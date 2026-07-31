@@ -213,10 +213,12 @@ describe("KeybindsTab", () => {
 
   // --- All keybinds present ---
 
-  it("renders Mark as Read, Search Messages, Upload File, Edit Last Message keybinds", () => {
+  it("renders Close Overlay, Search Messages, Upload File, Edit Last Message keybinds", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const labels = Array.from(el.querySelectorAll(".setting-label")).map((l) => l.textContent);
-    expect(labels).toContain("Mark as Read");
+    // "Mark as Read" used to be listed here with no feature behind it.
+    expect(labels).not.toContain("Mark as Read");
+    expect(labels).toContain("Close Overlay / Cancel");
     expect(labels).toContain("Search Messages");
     expect(labels).toContain("Upload File");
     expect(labels).toContain("Edit Last Message");

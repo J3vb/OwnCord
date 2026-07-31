@@ -360,18 +360,14 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("renders Hardware Acceleration toggle defaulting to on", () => {
+  it("does not offer a Hardware Acceleration toggle that nothing honours", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
 
-    const rows = container.querySelectorAll(".setting-row");
-    const hwRow = rows[1]!;
-    const label = hwRow.querySelector(".setting-label")!;
-    expect(label.textContent).toBe("Hardware Acceleration");
-
-    const toggle = hwRow.querySelector(".toggle")!;
-    expect(toggle.classList.contains("on")).toBe(true);
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    const labels = Array.from(container.querySelectorAll(".setting-label")).map(
+      (l) => l.textContent,
+    );
+    expect(labels).not.toContain("Hardware Acceleration");
   });
 
   it("toggles Developer Mode on and persists to localStorage", () => {

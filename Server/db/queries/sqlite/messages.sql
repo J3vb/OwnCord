@@ -1,5 +1,6 @@
--- name: CreateMessage :execresult
-INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?);
+-- name: CreateMessage :one
+INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp;
 
 -- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
@@ -12,8 +13,9 @@ FROM messages m JOIN users u ON m.user_id = u.id
 WHERE m.channel_id = ? AND m.deleted = 0
 ORDER BY m.id DESC LIMIT ?;
 
--- name: EditMessageContent :exec
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?;
+-- name: EditMessageContent :one
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp;
 
 -- name: SoftDeleteMessage :exec
 UPDATE messages SET deleted = 1 WHERE id = ?;
@@ -31,13 +33,14 @@ ON CONFLICT(user_id, channel_id) DO UPDATE SET last_message_id = excluded.last_m
 
 -- name: GetChannelUnreadCounts :many
 SELECT c.id,
-       COALESCE(MAX(m.id), 0) AS last_msg_id,
-       COUNT(CASE WHEN m.id > COALESCE(rs.last_message_id, 0) AND m.deleted = 0 THEN 1 END) AS unread
+       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
+       (SELECT COUNT(*) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0
+           AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread
 FROM channels c
-LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
-LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
-WHERE c.type = 'text'
-GROUP BY c.id;
+WHERE c.type IN ('text', 'announcement');
 
 -- SearchMessages and SearchMessagesInChannel use the messages_fts FTS5 virtual
 -- table which sqlc cannot introspect. Those queries remain as hand-written Go

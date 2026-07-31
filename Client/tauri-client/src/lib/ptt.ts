@@ -6,7 +6,6 @@
 
 import { loadPref, savePref } from "@components/settings/helpers";
 import { voiceStore } from "@stores/voice.store";
-import { setMuted } from "./livekitSession";
 import { createLogger } from "./logger";
 
 const log = createLogger("ptt");
@@ -100,8 +99,16 @@ export async function initPtt(): Promise<void> {
       const channelId = voiceStore.getState().currentChannelId;
       if (channelId === null) return;
 
-      setMuted(!event.payload);
-      log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
+      // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
+      // loaded lazily so it stays out of the startup path. In a voice channel
+      // the module is necessarily already loaded, so this import resolves
+      // from the module cache in a microtask.
+      void import("./livekitSession")
+        .then(({ setMuted }) => {
+          setMuted(!event.payload);
+          log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
+        })
+        .catch((e) => log.warn("Failed to apply PTT mute", e));
     });
     pttUnsubscribe = unsub;
 

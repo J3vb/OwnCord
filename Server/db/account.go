@@ -27,7 +27,7 @@ import (
 // After this the account is completely unusable and all personal data is
 // removed while preserving referential integrity for historical records.
 func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("DeleteAccount begin tx: %w", err)
 	}

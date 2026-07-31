@@ -13,6 +13,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 )
 
@@ -25,12 +26,18 @@ const ownerRoleID = 1
 // setupStatusResponse is the JSON shape returned by GET /api/setup/status.
 type setupStatusResponse struct {
 	NeedsSetup bool `json:"needs_setup"`
+	// Defaults prefills the setup wizard. Present only while setup is needed
+	// and the server was wired with its running config (see SetupOptions).
+	Defaults *setupDefaults `json:"defaults,omitempty"`
 }
 
 // setupRequest is the JSON body for POST /api/setup.
 type setupRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// Wizard carries the optional first-run configuration. Absent = legacy
+	// behaviour: create the owner account only.
+	Wizard *setupWizardRequest `json:"wizard,omitempty"`
 }
 
 // setupResponse is the JSON shape returned on successful setup.
@@ -39,23 +46,63 @@ type setupResponse struct {
 	UserID     int64  `json:"user_id"`
 	Username   string `json:"username"`
 	InviteCode string `json:"invite_code"`
+	// RestartRequired is true when wizard values that are only read at
+	// startup differ from the running config; the server restarts itself
+	// right after this response is sent.
+	RestartRequired bool `json:"restart_required"`
+	// RestartURL is where the admin panel will be reachable after the
+	// restart (scheme/port may have changed). Empty when no restart happens.
+	RestartURL string `json:"restart_url,omitempty"`
+	// Warnings lists non-fatal problems (e.g. config.yaml not writable).
+	// The account exists whenever this response is returned.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // handleSetupStatus returns whether initial setup is needed (no users exist).
-func handleSetupStatus(database *db.DB) http.HandlerFunc {
+func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		count, err := database.UserCount(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
 			return
 		}
-		writeJSON(w, http.StatusOK, setupStatusResponse{NeedsSetup: count == 0})
+		resp := setupStatusResponse{NeedsSetup: count == 0}
+		// Prefill defaults are only exposed pre-setup: after the first user
+		// exists this endpoint reveals nothing about the configuration.
+		if resp.NeedsSetup && opts.RunningCfg != nil {
+			cfg := opts.RunningCfg
+			d := &setupDefaults{
+				ServerName:        cfg.Server.Name,
+				Motd:              "Welcome!",
+				Port:              cfg.Server.Port,
+				TLSMode:           cfg.TLS.Mode,
+				TLSDomain:         cfg.TLS.Domain,
+				UploadMaxSizeMB:   cfg.Upload.MaxSizeMB,
+				VoiceQuality:      cfg.Voice.Quality,
+				VoiceAutoDownload: cfg.Voice.AutoDownloadLiveKit,
+			}
+			// The settings table is authoritative for the values the app
+			// reads live; fall back to the config/seed values on error.
+			if v, err := database.GetSetting(r.Context(), "server_name"); err == nil && v != "" {
+				d.ServerName = v
+			}
+			if v, err := database.GetSetting(r.Context(), "motd"); err == nil {
+				d.Motd = v
+			}
+			if v, err := database.GetSetting(r.Context(), "registration_open"); err == nil {
+				d.RegistrationOpen = v == "1" || strings.EqualFold(v, "true")
+			}
+			resp.Defaults = d
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
-// handleSetup creates the first owner account. It only works when no users
-// exist in the database, preventing abuse after initial setup.
-func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string) http.HandlerFunc {
+// handleSetup creates the first owner account and, when the request carries
+// a wizard payload, applies the chosen settings (DB + config.yaml) and
+// restarts the server if startup-only values changed. It only works when no
+// users exist in the database, preventing abuse after initial setup.
+func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// CSRF protection: reject cross-origin requests (BUG-097).
 		// A request is accepted when it is same-origin, or when its Origin is
@@ -101,6 +148,16 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
+		}
+
+		// Validate the whole wizard payload BEFORE creating the account so a
+		// bad value rejects the request instead of leaving a half-configured
+		// server behind an already-created owner.
+		if req.Wizard != nil {
+			if err := validateWizard(req.Wizard); err != nil {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+				return
+			}
 		}
 
 		// Hash the password.
@@ -153,18 +210,69 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			return
 		}
 
-		slog.Info("server setup completed", "owner", req.Username, "user_id", uid)
+		// Apply the wizard payload. The account exists from here on, so any
+		// failure downgrades to a warning — never a 5xx that would orphan the
+		// owner behind an opaque error.
+		var warnings []string
+		restartRequired := false
+		restartURL := ""
+		if req.Wizard != nil {
+			if err := applyWizardSettings(r.Context(), database, req.Wizard); err != nil {
+				slog.Error("setup wizard: saving settings failed", "error", err)
+				warnings = append(warnings,
+					"could not save server settings: "+err.Error()+" — adjust them later in the admin panel's Settings page")
+			}
+			if opts.ConfigPath != "" {
+				if err := config.Save(opts.ConfigPath, buildConfigPatch(req.Wizard, opts.RunningCfg)); err != nil {
+					slog.Error("setup wizard: writing config failed", "path", opts.ConfigPath, "error", err)
+					warnings = append(warnings,
+						"could not write "+opts.ConfigPath+": "+err.Error()+" — your account was created; edit the file manually to apply these settings")
+				} else {
+					db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "config_write", "server", 0,
+						"setup wizard wrote "+opts.ConfigPath+" ("+patchedConfigKeys(req.Wizard)+")")
+					if opts.RunningCfg != nil && wizardChangesRunningConfig(req.Wizard, opts.RunningCfg) {
+						restartRequired = true
+						restartURL = computeRestartURL(r.Host, req.Wizard, opts.RunningCfg)
+					}
+				}
+			}
+		}
+
+		slog.Info("server setup completed", "owner", req.Username, "user_id", uid, "wizard", req.Wizard != nil, "restart", restartRequired)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "server_setup", "server", 0,
 			"initial setup: owner account created, default channel and invite generated")
 
 		writeJSON(w, http.StatusCreated, setupResponse{
-			Token:      token,
-			UserID:     uid,
-			Username:   req.Username,
-			InviteCode: inviteCode,
+			Token:           token,
+			UserID:          uid,
+			Username:        req.Username,
+			InviteCode:      inviteCode,
+			RestartRequired: restartRequired,
+			RestartURL:      restartURL,
+			Warnings:        warnings,
 		})
+
+		// Restart after the response is written so the browser receives the
+		// token and the reconnect URL. Mirrors handleRestoreBackup /
+		// handleApplyUpdate: broadcast, then respawn in a goroutine
+		// (requestRestart sleeps a grace delay before acting).
+		if restartRequired {
+			if hub != nil {
+				hub.BroadcastServerRestart("setup", restartBroadcastDelaySeconds)
+			}
+			restartFn := opts.Restart
+			if restartFn == nil {
+				restartFn = requestRestart
+			}
+			go restartFn("setup_wizard")
+		}
 	}
 }
+
+// restartBroadcastDelaySeconds is the countdown clients are told before the
+// setup-wizard restart. There are normally no chat clients connected during
+// first-run setup, so this is informational.
+const restartBroadcastDelaySeconds = 3
 
 // isSameOrigin reports whether a browser-supplied Origin names this same
 // server, by comparing its host:port against the request's Host header.

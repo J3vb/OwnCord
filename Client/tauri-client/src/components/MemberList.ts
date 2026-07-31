@@ -7,8 +7,9 @@
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
-import { membersStore, type Member } from "@stores/members.store";
+import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { channelsStore } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
 import type { UserStatus } from "@lib/types";
 
@@ -16,8 +17,23 @@ import type { UserStatus } from "@lib/types";
 export interface MemberListOptions {
   readonly currentUserRole: string;
   readonly onKick: (userId: number, username: string) => Promise<void>;
-  readonly onBan: (userId: number, username: string) => Promise<void>;
+  readonly onBan: (userId: number, username: string, reason: string) => Promise<void>;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+}
+
+/** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
+const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["admin", "moderator", "member"];
+
+/**
+ * Role names an admin can assign, taken from the server's role list. "owner" is
+ * excluded — ownership transfer isn't a context-menu action.
+ */
+function assignableRoleNames(): readonly string[] {
+  const roles = channelsStore
+    .getState()
+    .roles.map((r) => r.name.toLowerCase())
+    .filter((name) => name !== "owner");
+  return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
 }
 
 /** Ordered role groups with display names and CSS color variables. */
@@ -127,7 +143,10 @@ function createMemberItem(
       closeActiveMenu();
       document.removeEventListener("mousedown", handleOutsideClick);
 
-      const availableRoles = ["admin", "moderator", "member"];
+      // Roles come from the server's `ready` payload — a hardcoded list made
+      // custom roles unreachable and, worse, unresolvable to a role id, so
+      // picking one silently did nothing.
+      const availableRoles = assignableRoleNames();
 
       activeMenu = createMemberContextMenu({
         userId: member.id,
@@ -135,7 +154,7 @@ function createMemberItem(
         currentRole: member.role.toLowerCase(),
         availableRoles,
         onKick: () => opts.onKick(member.id, member.username),
-        onBan: () => opts.onBan(member.id, member.username),
+        onBan: (reason: string) => opts.onBan(member.id, member.username, reason),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
       });
 
@@ -157,13 +176,18 @@ function createMemberItem(
   return item;
 }
 
-function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: AbortSignal): void {
+function renderList(
+  root: HTMLDivElement,
+  opts: MemberListOptions,
+  signal: AbortSignal,
+  rowsByUserId: Map<number, HTMLDivElement>,
+): void {
   clearChildren(root);
+  rowsByUserId.clear();
 
   const state = membersStore.getState();
-  const allMembers = Array.from(state.members.values());
 
-  if (allMembers.length === 0) {
+  if (state.members.size === 0) {
     const emptyState = createElement("div", { class: "member-list-empty" });
     const msg = createElement("p", { class: "member-list-empty-text" }, "No members online");
     emptyState.appendChild(msg);
@@ -171,10 +195,23 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
     return;
   }
 
+  // Single pass: bucket members by (lowercased) role, then sort each bucket
+  // by status \u2014 instead of one filter + toSorted sweep per role group.
+  const buckets = new Map<string, Member[]>();
+  for (const member of state.members.values()) {
+    const role = member.role.toLowerCase();
+    const bucket = buckets.get(role);
+    if (bucket === undefined) {
+      buckets.set(role, [member]);
+    } else {
+      bucket.push(member);
+    }
+  }
+
   for (const group of ROLE_GROUPS) {
-    const groupMembers = allMembers
-      .filter((m) => m.role.toLowerCase() === group.role)
-      .toSorted((a, b) => statusPriority(a.status) - statusPriority(b.status));
+    const groupMembers = (buckets.get(group.role) ?? []).toSorted(
+      (a, b) => statusPriority(a.status) - statusPriority(b.status),
+    );
 
     if (groupMembers.length === 0) continue;
 
@@ -186,7 +223,57 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
     root.appendChild(header);
 
     for (const member of groupMembers) {
-      root.appendChild(createMemberItem(member, group.colorVar, opts, signal));
+      const item = createMemberItem(member, group.colorVar, opts, signal);
+      rowsByUserId.set(member.id, item);
+      root.appendChild(item);
+    }
+  }
+}
+
+/** True when the only difference between two member maps is presence status \u2014
+ *  same ids with identical username/role/avatar/identity key. Such updates can
+ *  be patched into the existing rows instead of rebuilding the list. */
+function isPresenceOnlyChange(
+  prev: ReadonlyMap<number, Member>,
+  next: ReadonlyMap<number, Member>,
+): boolean {
+  if (prev.size === 0 || prev.size !== next.size) return false;
+  for (const [id, member] of next) {
+    const before = prev.get(id);
+    if (before === undefined) return false;
+    if (before === member) continue;
+    if (
+      before.username !== member.username ||
+      before.role !== member.role ||
+      before.avatar !== member.avatar ||
+      before.identityPublicKey !== member.identityPublicKey
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Patch status dots/classes in place for members whose presence changed.
+ *  Row identity (and therefore hover/context-menu state) is preserved; the
+ *  status-priority sort order is deliberately not reshuffled until the next
+ *  structural render. */
+function patchPresence(
+  prev: ReadonlyMap<number, Member>,
+  next: ReadonlyMap<number, Member>,
+  rowsByUserId: ReadonlyMap<number, HTMLDivElement>,
+): void {
+  for (const [id, member] of next) {
+    const before = prev.get(id);
+    if (before === undefined || before.status === member.status) continue;
+    const row = rowsByUserId.get(id);
+    if (row === undefined) continue;
+    row.classList.toggle("offline", member.status === "offline");
+    const dot = row.querySelector<HTMLDivElement>(".mi-status");
+    if (dot !== null) {
+      dot.style.background = statusColor(member.status);
+      dot.setAttribute("aria-label", member.status);
+      dot.title = member.status;
     }
   }
 }
@@ -194,18 +281,27 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
 export function createMemberList(opts: MemberListOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  /** Rendered rows by user id \u2014 lets presence-only updates patch in place. */
+  const rowsByUserId = new Map<number, HTMLDivElement>();
+  let prevMembers: ReadonlyMap<number, Member> = new Map();
 
   function mount(container: Element): void {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
-    renderList(root, opts, disposable.signal);
+    prevMembers = membersStore.getState().members;
+    renderList(root, opts, disposable.signal, rowsByUserId);
 
-    disposable.onStoreChange(
+    disposable.onStoreChange<MembersState, ReadonlyMap<number, Member>>(
       membersStore,
       (s) => s.members,
-      () => {
+      (members) => {
         if (root !== null) {
-          renderList(root, opts, disposable.signal);
+          if (isPresenceOnlyChange(prevMembers, members)) {
+            patchPresence(prevMembers, members, rowsByUserId);
+          } else {
+            renderList(root, opts, disposable.signal, rowsByUserId);
+          }
         }
+        prevMembers = members;
       },
     );
 
@@ -216,6 +312,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     closeActiveMenu();
     document.removeEventListener("mousedown", handleOutsideClick);
     disposable.destroy();
+    rowsByUserId.clear();
     if (root !== null) {
       root.remove();
       root = null;

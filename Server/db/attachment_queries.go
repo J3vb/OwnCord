@@ -128,7 +128,7 @@ func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID
 		   AND (uploader_id = ? OR uploader_id IS NULL)`,
 		strings.Join(placeholders, ","),
 	)
-	res, err := d.sqlDB.ExecContext(ctx, query, args...)
+	res, err := d.writer.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}
@@ -153,7 +153,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
-	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs: %w", err)
 	}

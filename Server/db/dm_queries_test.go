@@ -78,6 +78,64 @@ func TestGetOrCreateDMChannel_IdempotentReversedOrder(t *testing.T) {
 	}
 }
 
+// ─── GetUserDMChannelIDs ────────────────────────────────────────────────────
+
+// The ID-only lookup backs access computation (ws replay filtering, search
+// scoping) — it must track dm_open_state exactly: present while open, gone
+// after close, per user.
+func TestGetUserDMChannelIDs(t *testing.T) {
+	database := openMigratedMemory(t)
+	user1 := seedUser(t, database, "alice")
+	user2 := seedUser(t, database, "bob")
+	user3 := seedUser(t, database, "carol")
+
+	ch12, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
+	}
+	ch13, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user3)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel(u1,u3): %v", err)
+	}
+
+	ids, err := database.GetUserDMChannelIDs(context.Background(), user1)
+	if err != nil {
+		t.Fatalf("GetUserDMChannelIDs: %v", err)
+	}
+	got := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		got[id] = true
+	}
+	if len(ids) != 2 || !got[ch12.ID] || !got[ch13.ID] {
+		t.Errorf("user1 IDs = %v, want {%d, %d}", ids, ch12.ID, ch13.ID)
+	}
+
+	// user2 only participates in one DM.
+	ids2, err := database.GetUserDMChannelIDs(context.Background(), user2)
+	if err != nil {
+		t.Fatalf("GetUserDMChannelIDs(user2): %v", err)
+	}
+	if len(ids2) != 1 || ids2[0] != ch12.ID {
+		t.Errorf("user2 IDs = %v, want [%d]", ids2, ch12.ID)
+	}
+
+	// Closing a DM removes it from the caller's set only.
+	if err := database.CloseDM(context.Background(), user1, ch12.ID); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	ids, err = database.GetUserDMChannelIDs(context.Background(), user1)
+	if err != nil {
+		t.Fatalf("GetUserDMChannelIDs after close: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != ch13.ID {
+		t.Errorf("user1 IDs after close = %v, want [%d]", ids, ch13.ID)
+	}
+	ids2, _ = database.GetUserDMChannelIDs(context.Background(), user2)
+	if len(ids2) != 1 || ids2[0] != ch12.ID {
+		t.Errorf("user2 IDs after user1's close = %v, want [%d]", ids2, ch12.ID)
+	}
+}
+
 func TestGetOrCreateDMChannel_ReopensForCaller(t *testing.T) {
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")

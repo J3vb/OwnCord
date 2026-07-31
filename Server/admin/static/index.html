@@ -167,6 +167,22 @@
   .auth-box{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);padding:32px;width:380px}
   .auth-box h2{font-size:20px;font-weight:700;color:white;margin-bottom:20px}
   .auth-error{color:var(--red);font-size:13px;margin-top:10px;min-height:20px}
+  .auth-box.wizard{width:560px;max-width:94vw;max-height:92vh;overflow-y:auto}
+  .wiz-steps{display:flex;gap:6px;margin-bottom:20px}
+  .wiz-dot{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .2s}
+  .wiz-dot.active{background:var(--accent)}
+  .wiz-dot.done{background:var(--accent);opacity:.45}
+  .wiz-sub{color:var(--text-muted);font-size:14px;margin-bottom:20px;line-height:1.5}
+  .wiz-hint{color:var(--text-faint);font-size:12px;margin-top:6px;line-height:1.4}
+  .wiz-nav{display:flex;justify-content:space-between;gap:8px;margin-top:24px}
+  .wiz-review-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .wiz-review-row .k{color:var(--text-muted);white-space:nowrap}
+  .wiz-review-row .v{color:var(--text-normal);font-weight:600;text-align:right;word-break:break-word}
+  .wiz-callout{background:rgba(240,178,50,.1);border:1px solid rgba(240,178,50,.35);color:var(--yellow);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:16px;line-height:1.45}
+  .wiz-skip{display:block;width:100%;text-align:center;margin-top:14px;color:var(--text-faint);font-size:12px;cursor:pointer;text-decoration:underline;background:none}
+  .wiz-skip:hover{color:var(--text-muted)}
+  .wiz-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .wiz-toggle-row .lbl{font-size:14px;color:var(--text-normal)}
 
   /* Log viewer */
   .log-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
@@ -199,17 +215,9 @@
 </head>
 <body>
 
-<!-- Auth: Setup -->
+<!-- Auth: Setup (first-run wizard; content rendered by renderWizard) -->
 <div class="auth-overlay" id="setupOverlay">
-  <div class="auth-box">
-    <h2>Welcome to OwnCord</h2>
-    <p style="color:var(--text-muted);font-size:14px;margin-bottom:20px">No accounts exist yet. Create the owner account to get started.</p>
-    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="setupUser" autocomplete="username" placeholder="Choose a username"></div>
-    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupPass" type="password" autocomplete="new-password" placeholder="Min 8 characters"></div>
-    <div class="form-group"><label class="form-label">Confirm Password</label><input class="form-input" id="setupConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password"></div>
-    <button class="btn btn-accent" id="setupBtn" style="width:100%">Create Owner Account</button>
-    <div class="auth-error" id="setupErr"></div>
-  </div>
+  <div class="auth-box wizard" id="wizardBox"></div>
 </div>
 
 <!-- Auth: Setup Success -->
@@ -219,6 +227,12 @@
     <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code:</p>
     <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" onclick="copyInvite()">Copy</button></div>
     <p style="color:var(--yellow);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
+    <div id="setupWarnings"></div>
+    <div id="setupRestart" style="display:none">
+      <p style="color:var(--text-muted);font-size:14px;margin-bottom:8px"><span class="spinner" style="display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px"></span>Applying your settings — the server is restarting…</p>
+      <p style="font-size:14px;margin-bottom:8px">When it's back, open: <a id="restartLink" href="#" style="color:var(--text-link);word-break:break-all"></a></p>
+      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, click the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
+    </div>
     <button class="btn btn-accent" id="setupContinueBtn" style="width:100%">Continue to Admin Panel</button>
   </div>
 </div>
@@ -278,21 +292,36 @@ const I={
   megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   logs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  plugins:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6"/><path d="M18 3v6"/><path d="M4 9h16v4a8 8 0 0 1-16 0z"/><path d="M12 21v-4"/></svg>',
+  upload:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
 };
 
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
-  cachedStats:null,cachedUpdate:null,
+  cachedStats:null,cachedUpdate:null,channelCache:{},pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
 /* ═══ API ═══ */
+/* A 401 means the admin session is gone. Handle it here rather than letting
+   every call site toast "invalid or expired session" forever while the panel
+   stays on screen with no way back to the login form. */
+function handleSessionExpired(){
+  state.logConnectSeq++;
+  if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
+  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
+  state.token='';localStorage.removeItem('admin_token');
+  const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
+  showOverlay('loginOverlay');
+}
+
 async function api(method,path,body){
   const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'}};
   if(body!==undefined)opts.body=JSON.stringify(body);
   const res=await fetch('/admin/api'+path,opts);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
   if(res.status===204)return null;
   const data=await res.json();
   if(!res.ok)throw new Error(data.message||res.statusText);
@@ -334,33 +363,238 @@ function showOverlay(id){hideAll();document.getElementById(id).classList.add('vi
 function showApp(){hideAll();document.getElementById('adminShell').classList.remove('hidden')}
 
 async function checkAuth(){
-  try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
+  try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){wizInit(d.defaults);showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
   if(!state.token){showOverlay('loginOverlay');return}
   try{await api('GET','/stats');showApp();renderNav();renderContent()}catch(e){showOverlay('loginOverlay')}
 }
 
-document.getElementById('setupBtn').onclick=async()=>{
-  const u=document.getElementById('setupUser').value.trim(),p=document.getElementById('setupPass').value,c=document.getElementById('setupConfirm').value,err=document.getElementById('setupErr');
-  err.textContent='';
-  if(!u||!p){err.textContent='Username and password are required.';return}
-  if(p!==c){err.textContent='Passwords do not match.';return}
-  try{const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Setup failed');
-    state.token=d.token;localStorage.setItem('admin_token',state.token);
-    document.getElementById('inviteCode').textContent=d.invite_code;showOverlay('setupSuccessOverlay');
-  }catch(e){err.textContent=e.message}
-};
+/* ═══ First-Run Setup Wizard ═══ */
+/* Multi-step overlay shown while needs_setup is true. Collects the owner
+   account plus the basics (name, port, security, uploads, voice, access) and
+   submits everything as one POST /admin/api/setup — the server writes both
+   the settings table and config.yaml, and restarts itself if startup-only
+   values changed. "Skip" falls back to the legacy account-only payload. */
+const wiz={step:0,skip:false,defaults:null,data:{},busy:false};
+const WIZ_STEP_COUNT=6;
+
+function wizInit(defaults){
+  wiz.defaults=defaults||null;wiz.step=0;wiz.skip=false;wiz.busy=false;
+  const d=defaults||{};
+  wiz.data={username:'',password:'',confirm:'',
+    server_name:d.server_name||'OwnCord Server',
+    motd:(d.motd===undefined||d.motd===null)?'Welcome!':d.motd,
+    registration_open:!!d.registration_open,
+    port:d.port||8443,
+    tls_mode:d.tls_mode||'self_signed',
+    tls_domain:d.tls_domain||'',
+    upload_max_size_mb:d.upload_max_size_mb||100,
+    voice_quality:d.voice_quality||'medium',
+    voice_auto_download:d.voice_auto_download!==undefined?!!d.voice_auto_download:true};
+  renderWizard();
+}
+
+function wizDots(){
+  let h='<div class="wiz-steps">';
+  for(let i=0;i<WIZ_STEP_COUNT;i++)h+='<div class="wiz-dot '+(i===wiz.step?'active':i<wiz.step?'done':'')+'"></div>';
+  return h+'</div>';
+}
+
+function wizField(id,label,input){return '<div class="form-group"><label class="form-label" for="'+id+'">'+label+'</label>'+input+'</div>'}
+
+function renderWizard(){
+  const box=document.getElementById('wizardBox');
+  const d=wiz.data;
+  let h=wizDots();
+  const err='<div class="auth-error" id="wizErr"></div>';
+  const nav=nextLabel=>'<div class="wiz-nav"><button class="btn btn-ghost" onclick="wizBack()">Back</button><button class="btn btn-accent" id="wizNextBtn" onclick="wizNext()">'+nextLabel+'</button></div>';
+  switch(wiz.step){
+    case 0:
+      h+='<h2>Welcome to OwnCord</h2>'
+        +'<p class="wiz-sub">Your own private chat server is almost ready. This one-minute setup creates your admin account and configures the basics — no config files to edit, everything is saved for you.</p>'
+        +'<button class="btn btn-accent" style="width:100%" onclick="wizNext()">Get Started</button>'
+        +'<button class="wiz-skip" onclick="wizSkip()">Skip the questions — use recommended defaults</button>';
+      break;
+    case 1:
+      h+='<h2>Create your admin account</h2>'
+        +'<p class="wiz-sub">This is the owner account for managing the server. Pick a strong password — this account can do everything.</p>'
+        +wizField('wizUser','Username','<input class="form-input" id="wizUser" autocomplete="username" placeholder="Choose a username" value="'+esc(d.username)+'">')
+        +wizField('wizPass','Password','<input class="form-input" id="wizPass" type="password" autocomplete="new-password" placeholder="Min 8 characters">')
+        +wizField('wizConfirm','Confirm Password','<input class="form-input" id="wizConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password">')
+        +err+nav(wiz.skip?'Create Owner Account':'Next');
+      break;
+    case 2:
+      h+='<h2>Server basics</h2>'
+        +'<p class="wiz-sub">How your server introduces itself, and how people connect to it.</p>'
+        +wizField('wizName','Server Name','<input class="form-input" id="wizName" maxlength="100" value="'+esc(d.server_name)+'">')
+        +wizField('wizPort','Port','<input class="form-input" id="wizPort" type="number" min="1" max="65535" value="'+esc(d.port)+'"><div class="wiz-hint">The network port people connect to. Keep the default unless it clashes with something else on this machine.</div>')
+        +wizField('wizTLS','Security','<select class="filter-select" id="wizTLS" style="width:100%" onchange="wizTLSChanged()">'
+          +'<option value="self_signed"'+(d.tls_mode==='self_signed'?' selected':'')+'>Self-signed HTTPS &mdash; recommended</option>'
+          +'<option value="acme"'+(d.tls_mode==='acme'?' selected':'')+'>Let&#39;s Encrypt certificate &mdash; needs a public domain</option>'
+          +'<option value="manual"'+(d.tls_mode==='manual'?' selected':'')+'>Manual certificates &mdash; advanced</option>'
+          +'<option value="off"'+(d.tls_mode==='off'?' selected':'')+'>No encryption &mdash; not recommended</option>'
+          +'</select><div class="wiz-hint" id="wizTLSHint"></div>')
+        +'<div class="form-group" id="wizDomainGroup" style="display:none"><label class="form-label" for="wizDomain">Domain</label><input class="form-input" id="wizDomain" placeholder="chat.example.com" value="'+esc(d.tls_domain)+'"><div class="wiz-hint">Must already point at this machine, with ports 80 and 443 reachable from the internet. If that isn&#39;t set up yet, pick self-signed for now — you can switch later.</div></div>'
+        +err+nav('Next');
+      break;
+    case 3:
+      h+='<h2>Uploads &amp; voice</h2>'
+        +'<p class="wiz-sub">Limits for file sharing and voice chat quality.</p>'
+        +wizField('wizUpload','Max upload size (MB)','<input class="form-input" id="wizUpload" type="number" min="1" max="10240" value="'+esc(d.upload_max_size_mb)+'"><div class="wiz-hint">The largest file anyone can share. 100 MB suits most servers.</div>')
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Voice chat</div><div class="wiz-hint" style="margin-top:2px">Downloads the voice engine (LiveKit, ~40 MB, one time) from the official LiveKit project and manages it for you. Turn off only if you run your own LiveKit server.</div></div><button class="toggle'+(d.voice_auto_download?' on':'')+'" id="wizVoiceDl" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +wizField('wizVoice','Voice quality','<select class="filter-select" id="wizVoice" style="width:100%">'
+          +'<option value="low"'+(d.voice_quality==='low'?' selected':'')+'>Low &mdash; least bandwidth, phone-call quality</option>'
+          +'<option value="medium"'+(d.voice_quality==='medium'?' selected':'')+'>Medium &mdash; recommended balance</option>'
+          +'<option value="high"'+(d.voice_quality==='high'?' selected':'')+'>High &mdash; best quality, most bandwidth</option>'
+          +'</select>')
+        +err+nav('Next');
+      break;
+    case 4:
+      h+='<h2>Who can join?</h2>'
+        +'<p class="wiz-sub">You&#39;ll get an invite code either way — these control what happens after that.</p>'
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Open registration</div><div class="wiz-hint" style="margin-top:2px">Allow new people to create accounts using invite codes. Turn off to lock the server to existing members.</div></div><button class="toggle'+(d.registration_open?' on':'')+'" id="wizReg" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +wizField('wizMotd','Welcome message','<input class="form-input" id="wizMotd" maxlength="500" value="'+esc(d.motd)+'" placeholder="Welcome!"><div class="wiz-hint">Shown to members when they connect.</div>')
+        +err+nav('Next');
+      break;
+    case 5:{
+      const secLabel={self_signed:'Self-signed HTTPS',acme:'Let&#39;s Encrypt ('+esc(d.tls_domain)+')',manual:'Manual certificates',off:'No encryption'}[d.tls_mode]||esc(d.tls_mode);
+      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(d.voice_quality)],['Open registration',d.registration_open?'Yes':'No'],['Welcome message',esc(d.motd)||'&mdash;']];
+      h+='<h2>Review &amp; finish</h2><p class="wiz-sub">Everything look right? You can change any of this later in the admin panel.</p>';
+      rows.forEach(r=>{h+='<div class="wiz-review-row"><span class="k">'+r[0]+'</span><span class="v">'+r[1]+'</span></div>'});
+      if(wizNeedsRestart())h+='<div class="wiz-callout">The server will restart once to apply your connection settings, then point you to the right address.</div>';
+      h+=err+nav('Finish Setup');
+      break;}
+  }
+  box.innerHTML=h;
+  if(wiz.step===2)wizTLSChanged();
+  box.querySelectorAll('input').forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')wizNext()}));
+  const first=box.querySelector('input');if(first)first.focus();
+}
+
+function wizTLSChanged(){
+  const sel=document.getElementById('wizTLS');if(!sel)return;
+  const hints={
+    self_signed:'Works out of the box on your network. Browsers show a one-time security warning you can safely accept.',
+    acme:'A free, trusted certificate from Let’s Encrypt. Only choose this if you own a domain that points at this machine.',
+    manual:'Bring your own certificate files (data/cert.pem and data/key.pem).',
+    off:'Traffic is unencrypted. Only for testing, or behind a reverse proxy that handles HTTPS.'};
+  document.getElementById('wizTLSHint').textContent=hints[sel.value]||'';
+  document.getElementById('wizDomainGroup').style.display=sel.value==='acme'?'block':'none';
+}
+
+function wizNeedsRestart(){
+  const f=wiz.defaults;if(!f)return false;const d=wiz.data;
+  return Number(d.port)!==f.port||d.tls_mode!==f.tls_mode||Number(d.upload_max_size_mb)!==f.upload_max_size_mb||d.voice_quality!==f.voice_quality||d.voice_auto_download!==!!f.voice_auto_download||(d.tls_mode==='acme'&&d.tls_domain!==(f.tls_domain||''));
+}
+
+function wizCollect(){
+  const g=id=>{const el=document.getElementById(id);return el?el.value:undefined};
+  const d=wiz.data;
+  switch(wiz.step){
+    case 1:d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
+    case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
+    case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
+    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_open=t.classList.contains('on');d.motd=(g('wizMotd')||'').trim();break}
+  }
+}
+
+function wizBack(){
+  if(wiz.busy)return;
+  wizCollect();
+  if(wiz.step===1)wiz.skip=false;
+  wiz.step=Math.max(0,wiz.step-1);
+  renderWizard();
+}
+
+function wizSkip(){wiz.skip=true;wiz.step=1;renderWizard()}
+
+function wizNext(){
+  if(wiz.busy)return;
+  wizCollect();
+  const d=wiz.data;
+  const fail=msg=>{const e=document.getElementById('wizErr');if(e)e.textContent=msg};
+  switch(wiz.step){
+    case 1:
+      if(!d.username||!d.password)return fail('Username and password are required.');
+      if(d.password.length<8)return fail('Password must be at least 8 characters.');
+      if(d.password!==d.confirm)return fail('Passwords do not match.');
+      if(wiz.skip)return wizFinish();
+      break;
+    case 2:{
+      if(!d.server_name)return fail('Server name is required.');
+      const p=Number(d.port);
+      if(!Number.isInteger(p)||p<1||p>65535)return fail('Port must be a number between 1 and 65535.');
+      if(d.tls_mode==='acme'&&!d.tls_domain)return fail('A domain is required for Let’s Encrypt.');
+      break;}
+    case 3:{
+      const u=Number(d.upload_max_size_mb);
+      if(!Number.isInteger(u)||u<1||u>10240)return fail('Max upload size must be between 1 and 10240 MB.');
+      break;}
+    case 5:return wizFinish();
+  }
+  wiz.step++;renderWizard();
+}
+
+async function wizFinish(){
+  if(wiz.busy)return;wiz.busy=true;
+  const btn=document.getElementById('wizNextBtn');if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Setting up…'}
+  const d=wiz.data;
+  const body={username:d.username,password:d.password};
+  if(!wiz.skip){
+    body.wizard={server_name:d.server_name,motd:d.motd,registration_open:!!d.registration_open,
+      port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),
+      voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download};
+    if(d.tls_mode==='acme')body.wizard.tls_domain=d.tls_domain;
+  }
+  try{
+    const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const resp=await r.json();if(!r.ok)throw new Error(resp.message||'Setup failed');
+    state.token=resp.token;localStorage.setItem('admin_token',state.token);
+    document.getElementById('inviteCode').textContent=resp.invite_code;
+    const warn=document.getElementById('setupWarnings');warn.innerHTML='';
+    (resp.warnings||[]).forEach(wm=>{const div=document.createElement('div');div.className='wiz-callout';div.style.marginBottom='12px';div.textContent=wm;warn.appendChild(div)});
+    showOverlay('setupSuccessOverlay');
+    if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url);
+  }catch(e){
+    const err=document.getElementById('wizErr');if(err)err.textContent=e.message;
+    const b=document.getElementById('wizNextBtn');if(b){b.disabled=false;b.textContent=wiz.step===1?'Create Owner Account':'Finish Setup'}
+  }finally{wiz.busy=false}
+}
+
+/* Poll until the restarted server answers, then follow it. no-cors: an opaque
+   response resolving means "up" even across a port change; rejection means
+   still down. A self-signed cert the browser hasn't accepted yet keeps the
+   poll failing — the visible link is the primary path, this redirect is
+   best-effort sugar. */
+function beginRestartWait(url){
+  document.getElementById('setupContinueBtn').style.display='none';
+  document.getElementById('setupRestart').style.display='block';
+  const link=document.getElementById('restartLink');link.href=url;link.textContent=url;
+  let elapsed=0;
+  setTimeout(function poll(){
+    fetch(url+'/api/setup/status',{mode:'no-cors',cache:'no-store'})
+      .then(()=>{window.location=url})
+      .catch(()=>{elapsed+=2000;if(elapsed<60000)setTimeout(poll,2000)});
+  },4000);
+}
+
 document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
-function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info'))}
+function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
 document.getElementById('loginBtn').onclick=async()=>{
+  const btn=document.getElementById('loginBtn');
   const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value,err=document.getElementById('loginErr');
   err.textContent='';
+  if(!u||!p){err.textContent='Username and password are required.';return}
+  // Each submit counts against the login lockout counter — don't spend two.
+  if(btn.disabled)return;
+  btn.disabled=true;
   try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
     state.token=d.token;localStorage.setItem('admin_token',state.token);showApp();renderNav();renderContent();
   }catch(e){err.textContent=e.message}
+  finally{btn.disabled=false}
 };
 
-['setupUser','setupPass','setupConfirm'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setupBtn').click()}));
+/* Wizard inputs bind Enter dynamically in renderWizard(). */
 ['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
 
 /* ═══ Nav ═══ */
@@ -373,6 +607,7 @@ const NAV=[
   {section:'Configuration'},
   {id:'audit',label:'Audit Log',icon:I.audit},
   {id:'tokens',label:'API Tokens',icon:I.lock},
+  {id:'plugins',label:'Plugins',icon:I.plugins},
   {id:'logs',label:'Server Logs',icon:I.logs},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
   {id:'backups',label:'Backups',icon:I.backup},
@@ -409,7 +644,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -431,7 +666,7 @@ function renderContent(){
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
-  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)state.cachedUpdate=await r.json()}catch(e){}
+  try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
@@ -470,7 +705,14 @@ async function renderUsers(){
     html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:var(--accent)">'+initial+'</div><strong>'+esc(uname)+'</strong></div></td>';
     html+='<td><span class="role-badge"><span class="role-dot" style="background:'+roleColor(rid)+'"></span>'+roleName(rid)+'</span></td>';
     html+='<td><span class="dot '+statusDot+'"></span>'+statusLabel+'</td>';
-    html+='<td>'+(banned?'<span class="badge badge-red">Yes</span>':'<span class="badge badge-muted">No</span>')+'</td>';
+    // The ban reason is collected on ban and stored server-side; showing it
+    // here is the only place an admin can read back why someone was banned.
+    const banReason=u.ban_reason||u.BanReason||'';
+    const bannedCell=banned
+      ?'<span class="badge badge-red" title="'+esc(banReason||'No reason given')+'">Yes</span>'
+        +(banReason?'<div style="font-size:11px;color:var(--text-faint);margin-top:2px">'+esc(banReason)+'</div>':'')
+      :'<span class="badge badge-muted">No</span>';
+    html+='<td>'+bannedCell+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
     html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
@@ -534,7 +776,8 @@ async function renderChannels(){
     html+='<td style="font-size:12px;color:var(--text-faint)">'+esc(cat)+'</td>';
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
     const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+',\''+jsq(name)+'\')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
+    state.channelCache[id]=ch;
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -550,13 +793,38 @@ async function createChannel(){
   try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-function openChannelEditModal(id,name){
-  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
+/* PATCH /channels/{id} accepts name, topic, slow_mode, position and archived —
+   the modal used to offer only the name, so the Archived column in the table
+   was read-only state with no control behind it. */
+function openChannelEditModal(id){
+  const ch=state.channelCache[id]||{};
+  const name=ch.name||ch.Name||'';
+  const topic=ch.topic||ch.Topic||'';
+  const slow=ch.slow_mode||ch.SlowMode||0;
+  const pos=ch.position||ch.Position||0;
+  const archived=ch.archived||ch.Archived||false;
+  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" onclick="this.classList.toggle(\'on\')"></button></div></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
 }
 
 async function saveChannelEdit(id){
   const name=document.getElementById('chEditName').value.trim();
-  try{await api('PATCH','/channels/'+id,{name});closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
+  if(!name){showToast('Name is required','error');return}
+  const body={
+    name,
+    topic:document.getElementById('chEditTopic').value.trim(),
+    slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
+    position:parseInt(document.getElementById('chEditPos').value,10)||0,
+    archived:document.getElementById('chEditArchived').classList.contains('on'),
+  };
+  try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 function openDeleteChannel(id,name){
@@ -825,7 +1093,16 @@ async function saveSettings(){
   const body={};
   ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
   ['require_2fa','registration_open'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
-  try{await api('PATCH','/settings',body);state.settingsChanged=false;renderNav();showToast('Settings saved')}catch(e){showToast(e.message,'error')}
+  const btn=document.getElementById('saveSettingsBtn');
+  if(btn){if(btn.disabled)return;btn.disabled=true}
+  try{
+    await api('PATCH','/settings',body);
+    state.settingsChanged=false;renderNav();showToast('Settings saved');
+    // Leave the button disabled: there are no unsaved changes any more.
+  }catch(e){
+    showToast(e.message,'error');
+    if(btn)btn.disabled=false;
+  }
 }
 
 /* ═══ Backups ═══ */
@@ -840,7 +1117,7 @@ async function renderBackups(){
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?new Date(b.date).toLocaleString():'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+esc(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="confirmDeleteBackup(\''+esc(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+jsq(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="openDeleteBackupModal(\''+jsq(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -859,8 +1136,15 @@ async function confirmRestore(name){
   try{await api('POST','/backups/'+encodeURIComponent(name)+'/restore');closeModal();showToast('Database restored. Restart recommended.','info');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
+/* Deleting a backup is irreversible — confirm it like every other destructive
+   action here. It also used to report success without looking at the response,
+   so a failed delete said "Backup deleted" and left the file in place. */
+function openDeleteBackupModal(name){
+  openModal('<div class="modal-header"><h3>Delete Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:white">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteBackup(\''+jsq(name)+'\')">Delete</button></div>');
+}
+
 async function confirmDeleteBackup(name){
-  try{await fetch('/admin/api/backups/'+encodeURIComponent(name),{method:'DELETE',headers:{'Authorization':'Bearer '+state.token}});showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
+  try{await api('DELETE','/backups/'+encodeURIComponent(name));closeModal();showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ API Tokens ═══ */
@@ -916,7 +1200,7 @@ function showTokenOnceModal(d){
     '<button class="btn btn-ghost" onclick="copyToken(\''+jsq(d.token)+'\')">Copy</button></div></div>'+
     '<div class="modal-footer"><button class="btn btn-accent" onclick="closeModal();renderContent()">Done</button></div>');
 }
-function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info'))}
+function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','error'))}
 
 function confirmRevokeToken(id,label){
   openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:white">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="revokeToken('+id+')">Revoke</button></div>');
@@ -925,14 +1209,153 @@ async function revokeToken(id){
   try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
+/* ═══ Plugins ═══ */
+/* The plugin lifecycle API lives under /api/v1/admin/plugins (same admin auth
+   and IP gate, different prefix), so it needs its own fetch helper rather than
+   api(). Errors come back as plain text from http.Error, not JSON. */
+async function pluginApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined)init.body=opts.body;
+  const res=await fetch('/api/v1/admin/plugins'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return{data:null,res};
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok){
+    const msg=(data&&(data.message||data.error))||text.trim()||res.statusText;
+    throw new Error(msg);
+  }
+  return{data,res};
+}
+
+function pluginManifestSummary(row){
+  const raw=row.manifest_json||row.ManifestJSON||'';
+  if(!raw)return'';
+  try{
+    const m=JSON.parse(raw);
+    const bits=[];
+    if(m.description)bits.push(m.description);
+    if(Array.isArray(m.permissions)&&m.permissions.length)bits.push('permissions: '+m.permissions.join(', '));
+    return bits.join(' — ');
+  }catch(e){return''}
+}
+
+async function renderPlugins(){
+  let rows;
+  try{
+    const out=await pluginApi('GET','/');
+    rows=out.data||[];
+    state.pluginRuntime=out.res.headers.get('X-Plugin-Runtime')||'unknown';
+  }catch(e){
+    return'<div class="page-title">Plugins</div><p style="color:var(--red)">'+esc(e.message)+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+  }
+
+  const disabled=state.pluginRuntime==='disabled';
+  let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
+
+  if(disabled){
+    html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--yellow)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-faint);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
+  }else{
+    html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
+    html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
+    html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+    html+='<input type="file" id="pluginFile" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" onchange="document.getElementById(\'pluginInstallBtn\').disabled=!this.files.length">';
+    html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled onclick="installPlugin()">'+I.upload+' Install</button>';
+    html+='</div></div></div>';
+  }
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Installed</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
+  html+='<table class="tbl"><thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Installed</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!rows.length){
+    const empty=disabled?'No plugins installed — and the runtime is off':'No plugins installed yet';
+    html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">'+empty+'</td></tr>';
+  }else rows.forEach(row=>{
+    const id=row.id!==undefined?row.id:row.ID;
+    const name=row.name||row.Name||'';
+    const version=row.version||row.Version||'';
+    const enabled=row.enabled!==undefined?row.enabled:row.Enabled;
+    const installed=row.installed_at||row.InstalledAt||'';
+    const summary=pluginManifestSummary(row);
+    html+='<tr><td><div><strong>'+esc(name)+'</strong>'+(summary?'<div style="font-size:12px;color:var(--text-faint);margin-top:2px">'+esc(summary)+'</div>':'')+'</div></td>';
+    html+='<td style="font-family:var(--font-mono);font-size:12px">'+esc(version||'—')+'</td>';
+    html+='<td>'+(enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-muted">Disabled</span>')+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-faint)">'+(installed?new Date(installed).toLocaleString():'')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">';
+    if(disabled){
+      html+='<span style="font-size:12px;color:var(--text-faint)">runtime off</span>';
+    }else{
+      html+='<button class="btn btn-ghost" onclick="setPluginEnabled('+id+','+(enabled?'false':'true')+')">'+(enabled?'Disable':'Enable')+'</button>';
+      html+='<button class="act-btn danger" title="Uninstall" onclick="openUninstallPlugin('+id+',\''+jsq(name)+'\')">'+I.trash+'</button>';
+    }
+    html+='</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+async function installPlugin(){
+  const input=document.getElementById('pluginFile');
+  const btn=document.getElementById('pluginInstallBtn');
+  const file=input&&input.files&&input.files[0];
+  if(!file){showToast('Choose a .zip package first','error');return}
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  if(btn){btn.disabled=true;btn.textContent='Installing...'}
+  const fd=new FormData();
+  fd.append('plugin',file);
+  try{
+    // No explicit Content-Type: the browser must set the multipart boundary.
+    const out=await pluginApi('POST','/install',{body:fd});
+    const name=(out.data&&out.data.name)||file.name;
+    showToast('Installed '+name);
+    state.pluginBusy=false;
+    renderContent();
+  }catch(e){
+    state.pluginBusy=false;
+    showToast(e.message,'error');
+    if(btn){btn.disabled=false;btn.textContent='Install'}
+  }
+}
+
+async function setPluginEnabled(id,enable){
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  try{
+    await pluginApi('POST','/'+id+'/'+(enable?'enable':'disable'));
+    showToast(enable?'Plugin enabled':'Plugin disabled');
+  }catch(e){showToast(e.message,'error')}
+  state.pluginBusy=false;
+  renderContent();
+}
+
+function openUninstallPlugin(id,name){
+  openModal('<div class="modal-header"><h3>Uninstall Plugin</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Remove <strong style="color:white">'+esc(name)+'</strong> and its files from the server? Any data it stored is discarded. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="uninstallPlugin('+id+')">Uninstall</button></div>');
+}
+
+async function uninstallPlugin(id){
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  try{
+    await pluginApi('DELETE','/'+id);
+    closeModal();
+    showToast('Plugin uninstalled');
+  }catch(e){showToast(e.message,'error')}
+  state.pluginBusy=false;
+  renderContent();
+}
+
 /* ═══ Updates ═══ */
 async function renderUpdates(){
-  let info;
-  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)info=await r.json()}catch(e){}
+  // A failed check is not the same as "up to date" — saying so would be a lie
+  // that hides a broken update path.
+  let info,checkError='';
+  try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
   let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
   html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
-  if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
+  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(242,63,67,.15);color:var(--red)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
+  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
   else html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
   html+='</div>';
   if(info&&info.update_available){
@@ -952,10 +1375,14 @@ async function confirmApplyUpdate(){
   closeModal();state.updateApplying=true;renderContent();
   try{
     const r=await fetch('/admin/api/updates/apply',{method:'POST',headers:{'Authorization':'Bearer '+state.token}});
-    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000)}
-    else{const e=await r.json();showToast(e.message||'Update failed','error')}
+    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000);return}
+    let msg='Update failed';
+    try{const e=await r.json();msg=e.message||msg}catch(parseErr){}
+    showToast(msg,'error');
   }catch(e){showToast(e.message,'error')}
-  state.updateApplying=false;
+  // Failure path only: re-render so the button leaves its "Applying..." state
+  // instead of staying disabled until the next navigation.
+  state.updateApplying=false;renderContent();
 }
 
 /* ═══ Keyboard + Init ═══ */

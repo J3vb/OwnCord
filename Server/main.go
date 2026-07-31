@@ -41,14 +41,17 @@ func main() {
 	}
 
 	// Create ring buffer for admin log viewer, then build a multi-handler
-	// that tees log records to both stdout (INFO+) and the ring buffer (DEBUG+).
+	// that tees log records to both stdout and the ring buffer.
 	logBuf := admin.NewRingBuffer(2000)
-	// levelVar controls the stdout handler's threshold. It starts at INFO (the
+	// levelVar controls both handlers' thresholds. It starts at INFO (the
 	// zero value) so early-startup logs are captured, then run() raises/lowers
-	// it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded.
+	// it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded. The ring buffer
+	// shares it rather than hard-wiring DEBUG: with both sinks gated, Enabled
+	// returns false for suppressed levels and every gated Debug call across
+	// the server becomes a no-op instead of formatting a ring entry.
 	levelVar := new(slog.LevelVar)
 	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
-	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, slog.LevelDebug)
+	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, levelVar)
 	// logctx enriches records logged with a request/trace context (the
 	// ...Context slog variants) with req_id and, under -tags otel, trace_id.
 	log := slog.New(logctx.New(multiHandler))
@@ -86,13 +89,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 
 	// ── 1. Load configuration ──────────────────────────────────────────────
-	cfg, err := config.Load("config.yaml")
+	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Apply the configured stdout log level. The ring buffer keeps capturing
-	// DEBUG regardless, so the admin panel's live log view is unaffected.
+	// Apply the configured log level. The admin panel's live log view (ring
+	// buffer) follows the same threshold — set logging.level to "debug" to
+	// capture debug records there.
 	if lvl, ok := config.ParseLevel(cfg.Logging.Level); ok {
 		levelVar.Set(lvl)
 	} else {
@@ -227,6 +231,22 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 			persister.Stop(stopCtx)
 		}()
 	}
+
+	// ── 5d. Async audit writer ─────────────────────────────────────────────
+	// Moves audit-log INSERTs off the request path: once the writer is
+	// installed, WriteAudit enqueues here and a background goroutine batches
+	// the writes (same shape as the event persister above). Paths that never
+	// install a writer — the token CLI, tests — keep the synchronous
+	// behavior. This defer is registered after `defer database.Close()` so
+	// LIFO ordering drains the queue before the database is torn down.
+	auditWriter := db.NewAuditWriter(database, 1024, 50, 100*time.Millisecond)
+	auditWriter.Start(bgCtx)
+	database.SetAuditWriter(auditWriter)
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		auditWriter.Stop(stopCtx)
+	}()
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

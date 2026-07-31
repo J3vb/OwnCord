@@ -22,18 +22,17 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   // ---- Toggles ---------------------------------------------------------------
 
+  // NOTE: a "Hardware Acceleration" toggle used to sit here. Nothing read the
+  // preference it wrote — GPU compositing is decided by the webview before any
+  // JavaScript runs — so it was a switch that did nothing. Re-adding it means
+  // persisting the choice where the Rust startup path can read it before the
+  // webview is created; until then the panel doesn't claim the capability.
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "developerMode",
       label: "Developer Mode",
       desc: "Show message IDs, user IDs, and channel IDs on context menus",
       fallback: false,
-    },
-    {
-      key: "hardwareAcceleration",
-      label: "Hardware Acceleration",
-      desc: "Use GPU for rendering. Requires restart to take effect",
-      fallback: true,
     },
   ];
 

@@ -111,7 +111,24 @@ When `chatserver.exe` starts for the first time:
 3. **TLS certificate** -- A self-signed certificate is generated at `data/cert.pem` / `data/key.pem`
 4. **Database migration** -- SQLite database is created and all migrations run
 5. **Status reset** -- All user statuses are set to `offline`, stale voice states are cleared
-6. **Admin setup page** -- Navigate to `https://localhost:8443/admin` to create the Owner account
+6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard
+
+The setup wizard creates the Owner account and walks through the basics (server
+name, port, TLS mode, upload limit, voice, registration and welcome
+message). Choices are saved for you: live settings go to the database, and
+startup settings are written into `config.yaml` — comments and any hand edits
+in the file are preserved. The wizard also persists the generated LiveKit
+credentials so voice keeps working across restarts. If the port or TLS mode
+changed, the server restarts itself once and the wizard shows the new address.
+"Skip" runs the legacy minimal flow: just the Owner account, everything else
+on defaults.
+
+Voice works out of the box: with `voice.auto_download_livekit` enabled (the
+default in a freshly generated `config.yaml`, and a toggle in the wizard), the
+server downloads a pinned `livekit-server` release from the official LiveKit
+GitHub releases in the background — verified against the release checksum
+file — into `data/livekit/` and manages the process itself. Operators who run
+their own LiveKit can turn the toggle off or set `voice.livekit_binary`.
 
 The server listens on `https://0.0.0.0:8443` by default. See [Server Configuration](server-configuration.md) for all options.
 

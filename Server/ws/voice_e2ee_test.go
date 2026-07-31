@@ -93,30 +93,27 @@ func TestE2EE_Offer_TargetChannelCheckAtomicWithLookup(t *testing.T) {
 	sendCh := make(chan []byte, 32)
 	senderClient := ws.NewTestClientWithUser(hub, sender, 0, sendCh)
 	hub.Register(senderClient)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, senderClient)
 	hub.HandleMessageForTest(senderClient, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(sendCh)
+	drainChanTimeout(sendCh, 30*time.Millisecond)
 
 	// target joins voice
 	target := seedVoiceOwner(t, database, "toctou-target")
 	targetCh := make(chan []byte, 32)
 	targetClient := ws.NewTestClientWithUser(hub, target, 0, targetCh)
 	hub.Register(targetClient)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, targetClient)
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(targetCh)
+	drainChanTimeout(targetCh, 30*time.Millisecond)
 
 	// Send an E2EE offer from sender to target — should succeed since both
 	// are in the same channel.
 	encKey := validB64("encrypted-room-key-data")
 	iv := validB64("twelve-bytes")
 	hub.HandleMessageForTest(senderClient, e2eeOfferMsg(target.ID, encKey, iv))
-	time.Sleep(30 * time.Millisecond)
 
 	// Target should receive the offer relay.
-	msgs := drainChan(targetCh)
+	msgs := drainChanTimeout(targetCh, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "voice_e2ee_offer" {
@@ -140,28 +137,25 @@ func TestE2EE_Offer_RejectsNonKeyHolder(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins — should NOT be key holder
 	user2 := seedVoiceOwner(t, database, "kh-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send2)
+	drainChanTimeout(send2, 30*time.Millisecond)
 
 	// user2 tries to send an E2EE offer — should be rejected
 	encKey := validB64("encrypted-room-key-data")
 	iv := validB64("twelve-bytes")
 	hub.HandleMessageForTest(c2, e2eeOfferMsg(user1.ID, encKey, iv))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send2)
+	msgs := drainChanTimeout(send2, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "error" && extractCode(t, m) == "NOT_KEY_HOLDER" {
@@ -183,28 +177,25 @@ func TestE2EE_Offer_KeyHolderCanSend(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins
 	user2 := seedVoiceOwner(t, database, "kh-ok-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send2)
+	drainChanTimeout(send2, 30*time.Millisecond)
 
 	// user1 (key holder) sends offer to user2 — should succeed
 	encKey := validB64("encrypted-room-key-data")
 	iv := validB64("twelve-bytes")
 	hub.HandleMessageForTest(c1, e2eeOfferMsg(user2.ID, encKey, iv))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send2)
+	msgs := drainChanTimeout(send2, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "voice_e2ee_offer" {
@@ -226,45 +217,40 @@ func TestE2EE_KeyHolderTransfersOnLeave(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins
 	user2 := seedVoiceOwner(t, database, "kht-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	// user3 (highest ID) joins
 	user3 := seedVoiceOwner(t, database, "kht-user3")
 	send3 := make(chan []byte, 32)
 	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
 	hub.Register(c3)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c3)
 	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 	drainChan(send2)
 	drainChan(send3)
 
 	// user1 (key holder) leaves
 	hub.HandleMessageForTest(c1, voiceLeaveMsg())
-	time.Sleep(50 * time.Millisecond)
-	drainChan(send2)
+	drainChanTimeout(send2, 50*time.Millisecond)
 	drainChan(send3)
 
 	// Now user2 should be key holder — user2 sends offer to user3
 	encKey := validB64("new-key")
 	iv := validB64("twelve-bytes")
 	hub.HandleMessageForTest(c2, e2eeOfferMsg(user3.ID, encKey, iv))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send3)
+	msgs := drainChanTimeout(send3, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "voice_e2ee_offer" {
@@ -287,18 +273,16 @@ func TestE2EE_Announce_AcceptsRawBase64(t *testing.T) {
 	sendCh := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, 0, sendCh)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(sendCh)
+	drainChanTimeout(sendCh, 30*time.Millisecond)
 
 	// Send announce with raw (no padding) base64 key
 	rawKey := validURLSafeB64Key()
 	hub.HandleMessageForTest(c, e2eeAnnounceMsg(rawKey))
-	time.Sleep(30 * time.Millisecond)
 
 	// Should NOT receive an error
-	msgs := drainChan(sendCh)
+	msgs := drainChanTimeout(sendCh, 30*time.Millisecond)
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
 			t.Errorf("raw base64 should be accepted, got error: %s", extractMessage(t, m))
@@ -316,29 +300,26 @@ func TestE2EE_Offer_AcceptsRawBase64(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	user2 := seedVoiceOwner(t, database, "b64o-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 	drainChan(send2)
 
 	// Send offer with raw (no padding) base64
 	encKey := validRawB64("encrypted-room-key-data")
 	iv := validRawB64("twelve-bytes")
 	hub.HandleMessageForTest(c1, e2eeOfferMsg(user2.ID, encKey, iv))
-	time.Sleep(30 * time.Millisecond)
 
 	// Should NOT get an error on sender
-	msgs1 := drainChan(send1)
+	msgs1 := drainChanTimeout(send1, 30*time.Millisecond)
 	for _, m := range msgs1 {
 		if extractType(t, m) == "error" {
 			t.Errorf("raw base64 in offer should be accepted, got error: %s", extractMessage(t, m))
@@ -370,15 +351,14 @@ func TestE2EE_GetPubKey_ReturnsKeyAfterAnnounce(t *testing.T) {
 	sendCh := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, 0, sendCh)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(sendCh)
+	drainChanTimeout(sendCh, 30*time.Millisecond)
 
 	// Announce a public key
 	key := validB64Key()
+	// handleE2EEAnnounce stores the key synchronously.
 	hub.HandleMessageForTest(c, e2eeAnnounceMsg(key))
-	time.Sleep(30 * time.Millisecond)
 
 	// Retrieve via hub method — the key should be copied under lock
 	got := hub.GetClientE2EEPubKeyForTest(user.ID)
@@ -398,12 +378,11 @@ func TestE2EE_VoiceToken_IncludesIsKeyHolder(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Check that user1's voice_token has is_key_holder=true
-	msgs1 := drainChan(send1)
+	msgs1 := drainChanTimeout(send1, 50*time.Millisecond)
 	foundToken := false
 	for _, m := range msgs1 {
 		if extractType(t, m) == "voice_token" {
@@ -423,11 +402,10 @@ func TestE2EE_VoiceToken_IncludesIsKeyHolder(t *testing.T) {
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
-	msgs2 := drainChan(send2)
+	msgs2 := drainChanTimeout(send2, 50*time.Millisecond)
 	foundToken2 := false
 	for _, m := range msgs2 {
 		if extractType(t, m) == "voice_token" {
@@ -499,25 +477,21 @@ func TestE2EE_AnnounceSignature_RelayedToPeers(t *testing.T) {
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 	drainChan(send2)
 
 	key := validB64Key()
 	sig := validB64SigStr()
 	hub.HandleMessageForTest(c1, e2eeAnnounceMsgSigned(key, sig))
-	time.Sleep(30 * time.Millisecond)
 
-	found := false
-	for _, m := range drainChan(send2) {
-		if extractType(t, m) != "voice_e2ee_announce" {
-			continue
-		}
-		found = true
+	m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout)
+	if m == nil {
+		t.Error("peer should receive the signed announce")
+	} else {
 		gotSig, _ := extractPayloadField(t, m, "signature").(string)
 		if gotSig != sig {
 			t.Errorf("relayed signature = %q, want %q", gotSig, sig)
@@ -526,9 +500,6 @@ func TestE2EE_AnnounceSignature_RelayedToPeers(t *testing.T) {
 		if gotKey != key {
 			t.Errorf("relayed public_key = %q, want %q", gotKey, key)
 		}
-	}
-	if !found {
-		t.Error("peer should receive the signed announce")
 	}
 }
 
@@ -540,38 +511,30 @@ func TestE2EE_AnnounceSignature_ReplayedToLateJoiner(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	key := validB64Key()
 	sig := validB64SigStr()
 	hub.HandleMessageForTest(c1, e2eeAnnounceMsgSigned(key, sig))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// A late joiner must receive the stored announce WITH its signature.
 	user2 := seedVoiceOwner(t, database, "sigrp-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
-	found := false
-	for _, m := range drainChan(send2) {
-		if extractType(t, m) != "voice_e2ee_announce" {
-			continue
-		}
-		found = true
+	m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout)
+	if m == nil {
+		t.Error("late joiner should receive the replayed announce")
+	} else {
 		gotSig, _ := extractPayloadField(t, m, "signature").(string)
 		if gotSig != sig {
 			t.Errorf("replayed signature = %q, want %q", gotSig, sig)
 		}
-	}
-	if !found {
-		t.Error("late joiner should receive the replayed announce")
 	}
 }
 
@@ -583,25 +546,19 @@ func TestE2EE_AnnounceNoSignature_ReplayOmitsField(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 	hub.HandleMessageForTest(c1, e2eeAnnounceMsg(validB64Key()))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	user2 := seedVoiceOwner(t, database, "nosig-user2")
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
-	for _, m := range drainChan(send2) {
-		if extractType(t, m) != "voice_e2ee_announce" {
-			continue
-		}
+	if m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout); m != nil {
 		if v := extractPayloadField(t, m, "signature"); v != nil {
 			t.Errorf("legacy replay must omit signature, got %v", v)
 		}

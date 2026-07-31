@@ -19,6 +19,7 @@ import { logout } from "@lib/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
+import { loadUserStatus } from "@lib/userStatus";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
@@ -33,6 +34,8 @@ import {
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
+import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
+import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
 import { createMessageController, createPendingDeleteManager } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
@@ -113,6 +116,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function getCurrentUserId(): number {
     return authStore.getState().user?.id ?? 0;
+  }
+
+  /**
+   * Re-assert the status the user picked in settings. The server starts every
+   * session as "online", so without this a saved "Do Not Disturb" would show
+   * as selected in the panel while everyone else saw the user as online.
+   */
+  function restoreSavedPresence(): void {
+    const status = loadUserStatus();
+    if (status === "online") return;
+    const userId = getCurrentUserId();
+    if (userId !== 0) {
+      updatePresence(userId, status);
+    }
+    if (limiters.presence.tryConsume()) {
+      ws.send({ type: "presence_update", payload: { status } });
+    }
   }
 
   /** Resolve display name for a channel — for DMs, use recipient username from DM store. */
@@ -205,6 +225,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.connectionStatus,
         (status) => {
           try {
+            if (status === "connected") restoreSavedPresence();
             if (banner === null) return;
             applyConnectionStatus(banner, status);
           } catch (err) {
@@ -218,6 +239,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
     applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+    if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -357,6 +379,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Quick switcher (Ctrl+K)
     const qsManager = createQuickSwitcherManager(() => root);
     unsubscribers.push(qsManager.attach());
+
+    // The rest of the shortcuts listed on the settings Keybinds tab.
+    const voiceKeybindActions = createVoiceWidgetCallbacks(ws, limiters);
+    unsubscribers.push(
+      attachGlobalKeybinds({
+        onSearch: () => chatAreaResult.searchCtrl.open(),
+        onToggleMute: () => voiceKeybindActions.onMuteToggle(),
+        onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
+        onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
+        onUploadFile: () => channelCtrl?.openFilePicker(),
+        // Don't fire app shortcuts while the settings panel is on top of them.
+        isSuspended: () => uiStore.getState().settingsOpen,
+      }),
+    );
 
     // Toast container
     toast = createToastContainer();

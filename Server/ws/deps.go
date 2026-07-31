@@ -75,20 +75,34 @@ type VoiceDeps struct {
 	DB          *db.DB
 	Limiter     *auth.RateLimiter
 	Permissions *permissions.Checker
-	LiveKit     *LiveKitClient
-	TokenGen    VoiceTokenGenerator // used by voice_token_refresh V2
-	KeyHolder   KeyHolderChecker    // used by voice_token_refresh V2
+	// PermSvc is the cached permission service. When non-nil the permission
+	// helpers below answer from its per-user cache instead of per-call role and
+	// override queries; when nil (tests constructing bare deps) they keep the
+	// live DB path and fail closed exactly as before.
+	PermSvc   *service.PermissionService
+	LiveKit   *LiveKitClient
+	TokenGen  VoiceTokenGenerator // used by voice_token_refresh V2
+	KeyHolder KeyHolderChecker    // used by voice_token_refresh V2
 }
 
 // ── V2 permission helpers ───────────────────────────────────────────────────
 
-// requirePerm checks a channel permission via DB lookups. Returns nil if
-// allowed, or a Result carrying either an INTERNAL error (when the server
-// is misconfigured or a DB lookup fails) or a FORBIDDEN error (when the
-// permission bit is genuinely absent from the user's role). Previously
-// every branch returned FORBIDDEN, which hid operator-visible failures
-// behind a user-facing permission denial.
-func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64, label string) *Result {
+// requirePerm checks a channel permission. Returns nil if allowed, or a Result
+// carrying either an INTERNAL error (when the server is misconfigured or a DB
+// lookup fails) or a FORBIDDEN error (when the permission bit is genuinely
+// absent from the user's role). Previously every branch returned FORBIDDEN,
+// which hid operator-visible failures behind a user-facing permission denial.
+//
+// A positive verdict from the cached PermissionService is taken as-is (grants
+// are invalidated synchronously at every mutation site, so it cannot be a
+// stale allow beyond the invalidation contract). A negative verdict falls
+// through to the live path because the cache's boolean cannot express the
+// INTERNAL-vs-FORBIDDEN distinction above — denials are the rare case, so the
+// extra lookups only happen when the check is about to fail anyway.
+func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64, label string) *Result {
+	if permSvc != nil && permSvc.HasChannelPerm(ctx, userID, channelID, perm) {
+		return nil
+	}
 	if database == nil || perms == nil {
 		// Missing dependency is a server bug, not a user ACL outcome. Log
 		// here so operators see something even when the client surfaces a
@@ -117,8 +131,14 @@ func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checke
 	return nil
 }
 
-// hasPerm checks a channel permission via DB lookups. Returns true if allowed.
-func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
+// hasPerm checks a channel permission. Returns true if allowed. With a
+// PermissionService the answer comes from its per-user cache (false on any
+// lookup failure, same fail-closed posture as the live path); without one it
+// falls back to per-call DB lookups.
+func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) bool {
+	if permSvc != nil {
+		return permSvc.HasChannelPerm(ctx, userID, channelID, perm)
+	}
 	if database == nil || perms == nil {
 		return false
 	}
@@ -152,7 +172,44 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, u
 // (service.requireDMNotBlocked), it is two-party only, and a blocked user is
 // still a participant, so it is orthogonal to the non-participant hole this
 // closes.
-func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
+//
+// With a PermissionService the role-bit gate is answered from its per-user
+// cache (the channel-type lookup and the DM membership check stay live —
+// dm_participants rows are membership, not permission, state and are never
+// cached). Both branches enforce the same rule: role bit required on top, DM
+// membership via the single shared IsDMParticipant definition.
+func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) bool {
+	if database == nil {
+		return false
+	}
+	if permSvc == nil {
+		return hasChannelAccessLive(ctx, database, perms, userID, channelID, perm)
+	}
+	if !permSvc.HasChannelPerm(ctx, userID, channelID, perm) {
+		return false
+	}
+	ch, err := database.GetChannel(ctx, channelID)
+	if err != nil {
+		// Fail closed: an unknown type would silently take the non-DM path.
+		slog.Error("ws: hasChannelAccess GetChannel failed, denying",
+			"user_id", userID, "channel_id", channelID, "err", err)
+		return false
+	}
+	// A missing channel row takes the non-DM branch, i.e. the role verdict
+	// above stands: there is no DM there to join, and callers keep reporting a
+	// deleted channel the way they always have.
+	if ch == nil || ch.Type != "dm" {
+		return true
+	}
+	// DM: for "dm" the service's RequireChannelAccess is exactly the
+	// IsDMParticipant membership rule (it waives the role check, which was
+	// already enforced above).
+	return permSvc.RequireChannelAccess(ctx, userID, ch.Type, channelID, perm) == nil
+}
+
+// hasChannelAccessLive is the uncached hasChannelAccess path, kept verbatim for
+// hubs and deps constructed without a PermissionService (bare test fixtures).
+func hasChannelAccessLive(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
 	if database == nil || perms == nil {
 		return false
 	}
@@ -170,16 +227,19 @@ func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.C
 			"user_id", userID, "channel_id", channelID, "err", err)
 		return false
 	}
-	channelType := ""
-	if ch != nil {
-		channelType = ch.Type
-	}
-	// A missing channel row leaves channelType empty, i.e. the role verdict
+	// A missing channel row takes the non-DM branch, i.e. the role verdict
 	// above stands: there is no DM there to join, and callers keep reporting a
-	// deleted channel the way they always have. For every non-DM type this call
-	// just re-runs the role check above; the repeated lookup is the price of one
-	// shared definition of the rule, on a per-user rate-limited path.
-	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, channelType, channelID, perm) == nil
+	// deleted channel the way they always have.
+	if ch == nil || ch.Type != "dm" {
+		// For every non-DM type, RequireChannelAccess is defined as exactly the
+		// HasChannelPerm call already made above, so re-invoking it would only
+		// repeat the same override lookup. The role verdict is the answer.
+		return true
+	}
+	// DM: the role bit above stays required on top; the membership rule keeps
+	// its single shared definition in RequireChannelAccess (IsDMParticipant),
+	// which waives the role check for DMs.
+	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, ch.Type, channelID, perm) == nil
 }
 
 // ── V2 handler type ─────────────────────────────────────────────────────────

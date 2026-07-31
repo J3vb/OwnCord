@@ -7,8 +7,8 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
+import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
-import { loadPref, savePref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,6 +110,11 @@ function buildPasswordSection(
       const newVal = newPw.value;
       const confirmVal = confirmPw.value;
 
+      pwError.style.color = "var(--red)";
+      if (oldVal.length === 0) {
+        setText(pwError, "Enter your current password.");
+        return;
+      }
       if (newVal.length < 8) {
         setText(pwError, "New password must be at least 8 characters.");
         return;
@@ -119,6 +124,14 @@ function buildPasswordSection(
         return;
       }
       setText(pwError, "");
+      // In-flight state: a second click would burn an attempt against the
+      // server's lockout counter with the same credentials.
+      pwBtn.disabled = true;
+      setText(pwBtn, "Changing...");
+      const finish = (): void => {
+        pwBtn.disabled = false;
+        setText(pwBtn, "Change Password");
+      };
       void options
         .onChangePassword(oldVal, newVal)
         .then(() => {
@@ -133,9 +146,11 @@ function buildPasswordSection(
             pwError.style.color = "var(--red)";
             pwSuccessTimer = null;
           }, 3000);
+          finish();
         })
         .catch((err: unknown) => {
           setText(pwError, err instanceof Error ? err.message : "Failed to change password.");
+          finish();
         });
     },
     { signal },
@@ -273,24 +288,56 @@ function buildTotpConfirmArea(
   const elements: HTMLElement[] = [qrLabel, qrUri];
 
   if (result.backup_codes.length > 0) {
+    // These codes are shown exactly once — the confirm step replaces this view.
+    // Say so, and give a one-click way to keep them.
     const backupLabel = createElement(
       "div",
       {
-        style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
+        style: "color:var(--yellow, #faa61a);font-size:13px;margin-bottom:8px;font-weight:600",
       },
-      "Save these backup codes in a safe place:",
+      "Save these backup codes now — you won't see them again:",
     );
+    const codesText = result.backup_codes.join("\n");
     const backupList = createElement(
       "code",
       {
         style:
           "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
-          "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:12px;" +
+          "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:8px;" +
           "color:var(--text-primary);user-select:all",
+        "data-testid": "totp-backup-codes",
       },
-      result.backup_codes.join("\n"),
+      codesText,
     );
-    elements.push(backupLabel, backupList);
+    const copyBtn = createElement(
+      "button",
+      {
+        class: "ac-btn",
+        style: "margin-bottom:12px",
+        "data-testid": "totp-copy-backup-codes",
+      },
+      "Copy Codes",
+    );
+    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+    copyBtn.addEventListener(
+      "click",
+      () => {
+        const restore = (label: string): void => {
+          setText(copyBtn, label);
+          if (copyResetTimer !== null) clearTimeout(copyResetTimer);
+          copyResetTimer = setTimeout(() => {
+            setText(copyBtn, "Copy Codes");
+            copyResetTimer = null;
+          }, 1500);
+        };
+        void navigator.clipboard
+          .writeText(codesText)
+          .then(() => restore("Copied!"))
+          .catch(() => restore("Copy failed"));
+      },
+      { signal },
+    );
+    elements.push(backupLabel, backupList, copyBtn);
   }
 
   const codeInput = createElement("input", {
@@ -546,7 +593,7 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
   const sectionTitle = createElement("div", { class: "settings-section-title" }, "Status");
   const optionsList = createElement("div", { class: "settings-status-options" });
 
-  const currentStatus = loadPref<UserStatus>("userStatus", "online");
+  const currentStatus = loadUserStatus();
   const rowElements = new Map<UserStatus, HTMLDivElement>();
 
   for (const opt of STATUS_OPTIONS) {
@@ -578,7 +625,7 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
       }
       row.classList.add("active");
       row.setAttribute("aria-pressed", "true");
-      savePref("userStatus", opt.value);
+      saveUserStatus(opt.value);
       options.onStatusChange(opt.value);
     };
 

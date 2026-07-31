@@ -11,10 +11,6 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
-import { loadPref, applyTheme, THEMES } from "./settings/helpers";
-import type { ThemeName } from "./settings/helpers";
-import { getActiveThemeName, restoreTheme } from "@lib/themes";
-import { syncOsMotionListener } from "@lib/os-motion";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
@@ -67,54 +63,6 @@ const TAB_ICONS: Record<TabName, IconName> = {
 };
 
 // ---------------------------------------------------------------------------
-// Apply stored appearance (called at app startup)
-// ---------------------------------------------------------------------------
-
-/**
- * Apply stored appearance preferences (theme, font size, compact mode).
- * Call at app startup so the UI doesn't flash default styles.
- */
-export function applyStoredAppearance(): void {
-  const activeThemeName = getActiveThemeName();
-  if (activeThemeName in THEMES) {
-    applyTheme(activeThemeName as ThemeName);
-  } else {
-    restoreTheme();
-  }
-  try {
-    const rawAccent = localStorage.getItem("owncord:settings:accentColor");
-    if (rawAccent !== null) {
-      const accent = JSON.parse(rawAccent);
-      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
-        document.documentElement.style.setProperty("--accent", accent);
-        document.body.style.setProperty("--accent", accent);
-      }
-    }
-  } catch {
-    // Corrupted localStorage — keep the theme default accent.
-  }
-  document.documentElement.style.setProperty(
-    "--font-size",
-    `${loadPref<number>("fontSize", 16)}px`,
-  );
-  document.documentElement.classList.toggle(
-    "compact-mode",
-    loadPref<boolean>("compactMode", false),
-  );
-  document.documentElement.classList.toggle(
-    "reduced-motion",
-    loadPref<boolean>("reducedMotion", false),
-  );
-  document.documentElement.classList.toggle(
-    "high-contrast",
-    loadPref<boolean>("highContrast", false),
-  );
-  document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
-
-  syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
-}
-
-// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -127,8 +75,11 @@ export function createSettingsOverlay(
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
   let activeTab: TabName = authenticated ? "Account" : "Appearance";
+  /** False once the active tab's content has been torn down by `hide()`. */
+  let contentLive = false;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
+  let unsubAuth: (() => void) | null = null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, ac.signal);
@@ -158,12 +109,21 @@ export function createSettingsOverlay(
     contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder());
+    contentLive = true;
+  }
+
+  /** Release resources held by the tab currently on screen. */
+  function cleanupActiveTab(): void {
+    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    // The Logs tab keeps a live log listener pointed at its (now discarded)
+    // list element — drop it so it isn't re-rendering a detached tree.
+    if (activeTab === "Logs") logsTab.cleanup();
   }
 
   function setActiveTab(tab: TabName): void {
     if (tab === activeTab) return;
     // Clean up stateful tabs when switching away
-    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    cleanupActiveTab();
     activeTab = tab;
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
@@ -174,12 +134,17 @@ export function createSettingsOverlay(
 
   function show(): void {
     root?.classList.add("open");
+    // Closing tore down the live parts of the active tab (mic meter, camera
+    // preview, log listener). Rebuild it so a reopened panel shows live state
+    // instead of a frozen snapshot — and so every tab re-reads current prefs.
+    if (!contentLive) renderActiveTab();
   }
 
   function hide(): void {
     root?.classList.remove("open");
-    // Stop camera preview and mic meter when settings overlay closes
-    voiceTab.cleanup();
+    // Stop camera preview, mic meter, and the log listener when the overlay closes
+    cleanupActiveTab();
+    contentLive = false;
   }
 
   // ---- MountableComponent ---------------------------------------------------
@@ -219,6 +184,16 @@ export function createSettingsOverlay(
     appendChildren(profileInfo, profileName, editProfileLink);
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
+
+    // Keep the sidebar identity in step with the store — renaming yourself on
+    // the Account tab used to leave the old name sitting here until restart.
+    unsubAuth = authStore.subscribeSelector(
+      (s) => s.user?.username,
+      (name) => {
+        profileName.textContent = name ?? "Unknown";
+        avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
+      },
+    );
 
     // "User Settings" category — only Account belongs here (hidden when not authenticated)
     if (authenticated) {
@@ -320,6 +295,9 @@ export function createSettingsOverlay(
 
     root.appendChild(panel);
     renderActiveTab();
+    // Content built while the panel is closed is only a placeholder: opening
+    // rebuilds it so the first view is as fresh as every later one.
+    contentLive = uiStore.getState().settingsOpen;
 
     // Subscribe to uiStore for open/close
     unsubUi = uiStore.subscribeSelector(
@@ -346,6 +324,10 @@ export function createSettingsOverlay(
     if (unsubUi !== null) {
       unsubUi();
       unsubUi = null;
+    }
+    if (unsubAuth !== null) {
+      unsubAuth();
+      unsubAuth = null;
     }
     logsTab.cleanup();
     voiceTab.cleanup();

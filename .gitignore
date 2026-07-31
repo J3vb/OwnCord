@@ -88,3 +88,6 @@ Client/tauri-client/.env
 
 # Claude Code worktrees (local scratch, never commit)
 .claude/worktrees/
+
+# local server run logs
+server.log

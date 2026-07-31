@@ -120,6 +120,46 @@ func dmDrainAll(ch <-chan []byte) []map[string]any {
 	}
 }
 
+// dmWaitMsgType blocks until a message with the given type arrives on ch,
+// returning its envelope, or returns nil when the timeout expires.
+func dmWaitMsgType(ch <-chan []byte, msgType string, timeout time.Duration) map[string]any {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case raw := <-ch:
+			var env map[string]any
+			if err := json.Unmarshal(raw, &env); err != nil {
+				continue
+			}
+			if env["type"] == msgType {
+				return env
+			}
+		case <-timer.C:
+			return nil
+		}
+	}
+}
+
+// dmCollectAll reads messages for the full window d and returns the decoded
+// envelopes. Use for absence assertions — the window always elapses.
+func dmCollectAll(ch <-chan []byte, d time.Duration) []map[string]any {
+	var result []map[string]any
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	for {
+		select {
+		case raw := <-ch:
+			var env map[string]any
+			if err := json.Unmarshal(raw, &env); err == nil {
+				result = append(result, env)
+			}
+		case <-timer.C:
+			return result
+		}
+	}
+}
+
 // dmFindMsgType returns the first message of the given type from a slice of envelopes.
 func dmFindMsgType(msgs []map[string]any, msgType string) map[string]any {
 	for _, m := range msgs {
@@ -157,22 +197,17 @@ func TestDM_ChatSend_ParticipantSuccess(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hello bob"))
-	time.Sleep(100 * time.Millisecond)
 
 	// Alice should get chat_send_ok ack.
-	aliceMsgs := dmDrainAll(sendAlice)
-	ack := dmFindMsgType(aliceMsgs, "chat_send_ok")
-	if ack == nil {
+	if dmWaitMsgType(sendAlice, "chat_send_ok", waitTimeout) == nil {
 		t.Error("Alice did not receive chat_send_ok")
 	}
 
 	// Bob should get a chat_message via SendToUser.
-	bobMsgs := dmDrainAll(sendBob)
-	msg := dmFindMsgType(bobMsgs, "chat_message")
-	if msg == nil {
+	if dmWaitMsgType(sendBob, "chat_message", waitTimeout) == nil {
 		t.Error("Bob did not receive chat_message")
 	}
 }
@@ -189,15 +224,13 @@ func TestDM_ChatSend_SequencedAndReplayBuffered(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m1"))
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m2"))
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m3"))
-	time.Sleep(120 * time.Millisecond)
 
-	bobMsgs := dmDrainAll(sendBob)
-	chat := dmFindMsgType(bobMsgs, "chat_message")
+	chat := dmWaitMsgType(sendBob, "chat_message", waitTimeout)
 	if chat == nil {
 		t.Fatal("Bob did not receive any DM chat_message")
 	}
@@ -226,11 +259,11 @@ func TestDM_ChatSend_NonParticipantForbidden(t *testing.T) {
 	sendCharlie := make(chan []byte, 64)
 	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cCharlie, dmChatSendMsg(dmChID, "intruder"))
-	time.Sleep(100 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
 	if code != "FORBIDDEN" {
@@ -255,20 +288,16 @@ func TestDM_ChatSend_AutoReopenForRecipient(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, 0, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	// Alice sends a message — should auto-reopen for Bob.
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hey bob"))
-	time.Sleep(100 * time.Millisecond)
 
 	// Bob should receive both a dm_channel_open and the chat_message.
-	bobMsgs := dmDrainAll(sendBob)
-	openMsg := dmFindMsgType(bobMsgs, "dm_channel_open")
-	if openMsg == nil {
+	if dmWaitMsgType(sendBob, "dm_channel_open", waitTimeout) == nil {
 		t.Error("Bob did not receive dm_channel_open on auto-reopen")
 	}
-	chatMsg := dmFindMsgType(bobMsgs, "chat_message")
-	if chatMsg == nil {
+	if dmWaitMsgType(sendBob, "chat_message", waitTimeout) == nil {
 		t.Error("Bob did not receive chat_message after auto-reopen")
 	}
 }
@@ -290,15 +319,12 @@ func TestDM_ChatEdit_ParticipantCanEdit(t *testing.T) {
 	sendAlice := make(chan []byte, 64)
 	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
 	hub.Register(cAlice)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cAlice)
 
 	hub.HandleMessageForTest(cAlice, dmChatEditMsg(msgID, "edited"))
-	time.Sleep(100 * time.Millisecond)
 
 	// Alice should receive the chat_edited broadcast (via the sequenced DM event path).
-	msgs := dmDrainAll(sendAlice)
-	edited := dmFindMsgType(msgs, "chat_edited")
-	if edited == nil {
+	if dmWaitMsgType(sendAlice, "chat_edited", waitTimeout) == nil {
 		t.Error("participant did not receive chat_edited for DM")
 	}
 }
@@ -319,11 +345,11 @@ func TestDM_ChatEdit_NonParticipantForbidden(t *testing.T) {
 	sendCharlie := make(chan []byte, 64)
 	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cCharlie, dmChatEditMsg(msgID, "hacked"))
-	time.Sleep(100 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
 	if code != "FORBIDDEN" {
@@ -350,18 +376,15 @@ func TestDM_ChatDelete_ParticipantCanDeleteOwn(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cAlice, dmChatDeleteMsg(msgID))
-	time.Sleep(100 * time.Millisecond)
 
 	// Both participants should receive chat_deleted.
-	aliceMsgs := dmDrainAll(sendAlice)
-	if dmFindMsgType(aliceMsgs, "chat_deleted") == nil {
+	if dmWaitMsgType(sendAlice, "chat_deleted", waitTimeout) == nil {
 		t.Error("Alice did not receive chat_deleted")
 	}
-	bobMsgs := dmDrainAll(sendBob)
-	if dmFindMsgType(bobMsgs, "chat_deleted") == nil {
+	if dmWaitMsgType(sendBob, "chat_deleted", waitTimeout) == nil {
 		t.Error("Bob did not receive chat_deleted")
 	}
 }
@@ -381,11 +404,11 @@ func TestDM_ChatDelete_NonParticipantForbidden(t *testing.T) {
 	sendCharlie := make(chan []byte, 64)
 	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cCharlie, dmChatDeleteMsg(msgID))
-	time.Sleep(100 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
 	if code != "FORBIDDEN" {
@@ -409,13 +432,13 @@ func TestDM_ChatDelete_NoModeratorOverride(t *testing.T) {
 	sendAlice := make(chan []byte, 64)
 	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
 	hub.Register(cAlice)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cAlice)
 
 	// Alice (Owner role) tries to delete Bob's message — should fail because
 	// DMs disable moderator override.
 	hub.HandleMessageForTest(cAlice, dmChatDeleteMsg(msgID))
-	time.Sleep(100 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendAlice)
 	code := dmFindErrorCode(msgs)
 	if code != "FORBIDDEN" {
@@ -437,15 +460,12 @@ func TestDM_Typing_ParticipantBroadcasts(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cAlice, dmTypingMsg(dmChID))
-	time.Sleep(100 * time.Millisecond)
 
 	// Bob should receive typing broadcast (type is "typing", not "typing_start").
-	bobMsgs := dmDrainAll(sendBob)
-	typing := dmFindMsgType(bobMsgs, "typing")
-	if typing == nil {
+	if dmWaitMsgType(sendBob, "typing", waitTimeout) == nil {
 		t.Error("Bob did not receive typing in DM")
 	}
 }
@@ -466,25 +486,27 @@ func TestDM_Typing_NonParticipantSilentlyDropped(t *testing.T) {
 	hub.Register(cCharlie)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cCharlie, dmTypingMsg(dmChID))
-	time.Sleep(100 * time.Millisecond)
 
-	// Charlie should NOT receive an error — typing from non-participants is silently dropped.
-	charlieMsgs := dmDrainAll(sendCharlie)
-	if code := dmFindErrorCode(charlieMsgs); code != "" {
-		t.Errorf("non-participant typing should be silently dropped, got error: %s", code)
-	}
-
-	// Alice and Bob should NOT receive typing from Charlie.
-	aliceMsgs := dmDrainAll(sendAlice)
+	// Alice and Bob should NOT receive typing from Charlie. The bounded window
+	// on Alice's channel doubles as the settle time for Bob's (a wrongly routed
+	// typing broadcast would be fanned out to both in the same delivery pass).
+	aliceMsgs := dmCollectAll(sendAlice, 100*time.Millisecond)
 	if dmFindMsgType(aliceMsgs, "typing") != nil {
 		t.Error("Alice received typing from non-participant Charlie")
 	}
 	bobMsgs := dmDrainAll(sendBob)
 	if dmFindMsgType(bobMsgs, "typing") != nil {
 		t.Error("Bob received typing from non-participant Charlie")
+	}
+
+	// Charlie should NOT receive an error — typing from non-participants is
+	// silently dropped (error replies would have been sent synchronously).
+	charlieMsgs := dmDrainAll(sendCharlie)
+	if code := dmFindErrorCode(charlieMsgs); code != "" {
+		t.Errorf("non-participant typing should be silently dropped, got error: %s", code)
 	}
 }
 
@@ -499,12 +521,11 @@ func TestDM_ChannelFocus_ParticipantAllowed(t *testing.T) {
 	sendAlice := make(chan []byte, 64)
 	cAlice := ws.NewTestClientWithUser(hub, alice, 0, sendAlice)
 	hub.Register(cAlice)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cAlice)
 
 	hub.HandleMessageForTest(cAlice, dmChannelFocusMsg(dmChID))
-	time.Sleep(50 * time.Millisecond)
 
-	// No error should be sent.
+	// No error should be sent (error replies are synchronous — already buffered).
 	msgs := dmDrainAll(sendAlice)
 	if code := dmFindErrorCode(msgs); code != "" {
 		t.Errorf("participant channel_focus got error: %s", code)
@@ -521,11 +542,11 @@ func TestDM_ChannelFocus_NonParticipantRejected(t *testing.T) {
 	sendCharlie := make(chan []byte, 64)
 	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cCharlie, dmChannelFocusMsg(dmChID))
-	time.Sleep(50 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
 	if code != "FORBIDDEN" {
@@ -552,18 +573,15 @@ func TestDM_ReactionAdd_ParticipantSuccess(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cAlice)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
 	hub.HandleMessageForTest(cBob, dmReactionAddMsg(msgID, "👍"))
-	time.Sleep(100 * time.Millisecond)
 
 	// Both participants should get reaction_update broadcast.
-	aliceMsgs := dmDrainAll(sendAlice)
-	if dmFindMsgType(aliceMsgs, "reaction_update") == nil {
+	if dmWaitMsgType(sendAlice, "reaction_update", waitTimeout) == nil {
 		t.Error("Alice did not receive reaction_update in DM")
 	}
-	bobMsgs := dmDrainAll(sendBob)
-	if dmFindMsgType(bobMsgs, "reaction_update") == nil {
+	if dmWaitMsgType(sendBob, "reaction_update", waitTimeout) == nil {
 		t.Error("Bob did not receive reaction_update in DM")
 	}
 }
@@ -583,11 +601,11 @@ func TestDM_ReactionAdd_NonParticipantError(t *testing.T) {
 	sendCharlie := make(chan []byte, 64)
 	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cCharlie, dmReactionAddMsg(msgID, "👎"))
-	time.Sleep(100 * time.Millisecond)
 
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
 	// Non-participant reaction returns BAD_REQUEST (normalized to prevent IDOR info leak).
@@ -610,19 +628,18 @@ func TestDM_ReactionRemove_ParticipantSuccess(t *testing.T) {
 	sendBob := make(chan []byte, 64)
 	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
 	hub.Register(cBob)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cBob)
 
-	// Add a reaction first.
+	// Add a reaction first and consume its reaction_update broadcast.
 	hub.HandleMessageForTest(cBob, dmReactionAddMsg(msgID, "🔥"))
-	time.Sleep(50 * time.Millisecond)
-	dmDrainAll(sendBob) // clear
+	if dmWaitMsgType(sendBob, "reaction_update", waitTimeout) == nil {
+		t.Fatal("participant did not receive reaction_update (add) in DM")
+	}
 
 	// Remove the reaction.
 	hub.HandleMessageForTest(cBob, dmReactionRemoveMsg(msgID, "🔥"))
-	time.Sleep(100 * time.Millisecond)
 
-	msgs := dmDrainAll(sendBob)
-	if dmFindMsgType(msgs, "reaction_update") == nil {
+	if dmWaitMsgType(sendBob, "reaction_update", waitTimeout) == nil {
 		t.Error("participant did not receive reaction_update (remove) in DM")
 	}
 }
@@ -646,21 +663,20 @@ func TestDM_ChatSend_DeliveredViaSendToUser(t *testing.T) {
 	hub.Register(cAlice)
 	hub.Register(cBob)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "private to bob"))
-	time.Sleep(100 * time.Millisecond)
-
-	// Charlie should NOT receive the DM message.
-	charlieMsgs := dmDrainAll(sendCharlie)
-	if dmFindMsgType(charlieMsgs, "chat_message") != nil {
-		t.Error("Charlie (non-participant) received DM chat_message — should be delivered only via SendToUser")
-	}
 
 	// Bob SHOULD receive it.
-	bobMsgs := dmDrainAll(sendBob)
-	if dmFindMsgType(bobMsgs, "chat_message") == nil {
+	if dmWaitMsgType(sendBob, "chat_message", waitTimeout) == nil {
 		t.Error("Bob did not receive DM chat_message")
+	}
+
+	// Charlie should NOT receive the DM message — bounded absence window after
+	// Bob's copy has already been delivered.
+	charlieMsgs := dmCollectAll(sendCharlie, 50*time.Millisecond)
+	if dmFindMsgType(charlieMsgs, "chat_message") != nil {
+		t.Error("Charlie (non-participant) received DM chat_message — should be delivered only via SendToUser")
 	}
 }
 
@@ -685,14 +701,19 @@ func TestDM_MultipleChannels_IsolatedDelivery(t *testing.T) {
 	hub.Register(cAlice)
 	hub.Register(cBob)
 	hub.Register(cCharlie)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cCharlie)
 
 	// Alice sends to Alice-Bob DM.
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmAB, fmt.Sprintf("only for bob %d", dmAB)))
-	time.Sleep(100 * time.Millisecond)
+
+	// Bob's copy arriving proves delivery completed; then Charlie gets a
+	// bounded absence window.
+	if dmWaitMsgType(sendBob, "chat_message", waitTimeout) == nil {
+		t.Fatal("Bob did not receive the Alice-Bob DM message")
+	}
 
 	// Charlie should NOT get this message.
-	charlieMsgs := dmDrainAll(sendCharlie)
+	charlieMsgs := dmCollectAll(sendCharlie, 50*time.Millisecond)
 	if dmFindMsgType(charlieMsgs, "chat_message") != nil {
 		t.Error("Charlie received message from Alice-Bob DM")
 	}

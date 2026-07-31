@@ -562,11 +562,26 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   const unsubscribers: Array<() => void> = [];
 
+  /** Voice-user rows from the last render, keyed by user id — lets the
+   *  speaking-only subscription patch classes without per-user querySelector. */
+  const voiceRowByUserId = new Map<number, HTMLElement>();
+
+  function rebuildVoiceRowCache(): void {
+    voiceRowByUserId.clear();
+    if (channelList === null) return;
+    for (const row of channelList.querySelectorAll<HTMLElement>(
+      ".voice-user-item[data-voice-uid]",
+    )) {
+      voiceRowByUserId.set(Number(row.dataset.voiceUid), row);
+    }
+  }
+
   function renderChannels(): void {
     if (channelList === null) {
       return;
     }
     clearChildren(channelList);
+    voiceRowByUserId.clear();
 
     const grouped = getChannelsByCategory();
     const state = channelsStore.getState();
@@ -601,6 +616,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         ),
       );
     }
+
+    rebuildVoiceRowCache();
   }
 
   function mount(container: Element): void {
@@ -659,43 +676,44 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     );
     unsubscribers.push(unsubConnStatus);
 
-    // Subscribe to voice store — only full re-render when users join/leave
-    // or mute/deafen/camera changes. Speaking state is patched in-place via
-    // CSS class toggle to avoid destroying DOM elements (which kills hover).
-    let prevVoiceStructureSig = "";
-    const unsubVoice = voiceStore.subscribe((state) => {
-      // Structural signature: who is in which channel + mute/deafen/camera.
-      // Excludes speaking — that's patched in-place below.
-      let structSig = String(state.currentChannelId ?? "");
-      for (const [chId, users] of state.voiceUsers) {
-        structSig += `|${chId}`;
-        for (const [uid, u] of users) {
-          // Include the E2EE verification status so a verified↔unverified↔mismatch
-          // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
-          const verif = state.peerVerifications?.get(uid);
-          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${verif ? `@${verif.status}` : ""}`;
+    // Subscribe to voice store, split in two:
+    //  (a) a structural selector (who is in which channel + mute/deafen/camera/
+    //      screenshare + E2EE verification, excluding `speaking`) that does a
+    //      full re-render;
+    //  (b) a speaking-only patcher that toggles CSS classes on rows cached at
+    //      render time, so a speaker event never destroys DOM elements (which
+    //      kills hover) and never pays a per-user querySelector.
+    const unsubVoiceStructure = voiceStore.subscribeSelector(
+      (state) => {
+        let structSig = String(state.currentChannelId ?? "");
+        for (const [chId, users] of state.voiceUsers) {
+          structSig += `|${chId}`;
+          for (const [uid, u] of users) {
+            // Include the E2EE verification status so a verified↔unverified↔mismatch
+            // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
+            const verif = state.peerVerifications?.get(uid);
+            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${verif ? `@${verif.status}` : ""}`;
+          }
         }
-      }
-      if (structSig !== prevVoiceStructureSig) {
-        prevVoiceStructureSig = structSig;
-        renderChannels();
-        return;
-      }
+        return structSig;
+      },
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubVoiceStructure);
 
-      // Patch speaking state in-place — toggle CSS class without re-rendering.
-      if (channelList === null) return;
+    // Registered after the structural subscription so a structural change in
+    // the same notification re-renders (and refreshes the row cache) first.
+    const unsubSpeaking = voiceStore.subscribe((state) => {
       for (const [, users] of state.voiceUsers) {
         for (const [uid, u] of users) {
-          const row = channelList.querySelector<HTMLElement>(
-            `.voice-user-item[data-voice-uid="${uid}"]`,
-          );
-          if (row !== null) {
+          const row = voiceRowByUserId.get(uid);
+          if (row !== undefined) {
             row.classList.toggle("speaking", u.speaking);
           }
         }
       }
     });
-    unsubscribers.push(unsubVoice);
+    unsubscribers.push(unsubSpeaking);
   }
 
   function destroy(): void {
@@ -705,6 +723,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       unsub();
     }
     unsubscribers.length = 0;
+    voiceRowByUserId.clear();
     if (root !== null) {
       root.remove();
       root = null;

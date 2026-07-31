@@ -112,6 +112,52 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
+  it("only mints one invite per click, even on a double-click", async () => {
+    let release: ((v: InviteItem) => void) | null = null;
+    const onCreateInvite = vi.fn(
+      () =>
+        new Promise<InviteItem>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const opts = makeOptions({ invites: [], onCreateInvite });
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    const createBtn = container.querySelector(".invite-manager__create") as HTMLButtonElement;
+    createBtn.click();
+    expect(createBtn.disabled).toBe(true);
+    createBtn.click();
+    expect(onCreateInvite).toHaveBeenCalledTimes(1);
+
+    release!(makeInvite({ code: "newcode123" }));
+    await vi.waitFor(() => {
+      expect(createBtn.disabled).toBe(false);
+    });
+
+    mgr.destroy?.();
+  });
+
+  it("disarms the revoke confirm if it is left alone", () => {
+    vi.useFakeTimers();
+    try {
+      const opts = makeOptions({ invites: [makeInvite({ code: "abc123xyz" })] });
+      const mgr = createInviteManager(opts);
+      mgr.mount(container);
+
+      const revokeBtn = container.querySelector(".invite-item__revoke") as HTMLButtonElement;
+      revokeBtn.click();
+      vi.advanceTimersByTime(5000);
+      revokeBtn.click();
+
+      // The second click re-arms rather than revoking a link the user forgot about.
+      expect(opts.onRevokeInvite).not.toHaveBeenCalled();
+      mgr.destroy?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("click revoke calls onRevokeInvite and removes from list on resolve", async () => {
     const opts = makeOptions({ invites: [makeInvite({ code: "abc123xyz" })] });
     const mgr = createInviteManager(opts);
@@ -120,6 +166,9 @@ describe("InviteManager", () => {
     expect(container.querySelectorAll(".invite-item").length).toBe(1);
 
     const revokeBtn = container.querySelector(".invite-item__revoke") as HTMLButtonElement;
+    // Revoking kills a live link — first click only arms the confirm.
+    revokeBtn.click();
+    expect(opts.onRevokeInvite).not.toHaveBeenCalled();
     revokeBtn.click();
     expect(opts.onRevokeInvite).toHaveBeenCalledWith("abc123xyz");
 
@@ -191,6 +240,7 @@ describe("InviteManager", () => {
     mgr.mount(container);
 
     const revokeBtn = container.querySelector(".invite-item__revoke") as HTMLButtonElement;
+    revokeBtn.click();
     revokeBtn.click();
 
     await vi.waitFor(() => {

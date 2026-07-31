@@ -2,15 +2,16 @@ package ws
 
 import (
 	"context"
-	"fmt"
 	"time"
+
+	"github.com/owncord/server/auth"
 )
 
 // handlePingV2 is the V2 handler for ping (heartbeat) messages.
 // It rate-limits and returns a pong reply on success.
 func handlePingV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PingDeps)
-	if d.Limiter != nil && !d.Limiter.Allow(fmt.Sprintf("ping:%d", info.UserID), 2, time.Second) {
+	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("ping", info.UserID), 2, time.Second) {
 		return Result{} // rate limited: silent drop
 	}
 	return Result{Reply: buildJSON(map[string]any{"type": MsgTypePong})}

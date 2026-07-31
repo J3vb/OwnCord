@@ -57,6 +57,10 @@ func (f *fakeEventStore) LastCutoff() time.Time {
 }
 
 // Stubs for the rest of the EventStore interface — not exercised here.
+func (*fakeEventStore) PersistEvents(context.Context, []db.PersistedEvent) (int, error) {
+	return 0, nil
+}
+
 func (*fakeEventStore) PersistEvent(context.Context, int64, string, int64, []byte) error {
 	panic("unused")
 }

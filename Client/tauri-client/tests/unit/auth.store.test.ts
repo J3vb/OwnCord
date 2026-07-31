@@ -7,7 +7,17 @@ import {
   getCurrentUser,
   updateUser,
 } from "../../src/stores/auth.store";
+import { resetVoiceStore, joinVoiceChannel, setVoiceStatus } from "../../src/stores/voice.store";
+import { leaveVoice } from "@lib/livekitSession";
 import type { UserWithRole } from "../../src/lib/types";
+
+// Mock the lazily-imported voice SDK module so we can assert clearAuth() only
+// pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
+vi.mock("@lib/livekitSession", () => ({
+  leaveVoice: vi.fn(),
+}));
+
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const TEST_USER: UserWithRole = {
   id: 42,
@@ -201,6 +211,30 @@ describe("auth store", () => {
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
       clearAuth();
       expect(getCurrentUser()).toBeNull();
+    });
+  });
+
+  // clearAuth voice-session cleanup (regression: don't force-load the LiveKit
+  // chunk on every logout/401 for a text-only user).
+  describe("clearAuth voice cleanup", () => {
+    beforeEach(() => {
+      resetVoiceStore();
+      vi.mocked(leaveVoice).mockClear();
+    });
+
+    it("does NOT load livekitSession when there is no active voice session", async () => {
+      // Voice store is idle (currentChannelId null, voiceStatus "idle").
+      clearAuth();
+      await flushMicrotasks();
+      expect(leaveVoice).not.toHaveBeenCalled();
+    });
+
+    it("leaves voice when a voice session is active", async () => {
+      joinVoiceChannel(7); // currentChannelId=7, voiceStatus="joining"
+      setVoiceStatus("connected");
+      clearAuth();
+      await flushMicrotasks();
+      expect(leaveVoice).toHaveBeenCalledWith(false);
     });
   });
 

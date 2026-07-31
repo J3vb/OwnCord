@@ -58,9 +58,10 @@ func TestChannelMetadata_NotDeliveredToRolesDeniedRead(t *testing.T) {
 
 	insiderSend := make(chan []byte, 64)
 	outsiderSend := make(chan []byte, 64)
+	cOutsider := ws.NewTestClientWithUser(hub, outsider, 0, outsiderSend)
 	hub.Register(ws.NewTestClientWithUser(hub, insider, 0, insiderSend))
-	hub.Register(ws.NewTestClientWithUser(hub, outsider, 0, outsiderSend))
-	time.Sleep(30 * time.Millisecond)
+	hub.Register(cOutsider)
+	waitRegistered(t, hub, cOutsider) // in-order events: both clients registered
 
 	pub := &db.Channel{ID: pubID, Name: "chmeta-general", Type: "text", Category: "Text"}
 	priv := &db.Channel{
@@ -71,7 +72,6 @@ func TestChannelMetadata_NotDeliveredToRolesDeniedRead(t *testing.T) {
 	hub.BroadcastChannelUpdate(pub)
 	hub.BroadcastChannelCreate(priv)
 	hub.BroadcastChannelUpdate(priv)
-	time.Sleep(150 * time.Millisecond)
 
 	// ── live delivery ─────────────────────────────────────────────────────────
 	insiderLive := drainChanTimeout(insiderSend, 200*time.Millisecond)

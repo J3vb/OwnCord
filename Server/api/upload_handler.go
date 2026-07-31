@@ -114,7 +114,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if ok && user != nil {
-			uploadKey := fmt.Sprintf("upload:%d", user.ID)
+			uploadKey := auth.Key("upload", user.ID)
 			if !limiter.Allow(uploadKey, uploadRateLimitPerMinute, time.Minute) {
 				writeJSON(w, http.StatusTooManyRequests, errorResponse{
 					Error:   "RATE_LIMITED",

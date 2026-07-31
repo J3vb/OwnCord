@@ -5,11 +5,15 @@
 import { createElement } from "@lib/dom";
 import { applyThemeByName } from "@lib/themes";
 
+// Preference persistence lives in `@lib/preferences` so `lib/` modules can use
+// it without importing from the component layer. Re-exported here so the
+// settings tabs keep a single import site — and, critically, so both layers
+// share one implementation (they used to be copy-pasted and had drifted).
+export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-export const STORAGE_PREFIX = "owncord:settings:";
 
 export const THEMES = {
   dark: {
@@ -39,31 +43,6 @@ export const THEMES = {
 } as const;
 
 export type ThemeName = keyof typeof THEMES;
-
-// ---------------------------------------------------------------------------
-// Preference helpers
-// ---------------------------------------------------------------------------
-
-export function loadPref<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + key);
-    if (raw === null) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    // Basic typeof guard against corrupted localStorage (covers boolean,
-    // number, string fallbacks used by current call sites).
-    if (typeof parsed !== typeof fallback) return fallback;
-    return parsed as T;
-  } catch {
-    return fallback;
-  }
-}
-
-export function savePref(key: string, value: unknown): void {
-  localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
-  // Dispatch a custom event so same-window listeners can invalidate caches.
-  // The native `storage` event only fires for cross-tab changes.
-  window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
-}
 
 // ---------------------------------------------------------------------------
 // Accessible toggle creation

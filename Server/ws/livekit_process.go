@@ -139,10 +139,13 @@ logging:
 	return cfgPath, nil
 }
 
-// Start launches the livekit-server binary. If LiveKitBinaryPath is empty,
-// this is a no-op (assumes LiveKit is managed externally).
+// Start launches the livekit-server binary. If LiveKitBinaryPath is empty
+// and auto-download is disabled, this is a no-op (assumes LiveKit is managed
+// externally). With auto-download enabled, the binary is fetched (and
+// checksum-verified) in the background before the process starts, so server
+// startup is never blocked on the download.
 func (p *LiveKitProcess) Start() error {
-	if p.cfg.LiveKitBinaryPath == "" {
+	if p.cfg.LiveKitBinaryPath == "" && !p.cfg.AutoDownloadLiveKit {
 		slog.Info("livekit: no binary path configured, assuming externally managed")
 		return nil
 	}
@@ -163,23 +166,68 @@ func (p *LiveKitProcess) Start() error {
 	p.cancel = cancel
 	p.loopDone = make(chan struct{})
 
-	go p.runLoop(ctx, cfgPath)
+	go func() {
+		defer func() {
+			p.mu.Lock()
+			if p.loopDone != nil {
+				close(p.loopDone)
+			}
+			p.mu.Unlock()
+		}()
+
+		binPath := p.cfg.LiveKitBinaryPath
+		if binPath == "" {
+			resolved, dlErr := p.resolveBinary(ctx)
+			if dlErr != nil {
+				if ctx.Err() == nil {
+					slog.Error("livekit: auto-download failed — voice stays offline until livekit-server is available",
+						"error", dlErr,
+						"hint", "check the network, or set voice.livekit_binary in config.yaml to a binary you provide")
+				}
+				return
+			}
+			binPath = resolved
+		}
+		p.runLoop(ctx, cfgPath, binPath)
+	}()
 
 	return nil
 }
 
+// resolveBinary downloads (or reuses a cached copy of) the pinned
+// livekit-server release, retrying a few times so a transient network hiccup
+// at boot does not permanently disable voice until the next restart.
+func (p *LiveKitProcess) resolveBinary(ctx context.Context) (string, error) {
+	const (
+		attempts   = 3
+		retryDelay = 15 * time.Second
+	)
+	var lastErr error
+	for i := range attempts {
+		if i > 0 {
+			slog.Warn("livekit: retrying download", "attempt", i+1, "error", lastErr)
+			select {
+			case <-time.After(retryDelay):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		path, err := EnsureLiveKitBinary(attemptCtx, p.dataDir, p.cfg.LiveKitVersion)
+		cancel()
+		if err == nil {
+			return path, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
 // runLoop starts and restarts the process until stopped or context cancelled.
 // Uses exponential backoff (3s → 6s → 12s … up to 60s) and stops after 10
-// consecutive rapid failures (process exits within 30 seconds).
-func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
-	defer func() {
-		p.mu.Lock()
-		if p.loopDone != nil {
-			close(p.loopDone)
-		}
-		p.mu.Unlock()
-	}()
-
+// consecutive rapid failures (process exits within 30 seconds). loopDone is
+// closed by the Start goroutine that calls this.
+func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 	const (
 		baseDelay   = 3 * time.Second
 		maxDelay    = 60 * time.Second
@@ -195,7 +243,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
 			return
 		}
 
-		cmd := exec.CommandContext(ctx, p.cfg.LiveKitBinaryPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config
+		cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.WaitDelay = 6 * time.Second // bound Wait to prevent goroutine leak on Windows
@@ -210,7 +258,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
 		p.mu.Unlock()
 
 		slog.Info("livekit: starting process",
-			"binary", p.cfg.LiveKitBinaryPath,
+			"binary", binPath,
 			"config", cfgPath,
 			"rapid_failures", rapidFailures)
 

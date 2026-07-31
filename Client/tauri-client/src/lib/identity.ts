@@ -177,10 +177,13 @@ async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPai
   const keyPair = await generateIdentityKeyPair();
   const blob = await exportIdentityKeyPair(keyPair.privateKey);
   if (await saveIdentityKey(host, blob)) {
-    // The store reported success — verify it actually kept the value. Windows
-    // can accept a CredWrite and persist nothing (Credential Manager disabled,
-    // or the "do not allow storage of passwords and credentials" policy), which
-    // otherwise surfaces to the user only as peers flagging them as a MITM.
+    // Outer half of a two-layer check. `save_identity_key` already reads its own
+    // write back and falls through to the DPAPI file if the OS credential store
+    // does not return it (see src-tauri/src/secret_store.rs and
+    // docs/credential-storage.md), so reaching the branch below now means the
+    // secret survived neither store. Kept because this is the failure a
+    // resolved promise cannot express, and its only other symptom is peers
+    // flagging the user as a MITM after a restart.
     if ((await loadIdentityKey(host)) !== blob) {
       log.error(
         "Identity key did not persist — the credential store accepted the write but did not return it. " +

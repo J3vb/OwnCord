@@ -33,11 +33,11 @@ type Config struct {
 	Logging          LoggingConfig          `koanf:"logging"`
 }
 
-// LoggingConfig controls server log verbosity. The in-memory ring buffer that
-// backs the admin panel's live log view always captures DEBUG regardless of
-// this setting — Level only gates what is written to stdout.
+// LoggingConfig controls server log verbosity. Level gates both stdout and
+// the in-memory ring buffer that backs the admin panel's live log view, so
+// suppressed levels cost nothing anywhere on the hot path.
 type LoggingConfig struct {
-	// Level is the minimum level written to stdout: "debug" | "info" | "warn" |
+	// Level is the minimum level logged: "debug" | "info" | "warn" |
 	// "error". Override at runtime without editing config.yaml via the
 	// OWNCORD_LOGGING_LEVEL environment variable.
 	Level string `koanf:"level"`
@@ -137,7 +137,17 @@ type VoiceConfig struct {
 	LiveKitAPISecret  string `koanf:"livekit_api_secret"` // LiveKit API secret
 	LiveKitURL        string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `koanf:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
-	NodeIP            string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
+	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
+	// release from the official LiveKit GitHub releases into
+	// <data_dir>/livekit/ and runs it as the companion process, when no
+	// livekit_binary is configured. Fresh installs enable this in the
+	// generated config.yaml so voice works out of the box; the compiled-in
+	// default stays false so existing configs keep their behaviour.
+	AutoDownloadLiveKit bool `koanf:"auto_download_livekit"`
+	// LiveKitVersion overrides the pinned livekit-server release version used
+	// by auto-download (e.g. "1.13.5"). Empty = the built-in pin.
+	LiveKitVersion string `koanf:"livekit_version"`
+	NodeIP         string `koanf:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
 	// in addition to the external node_ip mapping, so clients on the local
 	// network can connect while remote clients use the public IP.
@@ -155,6 +165,13 @@ type ServerConfig struct {
 	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
 	WAFEnabled        bool     `koanf:"waf_enabled"`        // Enable Coraza WAF (default: false)
 	WAFParanoiaLevel  int      `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
+	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
+	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
+	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
+	// Defaults to "detect": chat traffic routinely contains SQL-ish/HTML-ish
+	// text the CRS false-positives on, so blocking needs tuning against real
+	// traffic first. Unknown values fall back to "detect".
+	WAFCRSMode string `koanf:"waf_crs_mode"`
 }
 
 // DatabaseConfig holds database settings.
@@ -209,6 +226,7 @@ func defaults() Config {
 				"192.168.0.0/16", // private class C
 				"fc00::/7",       // IPv6 unique local
 			},
+			WAFCRSMode: "detect",
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -274,6 +292,10 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # waf_enabled: false        # Coraza WAF (inline rules + OWASP Core Rule Set)
+  # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
+  # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs
+  #                           # CRS matches without blocking (safe default for chat traffic)
 
 database:
   type: "sqlite"          # "sqlite" is the only supported backend
@@ -294,7 +316,12 @@ voice:
   # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
   # livekit_api_secret: ""    # LiveKit API secret (REQUIRED, min 32 chars — generate a unique secret)
   livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
-  # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
+  auto_download_livekit: true # download and run livekit-server automatically when
+                              # no livekit_binary is set (verified against the
+                              # official LiveKit release checksums; stored in data/livekit/)
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.5")
+  # livekit_binary: ""             # path to an existing livekit-server binary; set this to
+  #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
   # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
   # quality: "medium"              # low | medium | high
@@ -339,9 +366,9 @@ voice:
 # gif:
 #   api_key: ""
 
-# Logging. "level" gates what is written to stdout; the admin panel's live log
-# view always captures debug regardless. Override without editing this file via
-# the OWNCORD_LOGGING_LEVEL environment variable.
+# Logging. "level" gates what is logged, to stdout and the admin panel's live
+# log view alike. Override without editing this file via the
+# OWNCORD_LOGGING_LEVEL environment variable.
 # logging:
 #   level: "info"             # debug | info | warn | error
 `
@@ -358,23 +385,26 @@ func Load(cfgPath string) (*Config, error) {
 		return nil, fmt.Errorf("loading defaults: %w", err)
 	}
 
-	// Layer 2: YAML file (create default if missing).
+	// Layer 2: YAML file (create default if missing). The freshly written
+	// default file is loaded like any other so the first boot runs with
+	// exactly the configuration the file documents (the generated template
+	// enables options — e.g. voice.auto_download_livekit — that the
+	// compiled-in defaults deliberately leave off for pre-existing configs).
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); writeErr != nil {
 			return nil, fmt.Errorf("writing default config: %w", writeErr)
 		}
-	} else {
-		// Read the file and try to parse it ourselves to detect invalid YAML.
-		raw, readErr := os.ReadFile(cfgPath)
-		if readErr != nil {
-			return nil, fmt.Errorf("reading config file %s: %w", cfgPath, readErr)
-		}
-		if parseErr := validateYAML(raw); parseErr != nil {
-			return nil, fmt.Errorf("loading config file %s: %w", cfgPath, parseErr)
-		}
-		if err := k.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
-			return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
-		}
+	}
+	// Read the file and try to parse it ourselves to detect invalid YAML.
+	raw, readErr := os.ReadFile(cfgPath) //nolint:gosec // G304: path from trusted wiring
+	if readErr != nil {
+		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, readErr)
+	}
+	if parseErr := validateYAML(raw); parseErr != nil {
+		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, parseErr)
+	}
+	if err := k.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
+		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
 
 	// Layer 3: environment variable overrides.

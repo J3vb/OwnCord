@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/telemetry"
@@ -105,7 +106,7 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	}
 
 	// Per-user-per-channel rate limit.
-	ratKey := fmt.Sprintf("typing:%d:%d", userID, channelID)
+	ratKey := auth.Key(auth.Key("typing", userID), channelID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 3*time.Second) {
 		return nil, nil
 	}
@@ -145,7 +146,7 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 },
 ) error {
 	// Rate limit.
-	ratKey := fmt.Sprintf("presence:%d", userID)
+	ratKey := auth.Key("presence", userID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 10*time.Second) {
 		return ErrRateLimited
 	}

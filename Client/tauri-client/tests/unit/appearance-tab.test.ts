@@ -170,6 +170,31 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.placeholder).toBe("5865f2");
   });
 
+  it("keeps a saved accent applied after switching themes", () => {
+    // applyThemeByName strips every inline custom property from <body>, so the
+    // accent override has to be re-applied or the theme's own --accent wins.
+    mockApplyThemeByName.mockImplementation(() => {
+      const style = document.body.style;
+      for (let i = style.length - 1; i >= 0; i--) {
+        const prop = style.item(i);
+        if (prop.startsWith("--")) style.removeProperty(prop);
+      }
+    });
+
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const swatches = container.querySelectorAll(".accent-swatch");
+    (swatches[1] as HTMLElement).click(); // #57f287
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#57f287");
+
+    const tiles = container.querySelectorAll(".theme-opt");
+    (tiles[0] as HTMLElement).click(); // switch to "dark"
+
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#57f287");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#57f287");
+  });
+
   it("restores a custom active theme without forcing a built-in tile active", () => {
     mockGetActiveThemeName.mockReturnValue("custom-sunrise");
 

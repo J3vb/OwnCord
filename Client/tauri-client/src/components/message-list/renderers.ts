@@ -1,12 +1,15 @@
 /**
- * Message rendering barrel — re-exports all rendering helpers and contains
- * the composite functions (renderMessage, renderDayDivider, renderReplyRef,
- * renderSystemMessage) that orchestrate pieces from the split modules.
+ * Message rendering barrel — re-exports the rendering helpers consumers use
+ * and contains the composite functions (renderMessage, renderDayDivider,
+ * renderReplyRef, renderSystemMessage) that orchestrate pieces from the
+ * split modules.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
+import { canManageMessages } from "@lib/permissions";
+import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -18,11 +21,11 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   }
 }) as EventListener);
 
-// -- Re-exports (preserve all existing public API) ----------------------------
+// -- Re-exports (only the names consumers actually import; everything else is
+// -- available directly from the split modules) -------------------------------
 
 export {
   GROUP_THRESHOLD_MS,
-  parseTimestamp,
   formatTime,
   formatFullDate,
   formatMessageTimestamp,
@@ -33,42 +36,13 @@ export {
 } from "./formatting";
 
 export {
-  MENTION_REGEX,
-  CODE_BLOCK_REGEX,
-  INLINE_CODE_REGEX,
-  URL_REGEX,
   renderInlineContent,
   renderMentions,
   renderMentionSegment,
   renderMessageContent,
 } from "./content-parser";
 
-export {
-  extractYouTubeId,
-  renderYouTubeEmbed,
-  isDirectImageUrl,
-  renderInlineImage,
-  openImageLightbox,
-  extractUrls,
-  renderUrlEmbeds,
-} from "./media";
-
-export type { OgMeta } from "./embeds";
-export { parseOgTags, renderGenericLinkPreview, applyOgMeta } from "./embeds";
-
-export {
-  formatFileSize,
-  isImageMime,
-  isSafeUrl,
-  openCacheDb,
-  uint8ToBase64,
-  fetchImageAsDataUrl,
-  renderAttachment,
-  setServerHost,
-  resolveServerUrl,
-} from "./attachments";
-
-export { renderReactions } from "./reactions";
+export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
@@ -307,7 +281,8 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    if (msg.user.id === opts.currentUserId) {
+    // Own message, or a moderator acting on someone else's.
+    if (msg.user.id === opts.currentUserId || canManageMessages()) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": "Delete",
@@ -328,9 +303,12 @@ export function renderMessage(
       copyIdBtn.addEventListener(
         "click",
         () => {
-          void navigator.clipboard.writeText(String(msg.id)).catch(() => {
-            /* clipboard unavailable */
-          });
+          // No silent success: a copy with no feedback is indistinguishable
+          // from a clipboard that refused.
+          void navigator.clipboard.writeText(String(msg.id)).then(
+            () => showToast("Message ID copied", "success"),
+            () => showToast("Couldn't copy the message ID", "error"),
+          );
         },
         { signal },
       );

@@ -3,11 +3,17 @@
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
-import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/logger";
+import {
+  getLogBuffer,
+  clearLogBuffer,
+  addLogListener,
+  setLogLevel,
+  getLogLevel,
+} from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
-import { savePref } from "./helpers";
+import { savePref, readMigratedStringPref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -59,40 +65,6 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   }
 
   return row;
-}
-
-function readMigratedStringPref<T extends string>(
-  key: string,
-  fallback: T,
-  allowedValues: readonly T[],
-): T {
-  const currentRaw = localStorage.getItem(`owncord:settings:${key}`);
-  if (currentRaw !== null) {
-    try {
-      const currentValue: unknown = JSON.parse(currentRaw);
-      if (typeof currentValue === "string" && allowedValues.includes(currentValue as T)) {
-        return currentValue as T;
-      }
-    } catch {
-      // Ignore corrupted current storage and fall back below.
-    }
-  }
-
-  const legacyRaw = localStorage.getItem(key);
-  if (legacyRaw !== null) {
-    let legacyValue: unknown = legacyRaw;
-    try {
-      legacyValue = JSON.parse(legacyRaw);
-    } catch {
-      // Legacy values were previously stored as raw strings.
-    }
-    if (typeof legacyValue === "string" && allowedValues.includes(legacyValue as T)) {
-      savePref(key, legacyValue);
-      return legacyValue as T;
-    }
-  }
-
-  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +173,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     if (savedMinLevel !== "") {
       levelSelect.value = savedMinLevel;
       setLogLevel(savedMinLevel);
+    } else {
+      // No saved pref: reflect the actual effective runtime level (the
+      // applyStoredLogLevel fallback — info in prod, debug in dev) instead of
+      // leaving the select on its first option (DEBUG). Purely cosmetic — no
+      // save/apply, so the runtime level is unchanged.
+      levelSelect.value = getLogLevel();
     }
     levelSelect.addEventListener(
       "change",

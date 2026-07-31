@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/owncord/server/db"
 )
 
 // The events table backs cold-tier reconnect replay: when a client's last_seq
@@ -48,6 +50,86 @@ func TestPersistEvent_AndGetEventsSince(t *testing.T) {
 	}
 	if len(tail) != 1 || tail[0].Seq != 3 {
 		t.Errorf("GetEventsSince(2) = %+v, want only seq 3", tail)
+	}
+}
+
+func TestPersistEvents_BatchInsertsAll(t *testing.T) {
+	database := newMigratedTestDB(t)
+	ctx := context.Background()
+
+	batch := []db.PersistedEvent{
+		{Seq: 1, EventType: "chat_message", ChannelID: 10, Payload: []byte(`{"n":1}`)},
+		{Seq: 2, EventType: "chat_message", ChannelID: 10, Payload: []byte(`{"n":2}`)},
+		{Seq: 3, EventType: "presence", ChannelID: 0, Payload: []byte(`{"n":3}`)},
+	}
+	persisted, err := database.PersistEvents(ctx, batch)
+	if err != nil {
+		t.Fatalf("PersistEvents: %v", err)
+	}
+	if persisted != 3 {
+		t.Fatalf("persisted = %d, want 3", persisted)
+	}
+
+	rows, err := database.GetEventsSince(ctx, 0, 100)
+	if err != nil {
+		t.Fatalf("GetEventsSince: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("stored %d events, want 3", len(rows))
+	}
+	for i, e := range rows {
+		if e.Seq != batch[i].Seq || e.EventType != batch[i].EventType || e.ChannelID != batch[i].ChannelID {
+			t.Errorf("row[%d] = %+v, want seq/type/channel of %+v", i, e, batch[i])
+		}
+	}
+}
+
+func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
+	database := newMigratedTestDB(t)
+
+	persisted, err := database.PersistEvents(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("PersistEvents(nil): %v", err)
+	}
+	if persisted != 0 {
+		t.Errorf("persisted = %d, want 0", persisted)
+	}
+}
+
+// One bad row must not drop the batch: the tx fails (duplicate seq is the
+// PRIMARY KEY), and the per-row fallback still lands the good rows —
+// best-effort semantics identical to the old per-event loop.
+func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
+	database := newMigratedTestDB(t)
+	ctx := context.Background()
+
+	if err := database.PersistEvent(ctx, 2, "e", 0, []byte(`{}`)); err != nil {
+		t.Fatalf("PersistEvent: %v", err)
+	}
+
+	persisted, err := database.PersistEvents(ctx, []db.PersistedEvent{
+		{Seq: 1, EventType: "e", ChannelID: 0, Payload: []byte(`{}`)},
+		{Seq: 2, EventType: "e", ChannelID: 0, Payload: []byte(`{}`)}, // duplicate — fails
+		{Seq: 3, EventType: "e", ChannelID: 0, Payload: []byte(`{}`)},
+	})
+	if persisted != 2 {
+		t.Errorf("persisted = %d, want 2 (rows 1 and 3 via fallback)", persisted)
+	}
+	if err == nil {
+		t.Error("PersistEvents must report the lost row's error")
+	}
+
+	rows, qErr := database.GetEventsSince(ctx, 0, 100)
+	if qErr != nil {
+		t.Fatalf("GetEventsSince: %v", qErr)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("stored %d events, want 3 (pre-existing 2 plus fallback 1 and 3)", len(rows))
+	}
+	for i, want := range []int64{1, 2, 3} {
+		if rows[i].Seq != want {
+			t.Errorf("row[%d].Seq = %d, want %d", i, rows[i].Seq, want)
+		}
 	}
 }
 

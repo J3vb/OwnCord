@@ -4,7 +4,6 @@
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
 import type { HealthStatus } from "@lib/profiles";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
@@ -14,7 +13,6 @@ import { loadCredential } from "@lib/credentials";
 // Re-exports (public API must not change)
 // ---------------------------------------------------------------------------
 
-export type { FormState, FormMode } from "./connect-page/LoginForm";
 export type { SimpleProfile } from "./connect-page/ServerPanel";
 
 import type { SimpleProfile } from "./connect-page/ServerPanel";
@@ -208,27 +206,52 @@ export function createConnectPage(
   // MountableComponent
   // ---------------------------------------------------------------------------
 
-  let settingsOverlay: ReturnType<typeof createSettingsOverlay> | null = null;
+  let settingsOverlay: ReturnType<
+    typeof import("@components/SettingsOverlay").createSettingsOverlay
+  > | null = null;
+  let settingsOverlayLoading = false;
+  let unsubSettingsOpen: (() => void) | null = null;
+
+  // The settings overlay (whose tabs pull in the LiveKit stack) is created
+  // lazily on first open so it stays out of the startup path. Once created it
+  // manages its own show/hide off uiStore.settingsOpen.
+  function ensureSettingsOverlay(): void {
+    if (settingsOverlay !== null || settingsOverlayLoading) return;
+    settingsOverlayLoading = true;
+    void import("@components/SettingsOverlay").then(({ createSettingsOverlay }) => {
+      settingsOverlayLoading = false;
+      // The page may have been destroyed while the chunk loaded.
+      if (signal.aborted) return;
+      // Unauthenticated on the connect page — account actions are no-ops.
+      settingsOverlay = createSettingsOverlay({
+        isAuthenticated: false,
+        onClose: () => closeSettings(),
+        onChangePassword: () => Promise.resolve(),
+        onUpdateProfile: () => Promise.resolve(),
+        onLogout: () => {},
+        onDeleteAccount: () => Promise.resolve(),
+        onStatusChange: () => {},
+        onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
+        onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
+        onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
+      });
+      settingsOverlay.mount(root);
+    });
+  }
 
   function mount(target: Element): void {
     container = target;
     const rootEl = buildRoot();
     container.appendChild(rootEl);
 
-    // Mount settings overlay on the connect page (unauthenticated — account actions are no-ops)
-    settingsOverlay = createSettingsOverlay({
-      isAuthenticated: false,
-      onClose: () => closeSettings(),
-      onChangePassword: () => Promise.resolve(),
-      onUpdateProfile: () => Promise.resolve(),
-      onLogout: () => {},
-      onDeleteAccount: () => Promise.resolve(),
-      onStatusChange: () => {},
-      onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
-      onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
-      onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
-    });
-    settingsOverlay.mount(rootEl);
+    // Create the settings overlay the first time settings are opened.
+    unsubSettingsOpen = uiStore.subscribeSelector(
+      (s) => s.settingsOpen,
+      (settingsOpen) => {
+        if (settingsOpen) ensureSettingsOverlay();
+      },
+    );
+    if (uiStore.getState().settingsOpen) ensureSettingsOverlay();
 
     // Show any pending auth error (e.g. "already connected from another client")
     const pendingError = uiStore.getState().transientError;
@@ -244,6 +267,8 @@ export function createConnectPage(
   function destroy(): void {
     // Abort all event listeners registered with the signal
     abortController.abort();
+    unsubSettingsOpen?.();
+    unsubSettingsOpen = null;
     settingsOverlay?.destroy?.();
     settingsOverlay = null;
 

@@ -1033,6 +1033,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1062,6 +1063,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });
@@ -1284,6 +1286,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1321,6 +1324,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         next.set(2, {
           id: 2,
@@ -1331,6 +1335,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1393,6 +1398,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
       });
@@ -1797,6 +1803,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1839,7 +1846,7 @@ describe("SidebarArea", () => {
     /** Extract callbacks passed to createMemberList */
     function getMemberListCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (userId: number, username: string) => Promise<void>;
+      onBan: (userId: number, username: string, reason: string) => Promise<void>;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as MockedFn).mock.calls;
@@ -1906,9 +1913,9 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "spamming");
 
-      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3);
+      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming");
       expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
 
       cleanup(result);
@@ -1924,7 +1931,7 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "");
 
       expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
 
@@ -1941,7 +1948,7 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "");
 
       expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
 
@@ -2019,7 +2026,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onChangeRole does nothing when role name not found", async () => {
+    it("onChangeRole reports an unresolvable role instead of failing silently", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
@@ -2031,7 +2038,10 @@ describe("SidebarArea", () => {
       await callbacks.onChangeRole(4, "Charlie", "nonexistent");
 
       expect(opts.api.adminChangeRole).not.toHaveBeenCalled();
-      expect(mockShow).not.toHaveBeenCalled();
+      expect(mockShow).toHaveBeenCalledWith(
+        'Unknown role "nonexistent" — try reconnecting',
+        "error",
+      );
 
       cleanup(result);
     });

@@ -2,9 +2,7 @@
 package ws
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -18,18 +16,6 @@ import (
 	"github.com/owncord/server/stackutil"
 	"github.com/owncord/server/syncutil"
 )
-
-// broadcastMsg is an internal message queued for delivery.
-type broadcastMsg struct {
-	channelID int64 // 0 = send to all connected clients
-	msg       []byte
-	// recipients, when non-nil, replaces topic fan-out with direct delivery to
-	// exactly these user IDs. Used by voice_state/voice_leave: they are global
-	// in scope (every sidebar shows them) but must not disclose a channel the
-	// recipient's role may not READ, and the audience is resolved off the hub
-	// goroutine so deliverBroadcast stays free of permission queries.
-	recipients []int64
-}
 
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
@@ -53,6 +39,12 @@ type Hub struct {
 	lkProcess    *LiveKitProcess
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
+	// perms is the cached permission service (service.PermissionService). Nil in
+	// bare test hubs constructed without Services; every use falls back to the
+	// live permChecker path then. Revocation stays prompt because each mutation
+	// site invalidates synchronously (InvalidateUser on role change,
+	// InvalidateAll on channel-override change) — the cache TTL is a backstop.
+	perms *service.PermissionService
 	// messageSvc gates plugin broadcasts through the same posting policy as a
 	// real message send (permissions, DM membership, DM blocks). Nil only in
 	// bare test hubs; the broadcast gate fails closed then.
@@ -79,6 +71,12 @@ type Hub struct {
 	// running flips when Run starts; plain-field setters check it so a late
 	// call fails loudly instead of racing the dispatch loop.
 	running atomic.Bool
+
+	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
+	// goroutines (startSweep): a tick that arrives while the previous sweep
+	// is still running is skipped rather than stacked.
+	sessionSweepInFlight atomic.Bool
+	voiceSweepInFlight   atomic.Bool
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -143,6 +141,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		presenceDeps.ChannelSvc = svc.Channels
 		reactionDeps.MessageSvc = svc.Messages
 		h.messageSvc = svc.Messages
+		h.perms = svc.Permissions
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -158,6 +157,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		DB:          h.db,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
+		PermSvc:     h.perms,
 		LiveKit:     h.livekit,
 		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
 		KeyHolder:   h,
@@ -204,53 +204,6 @@ func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 		h.settingsMotd = motd
 	}
 	h.settingsLastUpdate = time.Now()
-}
-
-// SetLiveKit sets the LiveKit client on the hub. Must be called before Run;
-// late calls are ignored with an error log.
-func (h *Hub) SetLiveKit(lk *LiveKitClient) {
-	if h.rejectIfRunning("SetLiveKit") {
-		return
-	}
-	h.livekit = lk
-}
-
-// GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
-// is not configured. Satisfies VoiceTokenGenerator so the Hub can be passed
-// as a dep at registration time (before SetLiveKit is called).
-func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error) {
-	if h.livekit == nil {
-		return "", fmt.Errorf("voice not configured")
-	}
-	return h.livekit.GenerateToken(userID, username, channelID, voiceJoinToken, canPublish, canSubscribe, canVideo, canScreenShare)
-}
-
-// URL delegates to the LiveKit client. Returns empty string if not configured.
-func (h *Hub) URL() string {
-	if h.livekit == nil {
-		return ""
-	}
-	return h.livekit.URL()
-}
-
-// LiveKitHealthCheck probes the LiveKit server for connectivity.
-// It tries the SDK client first (ListRooms), and falls back to an HTTP probe
-// if a managed process is configured. Returns false with a reason if LiveKit
-// is not configured or unreachable.
-func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
-	if h.livekit == nil {
-		return false, fmt.Errorf("not configured")
-	}
-	return h.livekit.HealthCheck(ctx)
-}
-
-// SetLiveKitProcess sets the LiveKit process manager on the hub. Must be
-// called before Run; late calls are ignored with an error log.
-func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
-	if h.rejectIfRunning("SetLiveKitProcess") {
-		return
-	}
-	h.lkProcess = p
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
@@ -313,9 +266,12 @@ func (h *Hub) Run() {
 				case <-staleTicker.C:
 					h.sweepStaleClients()
 				case <-sessionSweepTicker.C:
-					h.sweepRevokedSessions()
+					// The revoked-session and stale-voice sweeps do per-client
+					// DB work, so they run off the dispatch goroutine — a slow
+					// sweep must not stall broadcast delivery.
+					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
-					h.sweepStaleVoiceStates()
+					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
 				}
 			}
 		}()
@@ -363,46 +319,6 @@ func (h *Hub) GracefulStop() {
 		// Stop the hub dispatch loop.
 		h.stopOnce.Do(func() { close(h.stop) })
 	})
-}
-
-// CleanupVoiceForChannel removes all voice participants from the given channel.
-// Called when a channel is deleted.
-func (h *Hub) CleanupVoiceForChannel(channelID int64) {
-	// Cleanup must complete even if the triggering request goes away.
-	ctx := context.Background()
-	// Get all users in the channel's voice state from DB.
-	states, err := h.db.GetChannelVoiceStates(ctx, channelID)
-	if err != nil {
-		slog.Error("CleanupVoiceForChannel GetChannelVoiceStates", "err", err, "channel_id", channelID)
-		return
-	}
-	if len(states) == 0 {
-		return
-	}
-
-	// Clean up DB state and LiveKit for each participant.
-	for _, vs := range states {
-		if err := h.db.LeaveVoiceChannel(ctx, vs.UserID); err != nil {
-			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
-		}
-
-		// Clear client voice state.
-		h.mu.RLock()
-		if client, ok := h.clients[vs.UserID]; ok {
-			client.clearVoiceChID()
-		}
-		h.mu.RUnlock()
-
-		// Remove from LiveKit (best-effort).
-		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, channelID, vs.UserID, vs.JoinedAt)
-		}
-	}
-
-	// Broadcast voice_leave for each participant.
-	for _, vs := range states {
-		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, vs.UserID))
-	}
 }
 
 // IsUserConnected returns true if a client with the given userID is already
@@ -506,398 +422,6 @@ func (h *Hub) unregisterNow(c *Client) bool {
 	return true // different client registered = was replaced
 }
 
-// BroadcastToChannel enqueues msg for delivery to all clients subscribed to
-// channelID. When channelID is 0 the message is sent to every connected client.
-// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
-func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
-	select {
-	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping message",
-			"channel_id", channelID, "msg_len", len(msg))
-	}
-}
-
-// BroadcastToAll enqueues msg for delivery to every connected client.
-// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
-func (h *Hub) BroadcastToAll(msg []byte) {
-	select {
-	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping global message",
-			"msg_len", len(msg))
-	}
-}
-
-// broadcastVoiceEvent enqueues a voice_state / voice_leave message for the
-// connected clients whose current role may READ channelID.
-//
-// These events used to go out via BroadcastToAll, which handed every
-// authenticated client the membership and camera/mute state of voice channels
-// that channel_overrides hides from their role — while the equivalent read path
-// (buildReady) deliberately filters voice states to readable channels. Tagging
-// the event with its real channel id also makes reconnect replay filter it,
-// where a channelID of 0 was replayed unconditionally.
-//
-// The audience is resolved here, on the caller's goroutine, so the hub's
-// dispatch loop never blocks on permission lookups.
-func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
-	h.broadcastChannelScoped(ctx, channelID, msg, "voice event")
-}
-
-// broadcastChannelScoped enqueues msg for exactly the connected clients whose
-// current role may READ channelID, tagged with that channel id so reconnect
-// replay filters it too (EventsSinceFiltered replays a channelID of 0
-// unconditionally). kind only labels the drop warning.
-func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg []byte, kind string) {
-	bm := broadcastMsg{
-		channelID:  channelID,
-		msg:        msg,
-		recipients: h.channelReadAudience(ctx, channelID),
-	}
-	select {
-	case h.broadcast <- bm:
-	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping "+kind,
-			"channel_id", channelID, "msg_len", len(msg))
-	}
-}
-
-// channelReadAudience returns the connected user IDs whose current role may READ
-// channelID. Always non-nil, so an empty result means "deliver to nobody"
-// rather than "no filter". Roles are resolved per client (an admin may have
-// reassigned one mid-session) and the channel verdict is memoised per role, so
-// the cost is one role lookup per connected client plus one override lookup per
-// distinct role. Fails closed: a client whose role cannot be resolved is left
-// out. Mirrors RefreshChannelVisibility, which resolves visibility the same way.
-func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 {
-	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
-	h.mu.RUnlock()
-
-	audience := make([]int64, 0, len(userIDs))
-	if h.db == nil || h.permChecker == nil {
-		return audience
-	}
-	visibleByRole := make(map[int64]bool)
-	for _, uid := range userIDs {
-		role, err := h.db.GetRoleForUser(ctx, uid)
-		if err != nil || role == nil {
-			continue
-		}
-		visible, ok := visibleByRole[role.ID]
-		if !ok {
-			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, permissions.ReadMessages)
-			visibleByRole[role.ID] = visible
-		}
-		if visible {
-			audience = append(audience, uid)
-		}
-	}
-	return audience
-}
-
-// BroadcastServerRestart sends a server_restart message to all connected clients.
-// reason describes why the server is restarting (e.g., "update").
-// delaySeconds tells clients how long until the server actually shuts down.
-func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
-	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
-}
-
-// BroadcastChannelCreate sends a channel_create message to the connected
-// clients whose current role may READ ch. It used to go out via BroadcastToAll,
-// which handed every authenticated client the name, category and topic of a
-// channel that channel_overrides hides from their role — metadata the ready
-// payload (buildReady/VisibleChannelIDs) deliberately withholds.
-//
-// The admin HubBroadcaster interface carries no context, so — like
-// RefreshChannelVisibility — the audience is resolved against Background: the
-// fan-out must complete regardless of the triggering request.
-func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
-	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelCreate(ch), "channel_create")
-}
-
-// BroadcastChannelUpdate sends a channel_update message to the connected
-// clients whose current role may READ ch. Same disclosure as
-// BroadcastChannelCreate; same filtered fan-out.
-func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
-	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelUpdate(ch), "channel_update")
-}
-
-// BroadcastChannelDelete sends a channel_delete message to all connected clients.
-//
-// Deliberately unfiltered: the payload is the bare channel id, with none of the
-// metadata create/update carry, and by the time the admin handler calls this the
-// channel row — and with it the ON DELETE CASCADE'd channel_overrides — is
-// already gone, so a permission check here would answer from base role perms
-// and could drop the delete for exactly the users who saw the channel via a
-// positive override, stranding it in their sidebar.
-func (h *Hub) BroadcastChannelDelete(channelID int64) {
-	h.BroadcastToAll(buildChannelDelete(channelID))
-}
-
-// RefreshChannelVisibility re-evaluates which connected clients may see ch
-// after a channel_overrides change and sends targeted channel_create /
-// channel_delete messages so sidebars converge without a reconnect. Clients
-// that lose visibility are also unsubscribed from the channel topic and have
-// their focused channel cleared so live messages stop flowing.
-//
-// The sends deliberately bypass the sequenced broadcast/replay path: a
-// replayed channel_delete would be filtered by the allowed-channel set
-// computed at replay time, which after an override change is exactly the
-// inverse of the intended audience. Clients tolerate seq-less messages.
-func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
-	if ch == nil {
-		return
-	}
-
-	h.mu.RLock()
-	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		clients = append(clients, c)
-	}
-	h.mu.RUnlock()
-
-	// Called via the admin HubBroadcaster interface, which carries no context;
-	// the targeted re-sync must complete regardless of the triggering request.
-	ctx := context.Background()
-
-	// Visibility is a function of the role, so resolve each role once.
-	visibleByRole := make(map[int64]bool)
-	roleVisible := func(roleID int64) bool {
-		if v, ok := visibleByRole[roleID]; ok {
-			return v
-		}
-		visible := false
-		role, err := h.db.GetRoleByID(ctx, roleID)
-		if err == nil && role != nil {
-			// Single visibility predicate shared with buildReady / REST
-			// ListVisibleChannels; the checker fails closed on a lookup error
-			// and bypasses for admins, matching the other sites exactly.
-			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, ch.ID, permissions.ReadMessages)
-		}
-		visibleByRole[roleID] = visible
-		return visible
-	}
-
-	for _, c := range clients {
-		if c.user == nil {
-			continue
-		}
-		// c.user is a connect-time snapshot; an admin may have changed the
-		// user's role mid-session, so resolve the current role from the DB.
-		// Fail closed: on error send nothing rather than mis-target.
-		fresh, err := h.db.GetUserByID(ctx, c.user.ID)
-		if err != nil || fresh == nil {
-			slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
-				"user_id", c.user.ID, "err", err)
-			continue
-		}
-		if roleVisible(fresh.RoleID) {
-			// Idempotent add on the client; also refreshes channel metadata.
-			c.sendMsg(buildChannelCreate(ch))
-			continue
-		}
-		c.sendMsg(buildChannelDelete(ch.ID))
-		h.pubsub.Unsubscribe(c, ChannelTopic(ch.ID))
-		c.mu.Lock()
-		if c.channelID == ch.ID {
-			c.channelID = 0
-		}
-		c.mu.Unlock()
-	}
-
-	// Clients not connected right now missed the targeted sends above. Move
-	// the watermark so any resume from a seq at or before this point is
-	// forced onto the full-ready path instead of replay (stored after the
-	// sends so a concurrent seq advance errs toward re-syncing more clients).
-	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
-}
-
-// mustFullResync reports whether a client resuming from lastSeq predates the
-// most recent channel-visibility change and therefore cannot converge via
-// replay.
-func (h *Hub) mustFullResync(lastSeq uint64) bool {
-	w := h.visibilityChangeSeq.Load()
-	return w > 0 && lastSeq <= w
-}
-
-// BroadcastMemberBan sends a member_ban message to all connected clients
-// and immediately disconnects the banned user's WebSocket connection (BUG-113).
-func (h *Hub) BroadcastMemberBan(userID int64) {
-	h.BroadcastToAll(buildMemberBan(userID))
-	h.DisconnectUser(userID)
-}
-
-// DisconnectUser forcibly disconnects the client identified by userID.
-// No-op if the user is not currently connected.
-func (h *Hub) DisconnectUser(userID int64) {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
-		return
-	}
-	slog.Info("hub: disconnecting user", "user_id", userID)
-	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-	h.kickClient(c)
-}
-
-// BroadcastUserUpdate sends a user_update message to all connected clients
-// when a user changes their profile (username, avatar, identity key).
-func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) {
-	h.BroadcastToAll(buildUserUpdate(userID, username, avatar, identityPublicKey))
-}
-
-// BroadcastMemberUpdate sends a member_update message to all connected clients
-// and re-evaluates the reassigned user's live channel subscriptions.
-func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
-	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
-	h.revokeUnreadableChannels(userID)
-}
-
-// revokeUnreadableChannels drops the channel-topic subscriptions the user's new
-// role may no longer READ. READ_MESSAGES is checked once, at channel_focus, and
-// then becomes a durable pub/sub subscription, so without this a demoted user
-// keeps receiving every chat_message / chat_edited / reaction_update posted in
-// the channels their old role could read for as long as the socket stays open.
-//
-// The per-client work mirrors RefreshChannelVisibility, the channel_overrides
-// equivalent: targeted, unsequenced channel_delete + Unsubscribe (a replayed
-// channel_delete would be filtered by the allowed set computed at replay time),
-// then a visibilityChangeSeq bump so a client resuming across this change takes
-// the full-ready path instead of replay.
-//
-// Only the topics the socket actually holds are examined — a blanket sweep over
-// every channel would disclose the full channel-ID list to a demoted user.
-func (h *Hub) revokeUnreadableChannels(userID int64) {
-	// Stored after the targeted sends (as in RefreshChannelVisibility) so a
-	// concurrent seq advance errs toward re-syncing more clients. Deferred
-	// because it must cover the early returns too: a user who is offline, or
-	// whose socket is closed below, converges via the full-ready path.
-	defer h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
-
-	if h.db == nil {
-		return
-	}
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok || c.user == nil {
-		return
-	}
-
-	// Called via the admin HubBroadcaster interface, which carries no context;
-	// the re-evaluation must complete regardless of the triggering request.
-	ctx := context.Background()
-
-	// c.user is a connect-time snapshot and the role just changed, so resolve
-	// the current user — and through it the current role — from the DB.
-	var allowed map[int64]bool
-	user, err := h.db.GetUserByID(ctx, userID)
-	if err == nil && user != nil {
-		// Same predicate as the ready payload and reconnect replay filtering.
-		allowed, err = h.computeAllowedChannels(ctx, h.db, user)
-	}
-	if err != nil || user == nil {
-		// Visibility unresolved. Keeping the old subscriptions would leak, and
-		// revoking them all would hollow out a sidebar the user may still be
-		// entitled to, so close the socket instead: the client reconnects and
-		// rebuilds from a ready payload computed with the new role. kickClient
-		// rather than DisconnectUser — the latter sends a BANNED error, which
-		// makes the client clear its credentials instead of reconnecting.
-		slog.Warn("hub: role change visibility unresolved, closing socket",
-			"user_id", userID, "err", err)
-		h.kickClient(c)
-		return
-	}
-
-	for _, topic := range h.pubsub.TopicsForClient(userID) {
-		chID := channelTopicID(topic)
-		if chID == 0 || allowed[chID] {
-			continue
-		}
-		// DM access is gated on dm_participants, which no role change can
-		// alter, while allowed sources DMs from dm_open_state — a DM the user
-		// has closed (or every DM, if the DM lookup inside
-		// computeAllowedChannels failed) is missing from allowed even though
-		// its subscription is still legitimate. Never revoke a DM topic here;
-		// on a lookup error close the socket rather than guess.
-		ch, chErr := h.db.GetChannel(ctx, chID)
-		if chErr != nil {
-			slog.Warn("hub: role change channel lookup failed, closing socket",
-				"user_id", userID, "channel_id", chID, "err", chErr)
-			h.kickClient(c)
-			return
-		}
-		if ch != nil && ch.Type == "dm" {
-			continue
-		}
-		c.sendMsg(buildChannelDelete(chID))
-		h.pubsub.Unsubscribe(c, topic)
-		c.mu.Lock()
-		if c.channelID == chID {
-			c.channelID = 0
-		}
-		c.mu.Unlock()
-	}
-}
-
-// SendToUser delivers msg directly to the client identified by userID.
-// Returns true if the client was found and the message was queued.
-func (h *Hub) SendToUser(userID int64, msg []byte) bool {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
-		return false
-	}
-	return c.trySendMsg(msg)
-}
-
-// SendToUserHigh sends a high-priority message to a specific user.
-func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	h.mu.RUnlock()
-	if !ok {
-		return false
-	}
-	c.sendHighMsg(msg)
-	return true
-}
-
-// BroadcastToAllLow enqueues a low-priority global broadcast.
-// Low-priority messages are silently dropped if a client's buffer is full.
-func (h *Hub) BroadcastToAllLow(msg []byte) {
-	// Low-priority global broadcasts bypass the sequenced broadcast channel
-	// and go directly through pub/sub — they don't need replay or seq numbering.
-	h.pubsub.PublishGlobalLow(msg)
-}
-
-// sendSequencedToUsersHigh stamps msg with a monotonic seq, stores it in the
-// replay buffer under channelID, and fans the wrapped payload out to the
-// provided users with high-priority delivery.
-func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
-	h.seqMu.Lock()
-	defer h.seqMu.Unlock()
-
-	seq := h.nextSeq()
-	wrapped := wrapWithSeq(msg, seq)
-	h.replayBuf.Push(seq, channelID, wrapped)
-	h.persistEvent(seq, channelID, wrapped)
-
-	for _, userID := range userIDs {
-		h.SendToUserHigh(userID, wrapped)
-	}
-}
-
 // ClientCount returns the number of currently registered clients (test helper).
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
@@ -924,82 +448,6 @@ func (h *Hub) VoiceSessionCount() int {
 	return count
 }
 
-// kickClient forcibly removes a client from the hub and closes its send channel,
-// which causes writePump to exit and the WebSocket connection to close.
-// It is safe to call from any goroutine.
-func (h *Hub) kickClient(c *Client) {
-	h.mu.Lock()
-	if current, ok := h.clients[c.userID]; ok && current == c {
-		delete(h.clients, c.userID)
-	}
-	h.mu.Unlock()
-	h.pubsub.UnsubscribeAll(c)
-	c.closeSend()
-}
-
-// nextSeq returns the next monotonic sequence number for broadcast messages.
-func (h *Hub) nextSeq() uint64 {
-	return atomic.AddUint64(&h.seq, 1)
-}
-
-// ReplayBuffer returns the hub's event ring buffer for reconnection replay.
-func (h *Hub) ReplayBuffer() *EventRingBuffer {
-	return h.replayBuf
-}
-
-// SeedSeq sets the hub's monotonic sequence counter to seed (atomic). Used
-// at startup to align in-memory seqs with the persisted MAX(events.seq) so
-// wrapped-payload seqs stay monotonic across restarts. Calling SeedSeq with
-// a value less than the current seq is a no-op (we never go backwards).
-func (h *Hub) SeedSeq(seed uint64) {
-	for {
-		cur := atomic.LoadUint64(&h.seq)
-		if seed <= cur {
-			return
-		}
-		if atomic.CompareAndSwapUint64(&h.seq, cur, seed) {
-			return
-		}
-	}
-}
-
-// SetEventPersister attaches a persister so subsequent broadcasts are also
-// written to the persistent EventStore. Pass nil to disable. Safe to call
-// at any time, including after Run has started.
-func (h *Hub) SetEventPersister(p *EventPersister) {
-	h.eventPersister.Store(p)
-}
-
-// SetEventStore attaches a read-side EventStore used by the cold-tier
-// reconnect replay path. Typically the same store backing SetEventPersister.
-// Pass nil to disable. Safe to call at any time, including after Run has
-// started.
-func (h *Hub) SetEventStore(s EventStore) {
-	if s == nil {
-		h.eventStore.Store(nil)
-		return
-	}
-	h.eventStore.Store(&s)
-}
-
-// SetPluginRegistry wires the plugin.Registry so the hub can dispatch
-// slash commands (chat_command messages) to plugin-owned handlers.
-// Pass nil to disable plugin command dispatch. Must be called before Run;
-// late calls are ignored with an error log.
-func (h *Hub) SetPluginRegistry(r *plugin.Registry) {
-	if h.rejectIfRunning("SetPluginRegistry") {
-		return
-	}
-	h.pluginRegistry = r
-}
-
-// SetPluginEventSink wires the plugin.EventSink so the hub fans out each
-// sequenced broadcast to subscribed plugins. Pass nil to disable. Safe to
-// call at any time, including after Run has started.
-func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
-	h.pluginSink.Store(s)
-}
-
 // rejectIfRunning reports whether Run has already started, logging an error
 // when it has. Plain-field setters must be wired before Run: the dispatch
 // loop and connection goroutines read those fields without synchronization,
@@ -1013,277 +461,7 @@ func (h *Hub) rejectIfRunning(setter string) bool {
 	return false
 }
 
-// ReconnectTierStats returns the per-tier resume hit counters in the order
-// (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
-// (Step 8) read from the same atomics.
-func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
-	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
-}
-
-// persistEvent enqueues a broadcast event for cold-storage persistence. Safe
-// to call with a nil persister; never blocks the broadcast hot path. seq is
-// the same hub-assigned monotonic counter embedded in payload, so the row
-// written to the EventStore has a row-seq that matches the wrapped-payload
-// seq the client tracks.
-func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
-	p := h.eventPersister.Load()
-	if p == nil {
-		return
-	}
-	eventType := extractEventType(payload)
-	if eventType == "" {
-		eventType = "broadcast"
-		if channelID != 0 {
-			eventType = "channel_broadcast"
-		}
-	}
-	p.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
-}
-
-// extractEventType scans a wrapped JSON envelope for the value of the "type"
-// field and returns it. Returns "" on any parse failure so the caller can
-// substitute a generic label. The scan is intentionally not a full JSON
-// decode — it only looks for the literal `"type":"<value>"` token, which
-// matches every wire-format envelope produced by this server. This avoids the
-// allocation cost of `encoding/json` on the broadcast hot path.
-func extractEventType(payload []byte) string {
-	const needle = `"type":"`
-	idx := bytes.Index(payload, []byte(needle))
-	if idx < 0 {
-		return ""
-	}
-	start := idx + len(needle)
-	end := bytes.IndexByte(payload[start:], '"')
-	if end < 0 {
-		return ""
-	}
-	t := payload[start : start+end]
-	// Reject any value with control chars or escapes — we want a clean
-	// label, not arbitrary user-controlled metadata. Length-cap defensively.
-	if len(t) == 0 || len(t) > 64 {
-		return ""
-	}
-	for _, b := range t {
-		if b < 0x20 || b == '\\' {
-			return ""
-		}
-	}
-	return string(t)
-}
-
-// wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
-func wrapWithSeq(msg []byte, seq uint64) []byte {
-	// Fast path: inject seq after the opening brace.
-	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
-	// Guard: msg must be a non-empty JSON object (starts with '{' and has content).
-	if len(msg) < 2 || msg[0] != '{' {
-		return msg
-	}
-	prefix := fmt.Sprintf(`{"seq":%d,`, seq)
-	result := make([]byte, 0, len(prefix)+len(msg)-1)
-	result = append(result, prefix...)
-	result = append(result, msg[1:]...) // skip opening brace
-	return result
-}
-
-// staleClientTimeout is the maximum duration a client can go without sending
-// any message before being considered stale and disconnected. The client sends
-// a ping every 30s, so 90s (3x) gives plenty of margin.
-const staleClientTimeout = 90 * time.Second
-
 // topicRateLimitPerSecond is the default maximum messages per second for any
 // single channel topic. Prevents a busy channel from saturating the broadcast
 // loop and starving other channels.
 const topicRateLimitPerSecond = 100
-
-// sweepStaleClients iterates over all connected clients and kicks any that
-// have not sent a message within staleClientTimeout.
-func (h *Hub) sweepStaleClients() {
-	now := time.Now()
-	h.mu.RLock()
-	var stale []*Client
-	for _, c := range h.clients {
-		if now.Sub(c.getLastActivity()) > staleClientTimeout {
-			stale = append(stale, c)
-		}
-	}
-	h.mu.RUnlock()
-
-	for _, c := range stale {
-		slog.Warn("hub: closing stale connection (no activity)",
-			"user_id", c.userID, "last_activity", c.getLastActivity())
-		h.kickClient(c)
-	}
-}
-
-// sweepRevokedSessions iterates all connected clients and kicks any whose
-// session has been deleted, expired, or whose user has been banned. This
-// provides time-based session enforcement for idle WebSocket connections
-// that never trigger the message-count-based check (BUG-109).
-func (h *Hub) sweepRevokedSessions() {
-	if h.db == nil {
-		return
-	}
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
-	h.mu.RLock()
-	snapshot := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		if c.tokenHash != "" {
-			snapshot = append(snapshot, c)
-		}
-	}
-	h.mu.RUnlock()
-
-	for _, c := range snapshot {
-		result, err := h.db.GetSessionWithBanStatus(ctx, c.tokenHash)
-		if err != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
-			slog.Info("session sweep: revoked/expired session, disconnecting",
-				"user_id", c.userID)
-			h.kickClient(c)
-			continue
-		}
-		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
-		if auth.IsEffectivelyBanned(tempUser) {
-			slog.Info("session sweep: banned user, disconnecting",
-				"user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
-		}
-	}
-}
-
-// sweepStaleVoiceStates queries all voice_states rows and removes any that
-// don't match a connected client's voiceChID. This catches ghost users that
-// slip through the primary cleanup paths (registerNow, readPump defer,
-// LiveKit webhook).
-func (h *Hub) sweepStaleVoiceStates() {
-	if h.db == nil {
-		return
-	}
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
-	// Revocation must evict a live session, not merely block the next join.
-	// Nothing else in ws re-validates voice permissions for a connection that
-	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
-	// until they disconnected. Checked once a minute, and only for the handful
-	// of clients actually in voice.
-	h.mu.RLock()
-	inVoice := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
-			inVoice = append(inVoice, c)
-		}
-	}
-	h.mu.RUnlock()
-	for _, c := range inVoice {
-		chID := c.getVoiceChID()
-		if chID == 0 || h.hasChannelPerm(ctx, c, chID, permissions.ConnectVoice) {
-			continue
-		}
-		slog.Warn("sweepStaleVoiceStates: evicting participant whose CONNECT_VOICE was revoked",
-			"user_id", c.userID, "channel_id", chID)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
-		h.handleVoiceLeave(ctx, c)
-	}
-
-	allStates, err := h.db.GetAllVoiceStates(ctx)
-	if err != nil {
-		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
-		return
-	}
-	if len(allStates) == 0 {
-		return
-	}
-
-	h.mu.RLock()
-	var stale []struct {
-		userID    int64
-		channelID int64
-		joinedAt  string
-	}
-	for _, vs := range allStates {
-		c, ok := h.clients[vs.UserID]
-		if !ok || c.getVoiceChID() != vs.ChannelID {
-			stale = append(stale, struct {
-				userID    int64
-				channelID int64
-				joinedAt  string
-			}{vs.UserID, vs.ChannelID, vs.JoinedAt})
-		}
-	}
-	h.mu.RUnlock()
-
-	for _, s := range stale {
-		// Channel-conditional delete: only removes the row if it still points
-		// at the channel we snapshotted. If the user rejoined or moved between
-		// the snapshot and now, the delete is a no-op and we skip the broadcast.
-		deleted, err := h.db.LeaveVoiceChannelIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
-		if err != nil {
-			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
-				"err", err, "user_id", s.userID, "channel_id", s.channelID)
-			continue
-		}
-		if !deleted {
-			continue
-		}
-		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
-			"user_id", s.userID, "channel_id", s.channelID)
-		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
-		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
-		}
-	}
-}
-
-// deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
-// in the replay buffer, and sends it to the appropriate clients via pub/sub.
-func (h *Hub) deliverBroadcast(bm broadcastMsg) {
-	h.seqMu.Lock()
-	defer h.seqMu.Unlock()
-
-	seq := h.nextSeq()
-	msg := wrapWithSeq(bm.msg, seq)
-
-	// Store in replay buffer for reconnection recovery.
-	h.replayBuf.Push(seq, bm.channelID, msg)
-	h.persistEvent(seq, bm.channelID, msg)
-
-	// Fan out to plugins subscribed to this event type (Phase C Step 9).
-	// Dispatch is a no-op in the default build; the wazero build calls into
-	// the WASM module. Dispatch is called outside seqMu after we release it
-	// conceptually — but since seqMu is still held here, the call MUST NOT
-	// re-enter the hub. The default build is safe; the wazero build should
-	// dispatch asynchronously once the runtime is real.
-	if sink := h.pluginSink.Load(); sink != nil {
-		eventType := extractEventType(msg)
-		if eventType == "" {
-			eventType = "broadcast"
-		}
-		sink.Dispatch(context.Background(), eventType, msg)
-	}
-
-	switch {
-	case bm.recipients != nil:
-		// Visibility-filtered fan-out: the audience was resolved by the caller.
-		for _, userID := range bm.recipients {
-			h.SendToUser(userID, msg)
-		}
-	case bm.channelID == 0:
-		// Global broadcast — deliver to every connected client.
-		h.pubsub.PublishGlobal(msg)
-	default:
-		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
-		topic := ChannelTopic(bm.channelID)
-		if !h.topicLimiter.Allow(topic) {
-			slog.Warn("hub: topic rate limit exceeded, dropping message",
-				"channel_id", bm.channelID, "seq", seq)
-			return
-		}
-		delivered := h.pubsub.Publish(topic, msg, 0)
-		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
-	}
-}

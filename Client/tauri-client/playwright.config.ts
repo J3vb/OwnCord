@@ -11,8 +11,19 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
+  // CI fail-fast: a systemic breakage (e.g. the shared login helper) makes
+  // most of the 255 tests burn their full timeout × retries — hours of runner
+  // time at 1 worker. Abort after 20 failures instead so the job reports a
+  // usable red quickly. 0 = unlimited (local runs see every failure).
+  maxFailures: process.env.CI ? 20 : 0,
+  // Self-terminate before the workflow's timeout-minutes (25) SIGKILLs the
+  // runner, so the HTML/JUnit report still gets written and uploaded.
+  globalTimeout: process.env.CI ? 20 * 60 * 1000 : 0,
   reporter: process.env.CI
-    ? [["html", { open: "never" }], ["junit", { outputFile: "test-results/junit.xml" }]]
+    ? [
+        ["html", { open: "never" }],
+        ["junit", { outputFile: "test-results/junit.xml" }],
+      ]
     : "html",
 
   use: {

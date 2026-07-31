@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
@@ -271,6 +273,9 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 		t.Fatalf("WriteFile backup: %v", err)
 	}
 
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
 
 	if w.Code != http.StatusOK {
@@ -286,6 +291,84 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	}
 	if resp["backup"] != backupName {
 		t.Errorf("backup = %q, want %q", resp["backup"], backupName)
+	}
+
+	// The response and the server_restart broadcast both promise a restart.
+	// Without one the process keeps serving requests against a closed DB.
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restore did not request a process restart")
+	}
+
+	// The safety copy the panel promises must exist on disk.
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("ReadDir backups: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no pre_restore_*.db safety backup was created")
+	}
+}
+
+// TestHandleRestoreBackup_AbortsWithoutSafetyBackup verifies the restore fails
+// closed when the pre-restore backup can't be written: the panel promises that
+// safety copy, and overwriting the live database without one is unrecoverable.
+func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+	backupName := "chatserver_20240101_120000.db"
+	dbFile := filepath.Join(tmpDir, "data", "chatserver.db")
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte("replacement"), 0o644); err != nil {
+		t.Fatalf("WriteFile backup: %v", err)
+	}
+	if err := os.WriteFile(dbFile, []byte("original"), 0o644); err != nil {
+		t.Fatalf("WriteFile db: %v", err)
+	}
+
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	// Make the safety copy impossible: VACUUM INTO refuses a destination that
+	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
+	// next few seconds' worth of candidates.
+	admin.SetBackupBaseDir(backupDir)
+	for i := range 4 {
+		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
+		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
+			t.Fatalf("WriteFile blocker: %v", err)
+		}
+	}
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (restore must abort); body: %s", w.Code, w.Body.String())
+	}
+	if restarted() {
+		t.Error("aborted restore must not restart the process")
+	}
+	data, err := os.ReadFile(dbFile)
+	if err != nil {
+		t.Fatalf("ReadFile db: %v", err)
+	}
+	if string(data) != "original" {
+		t.Errorf("database was overwritten despite the abort: %q", string(data))
 	}
 }
 

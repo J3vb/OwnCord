@@ -204,7 +204,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		}
 
 		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
-		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error: "RATE_LIMITED", Message: "too many failed attempts, try again later",
@@ -228,7 +228,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		}
 
 		// Verify old password using constant-time bcrypt comparison.
-		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
+		failKey := auth.Key("pw_confirm_fail", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.OldPassword) {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)

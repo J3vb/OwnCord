@@ -13,16 +13,51 @@ export const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
 
 // -- Timestamp helpers --------------------------------------------------------
 
+/** Memoized epoch millis per raw timestamp string. Timestamps are immutable,
+ *  and buildVirtualItems re-parses each one several times per render — the
+ *  memo removes thousands of Date constructions + regex runs. Bounded FIFO. */
+const parsedTimestampCache = new Map<string, number>();
+const PARSED_TIMESTAMP_CACHE_MAX = 2000;
+
 /** Parse a timestamp string, appending 'Z' if no timezone info is present
  *  so that UTC timestamps from SQLite are correctly interpreted. */
 export function parseTimestamp(raw: string): Date {
+  const cached = parsedTimestampCache.get(raw);
+  if (cached !== undefined) return new Date(cached);
+
   // SQLite datetime('now') produces "2026-03-19 08:29:41" (UTC, no suffix).
   // If there's no Z, +, or T with offset, treat as UTC by appending Z.
-  if (!raw.endsWith("Z") && !raw.includes("+") && !/T\d{2}:\d{2}:\d{2}[+-]/.test(raw)) {
-    return new Date(raw.replace(" ", "T") + "Z");
+  const date =
+    !raw.endsWith("Z") && !raw.includes("+") && !/T\d{2}:\d{2}:\d{2}[+-]/.test(raw)
+      ? new Date(raw.replace(" ", "T") + "Z")
+      : new Date(raw);
+
+  const ms = date.getTime();
+  if (!Number.isNaN(ms)) {
+    if (parsedTimestampCache.size >= PARSED_TIMESTAMP_CACHE_MAX) {
+      // Evict oldest entry (first inserted key)
+      const firstKey = parsedTimestampCache.keys().next().value;
+      if (firstKey !== undefined) parsedTimestampCache.delete(firstKey);
+    }
+    parsedTimestampCache.set(raw, ms);
   }
-  return new Date(raw);
+  return date;
 }
+
+// Cached formatters — Intl.DateTimeFormat construction is expensive and these
+// run for every rendered message. Only the FORMATTER is cached, never a
+// formatted string: "Today"/"Yesterday" flips at midnight, so strings are
+// recomputed per call from the cached formatter.
+const FULL_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+const CLOCK_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
 
 export function formatTime(iso: string): string {
   const d = parseTimestamp(iso);
@@ -30,11 +65,7 @@ export function formatTime(iso: string): string {
 }
 
 export function formatFullDate(iso: string): string {
-  return parseTimestamp(iso).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return FULL_DATE_FORMAT.format(parseTimestamp(iso));
 }
 
 /** Discord-style relative timestamp: "Today at 2:34 PM", "Yesterday at 2:34 PM",
@@ -43,11 +74,7 @@ export function formatMessageTimestamp(iso: string): string {
   const date = parseTimestamp(iso);
   const now = new Date();
 
-  const timeStr = date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const timeStr = CLOCK_TIME_FORMAT.format(date);
 
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);

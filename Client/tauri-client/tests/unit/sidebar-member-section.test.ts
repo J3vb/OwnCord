@@ -391,7 +391,7 @@ describe("SidebarMemberSection", () => {
     /** Extract the callbacks passed to createMemberList */
     function getCapturedCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (userId: number, username: string) => Promise<void>;
+      onBan: (userId: number, username: string, reason: string) => Promise<void>;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
@@ -484,9 +484,9 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "spamming");
 
-      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3);
+      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3, "spamming");
       expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
 
       section.destroy();
@@ -508,7 +508,7 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "");
 
       expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
 
@@ -531,7 +531,7 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob");
+      await callbacks.onBan(3, "Bob", "");
 
       expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
 
@@ -608,7 +608,7 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("changeRole: does nothing when role name is not found", async () => {
+    it("changeRole: reports an unresolvable role instead of failing silently", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn(),
@@ -626,9 +626,12 @@ describe("SidebarMemberSection", () => {
       const callbacks = getCapturedCallbacks();
       await callbacks.onChangeRole(4, "Charlie", "nonexistent-role");
 
-      // Should not call API or show toast because roleId is undefined
+      // No API call — but the user is told, rather than seeing a dead menu item.
       expect(mockApi.adminChangeRole).not.toHaveBeenCalled();
-      expect(mockShow).not.toHaveBeenCalled();
+      expect(mockShow).toHaveBeenCalledWith(
+        'Unknown role "nonexistent-role" — try reconnecting',
+        "error",
+      );
 
       section.destroy();
     });

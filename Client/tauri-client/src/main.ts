@@ -14,15 +14,14 @@ import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
-import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
-import { createMainPage } from "@pages/MainPage";
-import { applyStoredAppearance } from "@components/SettingsOverlay";
+import { applyStoredAppearance } from "@lib/appearance";
 import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
+import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
-import { createLogger } from "@lib/logger";
+import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
@@ -33,7 +32,23 @@ import type { CertTofuEvent } from "@lib/ws";
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+// Gate the log level before anything logs: debug entries are serialized and
+// persisted to disk, so in production the level must filter real work, not
+// just console noise. Honors the level saved on the Logs settings tab; when
+// unset, dev builds keep full debug output and production defaults to info.
+applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
+
 const log = createLogger("main");
+
+// livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
+// lazily so it stays out of the startup path. When a voice session exists the
+// module is necessarily already loaded, so this import resolves from the
+// module cache in a microtask.
+function voiceSessionLeave(sendWsLeave: boolean): void {
+  void import("@lib/livekitSession")
+    .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
+    .catch((e) => log.warn("Failed to leave voice session", e));
+}
 
 // Disable the default browser context menu globally.
 document.addEventListener("contextmenu", (e) => {
@@ -103,6 +118,11 @@ const ws = createWsClient();
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
 let dispatcherCleanup: (() => void) | null = null;
+// Tears down the session-scoped WS listeners registered in wirePostAuth
+// (user_update, onStateChange, ready). dispatcherCleanup only clears
+// dispatcher-registered handlers, so these need their own teardown to avoid
+// accumulating across login/logout/retry cycles.
+let sessionCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
@@ -241,8 +261,13 @@ function runHealthChecks(
   }
 }
 
+// Guards the async MainPage mount below against the destroy-before-mount race:
+// a stale mount is discarded when a newer navigation supersedes it.
+const navGuard = createNavigationGuard();
+
 // Render the appropriate page based on router state
-function renderPage(pageId: "connect" | "main"): void {
+async function renderPage(pageId: "connect" | "main"): Promise<void> {
+  const isCurrentNavigation = navGuard.begin();
   log.info("Navigating to page", { pageId });
   // Destroy previous page
   currentPage?.destroy?.();
@@ -261,6 +286,15 @@ function renderPage(pageId: "connect" | "main"): void {
     rememberPassword = true,
   ): void {
     log.info("Post-auth wiring", { host, username });
+    // Tear down any prior session wiring so listeners and the connected
+    // overlay never stack across a retry (a second wirePostAuth without an
+    // intervening logout).
+    sessionCleanup?.();
+    sessionCleanup = null;
+    dispatcherCleanup?.();
+    dispatcherCleanup = null;
+    connectedOverlay?.destroy();
+    connectedOverlay = null;
     api.setConfig({ token });
     // Store token in authStore so the dispatcher's auth_ok handler has it
     authStore.setState((prev) => ({ ...prev, token }));
@@ -269,6 +303,10 @@ function renderPage(pageId: "connect" | "main"): void {
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
     log.info("Dispatcher wired, connecting WS");
+
+    // Session-scoped WS listeners — collected so they're all removed together
+    // on logout/disconnect (or the next wirePostAuth).
+    const sessionUnsubs: Array<() => void> = [];
 
     // BUG-135: Only persist credentials when the user opted in.
     if (rememberPassword) {
@@ -285,21 +323,31 @@ function renderPage(pageId: "connect" | "main"): void {
     }
 
     // Update saved credentials when the current user changes their username.
-    ws.on("user_update", (payload) => {
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
-        const currentToken = authStore.getState().token;
-        if (currentToken) {
-          void saveCredential(host, payload.username, currentToken);
+    sessionUnsubs.push(
+      ws.on("user_update", (payload) => {
+        const currentUserId = authStore.getState().user?.id ?? 0;
+        if (payload.user_id === currentUserId) {
+          const currentToken = authStore.getState().token;
+          if (currentToken) {
+            void saveCredential(host, payload.username, currentToken);
+          }
         }
-      }
-    });
+      }),
+    );
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
+        // Stop listening once connected so a later transition can't fire this
+        // handler again (which would append a second overlay).
         unsubState();
+        // Pre-warm the lazily-loaded MainPage chunk (and the LiveKit stack
+        // behind it) so navigating past the connected overlay doesn't wait
+        // on a dynamic import.
+        void import("@pages/MainPage");
         const auth = authStore.getState();
+        // Ensure exactly one overlay exists at a time.
+        connectedOverlay?.destroy();
         connectedOverlay = createConnectedOverlay({
           serverName: auth.serverName ?? host,
           username: auth.user?.username ?? username,
@@ -317,8 +365,20 @@ function renderPage(pageId: "connect" | "main"): void {
           unsubReady();
           connectedOverlay?.markReady();
         });
+        sessionUnsubs.push(unsubReady);
+      } else if (wsState === "disconnected") {
+        // Terminal non-connected transition (auth_error, cert-mismatch reject,
+        // or intentional disconnect before ever connecting): drop the handler
+        // so it doesn't linger and fire on a later connect.
+        unsubState();
       }
     });
+    sessionUnsubs.push(unsubState);
+
+    sessionCleanup = () => {
+      for (const unsub of sessionUnsubs) unsub();
+      sessionUnsubs.length = 0;
+    };
   }
 
   // Track partial auth state for TOTP flow
@@ -523,6 +583,14 @@ function renderPage(pageId: "connect" | "main"): void {
       }
     })();
   } else {
+    // MainPage (and the LiveKit voice stack it statically imports) loads
+    // lazily so it stays out of the startup path. The chunk is pre-warmed as
+    // soon as the WS connect succeeds, so this normally resolves from the
+    // module cache.
+    const { createMainPage } = await import("@pages/MainPage");
+    // A newer navigation may have superseded this one while the chunk loaded;
+    // mounting now would fight the page that navigation rendered.
+    if (!isCurrentNavigation()) return;
     const mainPage = createMainPage({ ws, api });
     safeMount(mainPage, appEl!);
     currentPage = mainPage;
@@ -530,7 +598,9 @@ function renderPage(pageId: "connect" | "main"): void {
 }
 
 // Listen for navigation changes
-router.onNavigate(renderPage);
+router.onNavigate((pageId) => {
+  void renderPage(pageId);
+});
 
 // Handle logout / disconnect
 authStore.subscribeSelector(
@@ -546,6 +616,8 @@ authStore.subscribeSelector(
       }
       dispatcherCleanup?.();
       dispatcherCleanup = null;
+      sessionCleanup?.();
+      sessionCleanup = null;
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
@@ -570,8 +642,9 @@ window.addEventListener("beforeunload", () => {
   void flushLogs();
 });
 
-// Initial render
-renderPage(router.getCurrentPage());
+// Initial render (fire-and-forget — the initial page is "connect", whose
+// render branch is synchronous)
+void renderPage(router.getCurrentPage());
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();

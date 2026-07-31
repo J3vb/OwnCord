@@ -6,6 +6,10 @@ package db
 // schema_versions table records every applied migration filename and the UTC
 // timestamp at which it was applied.
 //
+// Every statement here — including the schema_versions bookkeeping reads —
+// runs on the writer pool so migration DDL and its tracking records are
+// applied and observed on the single write connection.
+//
 // Seeding for existing databases
 // --------------------------------
 // When the server is first upgraded to include migration tracking, existing
@@ -33,7 +37,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 
 // ensureSchemaVersions creates the tracking table if it does not yet exist.
 func ensureSchemaVersions(d *DB) error {
-	if _, err := d.sqlDB.Exec(createSchemaVersions); err != nil {
+	if _, err := d.writer.Exec(createSchemaVersions); err != nil {
 		return fmt.Errorf("creating schema_versions: %w", err)
 	}
 	return nil
@@ -43,7 +47,7 @@ func ensureSchemaVersions(d *DB) error {
 // without tracking — detected by the presence of the "users" table.
 func isExistingDatabase(d *DB) (bool, error) {
 	var name string
-	err := d.sqlDB.QueryRow(
+	err := d.writer.QueryRow(
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
 	).Scan(&name)
 	if err != nil {
@@ -58,7 +62,7 @@ func isExistingDatabase(d *DB) (bool, error) {
 // schemaVersionsExists reports whether the schema_versions table is present.
 func schemaVersionsExists(d *DB) (bool, error) {
 	var name string
-	err := d.sqlDB.QueryRow(
+	err := d.writer.QueryRow(
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'",
 	).Scan(&name)
 	if err != nil {
@@ -73,7 +77,7 @@ func schemaVersionsExists(d *DB) (bool, error) {
 // isApplied reports whether a migration filename has already been recorded.
 func isApplied(d *DB, filename string) (bool, error) {
 	var v string
-	err := d.sqlDB.QueryRow(
+	err := d.writer.QueryRow(
 		"SELECT version FROM schema_versions WHERE version = ?", filename,
 	).Scan(&v)
 	if err != nil {
@@ -109,7 +113,7 @@ func sqlFilenames(fsys fs.FS) ([]string, error) {
 // without executing them.  This is called once when upgrading a pre-tracking
 // database.
 func seedExistingDatabase(d *DB, filenames []string) error {
-	tx, err := d.sqlDB.Begin()
+	tx, err := d.writer.Begin()
 	if err != nil {
 		return fmt.Errorf("begin seed tx: %w", err)
 	}
@@ -197,7 +201,7 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 func applyMigration(database *DB, name, rawSQL string) error {
 	stmts := splitStatements(rawSQL)
 
-	tx, txErr := database.sqlDB.Begin()
+	tx, txErr := database.writer.Begin()
 	if txErr != nil {
 		return fmt.Errorf("begin tx for %s: %w", name, txErr)
 	}

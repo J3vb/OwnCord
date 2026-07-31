@@ -93,6 +93,18 @@ function oembedFail() {
   };
 }
 
+/**
+ * media.ts caches showEmbeds/inlineMedia/showLinkPreviews/animateGifs at
+ * module level and re-reads them on "owncord:pref-change" (the event savePref
+ * dispatches). After changing loadPrefMock, dispatch those events so the
+ * module's cached values pick up the new mock implementation.
+ */
+function syncPrefCache(): void {
+  for (const key of ["showEmbeds", "inlineMedia", "showLinkPreviews", "animateGifs"]) {
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
+  }
+}
+
 /** Simulate image load event on the first <img> found inside an element. */
 function fireImgLoad(parent: HTMLElement): void {
   const img = parent.querySelector("img") as HTMLImageElement | null;
@@ -130,6 +142,7 @@ describe("media.ts", () => {
     observeMediaMock.mockReset();
     loadPrefMock.mockReset();
     loadPrefMock.mockImplementation((_key: string, fallback: unknown) => fallback);
+    syncPrefCache();
     clearMediaCaches();
     document.body.innerHTML = "";
   });
@@ -310,6 +323,7 @@ describe("media.ts", () => {
         if (key === "animateGifs") return true;
         return fallback;
       });
+      syncPrefCache();
 
       const url = "https://example.com/animated.gif";
       const wrap = renderInlineImage(url);
@@ -327,6 +341,7 @@ describe("media.ts", () => {
         if (key === "animateGifs") return false;
         return fallback;
       });
+      syncPrefCache();
 
       const url = "https://example.com/frozen.gif";
       const wrap = renderInlineImage(url);
@@ -1263,6 +1278,7 @@ describe("media.ts", () => {
         if (key === "showEmbeds") return false;
         return true;
       });
+      syncPrefCache();
 
       const fragment = renderUrlEmbeds("https://www.youtube.com/watch?v=skip1");
 
@@ -1276,6 +1292,7 @@ describe("media.ts", () => {
         if (key === "inlineMedia") return false;
         return true;
       });
+      syncPrefCache();
 
       const fragment = renderUrlEmbeds("https://example.com/photo.png");
 
@@ -1289,6 +1306,7 @@ describe("media.ts", () => {
         if (key === "showLinkPreviews") return false;
         return true;
       });
+      syncPrefCache();
 
       const fragment = renderUrlEmbeds("https://example.com/article");
 
@@ -1299,6 +1317,7 @@ describe("media.ts", () => {
 
     it("produces empty fragment when all preferences are disabled", () => {
       loadPrefMock.mockReturnValue(false);
+      syncPrefCache();
 
       const fragment = renderUrlEmbeds(
         "https://www.youtube.com/watch?v=abc https://example.com/pic.png https://example.com/page",

@@ -26,6 +26,8 @@ func (v VoiceConfig) LogValue() slog.Value {
 		slog.String("livekit_api_secret", redactSecret(v.LiveKitAPISecret)),
 		slog.String("livekit_url", v.LiveKitURL),
 		slog.String("livekit_binary", v.LiveKitBinaryPath),
+		slog.Bool("auto_download_livekit", v.AutoDownloadLiveKit),
+		slog.String("livekit_version", v.LiveKitVersion),
 		slog.String("node_ip", v.NodeIP),
 		slog.Bool("advertise_internal_ip", v.AdvertiseInternalIP),
 		slog.String("quality", v.Quality),

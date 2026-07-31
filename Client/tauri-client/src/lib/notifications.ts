@@ -3,7 +3,8 @@
  * and plays sounds for incoming messages based on user preferences.
  */
 
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "./preferences";
+import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import type { ChatMessagePayload } from "./types";
@@ -51,6 +52,11 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
     return;
   }
 
+  // Do Not Disturb — the settings panel promises "You will not receive desktop
+  // notifications", so honour it for the popup and the chime. The taskbar
+  // flash stays: it's a passive hint, not a notification.
+  const dnd = loadUserStatus() === "dnd";
+
   const channelName = getChannelName(payload.channel_id);
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
@@ -64,7 +70,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const body = sanitizeNotif(payload.content, 100);
 
   // Desktop notification
-  if (loadPref<boolean>("desktopNotifications", true)) {
+  if (!dnd && loadPref<boolean>("desktopNotifications", true)) {
     fireDesktopNotification(title, body);
   }
 
@@ -74,7 +80,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 
   // Notification sound
-  if (loadPref<boolean>("notificationSounds", true)) {
+  if (!dnd && loadPref<boolean>("notificationSounds", true)) {
     playNotificationSound();
   }
 }

@@ -167,6 +167,10 @@ type channelPayload struct {
 	Category string `json:"category"`
 	Topic    string `json:"topic"`
 	Position int    `json:"position"`
+	// SlowMode lets the client pre-disable the composer for the cooldown
+	// instead of accepting a message the server will refuse with SLOW_MODE.
+	// Seconds; 0 means off.
+	SlowMode int `json:"slow_mode"`
 }
 
 type channelDeletePayload struct {
@@ -480,6 +484,7 @@ func buildChannelCreate(ch *db.Channel) []byte {
 			Category: ch.Category,
 			Topic:    ch.Topic,
 			Position: ch.Position,
+			SlowMode: ch.SlowMode,
 		},
 	})
 }
@@ -495,6 +500,7 @@ func buildChannelUpdate(ch *db.Channel) []byte {
 			Category: ch.Category,
 			Topic:    ch.Topic,
 			Position: ch.Position,
+			SlowMode: ch.SlowMode,
 		},
 	})
 }

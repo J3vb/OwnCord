@@ -109,6 +109,11 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 
 func (h *PluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	// An empty list means "nothing installed" on a server with the runtime on,
+	// and "you can't install anything" on a server with it off. The caller
+	// can't tell those apart from the body, so say which it is — otherwise the
+	// admin panel's empty state has to guess.
+	w.Header().Set("X-Plugin-Runtime", pluginRuntimeState(h.registry))
 	if h.store == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
@@ -171,6 +176,16 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pluginRuntimeState reports whether lifecycle calls will work, for the
+// X-Plugin-Runtime response header. A nil registry means plugin support is
+// compiled/configured off and every lifecycle endpoint answers 503.
+func pluginRuntimeState(registry *plugin.Registry) string {
+	if registry == nil {
+		return "disabled"
+	}
+	return "enabled"
 }
 
 // isZipContentType reports whether ct looks like a zip MIME type. Both the

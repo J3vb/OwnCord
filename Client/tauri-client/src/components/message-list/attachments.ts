@@ -17,6 +17,15 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
 import { openImageLightbox } from "./media";
 
+/** Cached value of the animateGifs preference. Invalidated on pref change
+ *  (same pattern as roleColors in formatting.ts). */
+let animateGifsPref = loadPref<boolean>("animateGifs", true);
+window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+  if (e.detail.key === "animateGifs") {
+    animateGifsPref = loadPref<boolean>("animateGifs", true);
+  }
+}) as EventListener);
+
 // -- Server host state --------------------------------------------------------
 
 /** Module-level server host for resolving relative attachment URLs. */
@@ -336,7 +345,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         "load",
         () => {
           clearReservation();
-          if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
+          if (isGif) observeMedia(img, cached, wrap, !animateGifsPref);
         },
         { once: true },
       );
@@ -357,7 +366,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             "load",
             () => {
               clearReservation();
-              if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
+              if (isGif) observeMedia(img, dataUrl, wrap, !animateGifsPref);
             },
             { once: true },
           );

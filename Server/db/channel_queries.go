@@ -210,7 +210,7 @@ type ChannelRoleOverride struct {
 // on the given channel (zero allow/deny when no override row exists), ordered
 // by role position descending.
 func (d *DB) ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]ChannelRoleOverride, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT r.id, r.name, r.position, r.permissions,
 		        COALESCE(o.allow, 0), COALESCE(o.deny, 0)
 		 FROM roles r
@@ -262,7 +262,7 @@ func (d *DB) GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string
 		strings.Join(placeholders, ","),
 	)
 
-	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelTypes query: %w", err)
 	}

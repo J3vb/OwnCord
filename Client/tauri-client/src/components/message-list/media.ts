@@ -16,6 +16,30 @@ import { renderGenericLinkPreview } from "./embeds";
 
 const log = createLogger("media");
 
+// Cached embed/media preferences — read once and invalidated on pref change
+// instead of hitting localStorage for every rendered message (same pattern as
+// roleColors in formatting.ts and developerMode in renderers.ts).
+let showEmbedsPref = loadPref<boolean>("showEmbeds", true);
+let inlineMediaPref = loadPref<boolean>("inlineMedia", true);
+let showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
+let animateGifsPref = loadPref<boolean>("animateGifs", true);
+window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+  switch (e.detail.key) {
+    case "showEmbeds":
+      showEmbedsPref = loadPref<boolean>("showEmbeds", true);
+      break;
+    case "inlineMedia":
+      inlineMediaPref = loadPref<boolean>("inlineMedia", true);
+      break;
+    case "showLinkPreviews":
+      showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
+      break;
+    case "animateGifs":
+      animateGifsPref = loadPref<boolean>("animateGifs", true);
+      break;
+  }
+}) as EventListener);
+
 /**
  * Cache of rendered image heights keyed by URL. When virtual scroll rebuilds
  * DOM elements, new images use the cached height as min-height instead of the
@@ -255,7 +279,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   img.addEventListener(
     "load",
     () => {
-      log.info("Image loaded", {
+      log.debug("Image loaded", {
         url: url.slice(0, 80),
         naturalW: img.naturalWidth,
         naturalH: img.naturalHeight,
@@ -286,10 +310,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     img.addEventListener(
       "load",
       () => {
-        log.debug("Calling observeMedia for GIF", { url: url.slice(0, 80) });
-        const startFrozen = !loadPref("animateGifs", true);
-        observeMedia(img, url, wrap, startFrozen);
-        log.debug("observeMedia complete", { startFrozen });
+        observeMedia(img, url, wrap, !animateGifsPref);
       },
       { once: true },
     );
@@ -483,13 +504,7 @@ export function extractUrls(content: string): string[] {
 export function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const urls = extractUrls(content);
-  log.debug("renderUrlEmbeds", { urlCount: urls.length, urls });
   const seen = new Set<string>();
-
-  // Read preferences once before the loop to avoid per-URL localStorage reads
-  const showEmbeds = loadPref("showEmbeds", true);
-  const inlineMedia = loadPref("inlineMedia", true);
-  const showLinkPreviews = loadPref("showLinkPreviews", true);
 
   for (const url of urls) {
     if (seen.has(url)) continue;
@@ -498,7 +513,7 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     // YouTube embed
     const ytId = extractYouTubeId(url);
     if (ytId !== null) {
-      if (!showEmbeds) continue;
+      if (!showEmbedsPref) continue;
       fragment.appendChild(renderYouTubeEmbed(ytId, url));
       continue;
     }
@@ -506,26 +521,18 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     // Direct image/GIF URL — render inline
     const isDirect = isDirectImageUrl(url);
     const isSafe = isSafeUrl(url);
-    log.debug("URL classification", {
-      url: url.slice(0, 80),
-      isDirect,
-      isSafe,
-      isGif: isGifUrl(url),
-    });
     if (isDirect && isSafe) {
-      if (!inlineMedia) continue;
+      if (!inlineMediaPref) continue;
       fragment.appendChild(renderInlineImage(url));
       continue;
     }
 
     // Generic URL preview (compact link card)
     if (isSafe) {
-      if (!showLinkPreviews) continue;
-      log.debug("Falling through to generic link preview", { url: url.slice(0, 80) });
+      if (!showLinkPreviewsPref) continue;
       fragment.appendChild(renderGenericLinkPreview(url));
     }
   }
 
-  log.debug("renderUrlEmbeds complete");
   return fragment;
 }

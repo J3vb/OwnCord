@@ -5,9 +5,11 @@
 
 import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
-import { resetVoiceStore } from "@stores/voice.store";
-import { leaveVoice } from "@lib/livekitSession";
+import { resetVoiceStore, voiceStore } from "@stores/voice.store";
 import { cleanupNotificationAudio } from "@lib/notifications";
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("auth.store");
 
 export interface AuthState {
   readonly token: string | null;
@@ -42,7 +44,18 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
  *  session (WebRTC, AudioContext, streams) and clears voice store state.
  *  Safe to call even if no voice session is active — leaveVoice is idempotent. */
 export function clearAuth(): void {
-  leaveVoice(false);
+  // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
+  // lazily so it stays out of the startup path. Only import it when there is
+  // actually a voice session to leave — otherwise a text-only user who never
+  // joined voice would pull in the whole LiveKit SDK on every logout/401.
+  // When a voice session exists the module is necessarily already loaded, so
+  // this import resolves from the module cache in a microtask.
+  const voice = voiceStore.getState();
+  if (voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
+    void import("@lib/livekitSession")
+      .then(({ leaveVoice }) => leaveVoice(false))
+      .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
+  }
   resetVoiceStore();
   cleanupNotificationAudio();
   authStore.setState(() => ({ ...INITIAL_STATE }));

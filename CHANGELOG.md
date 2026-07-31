@@ -82,6 +82,22 @@ behavioural changes operators must know about.
 
 ### Behavioural changes operators must know about
 
+- **The desktop client now actually uses the OS credential store.** The
+  `keyring` crate declares no `default` feature, so the previous
+  `keyring = "3"` dependency compiled its in-memory *mock* store on
+  Windows, macOS and Linux alike: saves reported success and the next
+  read in the same process returned nothing, and no credential was ever
+  written to Credential Manager / Keychain / Secret Service. The visible
+  symptom was the voice-E2EE identity keypair being regenerated, so the
+  published identity key stopped matching the key that signed the voice
+  announce and peers rejected it as a possible MITM. The platform
+  backends are now enabled explicitly and every write is read back
+  before it is reported as saved. See
+  [docs/credential-storage.md](docs/credential-storage.md).
+  - **Linux builds need a new system package, `libdbus-1-dev`**, for the
+    Secret Service backend. CI and release workflows install it already.
+  - Users on an affected machine are logged in again and re-verified by
+    their peers once, then persist normally.
 - **`event_persistence.enabled` defaults to `true`.** Every broadcast
   WebSocket event is written to the `events` table, retained for
   24 hours by default, and pruned by a background goroutine every hour.

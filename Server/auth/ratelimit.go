@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/owncord/server/syncutil"
@@ -28,45 +29,86 @@ type LockoutPersister interface {
 	LoadActiveLockouts(ctx context.Context) (keys []string, expiresAt []time.Time, err error)
 }
 
+// rateLimiterShards is the number of independently locked buckets the key
+// space is split across. Must be a power of two (shardFor masks with -1).
+const rateLimiterShards = 32
+
+// rateLimiterShard holds one bucket's windows/lockouts maps under its own
+// mutex, so contention on one key never serializes unrelated keys.
+type rateLimiterShard struct {
+	mu       syncutil.Mutex
+	windows  map[string]*entry
+	lockouts map[string]*lockoutEntry
+}
+
 // RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
 // optional IP lockout support. When a LockoutStore is provided, lockout
 // entries are persisted so they survive server restarts.
+//
+// Internally the key space is sharded across 32 buckets (FNV-1a of the key),
+// each with its own mutex, so the process-wide limiter is no longer a single
+// lock every WS message and HTTP request funnels through.
 //
 // NOTE (L2): The sliding-window counters and the PartialAuthStore /
 // UsedTOTPCodeStore (in totp.go) are process-local. The server must run
 // as a single instance. Horizontal scaling requires migrating these
 // stores to a shared backend (e.g. Redis).
 type RateLimiter struct {
-	mu       syncutil.Mutex
-	windows  map[string]*entry
-	lockouts map[string]*lockoutEntry
-	store    LockoutPersister // nil = pure in-memory (tests, non-login limiters)
+	shards [rateLimiterShards]rateLimiterShard
+	store  LockoutPersister // nil = pure in-memory (tests, non-login limiters)
+}
+
+// newRateLimiter allocates the per-shard maps shared by both constructors.
+func newRateLimiter(store LockoutPersister) *RateLimiter {
+	rl := &RateLimiter{store: store}
+	for i := range rl.shards {
+		rl.shards[i].windows = make(map[string]*entry)
+		rl.shards[i].lockouts = make(map[string]*lockoutEntry)
+	}
+	return rl
 }
 
 // NewRateLimiter returns an initialised RateLimiter with no persistence.
 func NewRateLimiter() *RateLimiter {
-	return &RateLimiter{
-		windows:  make(map[string]*entry),
-		lockouts: make(map[string]*lockoutEntry),
-	}
+	return newRateLimiter(nil)
 }
 
 // NewPersistentRateLimiter returns a RateLimiter that persists lockouts via
 // the provided store. It loads any active lockouts from the store on creation.
 func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
-	rl := &RateLimiter{
-		windows:  make(map[string]*entry),
-		lockouts: make(map[string]*lockoutEntry),
-		store:    store,
-	}
+	rl := newRateLimiter(store)
 	// Load surviving lockouts from the store. Constructor runs at startup
 	// with no request in flight, so background context.
 	if keys, expiresAt, err := store.LoadActiveLockouts(context.Background()); err == nil {
 		for i, key := range keys {
-			rl.lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
+			rl.shardFor(key).lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
 		}
 	}
 	return rl
+}
+
+// shardFor maps key to its bucket via FNV-1a (inlined so hashing allocates
+// nothing, unlike hash/fnv's digest).
+func (r *RateLimiter) shardFor(key string) *rateLimiterShard {
+	h := uint32(2166136261)
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return &r.shards[h&(rateLimiterShards-1)]
+}
+
+// Key builds the canonical "prefix:id" rate-limit key. It exists because the
+// hot paths (every WS message, every authenticated request) used to pay for a
+// fmt.Sprintf per call; strconv.AppendInt into a pre-sized buffer leaves the
+// string itself as the only allocation. Compose multi-part keys by nesting:
+// Key(Key("voice_e2ee_offer", userID), channelID).
+func Key(prefix string, id int64) string {
+	b := make([]byte, 0, len(prefix)+21) // ':' + up to 20 digits/sign
+	b = append(b, prefix...)
+	b = append(b, ':')
+	b = strconv.AppendInt(b, id, 10)
+	return string(b)
 }
 
 // Allow reports whether a request from key is permitted given the limit and
@@ -74,24 +116,25 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 // permitted. Returns false when key is locked out or has exceeded limit within
 // window.
 func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Lockout takes priority.
-	if lo, ok := r.lockouts[key]; ok {
+	if lo, ok := s.lockouts[key]; ok {
 		if time.Now().Before(lo.expiresAt) {
 			return false
 		}
-		delete(r.lockouts, key)
+		delete(s.lockouts, key)
 	}
 
 	now := time.Now()
 	cutoff := now.Add(-window)
 
-	e, ok := r.windows[key]
+	e, ok := s.windows[key]
 	if !ok {
 		e = &entry{}
-		r.windows[key] = e
+		s.windows[key] = e
 	}
 
 	// Prune timestamps outside the current window.
@@ -117,10 +160,11 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 // once the lockout is decided, so the caller's cancellation is detached
 // (WithoutCancel) rather than aborting the write mid-request.
 func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Duration) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	expiresAt := time.Now().Add(duration)
-	r.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
+	s.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
 	if r.store != nil {
 		_ = r.store.UpsertLockout(context.WithoutCancel(ctx), key, expiresAt)
 	}
@@ -128,16 +172,17 @@ func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Dur
 
 // IsLockedOut reports whether key is currently under a lockout.
 func (r *RateLimiter) IsLockedOut(key string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	lo, ok := r.lockouts[key]
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lo, ok := s.lockouts[key]
 	if !ok {
 		return false
 	}
 	if time.Now().Before(lo.expiresAt) {
 		return true
 	}
-	delete(r.lockouts, key)
+	delete(s.lockouts, key)
 	return false
 }
 
@@ -146,19 +191,20 @@ func (r *RateLimiter) IsLockedOut(key string) bool {
 // rate-limit checks where the caller wants to record (via Allow) only on
 // specific outcomes such as verification failures.
 func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if lo, ok := r.lockouts[key]; ok {
+	if lo, ok := s.lockouts[key]; ok {
 		if time.Now().Before(lo.expiresAt) {
 			return false
 		}
-		delete(r.lockouts, key)
+		delete(s.lockouts, key)
 	}
 
 	cutoff := time.Now().Add(-window)
 
-	e, ok := r.windows[key]
+	e, ok := s.windows[key]
 	if !ok {
 		return true
 	}
@@ -176,10 +222,11 @@ func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
 // Reset clears all rate-limit state (timestamps and lockout) for key.
 // Like Lockout, the store delete must complete once decided (WithoutCancel).
 func (r *RateLimiter) Reset(ctx context.Context, key string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.windows, key)
-	delete(r.lockouts, key)
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.windows, key)
+	delete(s.lockouts, key)
 	if r.store != nil {
 		_ = r.store.DeleteLockout(context.WithoutCancel(ctx), key)
 	}
@@ -193,32 +240,39 @@ func (r *RateLimiter) Reset(ctx context.Context, key string) {
 //
 // A lockouts entry is removed when its expiry has passed.
 //
+// Shards are swept one at a time, so the periodic cleanup never stalls the
+// whole limiter at once.
+//
 // Pass defaultCleanupMaxWindow (15 minutes) for normal server operation, or
 // a shorter duration in tests.
 func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	cutoff := time.Now().Add(-maxWindow)
 
-	for key, e := range r.windows {
-		allStale := true
-		for _, ts := range e.timestamps {
-			if ts.After(cutoff) {
-				allStale = false
-				break
+	for i := range r.shards {
+		s := &r.shards[i]
+		s.mu.Lock()
+
+		for key, e := range s.windows {
+			allStale := true
+			for _, ts := range e.timestamps {
+				if ts.After(cutoff) {
+					allStale = false
+					break
+				}
+			}
+			if allStale {
+				delete(s.windows, key)
 			}
 		}
-		if allStale {
-			delete(r.windows, key)
-		}
-	}
 
-	now := time.Now()
-	for key, lo := range r.lockouts {
-		if now.After(lo.expiresAt) {
-			delete(r.lockouts, key)
+		now := time.Now()
+		for key, lo := range s.lockouts {
+			if now.After(lo.expiresAt) {
+				delete(s.lockouts, key)
+			}
 		}
+
+		s.mu.Unlock()
 	}
 
 	if r.store != nil {
@@ -249,9 +303,15 @@ func (r *RateLimiter) StartCleanup(interval, maxWindow time.Duration, stop <-cha
 }
 
 // Len returns the number of entries currently stored in the windows and
-// lockouts maps. It is primarily useful for testing and monitoring.
+// lockouts maps, summed across all shards. It is primarily useful for
+// testing and monitoring.
 func (r *RateLimiter) Len() (windows, lockouts int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.windows), len(r.lockouts)
+	for i := range r.shards {
+		s := &r.shards[i]
+		s.mu.Lock()
+		windows += len(s.windows)
+		lockouts += len(s.lockouts)
+		s.mu.Unlock()
+	}
+	return windows, lockouts
 }

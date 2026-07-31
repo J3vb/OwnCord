@@ -207,6 +207,7 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             libsecret-1-dev \
+            libdbus-1-dev \
             libasound2-dev \
             libssl-dev \
             librsvg2-dev
@@ -227,16 +228,17 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
-  # Playwright e2e against the mocked-Tauri dev server. Non-blocking, and it
-  # will very likely be RED at first: the suite has never run in CI, and a
-  # local run of the 255 web tests on `main` itself fails ~229 of them, all
-  # cascading from the shared login helper in tests/e2e/helpers.ts
-  # (navigateToMainPage never sees [data-testid='app-layout']). That breakage
-  # predates this PR — it reproduces on a clean 70caa6c worktree.
+  # Playwright e2e against the mocked-Tauri dev server. The suite is green
+  # since the mock repair (start_http_proxy stub + voice-premise rewrite):
+  # a full 255-test run passes locally in ~7.5 min at 1 worker. Runaway
+  # protection lives in playwright.config.ts (maxFailures: 20 aborts a
+  # systemic cascade early; globalTimeout: 20 min self-terminates with a
+  # usable report) with timeout-minutes below as the outer backstop.
   #
-  # The job is wired up anyway so the breakage is visible instead of invisible,
-  # but it MUST stay continue-on-error until the suite is repaired, and
-  # timeout-minutes caps the minutes it can burn while it is failing.
+  # Still continue-on-error for now: a newly-revived 255-test browser suite
+  # may harbor rare flakes (retries: 2 covers them, but confidence needs a
+  # few green pushes first). Flip this job to blocking once it has been
+  # stably green across several pushes.
   # See docs/audit-test-coverage-2026-07-25.md T-2026-07-25-21.
   # The native config (playwright.config.native.ts) is deliberately not wired
   # up — it needs a real server and a built desktop binary.
@@ -331,6 +333,7 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             libsecret-1-dev \
+            libdbus-1-dev \
             libasound2-dev \
             libssl-dev \
             patchelf \
