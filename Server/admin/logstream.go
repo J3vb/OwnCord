@@ -79,16 +79,18 @@ func (ts *ticketStore) redeem(ticket string) (ticketEntry, bool) {
 }
 
 // handleLogTicket issues a short-lived, single-use ticket for the SSE log stream.
-// POST /admin/api/logs/ticket — requires normal admin auth (cookie/header).
+// POST /admin/api/logs/ticket — requires normal admin auth (header). The ticket
+// is bound to the hash of whichever bearer credential authenticated the request
+// (login session or API token), so both principal kinds can stream logs.
 func handleLogTicket(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := r.Context().Value(adminSessionKey).(*db.Session)
-		if !ok || sess == nil || sess.TokenHash == "" {
+		hash, ok := r.Context().Value(adminTokenHashKey).(string)
+		if !ok || hash == "" {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
 			return
 		}
 
-		ticket, err := logTickets.issue(sess.TokenHash)
+		ticket, err := logTickets.issue(hash)
 		if err != nil {
 			slog.Error("failed to issue log stream ticket", "err", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate ticket")
@@ -351,11 +353,14 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			http.Error(w, string(errResp), http.StatusUnauthorized)
 			return
 		}
-		// Stream lifetime == request lifetime, so all session re-checks below
-		// use the stream request's context.
+		// Stream lifetime == request lifetime, so all principal re-checks below
+		// use the stream request's context. The ticket's hash is resolved the
+		// same way adminAuthMiddleware resolves a bearer credential — login
+		// session first, then API token — so revoking either kind mid-stream
+		// cuts the stream.
 		ctx := r.Context()
-		sess, err := database.GetSessionByTokenHash(ctx, entry.tokenHash)
-		if err != nil || sess == nil || auth.IsSessionExpired(sess.ExpiresAt) {
+		user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
+		if err != nil || user == nil || role == nil {
 			errResp, _ := json.Marshal(map[string]string{
 				"error":   "UNAUTHORIZED",
 				"message": "invalid or expired session",
@@ -363,27 +368,19 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			http.Error(w, string(errResp), http.StatusUnauthorized)
 			return
 		}
-		sessionStillAuthorized := func() bool {
-			current, currentErr := database.GetSessionByTokenHash(ctx, entry.tokenHash)
-			if currentErr != nil || current == nil || auth.IsSessionExpired(current.ExpiresAt) {
-				return false
-			}
-			user, userErr := database.GetUserByID(ctx, current.UserID)
-			if userErr != nil || user == nil {
+		principalStillAuthorized := func() bool {
+			current, currentRole, _, resolveErr := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
+			if resolveErr != nil || current == nil || currentRole == nil {
 				return false
 			}
 			// A ban mid-stream must cut the stream, same as adminAuthMiddleware
 			// rejects a banned user on the request path.
-			if auth.IsEffectivelyBanned(user) {
+			if auth.IsEffectivelyBanned(current) {
 				return false
 			}
-			role, roleErr := database.GetRoleByID(ctx, user.RoleID)
-			if roleErr != nil || role == nil {
-				return false
-			}
-			return permissions.HasAdmin(role.Permissions)
+			return permissions.HasAdmin(currentRole.Permissions)
 		}
-		if !sessionStillAuthorized() {
+		if !principalStillAuthorized() {
 			errResp, _ := json.Marshal(map[string]string{
 				"error":   "FORBIDDEN",
 				"message": "administrator permission required",
@@ -409,7 +406,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 
 		// Send backfill.
 		for _, entry := range ringBuf.Snapshot() {
-			if !sessionStillAuthorized() {
+			if !principalStillAuthorized() {
 				return
 			}
 			if data, err := json.Marshal(entry); err == nil {
@@ -429,7 +426,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		for {
 			select {
 			case entry := <-ch:
-				if !sessionStillAuthorized() {
+				if !principalStillAuthorized() {
 					return
 				}
 				if data, err := json.Marshal(entry); err == nil {
@@ -437,7 +434,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 					flusher.Flush()
 				}
 			case <-keepalive.C:
-				if !sessionStillAuthorized() {
+				if !principalStillAuthorized() {
 					return
 				}
 				_, _ = fmt.Fprint(w, ": keepalive\n\n")
