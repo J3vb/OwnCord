@@ -16,6 +16,10 @@ const (
 	adminUserKey adminContextKey = iota
 	// adminSessionKey is the context key for the authenticated *db.Session.
 	adminSessionKey
+	// adminTokenHashKey is the context key for the hash (string) of the bearer
+	// credential that authenticated the request — a login session or an API
+	// token. Unlike adminSessionKey it is set for both principal kinds.
+	adminTokenHashKey
 )
 
 // ─── Allowed settings keys ────────────────────────────────────────────────────

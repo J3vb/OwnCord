@@ -113,3 +113,51 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 		t.Fatalf("expected backfill to stop after first entry once session was revoked, wrote %d entries; body = %s", writer.writeCount, writer.buffer.String())
 	}
 }
+
+func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
+	database := newLogStreamTestDB(t)
+	logBuf := NewRingBuffer(8)
+	logBuf.Write(LogEntry{Timestamp: "2026-07-31T10:00:00Z", Level: "info", Message: "first", Source: "test"})
+	logBuf.Write(LogEntry{Timestamp: "2026-07-31T10:00:01Z", Level: "info", Message: "second", Source: "test"})
+
+	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	tokenID, err := database.CreateAPIToken(context.Background(), userID, tokenHash, "test", nil)
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	ticket, err := logTickets.issue(tokenHash)
+	if err != nil {
+		t.Fatalf("issue ticket: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
+	writer := &revokingSSEWriter{
+		header: make(http.Header),
+		revoke: func() {
+			_, _ = database.RevokeAPIToken(context.Background(), tokenID)
+		},
+		cancel: cancel,
+	}
+
+	handleLogStream(database, logBuf).ServeHTTP(writer, req)
+
+	if writer.statusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
+	}
+	if writer.writeCount != 1 {
+		t.Fatalf("expected backfill to stop after first entry once the API token was revoked, wrote %d entries; body = %s", writer.writeCount, writer.buffer.String())
+	}
+}

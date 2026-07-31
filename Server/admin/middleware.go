@@ -69,6 +69,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 
 			ctx := context.WithValue(r.Context(), adminUserKey, user)
 			ctx = context.WithValue(ctx, adminSessionKey, sess) // nil for API-token principals; consumers guard nil
+			ctx = context.WithValue(ctx, adminTokenHashKey, hash)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
