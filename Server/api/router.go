@@ -53,7 +53,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {
-		r.Use(NewWAFMiddleware(cfg.Server.WAFParanoiaLevel))
+		r.Use(NewWAFMiddlewareCRS(cfg.Server.WAFParanoiaLevel, cfg.Server.WAFCRSMode))
 	}
 
 	// Health check — unauthenticated, no versioning prefix.
