@@ -94,7 +94,7 @@ All four are optimistic with rollback; each also emits a WS control message.
 | Control | Local state | WS message | Rollback |
 |---------|-------------|-----------|----------|
 | **Mute** | `localMuted` (`setLocalMuted`) — fully unpublishes the mic track | `voice_mute{muted}` | n/a (local-authoritative) |
-| **Deafen** | `localDeafened` + forces mute | `voice_deafen` + `voice_mute` | implies mute |
+| **Deafen** | `localDeafened` + forces mute — unsubscribes remote *voice* audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume) | `voice_deafen` + `voice_mute` | implies mute |
 | **Camera** | `localCamera` set optimistically, rolled back on device failure (`screenShare.ts:177,204`) | `voice_camera{enabled}` | revert on failure + toast |
 | **Screenshare** | `localScreenshare` optimistic, rollback on failure (`screenShare.ts:265,311`); rate-limited | `voice_screenshare{enabled}` | revert + toast |
 
