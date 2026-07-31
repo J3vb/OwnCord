@@ -49,13 +49,12 @@ func TestChannelFocus_AllowedByDefault(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Should NOT receive a FORBIDDEN error.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -84,10 +83,9 @@ func TestChannelFocus_DeniedByOverride(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -108,13 +106,12 @@ func TestChannelFocus_AdminBypassesDeny(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Should NOT receive a FORBIDDEN error.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -143,10 +140,9 @@ func TestChatSend_DeniedWithoutSendMessages(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "should be rejected"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {

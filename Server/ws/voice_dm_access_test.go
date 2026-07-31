@@ -57,10 +57,9 @@ func TestVoiceJoin_DMNonParticipant_GetsNoTokenAndNoVoiceState(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
-	time.Sleep(50 * time.Millisecond)
 
 	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
 
@@ -82,10 +81,9 @@ func TestVoiceJoin_DMParticipant_StillJoins(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, alice, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
-	time.Sleep(50 * time.Millisecond)
 
 	if !hasVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond)) {
 		t.Error("a DM participant must still receive a voice token for their own DM")
@@ -110,7 +108,7 @@ func TestVoiceTokenRefresh_DMNonParticipant_Refused(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Second entry point: the refresh mints a token from the session's own voice
 	// channel id, so it must re-run the same membership check rather than trust
@@ -118,7 +116,6 @@ func TestVoiceTokenRefresh_DMNonParticipant_Refused(t *testing.T) {
 	ws.SetVoiceChIDForTest(c, dmID)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
-	time.Sleep(50 * time.Millisecond)
 
 	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
 }
@@ -132,14 +129,12 @@ func TestVoiceTokenRefresh_DMParticipant_StillRefreshes(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, alice, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
-	time.Sleep(50 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 50*time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
-	time.Sleep(50 * time.Millisecond)
 
 	if !hasVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond)) {
 		t.Error("a DM participant must still be able to refresh their voice token")

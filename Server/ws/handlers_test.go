@@ -202,14 +202,14 @@ func TestSessionExpiry_ValidSessionAllowsMessages(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithTokenHash(hub, user, hash, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Trigger the expiry check by sending enough messages to cross the check threshold.
 	for i := range ws.SessionCheckInterval + 1 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
 	}
-	time.Sleep(100 * time.Millisecond)
 
+	// The session check (and any kick) runs synchronously inside handleMessage.
 	// Client should still be registered.
 	if hub.ClientCount() == 0 {
 		t.Error("client was removed despite having a valid session")
@@ -240,14 +240,14 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithTokenHash(hub, user, hash, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Trigger the expiry check.
 	for range ws.SessionCheckInterval + 1 {
 		// Use a harmless but parseable message to accumulate message count.
 		hub.HandleMessageForTest(c, []byte(`{"type":"presence_update","payload":{"status":"online"}}`))
 	}
-	time.Sleep(100 * time.Millisecond)
+	// The expiry check kicks synchronously (kickClient) inside handleMessage.
 
 	// The client's send channel should be closed (connection severed).
 	// We verify this by checking that the send channel has been closed,
@@ -261,7 +261,6 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 	}
 
 	// The most reliable assertion: hub should have unregistered the client.
-	time.Sleep(50 * time.Millisecond)
 	if hub.ClientCount() != 0 {
 		t.Error("expired-session client was not removed from the hub")
 	}
@@ -279,13 +278,13 @@ func TestSessionExpiry_MissingTokenHashSkipsCheck(t *testing.T) {
 	// No token hash — simulates old-style test clients.
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send past the threshold; should not panic or remove the client.
+	// The session check runs synchronously inside handleMessage.
 	for i := range ws.SessionCheckInterval + 1 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
 	}
-	time.Sleep(100 * time.Millisecond)
 
 	if hub.ClientCount() == 0 {
 		t.Error("client without token hash was incorrectly removed")
@@ -304,16 +303,15 @@ func TestSlowMode_ZeroSlowMode_AllowsRapidMessages(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send 3 messages in quick succession.
 	for i := range 3 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("rapid %d", i)))
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	// Drain all messages.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -339,16 +337,14 @@ func TestSlowMode_EnforcedAfterFirstMessage(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// First message should succeed.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "first message"))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send) // clear the ack
+	drainChanTimeout(send, 30*time.Millisecond) // clear the ack
 
 	// Second message within slow_mode window should be rejected.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "second message too soon"))
-	time.Sleep(30 * time.Millisecond)
 
 	code := receiveErrorCode(send, 200*time.Millisecond)
 	if code != "SLOW_MODE" {
@@ -371,17 +367,15 @@ func TestSlowMode_DifferentUsersNotBlocked(t *testing.T) {
 	cB := ws.NewTestClientWithUser(hub, userB, chID, sendB)
 	hub.Register(cA)
 	hub.Register(cB)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, cB)
 
 	hub.HandleMessageForTest(cA, chatSendMsg(chID, "from A"))
-	time.Sleep(20 * time.Millisecond)
 
 	// B sends after A — B's slow mode window is independent.
 	hub.HandleMessageForTest(cB, chatSendMsg(chID, "from B"))
-	time.Sleep(50 * time.Millisecond)
 
 	// B should NOT receive a SLOW_MODE error.
-	msgs := drainChan(sendB)
+	msgs := drainChanTimeout(sendB, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -407,17 +401,15 @@ func TestSlowMode_ModeratorBypassesSlowMode(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, mod, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send two messages in rapid succession — mod should not be blocked.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "mod msg 1"))
-	time.Sleep(20 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 20*time.Millisecond)
 
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "mod msg 2"))
-	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -454,21 +446,19 @@ func TestSlowMode_DifferentChannels_IndependentWindows(t *testing.T) {
 	cB := ws.NewTestClientWithUser(hub, user, chB, sendB)
 
 	hub.Register(cA)
-	time.Sleep(10 * time.Millisecond)
+	waitRegistered(t, hub, cA)
 
 	// cA sends in channel A — triggers slow mode for A.
 	hub.HandleMessageForTest(cA, chatSendMsg(chA, "msg in A"))
-	time.Sleep(20 * time.Millisecond)
-	drainChan(sendA)
+	drainChanTimeout(sendA, 20*time.Millisecond)
 
 	// Now send in channel B via cB — should NOT be affected.
 	hub.Register(cB)
-	time.Sleep(10 * time.Millisecond)
+	waitRegistered(t, hub, cB)
 
 	hub.HandleMessageForTest(cB, chatSendMsg(chB, "msg in B"))
-	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(sendB)
+	msgs := drainChanTimeout(sendB, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -524,11 +514,10 @@ func TestChatSend_AttachmentsDeniedNoMessageCreated(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send a message with attachments — should be rejected before persisting.
 	hub.HandleMessageForTest(c, chatSendMsgWithAttachments(chID, "has attachment", []string{"fake-attach-id"}))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -557,16 +546,14 @@ func TestSlowMode_ErrorMessageContainsSlowModeDuration(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// First message to prime the window.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "first"))
-	time.Sleep(20 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 20*time.Millisecond)
 
 	// Second message — should receive SLOW_MODE error with duration in message.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "too soon"))
-	time.Sleep(50 * time.Millisecond)
 
 	timer := time.NewTimer(300 * time.Millisecond)
 	defer timer.Stop()
@@ -624,14 +611,13 @@ func TestChatSend_InvalidPayload_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_send",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -648,7 +634,7 @@ func TestChatSend_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -658,7 +644,6 @@ func TestChatSend_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -675,10 +660,9 @@ func TestChatSend_ChannelNotFound_ReturnsNotFound(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 99999, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatSendMsg(99999, "hello"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "NOT_FOUND" {
@@ -696,11 +680,10 @@ func TestChatSend_EmptyContent_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send message with empty content.
 	hub.HandleMessageForTest(c, chatSendMsg(chID, ""))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -718,7 +701,7 @@ func TestChatSend_TooLongContent_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Build a 4001-rune string to exceed the limit.
 	longContent := make([]rune, 4001)
@@ -726,7 +709,6 @@ func TestChatSend_TooLongContent_ReturnsBadRequest(t *testing.T) {
 		longContent[i] = 'a'
 	}
 	hub.HandleMessageForTest(c, chatSendMsg(chID, string(longContent)))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -748,7 +730,7 @@ func TestChatSend_SuccessWithReplyTo(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -759,7 +741,6 @@ func TestChatSend_SuccessWithReplyTo(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	// Should get a chat_send_ok ack.
 	timer := time.NewTimer(300 * time.Millisecond)
@@ -795,10 +776,9 @@ func TestChatSend_NilUserClientSendsMessage(t *testing.T) {
 	// Use NewTestClientWithUser so permissions work (user record is attached).
 	c := ws.NewTestClientWithUser(hub, owner, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "hello"))
-	time.Sleep(50 * time.Millisecond)
 
 	// Expect a chat_send_ok.
 	timer := time.NewTimer(300 * time.Millisecond)
@@ -829,16 +809,14 @@ func TestPresence_RateLimit_ReturnsError(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// First presence update — should succeed.
 	hub.HandleMessageForTest(c, presenceUpdateMsg("online"))
-	time.Sleep(20 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 20*time.Millisecond)
 
 	// Second presence update immediately — should be rate-limited.
 	hub.HandleMessageForTest(c, presenceUpdateMsg("idle"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "RATE_LIMITED" {
@@ -951,10 +929,9 @@ func TestChatEdit_ValidEdit_BroadcastsChatEdited(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "edited content"))
-	time.Sleep(50 * time.Millisecond)
 
 	payload := receiveMsgOfType(send, "chat_edited", 300*time.Millisecond)
 	if payload == nil {
@@ -977,7 +954,7 @@ func TestChatEdit_InvalidPayload_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send a chat_edit envelope with an unparseable payload.
 	raw, _ := json.Marshal(map[string]any{
@@ -985,7 +962,6 @@ func TestChatEdit_InvalidPayload_ReturnsBadRequest(t *testing.T) {
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1004,10 +980,9 @@ func TestChatEdit_EmptyContent_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, ""))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1027,10 +1002,9 @@ func TestChatEdit_NotOwner_ReturnsForbidden(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, editor, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "stolen edit"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -1048,7 +1022,7 @@ func TestChatEdit_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_edit",
@@ -1058,7 +1032,6 @@ func TestChatEdit_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1079,10 +1052,9 @@ func TestChatDelete_OwnerDeletesOwn_BroadcastsChatDeleted(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
-	time.Sleep(50 * time.Millisecond)
 
 	payload := receiveMsgOfType(send, "chat_deleted", 300*time.Millisecond)
 	if payload == nil {
@@ -1106,10 +1078,9 @@ func TestChatDelete_ModeratorDeletesOthers_BroadcastsChatDeleted(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, mod, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
-	time.Sleep(50 * time.Millisecond)
 
 	payload := receiveMsgOfType(send, "chat_deleted", 300*time.Millisecond)
 	if payload == nil {
@@ -1129,10 +1100,9 @@ func TestChatDelete_NonOwnerWithoutManageMessages_ReturnsForbidden(t *testing.T)
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, other, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -1150,14 +1120,13 @@ func TestChatDelete_InvalidPayload_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_delete",
 		"payload": "bad",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1175,10 +1144,9 @@ func TestChatDelete_NonExistentMessage_ReturnsNotFound(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatDeleteMsg(99999))
-	time.Sleep(50 * time.Millisecond)
 
 	// Handler returns FORBIDDEN (not NOT_FOUND) to prevent message-ID enumeration.
 	code := receiveErrorCode(send, 300*time.Millisecond)
@@ -1197,7 +1165,7 @@ func TestChatDelete_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_delete",
@@ -1206,7 +1174,6 @@ func TestChatDelete_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1225,13 +1192,12 @@ func TestChatEdit_RateLimit_ReturnsError(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Exhaust the rate limit (chatRateLimit = 10 per second).
 	for i := range 11 {
 		hub.HandleMessageForTest(c, chatEditMsg(msgID, fmt.Sprintf("edit-%d", i)))
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "RATE_LIMITED" {
@@ -1255,13 +1221,12 @@ func TestChatDelete_RateLimit_ReturnsError(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Exhaust the rate limit (chatRateLimit = 10 per second).
 	for _, id := range msgIDs {
 		hub.HandleMessageForTest(c, chatDeleteMsg(id))
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "RATE_LIMITED" {
@@ -1285,10 +1250,9 @@ func TestChatEdit_DeletedMessage_ReturnsForbidden(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "ghost edit"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -1309,10 +1273,9 @@ func TestReaction_AddReaction_BroadcastsReactionUpdate(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
-	time.Sleep(50 * time.Millisecond)
 
 	payload := receiveMsgOfType(send, "reaction_update", 300*time.Millisecond)
 	if payload == nil {
@@ -1339,10 +1302,9 @@ func TestReaction_RemoveReaction_BroadcastsReactionUpdate(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_remove", msgID, "❤️"))
-	time.Sleep(50 * time.Millisecond)
 
 	payload := receiveMsgOfType(send, "reaction_update", 300*time.Millisecond)
 	if payload == nil {
@@ -1363,14 +1325,13 @@ func TestReaction_InvalidPayload_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "reaction_add",
 		"payload": "bad",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1389,10 +1350,9 @@ func TestReaction_EmptyEmoji_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, ""))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1411,12 +1371,11 @@ func TestReaction_TooLongEmoji_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// 33-character emoji string — exceeds the 32-byte limit.
 	longEmoji := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 33 chars
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, longEmoji))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1435,10 +1394,9 @@ func TestReaction_ControlCharInEmoji_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "a\x01b"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1456,10 +1414,9 @@ func TestReaction_NonExistentMessage_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", 99999, "👍"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1478,16 +1435,14 @@ func TestReaction_DuplicateAdd_ReturnsConflict(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// First add — should succeed.
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "🔥"))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send) // clear the first broadcast
+	drainChanTimeout(send, 30*time.Millisecond) // clear the first broadcast
 
 	// Second add of the same emoji — should fail with CONFLICT.
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "🔥"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "CONFLICT" {
@@ -1505,10 +1460,9 @@ func TestReaction_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", 0, "👍"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1532,10 +1486,9 @@ func TestReaction_DeletedMessage_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1580,11 +1533,10 @@ func TestTyping_ValidTyping_BroadcastsToOthers(t *testing.T) {
 		t.Fatalf("hub did not register both clients within timeout (count=%d)", hub.ClientCount())
 	}
 	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Watcher should receive a "typing" broadcast (the outbound event type from
 	// buildTypingMsg is "typing", distinct from the inbound "typing_start").
-	watcherMsgs := drainChan(sendWatcher)
+	watcherMsgs := drainChanTimeout(sendWatcher, 50*time.Millisecond)
 	foundTyping := false
 	for _, m := range watcherMsgs {
 		var env map[string]any
@@ -1622,10 +1574,9 @@ func TestTyping_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, typingStartMsg(0))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1656,15 +1607,13 @@ func TestTyping_RateLimited_SilentlyDropped(t *testing.T) {
 
 	// First typing event — should go through.
 	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(sendWatcher)
+	drainChanTimeout(sendWatcher, 30*time.Millisecond)
 
 	// Second typing event immediately — should be silently dropped.
 	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Sender should NOT receive an error (silently dropped).
-	senderMsgs := drainChan(sendSender)
+	senderMsgs := drainChanTimeout(sendSender, 50*time.Millisecond)
 	for _, m := range senderMsgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -1723,28 +1672,16 @@ func TestBroadcastExclude_SendsToOthersNotSelf(t *testing.T) {
 
 	// u1 sends a typing event — should reach u2 and u3 but NOT u1.
 	hub.HandleMessageForTest(c1, typingStartMsg(chID))
-	time.Sleep(50 * time.Millisecond)
 
 	// u2 and u3 must receive the "typing" broadcast.
 	for i, sendCh := range []<-chan []byte{send2, send3} {
-		msgs := drainChan(sendCh)
-		found := false
-		for _, m := range msgs {
-			var env map[string]any
-			if err := json.Unmarshal(m, &env); err != nil {
-				continue
-			}
-			if env["type"] == "typing" {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if receiveMsgOfType(sendCh, "typing", waitTimeout) == nil {
 			t.Errorf("user%d (non-sender) did not receive typing broadcast", i+2)
 		}
 	}
 
-	// u1 (sender) must NOT receive it.
+	// u1 (sender) must NOT receive it. The fan-out that reached u2 and u3
+	// has completed, so a wrongly-included copy would already be buffered.
 	msgs1 := drainChan(send1)
 	for _, m := range msgs1 {
 		var env map[string]any
@@ -1781,9 +1718,8 @@ func TestBroadcastExclude_DifferentChannelNotReceived(t *testing.T) {
 
 	// uA types in channel A — uB in channel B must NOT receive it.
 	hub.HandleMessageForTest(cA, typingStartMsg(chA))
-	time.Sleep(50 * time.Millisecond)
 
-	msgsB := drainChan(sendB)
+	msgsB := drainChanTimeout(sendB, 50*time.Millisecond)
 	for _, m := range msgsB {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -1806,10 +1742,9 @@ func TestPresence_InvalidStatus_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, presenceUpdateMsg("invisible"))
-	time.Sleep(50 * time.Millisecond)
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -1829,13 +1764,12 @@ func TestPresence_ValidStatus_Broadcasts(t *testing.T) {
 			send := make(chan []byte, 16)
 			c := ws.NewTestClientWithUser(hub, user, 0, send)
 			hub.Register(c)
-			time.Sleep(20 * time.Millisecond)
+			waitRegistered(t, hub, c)
 
 			hub.HandleMessageForTest(c, presenceUpdateMsg(status))
-			time.Sleep(50 * time.Millisecond)
 
 			// Must NOT receive a BAD_REQUEST error.
-			msgs := drainChan(send)
+			msgs := drainChanTimeout(send, 50*time.Millisecond)
 			for _, m := range msgs {
 				var env map[string]any
 				if err := json.Unmarshal(m, &env); err != nil {
@@ -1867,7 +1801,7 @@ func TestChannelFocus_ValidFocus_UpdatesChannelID(t *testing.T) {
 	// Start client on channel 0.
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Focus on chID.
 	raw, _ := json.Marshal(map[string]any{
@@ -1875,10 +1809,9 @@ func TestChannelFocus_ValidFocus_UpdatesChannelID(t *testing.T) {
 		"payload": map[string]any{"channel_id": chID},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	// No error expected.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
@@ -1891,20 +1824,8 @@ func TestChannelFocus_ValidFocus_UpdatesChannelID(t *testing.T) {
 
 	// Now broadcast to chID — client should receive it because channel was focused.
 	hub.BroadcastToChannel(chID, []byte(`{"type":"ping","payload":{}}`))
-	time.Sleep(30 * time.Millisecond)
 
-	found := false
-	for _, m := range drainChan(send) {
-		var env map[string]any
-		if err := json.Unmarshal(m, &env); err != nil {
-			continue
-		}
-		if env["type"] == "ping" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if receiveMsgOfType(send, "ping", waitTimeout) == nil {
 		t.Error("client did not receive broadcast after channel_focus updated its channelID")
 	}
 }
@@ -1918,17 +1839,16 @@ func TestChannelFocus_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "channel_focus",
 		"payload": map[string]any{"channel_id": 0},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	// Constructor rejects channel_id <= 0 with BAD_REQUEST.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		var env map[string]any
@@ -1975,16 +1895,14 @@ func TestHandleMessage_BannedUser_GetKickedAfterSessionCheck(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithTokenHash(hub, user, hash, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send enough messages to cross the session-check threshold.
 	for i := range ws.SessionCheckInterval + 1 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
 	}
-	time.Sleep(100 * time.Millisecond)
 
-	// The hub should have kicked the banned client.
-	time.Sleep(50 * time.Millisecond)
+	// The ban check kicks synchronously (kickClient) inside handleMessage.
 	if hub.ClientCount() != 0 {
 		t.Error("banned user was not kicked after session check")
 	}

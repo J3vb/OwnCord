@@ -183,10 +183,9 @@ func TestVoice_Join_SetsStateInDB(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
@@ -214,21 +213,12 @@ func TestVoice_Join_BroadcastsVoiceState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
-	// Look for a voice_state message in either send or send2.
-	foundVoiceState := false
-	allMsgs := append(drainChan(send), drainChan(send2)...)
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_state" {
-			foundVoiceState = true
-			break
-		}
-	}
-	if !foundVoiceState {
+	// The second channel member must receive the voice_state broadcast.
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
 		t.Error("voice_state broadcast not received after voice_join")
 	}
 }
@@ -242,24 +232,22 @@ func TestVoice_Join_SendsCurrentStatesToJoiner(t *testing.T) {
 	send1 := make(chan []byte, 16)
 	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	// Drain send1 to clear join broadcast.
-	drainChan(send1)
+	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 joins — should receive voice_state for user1.
 	user2 := seedVoiceOwner(t, database, "carol2")
 	send2 := make(chan []byte, 16)
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
 	// user2 should have received a voice_state for user1.
-	msgs2 := drainChan(send2)
+	msgs2 := drainChanTimeout(send2, 50*time.Millisecond)
 	voiceStateCount := 0
 	for _, msg := range msgs2 {
 		if extractType(t, msg) == "voice_state" {
@@ -277,16 +265,15 @@ func TestVoice_Join_MissingChannelID_SendsError(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	badMsg, _ := json.Marshal(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": 0},
 	})
 	hub.HandleMessageForTest(c, badMsg)
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -305,12 +292,11 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, 9999, send) // no user set → hasChannelPerm returns false
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -332,13 +318,11 @@ func TestVoice_Leave_ClearsStateInDB(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceLeaveMsg())
-	time.Sleep(30 * time.Millisecond)
 
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
@@ -363,25 +347,19 @@ func TestVoice_Leave_BroadcastsVoiceLeave(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
+	// Consume the join's voice_state broadcast so only the leave remains.
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
+		t.Fatal("no voice_state broadcast after voice_join")
+	}
 	drainChan(send)
 	drainChan(send2)
 
 	hub.HandleMessageForTest(c, voiceLeaveMsg())
-	time.Sleep(50 * time.Millisecond)
 
-	allMsgs := append(drainChan(send), drainChan(send2)...)
-	found := false
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_leave" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if receiveMsgOfType(send2, "voice_leave", waitTimeout) == nil {
 		t.Error("voice_leave broadcast not received after voice_leave message")
 	}
 }
@@ -396,13 +374,11 @@ func TestVoice_Mute_UpdatesStateInDB(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceMuteMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
@@ -427,24 +403,19 @@ func TestVoice_Mute_BroadcastsVoiceState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
+	// Consume the join's voice_state broadcast so the next one seen is the mute's.
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
+		t.Fatal("no voice_state broadcast after voice_join")
+	}
 	drainChan(send)
 	drainChan(send2)
 
 	hub.HandleMessageForTest(c, voiceMuteMsg(true))
-	time.Sleep(50 * time.Millisecond)
 
-	allMsgs := append(drainChan(send), drainChan(send2)...)
-	found := false
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_state" {
-			found = true
-			break
-		}
-	}
+	found := receiveMsgOfType(send2, "voice_state", waitTimeout) != nil
 	if !found {
 		t.Error("voice_state broadcast not received after voice_mute")
 	}
@@ -460,13 +431,11 @@ func TestVoice_Deafen_UpdatesStateInDB(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceDeafenMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
@@ -491,24 +460,19 @@ func TestVoice_Deafen_BroadcastsVoiceState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
+	// Consume the join's voice_state broadcast so the next one seen is the deafen's.
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
+		t.Fatal("no voice_state broadcast after voice_join")
+	}
 	drainChan(send)
 	drainChan(send2)
 
 	hub.HandleMessageForTest(c, voiceDeafenMsg(true))
-	time.Sleep(50 * time.Millisecond)
 
-	allMsgs := append(drainChan(send), drainChan(send2)...)
-	found := false
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_state" {
-			found = true
-			break
-		}
-	}
+	found := receiveMsgOfType(send2, "voice_state", waitTimeout) != nil
 	if !found {
 		t.Error("voice_state broadcast not received after voice_deafen")
 	}
@@ -540,17 +504,19 @@ func TestVoice_Camera_UpdatesState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
-	// Join voice channel first.
+	// Join voice channel first; consume the join's voice_state broadcast so
+	// the payload check below sees the camera toggle's broadcast.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
+		t.Fatal("no voice_state broadcast after voice_join")
+	}
 	drainChan(send)
 	drainChan(send2)
 
 	// Toggle camera on.
 	hub.HandleMessageForTest(c, voiceCameraMsg(true))
-	time.Sleep(50 * time.Millisecond)
 
 	// Verify DB state.
 	state, err := database.GetVoiceState(context.Background(), user.ID)
@@ -562,25 +528,11 @@ func TestVoice_Camera_UpdatesState(t *testing.T) {
 	}
 
 	// Verify voice_state broadcast received by channel member.
-	allMsgs := append(drainChan(send), drainChan(send2)...)
 	foundVoiceState := false
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_state" {
-			foundVoiceState = true
-
-			var env struct {
-				Type    string `json:"type"`
-				Payload struct {
-					Camera bool `json:"camera"`
-				} `json:"payload"`
-			}
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal voice_state: %v", err)
-			}
-			if !env.Payload.Camera {
-				t.Error("voice_state broadcast payload.camera = false, want true")
-			}
-			break
+	if payload := receiveMsgOfType(send2, "voice_state", waitTimeout); payload != nil {
+		foundVoiceState = true
+		if cam, _ := payload["camera"].(bool); !cam {
+			t.Error("voice_state broadcast payload.camera = false, want true")
 		}
 	}
 	if !foundVoiceState {
@@ -596,12 +548,11 @@ func TestVoice_Camera_NoPermission(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, 7001, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceCameraMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -622,19 +573,17 @@ func TestVoice_Camera_RateLimit(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Send 5 camera toggles rapidly — limit is 2/sec, so some should be rate-limited.
 	for range 5 {
 		hub.HandleMessageForTest(c, voiceCameraMsg(true))
 	}
-	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	errCount := 0
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -672,17 +621,19 @@ func TestVoice_Screenshare_UpdatesState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
-	// Join voice channel first.
+	// Join voice channel first; consume the join's voice_state broadcast so
+	// the payload check below sees the screenshare toggle's broadcast.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
+	if receiveMsgOfType(send2, "voice_state", waitTimeout) == nil {
+		t.Fatal("no voice_state broadcast after voice_join")
+	}
 	drainChan(send)
 	drainChan(send2)
 
 	// Toggle screenshare on.
 	hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
-	time.Sleep(50 * time.Millisecond)
 
 	// Verify DB state.
 	state, err := database.GetVoiceState(context.Background(), user.ID)
@@ -694,25 +645,11 @@ func TestVoice_Screenshare_UpdatesState(t *testing.T) {
 	}
 
 	// Verify voice_state broadcast received.
-	allMsgs := append(drainChan(send), drainChan(send2)...)
 	foundVoiceState := false
-	for _, msg := range allMsgs {
-		if extractType(t, msg) == "voice_state" {
-			foundVoiceState = true
-
-			var env struct {
-				Type    string `json:"type"`
-				Payload struct {
-					Screenshare bool `json:"screenshare"`
-				} `json:"payload"`
-			}
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal voice_state: %v", err)
-			}
-			if !env.Payload.Screenshare {
-				t.Error("voice_state broadcast payload.screenshare = false, want true")
-			}
-			break
+	if payload := receiveMsgOfType(send2, "voice_state", waitTimeout); payload != nil {
+		foundVoiceState = true
+		if ss, _ := payload["screenshare"].(bool); !ss {
+			t.Error("voice_state broadcast payload.screenshare = false, want true")
 		}
 	}
 	if !foundVoiceState {
@@ -728,12 +665,11 @@ func TestVoice_Screenshare_NoPermission(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, 7002, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	found := false
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -754,19 +690,17 @@ func TestVoice_Screenshare_RateLimit(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Send 5 screenshare toggles rapidly — limit is 2/sec.
 	for range 5 {
 		hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
 	}
-	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	errCount := 0
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
@@ -788,17 +722,15 @@ func TestVoice_HandleMessage_VoiceCamera_Dispatched(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Send via HandleMessageForTest to verify dispatch occurs (no unknown_type error).
 	hub.HandleMessageForTest(c, voiceCameraMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
 			var errEnv struct {
@@ -823,17 +755,15 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Send via HandleMessageForTest to verify dispatch occurs (no unknown_type error).
 	hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
-	time.Sleep(30 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	for _, m := range msgs {
 		if extractType(t, m) == "error" {
 			var errEnv struct {
@@ -875,11 +805,10 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	send1 := make(chan []byte, 32)
 	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	// First user joins — should succeed.
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Verify first user is in DB.
 	state1, err := database.GetVoiceState(context.Background(), user1.ID)
@@ -891,16 +820,15 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	send2 := make(chan []byte, 32)
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	drainChan(send1)
 	drainChan(send2)
 
 	// Second user joins — should get CHANNEL_FULL error.
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
-	msgs2 := drainChan(send2)
+	msgs2 := drainChanTimeout(send2, 50*time.Millisecond)
 	foundFull := false
 	for _, msg := range msgs2 {
 		if extractType(t, msg) == "error" {
@@ -941,12 +869,11 @@ func TestVoice_Join_SendsVoiceConfig(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 50*time.Millisecond)
 	foundConfig := false
 	for _, msg := range msgs {
 		if extractType(t, msg) == "voice_config" {
@@ -992,12 +919,11 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, userA, chanA, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Join channel A.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Verify in channel A via DB.
 	stateA, _ := database.GetVoiceState(context.Background(), userA.ID)
@@ -1007,7 +933,6 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 
 	// Join channel B — should leave A first.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanB))
-	time.Sleep(50 * time.Millisecond)
 
 	// DB state should show channel B.
 	stateB, _ := database.GetVoiceState(context.Background(), userA.ID)
@@ -1026,18 +951,16 @@ func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	drainChan(send)
+	drainChanTimeout(send, 30*time.Millisecond)
 
 	// Join same channel again.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
 
 	// Should receive ALREADY_JOINED error.
-	msgs := drainChan(send)
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
 	foundAlreadyJoined := false
 	for _, m := range msgs {
 		if code := extractCode(t, m); code == "ALREADY_JOINED" {
@@ -1061,14 +984,12 @@ func TestVoice_Leave_OnDisconnect(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
 
 	// Simulate disconnect by calling the exported test hook.
 	hub.HandleVoiceLeaveForTest(c)
-	time.Sleep(30 * time.Millisecond)
 
 	// DB state should be cleared.
 	state, err := database.GetVoiceState(context.Background(), user.ID)

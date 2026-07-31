@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
@@ -26,7 +25,7 @@ func TestIsUserConnected_Connected(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if !hub.IsUserConnected(user.ID) {
 		t.Error("expected true for registered user")
@@ -39,10 +38,11 @@ func TestIsUserConnected_AfterUnregister(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.Unregister(c)
-	time.Sleep(20 * time.Millisecond)
+	waitFor(t, waitTimeout, func() bool { return !hub.IsUserConnected(user.ID) },
+		"client to be unregistered")
 
 	if hub.IsUserConnected(user.ID) {
 		t.Error("expected false after unregister")
@@ -177,7 +177,7 @@ func TestHandleVoiceMute_NotInVoice2(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 
 	// Should receive an error about not being in a voice channel.
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -210,7 +210,7 @@ func TestHandleVoiceDeafen_NotInVoice2(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_deafen", "payload": json.RawMessage(payload)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -240,7 +240,7 @@ func TestHandleVoiceCamera_NotInVoice2(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_camera", "payload": json.RawMessage(payload)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -270,7 +270,7 @@ func TestHandleVoiceScreenshare_NotInVoice2(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_screenshare", "payload": json.RawMessage(payload)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -303,7 +303,7 @@ func TestHandleVoiceMute_BadPayload(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_mute", "payload": json.RawMessage(`{invalid json`)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -334,7 +334,7 @@ func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_deafen", "payload": json.RawMessage(`not json`)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -368,7 +368,7 @@ func TestHandleVoiceCamera_BadPayload(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_camera", "payload": json.RawMessage(`{bad`)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send
@@ -402,7 +402,7 @@ func TestHandleVoiceScreenshare_BadPayload(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"type": "voice_screenshare", "payload": json.RawMessage(`{bad`)})
 	hub.HandleMessageForTest(c, raw)
 
-	time.Sleep(10 * time.Millisecond)
+	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
 		msg := <-send

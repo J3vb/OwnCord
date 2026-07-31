@@ -557,12 +557,13 @@ func TestHub_BroadcastServerRestart_DeliversToAllClients(t *testing.T) {
 	u2 := seedTestUser(t, database, "restart-u2")
 	s1 := make(chan []byte, 4)
 	s2 := make(chan []byte, 4)
+	c2 := ws.NewTestClient(hub, u2, s2)
 	hub.Register(ws.NewTestClient(hub, u1, s1))
-	hub.Register(ws.NewTestClient(hub, u2, s2))
-	time.Sleep(20 * time.Millisecond)
+	hub.Register(c2)
+	waitRegistered(t, hub, c2) // in-order events: both clients registered
 
 	hub.BroadcastServerRestart("update", 5)
-	time.Sleep(20 * time.Millisecond)
+	// The receive selects below block with their own timeout.
 
 	for _, s := range []chan []byte{s1, s2} {
 		select {
@@ -603,12 +604,13 @@ func TestHub_BroadcastChannelCreate_DeliversToAllClients(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "chcreate-u1")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	ch := &db.Channel{ID: 77, Name: "announcements", Type: "text", Category: "News", Position: 1}
 	hub.BroadcastChannelCreate(ch)
-	time.Sleep(20 * time.Millisecond)
+	// The receive select below blocks with its own timeout.
 
 	select {
 	case msg := <-s1:
@@ -641,12 +643,13 @@ func TestHub_BroadcastChannelUpdate_DeliversToAllClients(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "chupdate-u1")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	ch := &db.Channel{ID: 88, Name: "updated-channel", Type: "text", Category: "General", Position: 2}
 	hub.BroadcastChannelUpdate(ch)
-	time.Sleep(20 * time.Millisecond)
+	// The receive select below blocks with its own timeout.
 
 	select {
 	case msg := <-s1:
@@ -676,11 +679,12 @@ func TestHub_BroadcastChannelDelete_DeliversToAllClients(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "chdel-u1")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	hub.BroadcastChannelDelete(123)
-	time.Sleep(20 * time.Millisecond)
+	// The receive select below blocks with its own timeout.
 
 	select {
 	case msg := <-s1:
@@ -709,11 +713,12 @@ func TestHub_BroadcastMemberBan_DeliversToAllClients(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "ban-u1")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	hub.BroadcastMemberBan(999)
-	time.Sleep(20 * time.Millisecond)
+	// The receive select below blocks with its own timeout.
 
 	select {
 	case msg := <-s1:
@@ -742,11 +747,12 @@ func TestHub_BroadcastMemberUpdate_DeliversToAllClients(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "memupdate-u1")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	hub.BroadcastMemberUpdate(888, "moderator")
-	time.Sleep(20 * time.Millisecond)
+	// The receive select below blocks with its own timeout.
 
 	select {
 	case msg := <-s1:

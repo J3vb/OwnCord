@@ -22,10 +22,9 @@ func TestHandleVoiceTokenRefresh_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -40,18 +39,16 @@ func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": vcID},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	foundToken := false
@@ -77,12 +74,11 @@ func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, user.ID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	ws.SetVoiceChIDForTest(c, 42)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "INTERNAL" {
@@ -99,15 +95,16 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 	ws.SetVoiceChIDForTest(c, vcID)
 
+	// rollbackVoiceJoin, CleanupVoiceForChannel, and sweepStaleVoiceStates are
+	// synchronous — their client/DB effects are visible as soon as they return.
 	hub.RollbackVoiceJoinForTest(c, vcID)
-	time.Sleep(100 * time.Millisecond)
 
 	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
 		t.Fatalf("voiceChID after rollback = %d, want 0", got)
@@ -138,11 +135,10 @@ func TestRollbackVoiceJoin_NoDBState_DoesNotPanic(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	ws.SetVoiceChIDForTest(c, 999)
 	hub.RollbackVoiceJoinForTest(c, 999)
-	time.Sleep(50 * time.Millisecond)
 
 	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
 		t.Fatalf("voiceChID after rollback = %d, want 0", got)
@@ -200,7 +196,7 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	if err := database.JoinVoiceChannel(context.Background(), user1.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel u1: %v", err)
@@ -212,7 +208,6 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	ws.SetVoiceChIDForTest(c2, vcID)
 
 	hub.CleanupVoiceForChannel(vcID)
-	time.Sleep(100 * time.Millisecond)
 
 	if got := ws.GetClientVoiceChIDForTest(c1); got != 0 {
 		t.Errorf("c1 voiceChID = %d, want 0", got)
@@ -231,7 +226,6 @@ func TestCleanupVoiceForChannel_EmptyChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	vcID := seedVoiceChannel(t, database, "cvfc-empty-vc")
 	hub.CleanupVoiceForChannel(vcID)
-	time.Sleep(20 * time.Millisecond)
 
 	// After cleanup of an empty channel, voice states should still be empty.
 	states, err := database.GetChannelVoiceStates(context.Background(), vcID)
@@ -253,7 +247,6 @@ func TestCleanupVoiceForChannel_DBStateButNoClient(t *testing.T) {
 	}
 
 	hub.CleanupVoiceForChannel(vcID)
-	time.Sleep(50 * time.Millisecond)
 
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
@@ -280,7 +273,6 @@ func TestSweepStaleVoiceStates_RemovesGhostState(t *testing.T) {
 	}
 
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(100 * time.Millisecond)
 
 	// Ghost state should be removed.
 	state, _ = database.GetVoiceState(context.Background(), user.ID)
@@ -298,7 +290,7 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
@@ -306,7 +298,6 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 	ws.SetVoiceChIDForTest(c, vcID)
 
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(100 * time.Millisecond)
 
 	// Active client's state should be preserved.
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
@@ -318,7 +309,6 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 func TestSweepStaleVoiceStates_NoStatesNoPanic(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(50 * time.Millisecond)
 
 	// With no voice states in the DB, sweep should leave the system clean.
 	// Verify by checking a known user has no voice state.
@@ -342,7 +332,7 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if err := database.JoinVoiceChannel(context.Background(), user.ID, vc2); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
@@ -350,7 +340,6 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	ws.SetVoiceChIDForTest(c, vc1) // Client thinks vc1, DB says vc2 — mismatch.
 
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(100 * time.Millisecond)
 
 	// Mismatched state should be removed from DB.
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
@@ -379,7 +368,7 @@ func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if joinErr := database.JoinVoiceChannel(context.Background(), user.ID, vcID); joinErr != nil {
 		t.Fatalf("JoinVoiceChannel: %v", joinErr)
@@ -392,7 +381,6 @@ func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
 
 	// Still permitted → the sweep leaves them alone.
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(100 * time.Millisecond)
 	if state, _ := database.GetVoiceState(context.Background(), user.ID); state == nil {
 		t.Fatal("a permitted participant must survive the sweep")
 	}
@@ -405,7 +393,6 @@ func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
 	}
 
 	hub.SweepStaleVoiceStatesForTest()
-	time.Sleep(200 * time.Millisecond)
 
 	if state, _ := database.GetVoiceState(context.Background(), user.ID); state != nil {
 		t.Error("revoked participant's voice state must be deleted by the sweep")

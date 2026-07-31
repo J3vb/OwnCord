@@ -22,7 +22,7 @@ func TestHandleVoiceJoin_InvalidChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -31,7 +31,6 @@ func TestHandleVoiceJoin_InvalidChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -45,7 +44,7 @@ func TestHandleVoiceJoin_NegativeChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -54,7 +53,6 @@ func TestHandleVoiceJoin_NegativeChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -68,7 +66,7 @@ func TestHandleVoiceMute_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Put client in voice so the "not in voice" guard doesn't fire first.
 	ws.SetClientVoiceChID(c, 999)
@@ -78,7 +76,6 @@ func TestHandleVoiceMute_InvalidPayload(t *testing.T) {
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -92,7 +89,7 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Put client in voice so the "not in voice" guard doesn't fire first.
 	ws.SetClientVoiceChID(c, 999)
@@ -102,7 +99,6 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -118,7 +114,7 @@ func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_camera",
@@ -127,7 +123,6 @@ func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "VOICE_ERROR" {
@@ -145,7 +140,7 @@ func TestHandleVoiceCamera_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Set voice channel so the not-in-voice check passes.
 	ws.SetClientVoiceChID(c, vcID)
@@ -155,7 +150,6 @@ func TestHandleVoiceCamera_InvalidPayload(t *testing.T) {
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -169,7 +163,7 @@ func TestHandleVoiceScreenshare_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_screenshare",
@@ -178,7 +172,6 @@ func TestHandleVoiceScreenshare_NotInVoice(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "VOICE_ERROR" {
@@ -196,7 +189,7 @@ func TestHandleVoiceScreenshare_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	ws.SetClientVoiceChID(c, vcID)
 
@@ -205,7 +198,6 @@ func TestHandleVoiceScreenshare_InvalidPayload(t *testing.T) {
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -222,7 +214,7 @@ func TestHandleVoiceJoin_FullFlow(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -231,7 +223,6 @@ func TestHandleVoiceJoin_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 500*time.Millisecond)
 	foundState := false
@@ -300,14 +291,13 @@ func TestVoiceState_NotDeliveredToRolesDeniedRead(t *testing.T) {
 	joinerSend := make(chan []byte, 64)
 	jc := ws.NewTestClientWithUser(hub, joiner, 0, joinerSend)
 	hub.Register(jc)
-	time.Sleep(30 * time.Millisecond)
+	waitRegistered(t, hub, jc)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": vcID},
 	})
 	hub.HandleMessageForTest(jc, raw)
-	time.Sleep(150 * time.Millisecond)
 
 	countVoiceState := func(ch <-chan []byte) int {
 		n := 0
@@ -334,7 +324,7 @@ func TestHandleVoiceJoin_AlreadyInSameChannel(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -343,11 +333,9 @@ func TestHandleVoiceJoin_AlreadyInSameChannel(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "ALREADY_JOINED" {
@@ -363,7 +351,7 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 	send := make(chan []byte, 128)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw1, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -372,8 +360,7 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw1)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	raw2, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -382,7 +369,6 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw2)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	foundLeave := false
@@ -421,7 +407,7 @@ func TestHandleVoiceJoin_ChannelFull(t *testing.T) {
 	send1 := make(chan []byte, 64)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -430,17 +416,15 @@ func TestHandleVoiceJoin_ChannelFull(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c1, raw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send1)
+	drainChanTimeout(send1, 100*time.Millisecond)
 
 	user2 := seedCoverageOwner(t, database, "vj-full-u2")
 	send2 := make(chan []byte, 64)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	hub.HandleMessageForTest(c2, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	code := drainForErrorCode(send2, 300*time.Millisecond)
 	if code != "CHANNEL_FULL" {
@@ -455,7 +439,7 @@ func TestHandleVoiceLeave_ExplicitLeave(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -464,12 +448,10 @@ func TestHandleVoiceLeave_ExplicitLeave(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	leaveRaw, _ := json.Marshal(map[string]any{"type": "voice_leave"})
 	hub.HandleMessageForTest(c, leaveRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	foundLeave := false
@@ -491,10 +473,10 @@ func TestHandleVoiceLeave_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
+	// handleVoiceLeave is synchronous — a no-op leave returns with state intact.
 	hub.HandleVoiceLeaveForTest(c)
-	time.Sleep(20 * time.Millisecond)
 
 	// Client should still be connected and have no voice channel set.
 	if !hub.IsUserConnected(user.ID) {
@@ -512,7 +494,7 @@ func TestHandleVoiceMute_FullFlow(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -521,8 +503,7 @@ func TestHandleVoiceMute_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	muteRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_mute",
@@ -531,7 +512,6 @@ func TestHandleVoiceMute_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, muteRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	found := false
@@ -554,7 +534,7 @@ func TestHandleVoiceDeafen_FullFlow(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -563,8 +543,7 @@ func TestHandleVoiceDeafen_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	deafenRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_deafen",
@@ -573,7 +552,6 @@ func TestHandleVoiceDeafen_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, deafenRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	found := false
@@ -595,7 +573,7 @@ func TestHandleVoiceJoin_ChannelNotFound(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -604,7 +582,6 @@ func TestHandleVoiceJoin_ChannelNotFound(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "NOT_FOUND" {
@@ -628,7 +605,7 @@ func TestHandleVoiceJoin_WithQualityOverride(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -637,7 +614,6 @@ func TestHandleVoiceJoin_WithQualityOverride(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	for _, msg := range msgs {
@@ -661,7 +637,7 @@ func TestHandleVoiceJoin_MultipleParticipants(t *testing.T) {
 	send1 := make(chan []byte, 64)
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -670,17 +646,15 @@ func TestHandleVoiceJoin_MultipleParticipants(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c1, raw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send1)
+	drainChanTimeout(send1, 100*time.Millisecond)
 
 	user2 := seedCoverageOwner(t, database, "vj-multi-u2")
 	send2 := make(chan []byte, 64)
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	hub.HandleMessageForTest(c2, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send2, 300*time.Millisecond)
 	voiceStateCount := 0
@@ -707,7 +681,7 @@ func TestHandleVoiceLeave_BroadcastsToOtherParticipants(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(30 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -716,15 +690,12 @@ func TestHandleVoiceLeave_BroadcastsToOtherParticipants(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c1, joinRaw)
-	time.Sleep(100 * time.Millisecond)
 	hub.HandleMessageForTest(c2, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send1)
+	drainChanTimeout(send1, 100*time.Millisecond)
 	drainChanBuf(send2)
 
 	leaveRaw, _ := json.Marshal(map[string]any{"type": "voice_leave"})
 	hub.HandleMessageForTest(c1, leaveRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send2, 300*time.Millisecond)
 	found := false
@@ -747,7 +718,7 @@ func TestHandleVoiceCamera_FullFlow(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -756,8 +727,7 @@ func TestHandleVoiceCamera_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	camRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_camera",
@@ -766,7 +736,6 @@ func TestHandleVoiceCamera_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, camRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	found := false
@@ -789,7 +758,7 @@ func TestHandleVoiceScreenshare_FullFlow(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	joinRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -798,8 +767,7 @@ func TestHandleVoiceScreenshare_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, joinRaw)
-	time.Sleep(100 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 100*time.Millisecond)
 
 	ssRaw, _ := json.Marshal(map[string]any{
 		"type": "voice_screenshare",
@@ -808,7 +776,6 @@ func TestHandleVoiceScreenshare_FullFlow(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, ssRaw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	found := false
@@ -832,7 +799,7 @@ func TestHandleVoiceMute_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_mute",
@@ -841,7 +808,6 @@ func TestHandleVoiceMute_NotInVoice(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "VOICE_ERROR" {
@@ -855,7 +821,7 @@ func TestHandleVoiceDeafen_NotInVoice(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_deafen",
@@ -864,7 +830,6 @@ func TestHandleVoiceDeafen_NotInVoice(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "VOICE_ERROR" {
@@ -890,7 +855,7 @@ func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_join",
@@ -899,7 +864,6 @@ func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	for _, msg := range msgs {
