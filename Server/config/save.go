@@ -204,7 +204,7 @@ type bytesProvider []byte
 
 func (b bytesProvider) ReadBytes() ([]byte, error) { return b, nil }
 
-func (b bytesProvider) Read() (map[string]interface{}, error) {
+func (b bytesProvider) Read() (map[string]any, error) {
 	return nil, errors.New("bytesProvider requires a parser")
 }
 

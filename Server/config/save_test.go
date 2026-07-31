@@ -10,8 +10,6 @@ import (
 	"github.com/owncord/server/config"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 // loadNoEnv loads cfgPath ensuring no OWNCORD_ env overrides leak in from the
 // test environment.
 func loadNoEnv(t *testing.T, cfgPath string) *config.Config {
@@ -31,11 +29,11 @@ func TestSavePatchesGeneratedDefaultFile(t *testing.T) {
 	loadNoEnv(t, cfgPath)
 
 	err := config.Save(cfgPath, config.Patch{
-		ServerPort:      ptr(9000),
-		ServerName:      ptr("My Cool Server"),
-		TLSMode:         ptr("off"),
-		UploadMaxSizeMB: ptr(250),
-		VoiceQuality:    ptr("high"),
+		ServerPort:      new(9000),
+		ServerName:      new("My Cool Server"),
+		TLSMode:         new("off"),
+		UploadMaxSizeMB: new(250),
+		VoiceQuality:    new("high"),
 	})
 	if err != nil {
 		t.Fatalf("Save() returned error: %v", err)
@@ -100,7 +98,7 @@ custom_section:
 		t.Fatalf("writing hand-edited file: %v", err)
 	}
 
-	if err := config.Save(cfgPath, config.Patch{ServerName: ptr("New Name")}); err != nil {
+	if err := config.Save(cfgPath, config.Patch{ServerName: new("New Name")}); err != nil {
 		t.Fatalf("Save() returned error: %v", err)
 	}
 
@@ -136,7 +134,7 @@ func TestSaveCreatesMissingFileFromTemplate(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	if err := config.Save(cfgPath, config.Patch{ServerPort: ptr(9999)}); err != nil {
+	if err := config.Save(cfgPath, config.Patch{ServerPort: new(9999)}); err != nil {
 		t.Fatalf("Save() returned error: %v", err)
 	}
 
@@ -168,8 +166,8 @@ func TestSaveVoiceCredentialsOnlyWhenEmpty(t *testing.T) {
 		loadNoEnv(t, cfgPath) // default file: livekit creds commented out
 
 		err := config.Save(cfgPath, config.Patch{
-			VoiceAPIKey:    ptr("key-abc123"),
-			VoiceAPISecret: ptr("0123456789abcdef0123456789abcdef"),
+			VoiceAPIKey:    new("key-abc123"),
+			VoiceAPISecret: new("0123456789abcdef0123456789abcdef"),
 		})
 		if err != nil {
 			t.Fatalf("Save() returned error: %v", err)
@@ -196,8 +194,8 @@ func TestSaveVoiceCredentialsOnlyWhenEmpty(t *testing.T) {
 		}
 
 		err := config.Save(cfgPath, config.Patch{
-			VoiceAPIKey:    ptr("key-should-not-win"),
-			VoiceAPISecret: ptr("secret-should-not-win-9876543210"),
+			VoiceAPIKey:    new("key-should-not-win"),
+			VoiceAPISecret: new("secret-should-not-win-9876543210"),
 		})
 		if err != nil {
 			t.Fatalf("Save() returned error: %v", err)
@@ -219,7 +217,7 @@ func TestSaveYAMLInjectionIsInert(t *testing.T) {
 	loadNoEnv(t, cfgPath)
 
 	hostile := "x\nserver:\n  port: 1 # pwned"
-	if err := config.Save(cfgPath, config.Patch{ServerName: ptr(hostile)}); err != nil {
+	if err := config.Save(cfgPath, config.Patch{ServerName: new(hostile)}); err != nil {
 		t.Fatalf("Save() returned error: %v", err)
 	}
 
@@ -244,7 +242,7 @@ func TestSaveLeavesUnparseableFileIntact(t *testing.T) {
 			if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
 				t.Fatalf("writing file: %v", err)
 			}
-			if err := config.Save(cfgPath, config.Patch{ServerPort: ptr(9000)}); err == nil {
+			if err := config.Save(cfgPath, config.Patch{ServerPort: new(9000)}); err == nil {
 				t.Fatal("Save() succeeded on a file it cannot safely patch")
 			}
 			raw, err := os.ReadFile(cfgPath)
