@@ -281,7 +281,8 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
-  # allowed_origins: []       # empty = deny cross-origin; set to ["*"] for dev or specific origins for prod
+  # allowed_origins: []       # browser origins allowed to connect; empty = deny cross-origin.
+  #                           # The OwnCord desktop client is always accepted and needs no entry.
   # trusted_proxies: []       # CIDRs of the reverse-proxy HOPS only (e.g. ["10.0.0.2/32"]).
   #                           # Never list client networks here: a range that covers
   #                           # clients degrades per-client rate limiting and lets

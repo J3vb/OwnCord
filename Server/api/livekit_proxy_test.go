@@ -73,18 +73,21 @@ func TestIsOriginAllowed_EmptyOriginAllowed(t *testing.T) {
 	}
 }
 
+// Note: fixtures use origins distinct from httptest's default request host
+// (example.com) so these exercise the allowlist path, not the same-origin
+// allowance.
 func TestIsOriginAllowed_MatchingOrigin(t *testing.T) {
 	r := httptest.NewRequest("GET", "/livekit/", nil)
-	r.Header.Set("Origin", "https://example.com")
-	if !isOriginAllowed(r, []string{"https://example.com"}) {
+	r.Header.Set("Origin", "https://app.example.net")
+	if !isOriginAllowed(r, []string{"https://app.example.net"}) {
 		t.Error("expected true for matching origin")
 	}
 }
 
 func TestIsOriginAllowed_CaseInsensitive(t *testing.T) {
 	r := httptest.NewRequest("GET", "/livekit/", nil)
-	r.Header.Set("Origin", "HTTPS://EXAMPLE.COM")
-	if !isOriginAllowed(r, []string{"https://example.com"}) {
+	r.Header.Set("Origin", "HTTPS://APP.EXAMPLE.NET")
+	if !isOriginAllowed(r, []string{"https://app.example.net"}) {
 		t.Error("expected true for case-insensitive origin match")
 	}
 }
@@ -107,7 +110,7 @@ func TestIsOriginAllowed_WildcardAllowsAll(t *testing.T) {
 
 func TestIsOriginAllowed_EmptyAllowlistDenies(t *testing.T) {
 	r := httptest.NewRequest("GET", "/livekit/", nil)
-	r.Header.Set("Origin", "https://example.com")
+	r.Header.Set("Origin", "https://cross.example.net")
 	if isOriginAllowed(r, []string{}) {
 		t.Error("expected false when allowlist is empty")
 	}
@@ -119,6 +122,68 @@ func TestIsOriginAllowed_MultipleAllowedOrigins(t *testing.T) {
 	allowed := []string{"https://a.com", "https://b.com", "https://c.com"}
 	if !isOriginAllowed(r, allowed) {
 		t.Error("expected true for origin in multi-origin allowlist")
+	}
+}
+
+// The desktop client's webview issues LiveKit signal/validate requests
+// directly (not via its Origin-stripping Rust proxy), so its fixed origins
+// must pass even on the default empty allowlist — otherwise voice 403s on
+// every fresh install for any client not on the server machine.
+func TestIsOriginAllowed_FirstPartyDesktopOrigins(t *testing.T) {
+	for _, origin := range []string{
+		"http://tauri.localhost",  // WebView2 (Windows)
+		"https://tauri.localhost", // WebView2, https variant
+		"tauri://localhost",       // WKWebView / WebKitGTK (macOS, Linux)
+		"HTTP://TAURI.LOCALHOST",  // case-insensitive
+	} {
+		r := httptest.NewRequest("GET", "/livekit/", nil)
+		r.Header.Set("Origin", origin)
+		if !isOriginAllowed(r, nil) {
+			t.Errorf("expected true for first-party desktop origin %q with empty allowlist", origin)
+		}
+	}
+}
+
+// A browser always attaches the page's origin to WebSocket handshakes, so a
+// page served by this very server (Origin host == request Host) must pass
+// even on the default empty allowlist. This mirrors websocket.Accept's
+// default same-origin policy, which the chat WS endpoint already applies —
+// without it a same-origin client can chat but voice 403s.
+func TestIsOriginAllowed_SameOriginAllowed(t *testing.T) {
+	for _, origin := range []string{
+		"https://192.168.0.125:8443",
+		"HTTPS://192.168.0.125:8443", // case-insensitive
+	} {
+		r := httptest.NewRequest("GET", "https://192.168.0.125:8443/livekit/", nil)
+		r.Header.Set("Origin", origin)
+		if !isOriginAllowed(r, nil) {
+			t.Errorf("expected true for same-origin %q with empty allowlist", origin)
+		}
+	}
+}
+
+// Same host but a different port is a different origin and must not pass.
+func TestIsOriginAllowed_SameHostDifferentPortDenied(t *testing.T) {
+	r := httptest.NewRequest("GET", "https://192.168.0.125:8443/livekit/", nil)
+	r.Header.Set("Origin", "https://192.168.0.125:9999")
+	if isOriginAllowed(r, nil) {
+		t.Error("expected false for same host with different port")
+	}
+}
+
+// A lookalike origin must NOT ride along with the first-party allowance.
+func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
+	for _, origin := range []string{
+		"http://tauri.localhost.evil.com",
+		"http://eviltauri.localhost",
+		"http://tauri.localhost:8080",
+		"tauri://evil",
+	} {
+		r := httptest.NewRequest("GET", "/livekit/", nil)
+		r.Header.Set("Origin", origin)
+		if isOriginAllowed(r, nil) {
+			t.Errorf("expected false for lookalike origin %q", origin)
+		}
 	}
 }
 
