@@ -42,6 +42,12 @@ export type MessageInputComponent = MountableComponent & {
    * the server would refuse is prevented here, not attempted and rejected.
    */
   setDisabled(reason: string | null): void;
+  /**
+   * Open the attachment file picker, as the "+" button does. Backs the
+   * Ctrl+U shortcut. No-op while the composer is disabled or when the host
+   * didn't wire an upload handler.
+   */
+  openFilePicker(): void;
 };
 
 const TYPING_THROTTLE_MS = 3_000;
@@ -86,6 +92,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
   let attachmentPreviewBar: HTMLDivElement | null = null;
+  /** Set by mount() when file uploads are wired; backs openFilePicker(). */
+  let openPicker: (() => void) | null = null;
 
   /** Pending attachment IDs to send with the next message. */
   const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] =
@@ -425,6 +433,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         { signal },
       );
       attachBtn.addEventListener("click", () => fileInput.click(), { signal });
+      openPicker = () => {
+        if (disabledReason !== null) return;
+        fileInput.click();
+      };
       root?.appendChild(fileInput);
     } else {
       attachBtn.setAttribute("disabled", "true");
@@ -667,7 +679,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyText = null;
     editBar = null;
     attachmentPreviewBar = null;
+    openPicker = null;
   }
 
-  return { mount, destroy, setReplyTo, clearReply, startEdit, cancelEdit, setDisabled };
+  function openFilePicker(): void {
+    openPicker?.();
+  }
+
+  return {
+    mount,
+    destroy,
+    setReplyTo,
+    clearReply,
+    startEdit,
+    cancelEdit,
+    setDisabled,
+    openFilePicker,
+  };
 }

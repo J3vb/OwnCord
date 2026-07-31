@@ -9,13 +9,11 @@ const { testPrefs } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
 }));
 
-// Mock the settings helpers
-vi.mock("../../src/components/settings/helpers", () => ({
+// Mock the preference store shared by the settings panel and lib modules
+vi.mock("../../src/lib/preferences", () => ({
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
-  THEMES: { dark: {}, midnight: {}, light: {} },
-  applyTheme: vi.fn(),
 }));
 
 // Mock livekitSession (imported transitively by auth.store)
@@ -931,6 +929,45 @@ describe("notifyIncomingMessage", () => {
 
       expect(sendNotification).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Do Not Disturb", () => {
+    it("suppresses the desktop notification and the sound while DND", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("notificationSounds", true);
+      testPrefs.set("flashTaskbar", true);
+      testPrefs.set("userStatus", "dnd");
+
+      notifyIncomingMessage(makePayload());
+
+      // The taskbar flash still fires — it's the one passive cue DND keeps.
+      await vi.waitFor(() => {
+        const win = getCurrentWindow();
+        expect(win.requestUserAttention).toHaveBeenCalled();
+      });
+
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+    });
+
+    it("still notifies for other statuses", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("userStatus", "idle");
+
+      notifyIncomingMessage(makePayload());
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
     });
   });
 

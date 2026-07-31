@@ -68,6 +68,8 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
+  /** Open the composer's attachment picker (Ctrl+U). No-op with no composer. */
+  openFilePicker(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +409,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   return {
     mountChannel,
     destroyChannel,
+    openFilePicker: () => messageInput?.openFilePicker(),
     get currentChannelId() {
       return _currentChannelId;
     },
