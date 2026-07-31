@@ -198,9 +198,16 @@ export const MOCK_MESSAGES_RICH = {
   has_more: true,
 };
 
+// Remote users only — the ready payload must never claim the LOCAL user
+// (id 1) is in a voice channel: the dispatcher treats "self in
+// ready.voice_states while voiceStatus is idle" as stale state from a
+// reload and immediately sends voice_leave + clears the local store
+// (dispatcher.ts stale-voice cleanup), which would hide the widget again.
+// Tests that need the widget visible must join via the real click path
+// (see joinVoiceChannelByName).
 export const MOCK_VOICE_STATE = [
-  { user_id: 1, channel_id: 10, muted: false, deafened: false },
   { user_id: 2, channel_id: 10, muted: true, deafened: false },
+  { user_id: 3, channel_id: 10, muted: false, deafened: false },
 ];
 
 export const MOCK_PINNED_MESSAGES = {
@@ -350,17 +357,21 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
       handler: `
         var p = parsed.payload;
         setTimeout(function() {
+          // Full VoiceStatePayload shape — the server always sends username
+          // (and the flag fields); the sidebar renders user.username directly,
+          // so an omitted username breaks the voice-user list render.
           __tauriEmitEvent("ws-message", JSON.stringify({
             type: "voice_state",
-            payload: { user_id: 1, channel_id: p.channel_id, muted: false, deafened: false }
+            payload: { user_id: 1, channel_id: p.channel_id, username: "testuser", muted: false, deafened: false, speaking: false, camera: false, screenshare: false }
           }));
         }, 50);
-        setTimeout(function() {
-          __tauriEmitEvent("ws-message", JSON.stringify({
-            type: "voice_token",
-            payload: { token: "mock-livekit-token", url: "ws://localhost:7880", channel_id: p.channel_id, direct_url: "" }
-          }));
-        }, 100);
+        // Deliberately NO voice_token reply: a token makes the client start a
+        // real LiveKit session, which in the browser mock deterministically
+        // self-destructs (E2EE key exchange times out after ~15s, and
+        // Room.connect to the fake port fails after ~3 retries), tearing the
+        // widget down mid-test. These web tests validate the WS/UI layer only
+        // (see voice-lifecycle.spec.ts header); real LiveKit is covered by the
+        // native suite.
       `,
     },
     {
@@ -607,6 +618,18 @@ export function buildTauriMockScript(opts: {
         }
         if (cmd === "ws_disconnect") return;
 
+        // ---- HTTP TOFU proxy ----
+        // api.ts routes all REST calls through the Rust loopback proxy:
+        // baseUrl() awaits start_http_proxy and builds
+        // http://127.0.0.1:{port}/api/v1/... — if this returns null (the
+        // unhandled-command fallback), the URL gets a literal "null" port and
+        // Request construction throws before the plugin:http mock above is
+        // ever consulted, failing every login. Any numeric port works: the
+        // transport is still plugin:http|fetch and route matching is
+        // substring-based, so the fake origin never has to be listened on.
+        if (cmd === "start_http_proxy") return 45123;
+        if (cmd === "stop_http_proxy") return;
+
         // ---- LiveKit proxy ----
         if (cmd === "start_livekit_proxy") return { port: 7880 };
         if (cmd === "stop_livekit_proxy") return;
@@ -620,6 +643,14 @@ export function buildTauriMockScript(opts: {
 
         // ---- Certs ----
         if (cmd === "store_cert_fingerprint" || cmd === "get_cert_fingerprint") return null;
+        if (cmd === "accept_cert_fingerprint") return null;
+
+        // ---- E2EE identity (keyring blob + TOFU pins) ----
+        // null = "no stored key/pin". ensureIdentityKeyPublished on the ready
+        // event is fire-and-forget (void), so a null store is safe and just
+        // exercises the fresh-key path.
+        if (cmd === "save_identity_key" || cmd === "load_identity_key" || cmd === "delete_identity_key") return null;
+        if (cmd === "store_identity_pin" || cmd === "get_identity_pin") return null;
 
         // ---- Window/webview plugin stubs ----
         if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;
@@ -887,6 +918,22 @@ export async function waitForWsReady(page: Page): Promise<void> {
 export async function navigateToMainPageReady(page: Page): Promise<void> {
   await navigateToMainPage(page);
   await waitForWsReady(page);
+}
+
+/**
+ * Join a voice channel through the real click path and wait for the voice
+ * widget to become visible. This is the only supported way for tests to get
+ * the local user into voice: pre-seeding the ready payload with user 1 no
+ * longer works (the dispatcher's stale-voice cleanup immediately leaves).
+ */
+export async function joinVoiceChannelByName(
+  page: Page,
+  channelName = "Voice Chat",
+): Promise<void> {
+  await page.locator(".channel-item.voice", { hasText: channelName }).click();
+  await expect(page.locator("[data-testid='voice-widget']")).toHaveClass(/visible/, {
+    timeout: 10_000,
+  });
 }
 
 /**

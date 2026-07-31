@@ -87,11 +87,12 @@ test.describe("Voice Widget", () => {
 
     const usersBefore = await page.locator(".voice-user-item").count();
 
-    // Another user joins the voice channel
+    // Another user joins the voice channel (id 4 — NOT already in
+    // MOCK_VOICE_STATE, so this is a genuine join, not an in-place update)
     await emitWsMessage(page, {
       type: "voice_state",
       payload: {
-        user_id: 3,
+        user_id: 4,
         username: "newvoiceuser",
         channel_id: 10,
         muted: false,

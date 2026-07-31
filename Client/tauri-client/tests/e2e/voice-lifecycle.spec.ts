@@ -16,6 +16,7 @@ import {
   mockTauriFullSessionWithVoice,
   mockTauriFullSessionWithVoiceFailure,
   navigateToMainPageReady,
+  joinVoiceChannelByName,
   emitWsMessage,
 } from "./helpers";
 
@@ -27,7 +28,7 @@ test.describe("Voice lifecycle", () => {
   });
 
   test("shows voice users in voice channel sidebar", async ({ page }) => {
-    // MOCK_VOICE_STATE has users 1 and 2 in channel 10 ("Voice Chat")
+    // MOCK_VOICE_STATE has remote users 2 and 3 in channel 10 ("Voice Chat")
     const voiceChannel = page.locator(".channel-item", { hasText: "Voice Chat" });
     await expect(voiceChannel).toBeVisible();
 
@@ -72,12 +73,12 @@ test.describe("Voice lifecycle", () => {
     // Wait for voice users to render
     await expect(page.locator(".voice-user-item")).toHaveCount(2, { timeout: 5000 });
 
-    // Emit speakers event — user 1 is speaking
+    // Emit speakers event — user 3 (in channel 10 per the ready payload) speaks
     await emitWsMessage(page, {
       type: "voice_speakers",
       payload: {
         channel_id: 10,
-        speakers: [1],
+        speakers: [3],
       },
     });
 
@@ -92,7 +93,7 @@ test.describe("Voice lifecycle", () => {
     // User starts speaking
     await emitWsMessage(page, {
       type: "voice_speakers",
-      payload: { channel_id: 10, speakers: [1] },
+      payload: { channel_id: 10, speakers: [3] },
     });
     await expect(page.locator(".voice-user-item.speaking")).toBeVisible({ timeout: 5000 });
 
@@ -143,6 +144,7 @@ test.describe("Voice widget", () => {
   });
 
   test("voice widget stats pane toggles on signal click", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const signal = page.locator(".vw-signal");
     const statsPane = page.locator(".vw-stats");
 
@@ -160,9 +162,11 @@ test.describe("Voice widget", () => {
 });
 
 test.describe("Voice WS flow", () => {
-  // MOCK_VOICE_STATE puts user 1 in channel 10 ("Voice Chat") during the
-  // ready payload, so the widget is ALREADY visible when tests start.
-  // Clicking "Voice Chat" toggles (leaves), clicking "Music" joins channel 11.
+  // The local user starts OUTSIDE voice: pre-seeding ready.voice_states with
+  // user 1 no longer works — the dispatcher's stale-voice cleanup would send
+  // voice_leave and clear the store immediately. Tests join via the real
+  // click path (joinVoiceChannelByName) and the widget shows because
+  // joinVoiceChannel() sets currentChannelId synchronously on click.
 
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
@@ -170,30 +174,29 @@ test.describe("Voice WS flow", () => {
     await navigateToMainPageReady(page);
   });
 
-  // 1. Voice join flow — leave first, then join a different channel.
+  // 1. Voice join flow — join, leave, then join a different channel.
   test("joining a voice channel shows the widget", async ({ page }) => {
     const widget = page.locator("[data-testid='voice-widget']");
 
-    // Widget is already visible (user 1 in channel 10 from MOCK_VOICE_STATE)
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
+    // Not in voice at start
+    await expect(widget).not.toHaveClass(/visible/);
 
-    // Leave current channel via Disconnect
+    // Join "Voice Chat" (channel 10)
+    await joinVoiceChannelByName(page, "Voice Chat");
+
+    // Leave via Disconnect
     const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
     await disconnectBtn.click();
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
 
-    // Join "Music" (channel 11, user is NOT in it)
-    const musicChannel = page.locator(".channel-item.voice", { hasText: "Music" });
-    await musicChannel.click();
-
-    // joinVoiceChannel sets currentChannelId immediately → widget gets .visible
-    await expect(widget).toHaveClass(/visible/, { timeout: 10_000 });
+    // Join "Music" (channel 11)
+    await joinVoiceChannelByName(page, "Music");
   });
 
-  // 2. Voice leave flow — widget is already visible; clicking Disconnect hides it.
+  // 2. Voice leave flow — join, then clicking Disconnect hides the widget.
   test("clicking disconnect hides voice widget", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
     await disconnectBtn.click();
@@ -207,7 +210,7 @@ test.describe("Voice WS flow", () => {
 
     await emitWsMessage(page, {
       type: "voice_speakers",
-      payload: { channel_id: 10, speakers: [1] },
+      payload: { channel_id: 10, speakers: [3] },
     });
 
     await expect(page.locator(".voice-user-item.speaking")).toBeVisible({ timeout: 5000 });
@@ -216,8 +219,8 @@ test.describe("Voice WS flow", () => {
   // 4. Permission recovery button — grant mic button appears when
   //    listenOnly is true (display toggled via voice store subscription).
   test("grant mic button appears in listen-only mode", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     // Set listen-only mode by manipulating the DOM directly (store isn't
     // exposed on window; listenOnly is set by livekitSession on mic failure).
@@ -250,8 +253,8 @@ test.describe("Voice WS flow", () => {
 
   // 6. Connection quality warning — stats pane auto-expands on quality degradation.
   test("quality degradation auto-expands stats pane", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     const statsPane = page.locator(".vw-stats");
     await expect(statsPane).not.toHaveClass(/visible/);
@@ -268,8 +271,8 @@ test.describe("Voice WS flow", () => {
 
   // 7. Mute/deafen toggle — buttons use aria-pressed and .active-ctrl class.
   test("mute and deafen buttons toggle state", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     const muteBtn = widget.locator("button[aria-label='Mute']");
     await expect(muteBtn).toHaveAttribute("aria-pressed", "false", { timeout: 5000 });
@@ -284,11 +287,10 @@ test.describe("Voice WS flow", () => {
     await expect(deafenBtn).toHaveClass(/active-ctrl/);
   });
 
-  // 8. Voice timer — joinedAt is set during ready payload processing,
-  //    so the timer is already running when the test starts.
+  // 8. Voice timer — joinedAt is set by joinVoiceChannel() on click.
   test("voice timer shows elapsed time", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     const timer = widget.locator(".vw-timer");
     await expect(timer).toBeVisible({ timeout: 5000 });
@@ -297,8 +299,8 @@ test.describe("Voice WS flow", () => {
 
   // 9. Token refresh — emitting a new voice_token doesn't disconnect.
   test("token refresh does not disconnect session", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     await emitWsMessage(page, {
       type: "voice_token",
@@ -321,9 +323,9 @@ test.describe("Voice WS flow", () => {
     await emitWsMessage(page, {
       type: "voice_state",
       payload: {
-        user_id: 1,
+        user_id: 3,
         channel_id: 10,
-        username: "testuser",
+        username: "member1",
         muted: false,
         deafened: false,
         speaking: false,
@@ -336,26 +338,24 @@ test.describe("Voice WS flow", () => {
     await expect(cameraIndicator).toBeVisible({ timeout: 5000 });
   });
 
-  // 11. Re-join after leave — leave via Disconnect, then re-join.
+  // 11. Re-join after leave — join, leave via Disconnect, then re-join.
   test("can rejoin voice channel after leaving", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     // Leave voice
     const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
     await disconnectBtn.click();
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
 
-    // Re-join by clicking "Voice Chat" (now user is NOT in it)
-    const voiceChannel = page.locator(".channel-item.voice", { hasText: "Voice Chat" });
-    await voiceChannel.click();
-    await expect(widget).toHaveClass(/visible/, { timeout: 10_000 });
+    // Re-join
+    await joinVoiceChannelByName(page, "Voice Chat");
   });
 
-  // 12. Channel switch — already in Voice Chat, click Music to switch.
+  // 12. Channel switch — join Voice Chat, click Music to switch.
   test("switching voice channels updates channel name", async ({ page }) => {
+    await joinVoiceChannelByName(page, "Voice Chat");
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
 
     // Verify initial channel name
     await expect(widget.locator(".vw-channel")).toHaveText("Voice Chat", { timeout: 5000 });
@@ -378,26 +378,19 @@ test.describe("Voice WS flow — failure", () => {
     await navigateToMainPageReady(page);
   });
 
-  // 13. Voice join failure — leave first (user starts in channel 10),
-  //     then join Music which triggers the failure handler.
+  // 13. Voice join failure — join Music, which triggers the failure handler.
   test("voice join failure does not crash and disconnect still works", async ({ page }) => {
     const widget = page.locator("[data-testid='voice-widget']");
+    await expect(widget).not.toHaveClass(/visible/);
 
-    // User starts in channel 10 from MOCK_VOICE_STATE — leave first
-    await expect(widget).toHaveClass(/visible/, { timeout: 5_000 });
-    const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
-    await disconnectBtn.click();
-    await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
-
-    // Now join Music — the failure handler will respond with an error
-    const musicChannel = page.locator(".channel-item.voice", { hasText: "Music" });
-    await musicChannel.click();
-
-    // joinVoiceChannel is called synchronously, so the widget shows immediately
-    await expect(widget).toHaveClass(/visible/, { timeout: 10_000 });
+    // Join Music — the failure handler responds with a VOICE_JOIN_FAILED error
+    // event; joinVoiceChannel is called synchronously on click, so the widget
+    // shows immediately regardless.
+    await joinVoiceChannelByName(page, "Music");
 
     // Wait for the error event to be processed — verify app is still functional
     // by checking the disconnect button remains clickable
+    const disconnectBtn = widget.locator("button[aria-label='Disconnect']");
     await expect(disconnectBtn).toBeEnabled({ timeout: 5_000 });
     await disconnectBtn.click();
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
