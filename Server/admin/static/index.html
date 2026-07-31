@@ -278,13 +278,15 @@ const I={
   megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   logs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  plugins:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6"/><path d="M18 3v6"/><path d="M4 9h16v4a8 8 0 0 1-16 0z"/><path d="M12 21v-4"/></svg>',
+  upload:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
 };
 
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
-  cachedStats:null,cachedUpdate:null,channelCache:{},
+  cachedStats:null,cachedUpdate:null,channelCache:{},pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
@@ -398,6 +400,7 @@ const NAV=[
   {section:'Configuration'},
   {id:'audit',label:'Audit Log',icon:I.audit},
   {id:'tokens',label:'API Tokens',icon:I.lock},
+  {id:'plugins',label:'Plugins',icon:I.plugins},
   {id:'logs',label:'Server Logs',icon:I.logs},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
   {id:'backups',label:'Backups',icon:I.backup},
@@ -434,7 +437,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -997,6 +1000,142 @@ function confirmRevokeToken(id,label){
 }
 async function revokeToken(id){
   try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Plugins ═══ */
+/* The plugin lifecycle API lives under /api/v1/admin/plugins (same admin auth
+   and IP gate, different prefix), so it needs its own fetch helper rather than
+   api(). Errors come back as plain text from http.Error, not JSON. */
+async function pluginApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined)init.body=opts.body;
+  const res=await fetch('/api/v1/admin/plugins'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return{data:null,res};
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok){
+    const msg=(data&&(data.message||data.error))||text.trim()||res.statusText;
+    throw new Error(msg);
+  }
+  return{data,res};
+}
+
+function pluginManifestSummary(row){
+  const raw=row.manifest_json||row.ManifestJSON||'';
+  if(!raw)return'';
+  try{
+    const m=JSON.parse(raw);
+    const bits=[];
+    if(m.description)bits.push(m.description);
+    if(Array.isArray(m.permissions)&&m.permissions.length)bits.push('permissions: '+m.permissions.join(', '));
+    return bits.join(' — ');
+  }catch(e){return''}
+}
+
+async function renderPlugins(){
+  let rows;
+  try{
+    const out=await pluginApi('GET','/');
+    rows=out.data||[];
+    state.pluginRuntime=out.res.headers.get('X-Plugin-Runtime')||'unknown';
+  }catch(e){
+    return'<div class="page-title">Plugins</div><p style="color:var(--red)">'+esc(e.message)+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+  }
+
+  const disabled=state.pluginRuntime==='disabled';
+  let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
+
+  if(disabled){
+    html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--yellow)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-faint);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
+  }else{
+    html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
+    html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
+    html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+    html+='<input type="file" id="pluginFile" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" onchange="document.getElementById(\'pluginInstallBtn\').disabled=!this.files.length">';
+    html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled onclick="installPlugin()">'+I.upload+' Install</button>';
+    html+='</div></div></div>';
+  }
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Installed</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
+  html+='<table class="tbl"><thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Installed</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!rows.length){
+    const empty=disabled?'No plugins installed — and the runtime is off':'No plugins installed yet';
+    html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">'+empty+'</td></tr>';
+  }else rows.forEach(row=>{
+    const id=row.id!==undefined?row.id:row.ID;
+    const name=row.name||row.Name||'';
+    const version=row.version||row.Version||'';
+    const enabled=row.enabled!==undefined?row.enabled:row.Enabled;
+    const installed=row.installed_at||row.InstalledAt||'';
+    const summary=pluginManifestSummary(row);
+    html+='<tr><td><div><strong>'+esc(name)+'</strong>'+(summary?'<div style="font-size:12px;color:var(--text-faint);margin-top:2px">'+esc(summary)+'</div>':'')+'</div></td>';
+    html+='<td style="font-family:var(--font-mono);font-size:12px">'+esc(version||'—')+'</td>';
+    html+='<td>'+(enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-muted">Disabled</span>')+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-faint)">'+(installed?new Date(installed).toLocaleString():'')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">';
+    if(disabled){
+      html+='<span style="font-size:12px;color:var(--text-faint)">runtime off</span>';
+    }else{
+      html+='<button class="btn btn-ghost" onclick="setPluginEnabled('+id+','+(enabled?'false':'true')+')">'+(enabled?'Disable':'Enable')+'</button>';
+      html+='<button class="act-btn danger" title="Uninstall" onclick="openUninstallPlugin('+id+',\''+jsq(name)+'\')">'+I.trash+'</button>';
+    }
+    html+='</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+async function installPlugin(){
+  const input=document.getElementById('pluginFile');
+  const btn=document.getElementById('pluginInstallBtn');
+  const file=input&&input.files&&input.files[0];
+  if(!file){showToast('Choose a .zip package first','error');return}
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  if(btn){btn.disabled=true;btn.textContent='Installing...'}
+  const fd=new FormData();
+  fd.append('plugin',file);
+  try{
+    // No explicit Content-Type: the browser must set the multipart boundary.
+    const out=await pluginApi('POST','/install',{body:fd});
+    const name=(out.data&&out.data.name)||file.name;
+    showToast('Installed '+name);
+    state.pluginBusy=false;
+    renderContent();
+  }catch(e){
+    state.pluginBusy=false;
+    showToast(e.message,'error');
+    if(btn){btn.disabled=false;btn.textContent='Install'}
+  }
+}
+
+async function setPluginEnabled(id,enable){
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  try{
+    await pluginApi('POST','/'+id+'/'+(enable?'enable':'disable'));
+    showToast(enable?'Plugin enabled':'Plugin disabled');
+  }catch(e){showToast(e.message,'error')}
+  state.pluginBusy=false;
+  renderContent();
+}
+
+function openUninstallPlugin(id,name){
+  openModal('<div class="modal-header"><h3>Uninstall Plugin</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Remove <strong style="color:white">'+esc(name)+'</strong> and its files from the server? Any data it stored is discarded. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="uninstallPlugin('+id+')">Uninstall</button></div>');
+}
+
+async function uninstallPlugin(id){
+  if(state.pluginBusy)return;
+  state.pluginBusy=true;
+  try{
+    await pluginApi('DELETE','/'+id);
+    closeModal();
+    showToast('Plugin uninstalled');
+  }catch(e){showToast(e.message,'error')}
+  state.pluginBusy=false;
+  renderContent();
 }
 
 /* ═══ Updates ═══ */
