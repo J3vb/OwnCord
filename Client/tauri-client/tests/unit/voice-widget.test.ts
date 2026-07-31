@@ -129,6 +129,7 @@ describe("VoiceWidget", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels };
     });
@@ -162,6 +163,7 @@ describe("VoiceWidget", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels };
     });
@@ -195,6 +197,7 @@ describe("VoiceWidget", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels };
     });

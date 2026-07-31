@@ -332,46 +332,42 @@ function buildVoiceAudioTabInner(
   previewWrap.appendChild(previewVideo);
   section.appendChild(previewWrap);
 
-  // Populate devices asynchronously
-  void (async () => {
+  /**
+   * (Re)fill the three device dropdowns from the current device list.
+   *
+   * Called on build and again on every `devicechange`, so unplugging a headset
+   * with the panel open removes it from the list instead of leaving a dead
+   * entry the user can select. A saved device that has vanished falls back to
+   * "Default" — the same thing the voice session does on hot-swap.
+   */
+  async function populateDevices(): Promise<void> {
+    const selects: Array<[HTMLSelectElement, MediaDeviceKind, string, string]> = [
+      [inputSelect, "audioinput", "audioInputDevice", "Microphone"],
+      [outputSelect, "audiooutput", "audioOutputDevice", "Speaker"],
+      [videoSelect, "videoinput", "videoInputDevice", "Camera"],
+    ];
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const savedInput = loadPref<string>("audioInputDevice", "");
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      const savedVideo = loadPref<string>("videoInputDevice", "");
+      if (signal.aborted) return;
 
-      for (const d of devices) {
-        if (d.kind === "audioinput") {
-          const opt = createElement(
-            "option",
-            { value: d.deviceId },
-            d.label || `Microphone (${d.deviceId.slice(0, 8)})`,
+      for (const [select, kind, prefKey, label] of selects) {
+        const saved = loadPref<string>(prefKey, "");
+        // Keep the leading "Default" option, replace the rest.
+        while (select.options.length > 1) select.remove(1);
+        let savedStillPresent = false;
+        for (const d of devices) {
+          if (d.kind !== kind) continue;
+          if (d.deviceId === saved) savedStillPresent = true;
+          select.appendChild(
+            createElement(
+              "option",
+              { value: d.deviceId },
+              d.label || `${label} (${d.deviceId.slice(0, 8)})`,
+            ),
           );
-          if (d.deviceId === savedInput) opt.setAttribute("selected", "");
-          inputSelect.appendChild(opt);
-        } else if (d.kind === "audiooutput") {
-          const opt = createElement(
-            "option",
-            { value: d.deviceId },
-            d.label || `Speaker (${d.deviceId.slice(0, 8)})`,
-          );
-          if (d.deviceId === savedOutput) opt.setAttribute("selected", "");
-          outputSelect.appendChild(opt);
-        } else if (d.kind === "videoinput") {
-          const opt = createElement(
-            "option",
-            { value: d.deviceId },
-            d.label || `Camera (${d.deviceId.slice(0, 8)})`,
-          );
-          if (d.deviceId === savedVideo) opt.setAttribute("selected", "");
-          videoSelect.appendChild(opt);
         }
+        select.value = saved !== "" && savedStillPresent ? saved : "";
       }
-
-      // Restore saved selections
-      if (savedInput) inputSelect.value = savedInput;
-      if (savedOutput) outputSelect.value = savedOutput;
-      if (savedVideo) videoSelect.value = savedVideo;
     } catch {
       const errOpt = createElement(
         "option",
@@ -380,7 +376,22 @@ function buildVoiceAudioTabInner(
       );
       inputSelect.appendChild(errOpt);
     }
-  })();
+  }
+
+  void populateDevices();
+
+  // MediaDevices is an EventTarget everywhere this ships, but a webview that
+  // exposes enumerateDevices without the event target shouldn't take the tab
+  // down with it — it just loses live refresh.
+  if (typeof navigator.mediaDevices?.addEventListener === "function") {
+    navigator.mediaDevices.addEventListener(
+      "devicechange",
+      () => {
+        void populateDevices();
+      },
+      { signal },
+    );
+  }
 
   inputSelect.addEventListener(
     "change",

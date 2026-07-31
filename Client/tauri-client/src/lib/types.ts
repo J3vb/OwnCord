@@ -21,16 +21,32 @@ export type VoiceQuality = "low" | "medium" | "high";
 export type ReactionAction = "add" | "remove";
 
 /** WebSocket error codes returned by the server. */
+/**
+ * Error codes the server can send over the socket. Mirrors
+ * `Server/ws/errors.go` — the union was missing more than half of them
+ * (SLOW_MODE, CONFLICT, BAD_REQUEST…), so code that switched on it could not
+ * name the cases the server actually emits.
+ */
 export type WsErrorCode =
-  | "BANNED"
-  | "FORBIDDEN"
+  | "BAD_REQUEST"
+  | "INTERNAL"
   | "NOT_FOUND"
+  | "FORBIDDEN"
   | "RATE_LIMITED"
-  | "INVALID_INPUT"
-  | "SERVER_ERROR"
+  | "ALREADY_JOINED"
   | "CHANNEL_FULL"
   | "VOICE_ERROR"
-  | "VIDEO_LIMIT";
+  | "VIDEO_LIMIT"
+  | "BANNED"
+  | "INVALID_JSON"
+  | "UNKNOWN_TYPE"
+  | "SLOW_MODE"
+  | "CONFLICT"
+  | "BAD_PAYLOAD"
+  | "NOT_KEY_HOLDER"
+  // Kept for older servers / existing call sites.
+  | "INVALID_INPUT"
+  | "SERVER_ERROR";
 
 /** REST API error codes. */
 export type ApiErrorCode =
@@ -104,6 +120,11 @@ export interface ReadyChannel {
    * server still enforces. Absent from older servers.
    */
   readonly can_send?: boolean;
+  /**
+   * Per-channel cooldown in seconds (0 = off). Drives the composer's
+   * slow-mode countdown; the server still enforces. Absent from older servers.
+   */
+  readonly slow_mode?: number;
 }
 
 /** Member object in the ready payload. */
@@ -243,12 +264,14 @@ export interface ChannelCreatePayload {
   readonly type: ChannelType;
   readonly category: string | null;
   readonly position: number;
+  readonly slow_mode?: number;
 }
 
 export interface ChannelUpdatePayload {
   readonly id: number;
   readonly name?: string;
   readonly position?: number;
+  readonly slow_mode?: number;
 }
 
 export interface ChannelDeletePayload {

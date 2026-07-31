@@ -123,6 +123,7 @@ describe("notifyIncomingMessage", () => {
             unreadCount: 0,
             lastMessageId: null,
             canSend: true,
+            slowMode: 0,
           },
         ],
       ]),

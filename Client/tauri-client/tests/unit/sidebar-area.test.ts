@@ -1033,6 +1033,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1062,6 +1063,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });
@@ -1284,6 +1286,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1321,6 +1324,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         next.set(2, {
           id: 2,
@@ -1331,6 +1335,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1393,6 +1398,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
       });
@@ -1797,6 +1803,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          slowMode: 0,
         });
         return { ...prev, channels: next };
       });
