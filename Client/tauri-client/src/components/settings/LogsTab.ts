@@ -7,7 +7,7 @@ import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
-import { savePref } from "./helpers";
+import { savePref, readMigratedStringPref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -59,40 +59,6 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   }
 
   return row;
-}
-
-function readMigratedStringPref<T extends string>(
-  key: string,
-  fallback: T,
-  allowedValues: readonly T[],
-): T {
-  const currentRaw = localStorage.getItem(`owncord:settings:${key}`);
-  if (currentRaw !== null) {
-    try {
-      const currentValue: unknown = JSON.parse(currentRaw);
-      if (typeof currentValue === "string" && allowedValues.includes(currentValue as T)) {
-        return currentValue as T;
-      }
-    } catch {
-      // Ignore corrupted current storage and fall back below.
-    }
-  }
-
-  const legacyRaw = localStorage.getItem(key);
-  if (legacyRaw !== null) {
-    let legacyValue: unknown = legacyRaw;
-    try {
-      legacyValue = JSON.parse(legacyRaw);
-    } catch {
-      // Legacy values were previously stored as raw strings.
-    }
-    if (typeof legacyValue === "string" && allowedValues.includes(legacyValue as T)) {
-      savePref(key, legacyValue);
-      return legacyValue as T;
-    }
-  }
-
-  return fallback;
 }
 
 // ---------------------------------------------------------------------------

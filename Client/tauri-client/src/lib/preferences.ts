@@ -39,3 +39,43 @@ export function savePref(key: string, value: unknown): void {
     // localStorage may throw on quota exceeded or when storage is disabled.
   }
 }
+
+/**
+ * Read a string-valued pref restricted to `allowedValues`, migrating a legacy
+ * unprefixed localStorage entry forward when the prefixed key is unset.
+ * Legacy values were stored either raw or JSON-encoded; a migrated value is
+ * re-saved under the prefixed key via savePref.
+ */
+export function readMigratedStringPref<T extends string>(
+  key: string,
+  fallback: T,
+  allowedValues: readonly T[],
+): T {
+  const currentRaw = localStorage.getItem(STORAGE_PREFIX + key);
+  if (currentRaw !== null) {
+    try {
+      const currentValue: unknown = JSON.parse(currentRaw);
+      if (typeof currentValue === "string" && allowedValues.includes(currentValue as T)) {
+        return currentValue as T;
+      }
+    } catch {
+      // Ignore corrupted current storage and fall back below.
+    }
+  }
+
+  const legacyRaw = localStorage.getItem(key);
+  if (legacyRaw !== null) {
+    let legacyValue: unknown = legacyRaw;
+    try {
+      legacyValue = JSON.parse(legacyRaw);
+    } catch {
+      // Legacy values were previously stored as raw strings.
+    }
+    if (typeof legacyValue === "string" && allowedValues.includes(legacyValue as T)) {
+      savePref(key, legacyValue);
+      return legacyValue as T;
+    }
+  }
+
+  return fallback;
+}

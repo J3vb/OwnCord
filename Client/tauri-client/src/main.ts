@@ -15,13 +15,13 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
-import { createMainPage } from "@pages/MainPage";
-import { applyStoredAppearance } from "@components/SettingsOverlay";
+import { applyStoredAppearance } from "@lib/appearance";
 import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
+import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
-import { createLogger, setLogLevel } from "@lib/logger";
+import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
@@ -34,8 +34,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
-// just console noise. Dev builds keep full debug output.
-setLogLevel(import.meta.env.DEV ? "debug" : "info");
+// just console noise. Honors the level saved on the Logs settings tab; when
+// unset, dev builds keep full debug output and production defaults to info.
+applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
 
 const log = createLogger("main");
 
@@ -253,8 +254,13 @@ function runHealthChecks(
   }
 }
 
+// Guards the async MainPage mount below against the destroy-before-mount race:
+// a stale mount is discarded when a newer navigation supersedes it.
+const navGuard = createNavigationGuard();
+
 // Render the appropriate page based on router state
-function renderPage(pageId: "connect" | "main"): void {
+async function renderPage(pageId: "connect" | "main"): Promise<void> {
+  const isCurrentNavigation = navGuard.begin();
   log.info("Navigating to page", { pageId });
   // Destroy previous page
   currentPage?.destroy?.();
@@ -311,6 +317,10 @@ function renderPage(pageId: "connect" | "main"): void {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
         unsubState();
+        // Pre-warm the lazily-loaded MainPage chunk (and the LiveKit stack
+        // behind it) so navigating past the connected overlay doesn't wait
+        // on a dynamic import.
+        void import("@pages/MainPage");
         const auth = authStore.getState();
         connectedOverlay = createConnectedOverlay({
           serverName: auth.serverName ?? host,
@@ -535,6 +545,14 @@ function renderPage(pageId: "connect" | "main"): void {
       }
     })();
   } else {
+    // MainPage (and the LiveKit voice stack it statically imports) loads
+    // lazily so it stays out of the startup path. The chunk is pre-warmed as
+    // soon as the WS connect succeeds, so this normally resolves from the
+    // module cache.
+    const { createMainPage } = await import("@pages/MainPage");
+    // A newer navigation may have superseded this one while the chunk loaded;
+    // mounting now would fight the page that navigation rendered.
+    if (!isCurrentNavigation()) return;
     const mainPage = createMainPage({ ws, api });
     safeMount(mainPage, appEl!);
     currentPage = mainPage;
@@ -542,7 +560,9 @@ function renderPage(pageId: "connect" | "main"): void {
 }
 
 // Listen for navigation changes
-router.onNavigate(renderPage);
+router.onNavigate((pageId) => {
+  void renderPage(pageId);
+});
 
 // Handle logout / disconnect
 authStore.subscribeSelector(
@@ -582,8 +602,9 @@ window.addEventListener("beforeunload", () => {
   void flushLogs();
 });
 
-// Initial render
-renderPage(router.getCurrentPage());
+// Initial render (fire-and-forget — the initial page is "connect", whose
+// render branch is synchronous)
+void renderPage(router.getCurrentPage());
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
