@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/owncord/server/db/dbgen"
 	"github.com/owncord/server/migrations"
@@ -23,6 +24,12 @@ import (
 type DB struct {
 	sqlDB *sql.DB
 	q     *dbgen.Queries
+
+	// auditWriter, when installed via SetAuditWriter (main.go server
+	// startup only), turns WriteAudit calls backed by this DB into
+	// non-blocking enqueues. Nil (the default) keeps audit writes
+	// synchronous — the token CLI and tests rely on that.
+	auditWriter atomic.Pointer[AuditWriter]
 }
 
 // Open opens (or creates) a SQLite database at path, enables WAL mode and
