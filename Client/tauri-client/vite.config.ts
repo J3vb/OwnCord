@@ -18,6 +18,14 @@ export default defineConfig({
   build: {
     modulePreload: { polyfill: false },
     cssCodeSplit: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Keep the ~1.3 MB LiveKit SDK in its own chunk, out of the entry.
+          livekit: ["livekit-client"],
+        },
+      },
+    },
   },
   resolve: {
     alias: {

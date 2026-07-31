@@ -655,6 +655,60 @@ describe("ChannelSidebar", () => {
     expect(updatedRow!.classList.contains("speaking")).toBe(true);
   });
 
+  it("speaking patch keeps the exact row element (cached map, no rebuild)", () => {
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 61,
+      username: "Talker2",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const rowBefore = container.querySelector('.voice-user-item[data-voice-uid="61"]');
+    expect(rowBefore).not.toBeNull();
+
+    // speaking-only flip → patched via the cached row map, not re-rendered
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 61,
+      username: "Talker2",
+      muted: false,
+      deafened: false,
+      speaking: true,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.flush();
+
+    const rowAfter = container.querySelector('.voice-user-item[data-voice-uid="61"]');
+    expect(rowAfter).toBe(rowBefore); // same element instance
+    expect(rowAfter!.classList.contains("speaking")).toBe(true);
+
+    // …and a structural change (mute) still re-renders with a fresh row.
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 61,
+      username: "Talker2",
+      muted: true,
+      deafened: false,
+      speaking: true,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.flush();
+
+    const rowRebuilt = container.querySelector('.voice-user-item[data-voice-uid="61"]');
+    expect(rowRebuilt).not.toBe(rowBefore);
+    expect(rowRebuilt!.querySelector(".vu-muted")).not.toBeNull();
+    // The rebuilt row keeps the speaking class (patch runs after re-render).
+    expect(rowRebuilt!.classList.contains("speaking")).toBe(true);
+  });
+
   // ── Voice user avatar ──
 
   it("renders first-letter avatar with deterministic color for voice user", () => {

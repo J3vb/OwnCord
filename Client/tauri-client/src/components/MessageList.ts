@@ -14,6 +14,7 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { unobserveMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
 import { shouldGroup, isSameDay, renderDayDivider, renderMessage } from "./message-list/renderers";
@@ -100,10 +101,17 @@ function estimateItemHeight(item: VirtualItem): number {
 
 // -- Pre-process messages into virtual items ----------------------------------
 
-function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[] {
+/** Build virtual items for `messages`. The optional seed (`prevMsg` /
+ *  `lastTimestamp`) lets the incremental tail-append path continue grouping and
+ *  day-divider logic from an already-built item list. */
+function buildVirtualItems(
+  messages: readonly Message[],
+  seedPrevMsg: Message | null = null,
+  seedLastTimestamp: string | null = null,
+): readonly VirtualItem[] {
   const items: VirtualItem[] = [];
-  let lastTimestamp: string | null = null;
-  let prevMsg: Message | null = null;
+  let lastTimestamp: string | null = seedLastTimestamp;
+  let prevMsg: Message | null = seedPrevMsg;
 
   for (const msg of messages) {
     if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
@@ -319,6 +327,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  /** Release IntersectionObserver tracking, pending freeze timers, and frozen-
+   *  frame data URLs for GIFs in rows that are about to be discarded — without
+   *  this, media-visibility retains every <img> ever rendered. Must run before
+   *  every clearChildren(contentContainer) and on destroy. */
+  function releaseTrackedMedia(): void {
+    if (contentContainer === null) return;
+    for (const img of contentContainer.querySelectorAll("img")) {
+      unobserveMedia(img);
+    }
+  }
+
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
 
@@ -330,6 +349,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const clientHeight = root.clientHeight;
 
     if (virtualItems.length === 0) {
+      releaseTrackedMedia();
       clearChildren(contentContainer);
       // With no rows, the region shows the fetch state: an in-region loading
       // placeholder, an inline error + Retry, or the welcome/empty state once
@@ -386,6 +406,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       renderedEnd = end;
 
       // Rebuild content
+      releaseTrackedMedia();
       clearChildren(contentContainer);
       const fragment = document.createDocumentFragment();
       for (let i = start; i < end; i++) {
@@ -427,6 +448,95 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const h = cached !== undefined ? cached : estimateItemHeight(virtualItems[i]!);
       tree.set(i, h);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Incremental tail append (fast path)
+  // ---------------------------------------------------------------------------
+
+  /** Cap on rendered rows for the append fast path. Once the window grows past
+   *  this, fall back to renderAll so it is re-trimmed to the visible range. */
+  const MAX_INCREMENTAL_WINDOW = 200;
+
+  /**
+   * Fast path for the common "new message arrived at the tail" update: when
+   * the store's array is a pure suffix extension of `allMessages`, append the
+   * new rows and re-seed the Fenwick tree instead of tearing down the whole
+   * rendered window (renderAll → renderWindow REBUILD). Anything else (edits,
+   * deletes, history prepends, confirmations replacing optimistic rows)
+   * returns false so the caller does a full rebuild.
+   *
+   * Scroll-anchor/spacer safety: no existing row is touched, so the anchor
+   * item's offset only changes via the bottom spacer/appended rows below it;
+   * the ResizeObserver's RAF pass re-measures and restores the anchor exactly
+   * as it does for image loads. The renderWindow oscillation guard is not
+   * consumed — this path never rebuilds.
+   */
+  function tryAppendMessages(): boolean {
+    if (root === null || contentContainer === null || tree === null) return false;
+    if (renderAllRunning || renderedStart < 0) return false;
+
+    const prev = allMessages;
+    const next = getChannelMessages(options.channelId);
+    if (prev.length === 0 || next.length <= prev.length) return false;
+    for (let i = 0; i < prev.length; i++) {
+      if (next[i] !== prev[i]) return false;
+    }
+
+    const prevLast = prev[prev.length - 1]!;
+    const appendedItems = buildVirtualItems(next.slice(prev.length), prevLast, prevLast.timestamp);
+    const oldItemCount = virtualItems.length;
+    const windowAtTail = renderedEnd === oldItemCount;
+    if (
+      windowAtTail &&
+      renderedEnd - renderedStart + appendedItems.length > MAX_INCREMENTAL_WINDOW
+    ) {
+      return false; // window has grown too large — let renderAll re-trim it
+    }
+
+    const atBottom = isNearBottom();
+
+    // Capture measured heights of the currently rendered rows before swapping
+    // trees so the rebuilt tree starts from real measurements.
+    measureRendered();
+
+    allMessages = next;
+    virtualItems = [...virtualItems, ...appendedItems];
+
+    // Extend the height index. FenwickTree is fixed-size, so re-seed a fresh
+    // one from the height cache — cheap relative to the DOM teardown this
+    // path avoids.
+    tree = new FenwickTree(virtualItems.length);
+    for (let i = 0; i < virtualItems.length; i++) {
+      const cached = heightCache.get(itemKey(i));
+      tree.set(i, cached !== undefined ? cached : estimateItemHeight(virtualItems[i]!));
+    }
+
+    if (windowAtTail) {
+      // The rendered window includes the old tail — append the new rows.
+      const fragment = document.createDocumentFragment();
+      for (const item of appendedItems) {
+        if (item.kind === "divider") {
+          fragment.appendChild(renderDayDivider(item.timestamp));
+        } else {
+          fragment.appendChild(
+            renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
+          );
+        }
+      }
+      contentContainer.appendChild(fragment);
+      renderedEnd = virtualItems.length;
+      measureRendered();
+    }
+    // Otherwise the user has scrolled up past the tail: the new items only
+    // grow the bottom spacer; renderWindow picks them up on the next rebuild.
+
+    updateSpacers();
+    if (atBottom) {
+      scrollToBottom();
+      updateScrollToBottomBtn();
+    }
+    return true;
   }
 
   // Guard against re-entrant renderAll calls (e.g. if a subscriber fires
@@ -618,9 +728,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     unsubscribers.push(
       messagesStore.subscribeSelector(
-        (s) => s.messagesByChannel,
+        // Scoped to the mounted channel so updates to OTHER channels (their
+        // array references are unchanged) never trigger a re-render here.
+        (s) => s.messagesByChannel.get(options.channelId),
         () => {
-          renderAll();
+          if (!tryAppendMessages()) {
+            renderAll();
+          }
         },
       ),
     );
@@ -637,14 +751,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // Only re-render when member roles change, not on presence/typing updates.
-    // Extract a role-only map so shallowEqual ignores status changes.
+    // The store bumps roleRevision solely on membership/role mutations, so
+    // selecting the counter avoids rebuilding a role map per notification.
     unsubscribers.push(
       membersStore.subscribeSelector(
-        (s) => {
-          const roles = new Map<number, string>();
-          for (const [id, m] of s.members) roles.set(id, m.role);
-          return roles;
-        },
+        (s) => s.roleRevision ?? 0,
         () => {
           renderAll();
         },
@@ -681,6 +792,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unsubscribers.length = 0;
     heightCache.clear();
     tree = null;
+    releaseTrackedMedia();
     if (root !== null) {
       root.remove();
       root = null;

@@ -374,4 +374,116 @@ describe("MessageList", () => {
     expect(() => msgList.destroy?.()).not.toThrow();
     expect(container.querySelector(".messages-container")).toBeNull();
   });
+
+  it("does not re-render when a DIFFERENT channel's messages update", () => {
+    setMessages(1, [makeMessage({ id: 1, content: "Mine" })]);
+    msgList.mount(container);
+
+    const rowBefore = container.querySelector("[data-testid='message-1']");
+    expect(rowBefore).not.toBeNull();
+
+    // Update another channel — this list (channel 1) must not rebuild.
+    setMessages(2, [makeMessage({ id: 50, channelId: 2, content: "Other channel" })]);
+    messagesStore.flush();
+
+    const rowAfter = container.querySelector("[data-testid='message-1']");
+    expect(rowAfter).toBe(rowBefore); // same element instance — no re-render
+  });
+
+  describe("incremental tail append", () => {
+    it("appends new rows without rebuilding existing ones", () => {
+      setMessages(1, [
+        makeMessage({ id: 1, content: "First" }),
+        makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
+      ]);
+      msgList.mount(container);
+
+      const row1Before = container.querySelector("[data-testid='message-1']");
+      const row2Before = container.querySelector("[data-testid='message-2']");
+      expect(row1Before).not.toBeNull();
+      expect(row2Before).not.toBeNull();
+
+      // Pure suffix extension → fast path: existing rows keep their identity.
+      setMessages(1, [
+        ...(messagesStore.getState().messagesByChannel.get(1) ?? []),
+        makeMessage({ id: 3, content: "Third", timestamp: "2024-01-15T12:02:00Z" }),
+      ]);
+      messagesStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1Before);
+      expect(container.querySelector("[data-testid='message-2']")).toBe(row2Before);
+      expect(container.querySelector("[data-testid='message-3']")).not.toBeNull();
+    });
+
+    it("appended rows preserve order, grouping, and day dividers vs a full rebuild", () => {
+      const initial = [
+        makeMessage({ id: 1, content: "First", timestamp: "2024-01-15T12:00:00Z" }),
+        makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
+      ];
+      setMessages(1, initial);
+      msgList.mount(container);
+
+      const appended = [
+        // Same user within threshold → must render grouped.
+        makeMessage({ id: 3, content: "Third", timestamp: "2024-01-15T12:02:00Z" }),
+        // Next day, different user → must be preceded by a day divider.
+        makeMessage({
+          id: 4,
+          content: "Fourth",
+          user: { id: 2, username: "Bob", avatar: null },
+          timestamp: "2024-01-16T09:00:00Z",
+        }),
+      ];
+      const finalMessages = [...initial, ...appended];
+      setMessages(1, finalMessages);
+      messagesStore.flush();
+
+      const content = container.querySelector(".virtual-content")!;
+
+      // Reference render: a fresh list mounted with the final message set
+      // (full rebuild path) must produce the same structure.
+      const refContainer = document.createElement("div");
+      document.body.appendChild(refContainer);
+      const refList = createMessageList(options);
+      refList.mount(refContainer);
+      const refContent = refContainer.querySelector(".virtual-content")!;
+
+      const describeChildren = (el: Element): string[] =>
+        Array.from(el.children).map((c) => `${c.className}|${c.getAttribute("data-testid") ?? ""}`);
+      expect(describeChildren(content)).toEqual(describeChildren(refContent));
+
+      // Explicit semantic checks on the appended tail.
+      expect(container.querySelectorAll(".msg-day-divider").length).toBe(2);
+      const row3 = container.querySelector("[data-testid='message-3']")!;
+      expect(row3.classList.contains("grouped")).toBe(true);
+      const row4 = container.querySelector("[data-testid='message-4']")!;
+      expect(row4.classList.contains("grouped")).toBe(false);
+      const ids = Array.from(content.querySelectorAll("[data-testid^='message-']")).map((el) =>
+        el.getAttribute("data-testid"),
+      );
+      expect(ids).toEqual(["message-1", "message-2", "message-3", "message-4"]);
+
+      refList.destroy?.();
+      refContainer.remove();
+    });
+
+    it("falls back to a full rebuild for non-append updates (edit)", () => {
+      setMessages(1, [
+        makeMessage({ id: 1, content: "Original" }),
+        makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
+      ]);
+      msgList.mount(container);
+
+      // Replace message 1's object (an edit) — not a suffix extension.
+      setMessages(1, [
+        makeMessage({ id: 1, content: "Edited" }),
+        makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
+      ]);
+      messagesStore.flush();
+
+      const row1 = container.querySelector("[data-testid='message-1']");
+      expect(row1).not.toBeNull();
+      expect(row1!.textContent).toContain("Edited");
+    });
+  });
 });

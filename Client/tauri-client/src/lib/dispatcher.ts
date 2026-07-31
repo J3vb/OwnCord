@@ -35,6 +35,7 @@ import {
   setTyping,
 } from "@stores/members.store";
 import {
+  voiceStore,
   setVoiceStates,
   updateVoiceState,
   removeVoiceUser,
@@ -55,19 +56,19 @@ import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
 import type { DmChannelPayload } from "./types";
 import type { ApiClient } from "./api";
-import {
-  handleVoiceToken,
-  handleE2EEAnnounce,
-  handleE2EEOffer,
-  handleParticipantLeft,
-  isVoiceConnected,
-} from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
 
 const log = createLogger("dispatcher");
+
+/** Lazily import the LiveKit session module. livekit-client (~1.3 MB) is kept
+ *  out of the entry chunk; voice handlers load it on first use. Once a voice
+ *  flow has started the module is cached, so this resolves in a microtask. */
+function livekitSession(): Promise<typeof import("@lib/livekitSession")> {
+  return import("@lib/livekitSession");
+}
 
 /** Map a server DM channel payload to the client DmChannel type. */
 function mapDmPayload(p: DmChannelPayload): DmChannel {
@@ -138,13 +139,20 @@ export function wireDispatcher(
       setVoiceStates(payload.voice_states);
 
       // Defense-in-depth: if the ready payload shows us in a voice channel
-      // but we have no LiveKit room connection (e.g. after F5 reload),
-      // send voice_leave to clean up the stale state. The server should
-      // have already cleaned this up, but this handles edge cases.
+      // but we have no LiveKit session (e.g. after F5 reload), send
+      // voice_leave to clean up the stale state. The server should have
+      // already cleaned this up, but this handles edge cases.
+      //
+      // livekitSession is lazily imported, so instead of the synchronous
+      // isVoiceConnected() the check reads the voice store's lifecycle
+      // status: "idle" means no live or pending LiveKit session (a fresh
+      // reload always starts idle — exactly the stale case), while any other
+      // status means livekitSession is driving a session right now.
       const currentUserId = authStore.getState().user?.id ?? 0;
       const inVoicePerReady =
         currentUserId !== 0 && payload.voice_states.some((vs) => vs.user_id === currentUserId);
-      if (inVoicePerReady && !isVoiceConnected()) {
+      const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
+      if (inVoicePerReady && !voiceSessionActive) {
         log.warn("Stale voice state detected in ready payload — sending voice_leave");
         ws.send({ type: "voice_leave", payload: {} });
         leaveVoiceChannel();
@@ -413,7 +421,9 @@ export function wireDispatcher(
     ws.on(S.VOICE_LEAVE, (payload) => {
       removeVoiceUser(payload);
       // Notify E2EE state machine so key holder can rotate the room key.
-      void handleParticipantLeft(payload.user_id);
+      void livekitSession().then(({ handleParticipantLeft }) =>
+        handleParticipantLeft(payload.user_id),
+      );
       // Clear local voice state if the current user was removed (kick/disconnect)
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (payload.user_id === currentUserId) {
@@ -436,12 +446,14 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_TOKEN, (payload) => {
-      void handleVoiceToken(
-        payload.token,
-        payload.url,
-        payload.channel_id,
-        payload.direct_url,
-        payload.is_key_holder,
+      void livekitSession().then(({ handleVoiceToken }) =>
+        handleVoiceToken(
+          payload.token,
+          payload.url,
+          payload.channel_id,
+          payload.direct_url,
+          payload.is_key_holder,
+        ),
       );
     }),
   );
@@ -450,13 +462,17 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_E2EE_ANNOUNCE, (payload) => {
-      void handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature);
+      void livekitSession().then(({ handleE2EEAnnounce }) =>
+        handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
+      );
     }),
   );
 
   unsubs.push(
     ws.on(S.VOICE_E2EE_OFFER, (payload) => {
-      void handleE2EEOffer(payload.from_user_id, payload.encrypted_key, payload.iv);
+      void livekitSession().then(({ handleE2EEOffer }) =>
+        handleE2EEOffer(payload.from_user_id, payload.encrypted_key, payload.iv),
+      );
     }),
   );
 

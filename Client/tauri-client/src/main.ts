@@ -14,7 +14,6 @@ import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
-import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { applyStoredAppearance } from "@components/SettingsOverlay";
@@ -22,7 +21,7 @@ import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
-import { createLogger } from "@lib/logger";
+import { createLogger, setLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
@@ -33,7 +32,20 @@ import type { CertTofuEvent } from "@lib/ws";
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+// Gate the log level before anything logs: debug entries are serialized and
+// persisted to disk, so in production the level must filter real work, not
+// just console noise. Dev builds keep full debug output.
+setLogLevel(import.meta.env.DEV ? "debug" : "info");
+
 const log = createLogger("main");
+
+// livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
+// lazily so it stays out of the startup path. When a voice session exists the
+// module is necessarily already loaded, so this import resolves from the
+// module cache in a microtask.
+function voiceSessionLeave(sendWsLeave: boolean): void {
+  void import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(sendWsLeave));
+}
 
 // Disable the default browser context menu globally.
 document.addEventListener("contextmenu", (e) => {

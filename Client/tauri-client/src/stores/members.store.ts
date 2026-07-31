@@ -21,11 +21,18 @@ export interface Member {
 export interface MembersState {
   readonly members: ReadonlyMap<number, Member>;
   readonly typingUsers: ReadonlyMap<number, ReadonlySet<number>>; // channelId -> Set<userId>
+  /** Monotonic counter bumped only when membership or a member's role changes
+   *  (setMembers/addMember/removeMember/updateMemberRole). Subscribers that
+   *  only care about role composition (e.g. MessageList role colors) select
+   *  this instead of rebuilding a role map on every presence/typing update.
+   *  Optional only so the many inline test fixtures need not restate it. */
+  readonly roleRevision?: number;
 }
 
 const INITIAL_STATE: MembersState = {
   members: new Map(),
   typingUsers: new Map(),
+  roleRevision: 0,
 };
 
 export const membersStore = createStore<MembersState>(INITIAL_STATE);
@@ -57,9 +64,10 @@ export function setMembers(members: readonly ReadyMember[]): void {
     clearTimeout(timer);
   }
   typingTimers.clear();
-  membersStore.setState(() => ({
+  membersStore.setState((prev) => ({
     members: map,
     typingUsers: new Map(),
+    roleRevision: (prev.roleRevision ?? 0) + 1,
   }));
 }
 
@@ -75,7 +83,7 @@ export function addMember(payload: MemberJoinPayload): void {
       status: "online",
       identityPublicKey: payload.user.identity_public_key ?? null,
     });
-    return { ...prev, members: next };
+    return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
 
@@ -84,7 +92,7 @@ export function removeMember(userId: number): void {
   membersStore.setState((prev) => {
     const next = new Map(prev.members);
     next.delete(userId);
-    return { ...prev, members: next };
+    return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
 
@@ -95,7 +103,7 @@ export function updateMemberRole(userId: number, role: string): void {
     if (!existing) return prev;
     const next = new Map(prev.members);
     next.set(userId, { ...existing, role });
-    return { ...prev, members: next };
+    return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
 
