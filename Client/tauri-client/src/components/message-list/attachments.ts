@@ -10,6 +10,7 @@ import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
+import { getToken } from "@stores/auth.store";
 import { save } from "@tauri-apps/plugin-dialog";
 
 const log = createLogger("attachments");
@@ -125,16 +126,23 @@ export function isTrustedServerUrl(url: string): boolean {
 }
 
 /**
- * If `url` targets the OwnCord server, return an equivalent URL pointing at the
- * Rust HTTP TOFU proxy's loopback origin (cert-pinned) with the same path and
- * query. Non-server URLs (external images) are returned unchanged so they use a
- * normal validated HTTPS fetch.
+ * Fetch `url`, routing OwnCord-server URLs through the Rust HTTP TOFU proxy's
+ * loopback origin (cert-pinned) with the session bearer token attached —
+ * /api/v1/files/{id} enforces channel ACLs, so an unauthenticated request
+ * would 401. The token is only ever sent to the configured server host;
+ * non-server URLs (external images) get a normal validated HTTPS fetch with
+ * no credentials.
  */
-async function toFetchUrl(url: string): Promise<string> {
-  if (!isServerUrl(url)) return url;
+async function fetchServerFile(url: string): Promise<Response> {
+  if (!isServerUrl(url)) return tauriFetch(url);
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
-  return `${origin}${parsed.pathname}${parsed.search}`;
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token !== null) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return tauriFetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
@@ -253,7 +261,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // use a normal validated HTTPS fetch. isSafeUrl restricts to http/https and
     // responses are only used as image data, never executed.
     try {
-      const res = await tauriFetch(await toFetchUrl(url));
+      const res = await fetchServerFile(url);
       if (!res.ok) return null;
 
       const rawCt = res.headers.get("content-type") ?? "";
@@ -413,8 +421,9 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const filePath = await save({ defaultPath: filename });
     if (filePath === null) return; // User cancelled
 
-    // Fetch file data — server downloads go through the cert-pinned HTTP proxy.
-    const res = await tauriFetch(await toFetchUrl(url));
+    // Fetch file data — server downloads go through the cert-pinned HTTP proxy
+    // with the session bearer token (the files endpoint requires auth).
+    const res = await fetchServerFile(url);
     if (!res.ok) {
       log.error("Download failed", { filename, status: res.status });
       alert(`Download failed: server returned ${res.status}`);
