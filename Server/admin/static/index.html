@@ -284,15 +284,28 @@ const I={
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
-  cachedStats:null,cachedUpdate:null,
+  cachedStats:null,cachedUpdate:null,channelCache:{},
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
 /* ═══ API ═══ */
+/* A 401 means the admin session is gone. Handle it here rather than letting
+   every call site toast "invalid or expired session" forever while the panel
+   stays on screen with no way back to the login form. */
+function handleSessionExpired(){
+  state.logConnectSeq++;
+  if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
+  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
+  state.token='';localStorage.removeItem('admin_token');
+  const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
+  showOverlay('loginOverlay');
+}
+
 async function api(method,path,body){
   const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'}};
   if(body!==undefined)opts.body=JSON.stringify(body);
   const res=await fetch('/admin/api'+path,opts);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
   if(res.status===204)return null;
   const data=await res.json();
   if(!res.ok)throw new Error(data.message||res.statusText);
@@ -340,24 +353,36 @@ async function checkAuth(){
 }
 
 document.getElementById('setupBtn').onclick=async()=>{
+  const btn=document.getElementById('setupBtn');
   const u=document.getElementById('setupUser').value.trim(),p=document.getElementById('setupPass').value,c=document.getElementById('setupConfirm').value,err=document.getElementById('setupErr');
   err.textContent='';
   if(!u||!p){err.textContent='Username and password are required.';return}
   if(p!==c){err.textContent='Passwords do not match.';return}
+  // In-flight guard: a second submit spends another attempt against the
+  // server's per-IP rate limit for nothing.
+  if(btn.disabled)return;
+  btn.disabled=true;
   try{const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Setup failed');
     state.token=d.token;localStorage.setItem('admin_token',state.token);
     document.getElementById('inviteCode').textContent=d.invite_code;showOverlay('setupSuccessOverlay');
   }catch(e){err.textContent=e.message}
+  finally{btn.disabled=false}
 };
 document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
-function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info'))}
+function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
 document.getElementById('loginBtn').onclick=async()=>{
+  const btn=document.getElementById('loginBtn');
   const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value,err=document.getElementById('loginErr');
   err.textContent='';
+  if(!u||!p){err.textContent='Username and password are required.';return}
+  // Each submit counts against the login lockout counter — don't spend two.
+  if(btn.disabled)return;
+  btn.disabled=true;
   try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
     state.token=d.token;localStorage.setItem('admin_token',state.token);showApp();renderNav();renderContent();
   }catch(e){err.textContent=e.message}
+  finally{btn.disabled=false}
 };
 
 ['setupUser','setupPass','setupConfirm'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setupBtn').click()}));
@@ -431,7 +456,7 @@ function renderContent(){
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
-  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)state.cachedUpdate=await r.json()}catch(e){}
+  try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
@@ -470,7 +495,14 @@ async function renderUsers(){
     html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:var(--accent)">'+initial+'</div><strong>'+esc(uname)+'</strong></div></td>';
     html+='<td><span class="role-badge"><span class="role-dot" style="background:'+roleColor(rid)+'"></span>'+roleName(rid)+'</span></td>';
     html+='<td><span class="dot '+statusDot+'"></span>'+statusLabel+'</td>';
-    html+='<td>'+(banned?'<span class="badge badge-red">Yes</span>':'<span class="badge badge-muted">No</span>')+'</td>';
+    // The ban reason is collected on ban and stored server-side; showing it
+    // here is the only place an admin can read back why someone was banned.
+    const banReason=u.ban_reason||u.BanReason||'';
+    const bannedCell=banned
+      ?'<span class="badge badge-red" title="'+esc(banReason||'No reason given')+'">Yes</span>'
+        +(banReason?'<div style="font-size:11px;color:var(--text-faint);margin-top:2px">'+esc(banReason)+'</div>':'')
+      :'<span class="badge badge-muted">No</span>';
+    html+='<td>'+bannedCell+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
     html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
     html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
@@ -534,7 +566,8 @@ async function renderChannels(){
     html+='<td style="font-size:12px;color:var(--text-faint)">'+esc(cat)+'</td>';
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
     const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+',\''+jsq(name)+'\')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
+    state.channelCache[id]=ch;
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -550,13 +583,38 @@ async function createChannel(){
   try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-function openChannelEditModal(id,name){
-  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
+/* PATCH /channels/{id} accepts name, topic, slow_mode, position and archived —
+   the modal used to offer only the name, so the Archived column in the table
+   was read-only state with no control behind it. */
+function openChannelEditModal(id){
+  const ch=state.channelCache[id]||{};
+  const name=ch.name||ch.Name||'';
+  const topic=ch.topic||ch.Topic||'';
+  const slow=ch.slow_mode||ch.SlowMode||0;
+  const pos=ch.position||ch.Position||0;
+  const archived=ch.archived||ch.Archived||false;
+  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" onclick="this.classList.toggle(\'on\')"></button></div></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
 }
 
 async function saveChannelEdit(id){
   const name=document.getElementById('chEditName').value.trim();
-  try{await api('PATCH','/channels/'+id,{name});closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
+  if(!name){showToast('Name is required','error');return}
+  const body={
+    name,
+    topic:document.getElementById('chEditTopic').value.trim(),
+    slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
+    position:parseInt(document.getElementById('chEditPos').value,10)||0,
+    archived:document.getElementById('chEditArchived').classList.contains('on'),
+  };
+  try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 function openDeleteChannel(id,name){
@@ -825,7 +883,16 @@ async function saveSettings(){
   const body={};
   ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
   ['require_2fa','registration_open'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
-  try{await api('PATCH','/settings',body);state.settingsChanged=false;renderNav();showToast('Settings saved')}catch(e){showToast(e.message,'error')}
+  const btn=document.getElementById('saveSettingsBtn');
+  if(btn){if(btn.disabled)return;btn.disabled=true}
+  try{
+    await api('PATCH','/settings',body);
+    state.settingsChanged=false;renderNav();showToast('Settings saved');
+    // Leave the button disabled: there are no unsaved changes any more.
+  }catch(e){
+    showToast(e.message,'error');
+    if(btn)btn.disabled=false;
+  }
 }
 
 /* ═══ Backups ═══ */
@@ -840,7 +907,7 @@ async function renderBackups(){
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?new Date(b.date).toLocaleString():'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+esc(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="confirmDeleteBackup(\''+esc(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+jsq(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="openDeleteBackupModal(\''+jsq(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -859,8 +926,15 @@ async function confirmRestore(name){
   try{await api('POST','/backups/'+encodeURIComponent(name)+'/restore');closeModal();showToast('Database restored. Restart recommended.','info');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
+/* Deleting a backup is irreversible — confirm it like every other destructive
+   action here. It also used to report success without looking at the response,
+   so a failed delete said "Backup deleted" and left the file in place. */
+function openDeleteBackupModal(name){
+  openModal('<div class="modal-header"><h3>Delete Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:white">'+esc(name)+'</strong>? This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteBackup(\''+jsq(name)+'\')">Delete</button></div>');
+}
+
 async function confirmDeleteBackup(name){
-  try{await fetch('/admin/api/backups/'+encodeURIComponent(name),{method:'DELETE',headers:{'Authorization':'Bearer '+state.token}});showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
+  try{await api('DELETE','/backups/'+encodeURIComponent(name));closeModal();showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ API Tokens ═══ */
@@ -916,7 +990,7 @@ function showTokenOnceModal(d){
     '<button class="btn btn-ghost" onclick="copyToken(\''+jsq(d.token)+'\')">Copy</button></div></div>'+
     '<div class="modal-footer"><button class="btn btn-accent" onclick="closeModal();renderContent()">Done</button></div>');
 }
-function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info'))}
+function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','error'))}
 
 function confirmRevokeToken(id,label){
   openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:white">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="revokeToken('+id+')">Revoke</button></div>');
@@ -927,12 +1001,15 @@ async function revokeToken(id){
 
 /* ═══ Updates ═══ */
 async function renderUpdates(){
-  let info;
-  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)info=await r.json()}catch(e){}
+  // A failed check is not the same as "up to date" — saying so would be a lie
+  // that hides a broken update path.
+  let info,checkError='';
+  try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
   let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
   html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
-  if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
+  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(242,63,67,.15);color:var(--red)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
+  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
   else html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
   html+='</div>';
   if(info&&info.update_available){
@@ -952,10 +1029,14 @@ async function confirmApplyUpdate(){
   closeModal();state.updateApplying=true;renderContent();
   try{
     const r=await fetch('/admin/api/updates/apply',{method:'POST',headers:{'Authorization':'Bearer '+state.token}});
-    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000)}
-    else{const e=await r.json();showToast(e.message||'Update failed','error')}
+    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000);return}
+    let msg='Update failed';
+    try{const e=await r.json();msg=e.message||msg}catch(parseErr){}
+    showToast(msg,'error');
   }catch(e){showToast(e.message,'error')}
-  state.updateApplying=false;
+  // Failure path only: re-render so the button leaves its "Applying..." state
+  // instead of staying disabled until the next navigation.
+  state.updateApplying=false;renderContent();
 }
 
 /* ═══ Keyboard + Init ═══ */
