@@ -6,8 +6,37 @@ on:
       - "v*"
 
 jobs:
+  # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
+  # because the client manifests weren't bumped before tagging — deployed
+  # clients then never saw the update. Fail fast on that mismatch, before any
+  # expensive build starts.
+  verify-versions:
+    name: Verify client version matches tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Compare tag with client manifests
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAURI_VERSION=$(node -p "require('./Client/tauri-client/src-tauri/tauri.conf.json').version")
+          NPM_VERSION=$(node -p "require('./Client/tauri-client/package.json').version")
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Client/tauri-client/src-tauri/Cargo.toml | head -1)
+          fail=0
+          for pair in "tauri.conf.json:$TAURI_VERSION" "package.json:$NPM_VERSION" "Cargo.toml:$CARGO_VERSION"; do
+            file="${pair%%:*}"; ver="${pair#*:}"
+            if [ "$ver" != "$TAG_VERSION" ]; then
+              echo "::error::Release tag v$TAG_VERSION does not match client version $ver in $file — bump the client version before tagging."
+              fail=1
+            fi
+          done
+          exit $fail
+
   release-client-windows:
     name: Build Tauri (Windows)
+    needs: verify-versions
     runs-on: windows-latest
     permissions:
       contents: read
@@ -59,6 +88,7 @@ jobs:
 
   release-client-linux:
     name: Build Tauri (Linux)
+    needs: verify-versions
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -131,6 +161,7 @@ jobs:
 
   release-server:
     name: Build server (${{ matrix.os }})
+    needs: verify-versions
     strategy:
       fail-fast: false
       matrix:
@@ -188,6 +219,7 @@ jobs:
 
   release-client-linux-arm64:
     name: Build Tauri (Linux ARM64)
+    needs: verify-versions
     runs-on: ubuntu-22.04-arm
     permissions:
       contents: read
@@ -265,6 +297,7 @@ jobs:
 
   release-server-docker:
     name: Build & Push Server Docker Image
+    needs: verify-versions
     runs-on: ubuntu-latest
     permissions:
       contents: read
