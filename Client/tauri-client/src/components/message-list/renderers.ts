@@ -6,7 +6,12 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
+import { hasPermission } from "@lib/permissions";
+import { Permission } from "@lib/types";
+import { showToast } from "@lib/toast";
+import { authStore } from "@stores/auth.store";
+import { channelsStore } from "@stores/channels.store";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -17,6 +22,24 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
     developerModeEnabled = loadPref<boolean>("developerMode", false);
   }
 }) as EventListener);
+
+/**
+ * Whether the signed-in user may delete other people's messages.
+ *
+ * The `ready` payload carries every role with its permission bitmask, so this
+ * is derived rather than guessed from the role name. The server still enforces;
+ * this only decides whether the affordance is offered (UX spec §6.2, and the
+ * "Delete (own / moderator)" row in docs/architecture/ux/messaging.md §4).
+ */
+function canManageMessages(): boolean {
+  const roleName = authStore.getState().user?.role;
+  if (roleName === undefined || roleName === null) return false;
+  const role = channelsStore
+    .getState()
+    .roles.find((r) => r.name.toLowerCase() === roleName.toLowerCase());
+  if (role === undefined) return false;
+  return hasPermission(role.permissions, Permission.MANAGE_MESSAGES);
+}
 
 // -- Re-exports (preserve all existing public API) ----------------------------
 
@@ -307,7 +330,8 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    if (msg.user.id === opts.currentUserId) {
+    // Own message, or a moderator acting on someone else's.
+    if (msg.user.id === opts.currentUserId || canManageMessages()) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": "Delete",
@@ -328,9 +352,12 @@ export function renderMessage(
       copyIdBtn.addEventListener(
         "click",
         () => {
-          void navigator.clipboard.writeText(String(msg.id)).catch(() => {
-            /* clipboard unavailable */
-          });
+          // No silent success: a copy with no feedback is indistinguishable
+          // from a clipboard that refused.
+          void navigator.clipboard.writeText(String(msg.id)).then(
+            () => showToast("Message ID copied", "success"),
+            () => showToast("Couldn't copy the message ID", "error"),
+          );
         },
         { signal },
       );

@@ -311,13 +311,7 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
     },
     "Delete Channel",
   );
-  withConfirmation(
-    deleteItem,
-    "Are you sure?",
-    () => options.onDelete(),
-    ac.signal,
-    "Deleting...",
-  );
+  withConfirmation(deleteItem, "Are you sure?", () => options.onDelete(), ac.signal, "Deleting...");
   menu.appendChild(deleteItem);
 
   function destroy(): void {
