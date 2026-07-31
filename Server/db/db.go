@@ -89,7 +89,16 @@ func Open(path string) (*DB, error) {
 // MigrateFS (defined in migrate.go) which maintains the schema_versions
 // tracking table.
 func Migrate(database *DB) error {
-	return MigrateFS(database, migrations.FS)
+	if err := MigrateFS(database, migrations.FS); err != nil {
+		return err
+	}
+	// Refresh the query planner's statistics once per startup so newly created
+	// indexes (e.g. migration 019) are actually chosen. Close() keeps them
+	// current afterwards via PRAGMA optimize.
+	if _, err := database.sqlDB.Exec("ANALYZE;"); err != nil {
+		return fmt.Errorf("running ANALYZE after migrations: %w", err)
+	}
+	return nil
 }
 
 // Close releases the underlying database connection.

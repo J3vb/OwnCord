@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
-import { membersStore } from "@stores/members.store";
+import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
@@ -340,6 +340,68 @@ describe("MemberList", () => {
 
     // Expected order: Online (0), Idle (1), Dnd (2), Offline (3)
     expect(names).toEqual(["Online", "Idle", "Dnd", "Offline"]);
+  });
+
+  it("patches a presence-only change in place, keeping row identity", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    const eveRowBefore = container.querySelector('[data-testid="member-5"]') as HTMLDivElement;
+    expect(eveRowBefore).not.toBeNull();
+    const allRowsBefore = Array.from(container.querySelectorAll(".member-item"));
+
+    // Presence-only update (same username/role/avatar) — via the real action.
+    updatePresence(5, "dnd");
+    membersStore.flush();
+
+    // Same DOM element — no rebuild, status dot patched in place.
+    const eveRowAfter = container.querySelector('[data-testid="member-5"]');
+    expect(eveRowAfter).toBe(eveRowBefore);
+    const dot = eveRowAfter!.querySelector(".mi-status") as HTMLDivElement;
+    expect(dot.style.background).toBe("var(--red)");
+    expect(dot.getAttribute("aria-label")).toBe("dnd");
+    expect(dot.title).toBe("dnd");
+
+    // Every other row also kept its identity.
+    const allRowsAfter = Array.from(container.querySelectorAll(".member-item"));
+    expect(allRowsAfter).toEqual(allRowsBefore);
+  });
+
+  it("toggles the offline class in place when presence flips to/from offline", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    const eveRow = container.querySelector('[data-testid="member-5"]') as HTMLDivElement;
+    expect(eveRow.classList.contains("offline")).toBe(false);
+
+    updatePresence(5, "offline");
+    membersStore.flush();
+    expect(container.querySelector('[data-testid="member-5"]')).toBe(eveRow);
+    expect(eveRow.classList.contains("offline")).toBe(true);
+
+    updatePresence(5, "online");
+    membersStore.flush();
+    expect(container.querySelector('[data-testid="member-5"]')).toBe(eveRow);
+    expect(eveRow.classList.contains("offline")).toBe(false);
+  });
+
+  it("still fully rebuilds when a member's role changes", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    const eveRowBefore = container.querySelector('[data-testid="member-5"]');
+
+    updateMemberRole(5, "admin");
+    membersStore.flush();
+
+    // Structural change → rebuild: new row element, Eve now in the ADMIN group.
+    const eveRowAfter = container.querySelector('[data-testid="member-5"]');
+    expect(eveRowAfter).not.toBeNull();
+    expect(eveRowAfter).not.toBe(eveRowBefore);
+    const headerTexts = Array.from(container.querySelectorAll(".member-role-group")).map(
+      (h) => h.textContent,
+    );
+    expect(headerTexts.find((t) => t?.includes("ADMIN"))).toContain("3");
   });
 
   it("re-renders when store updates to a different member set", () => {

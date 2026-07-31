@@ -109,36 +109,37 @@ type LogEntry struct {
 
 // RingBuffer is a bounded, thread-safe circular buffer of log entries
 // with fan-out to SSE subscriber channels.
+//
+// It is a true ring (fixed backing array + write position), modelled on
+// ws.EventRingBuffer: overwriting the oldest entry is a single slot store,
+// not a fresh capacity-sized allocation + copy per write.
 type RingBuffer struct {
 	mu          syncutil.Mutex
-	entries     []LogEntry
-	capacity    int
+	entries     []LogEntry // fixed backing array, len == capacity
+	pos         int        // next write position
+	count       int        // entries stored (up to len(entries))
 	subscribers map[*chan LogEntry]struct{}
 }
 
-// NewRingBuffer creates a ring buffer with the given capacity.
+// NewRingBuffer creates a ring buffer with the given capacity (must be > 0).
 func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
-		entries:     make([]LogEntry, 0, capacity),
-		capacity:    capacity,
+		entries:     make([]LogEntry, capacity),
 		subscribers: make(map[*chan LogEntry]struct{}),
 	}
 }
 
-// Write appends an entry, drops the oldest if full, and fans out
+// Write appends an entry, overwriting the oldest if full, and fans out
 // to all subscribers (non-blocking to avoid slow clients blocking logging).
 func (rb *RingBuffer) Write(entry LogEntry) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	if len(rb.entries) >= rb.capacity {
-		// Copy to a new slice to release the backing array's first slot,
-		// preventing unbounded growth from repeated re-slicing.
-		fresh := make([]LogEntry, rb.capacity-1, rb.capacity)
-		copy(fresh, rb.entries[1:])
-		rb.entries = fresh
+	rb.entries[rb.pos] = entry
+	rb.pos = (rb.pos + 1) % len(rb.entries)
+	if rb.count < len(rb.entries) {
+		rb.count++
 	}
-	rb.entries = append(rb.entries, entry)
 
 	for chp := range rb.subscribers {
 		select {
@@ -149,12 +150,19 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 	}
 }
 
-// Snapshot returns a copy of all current entries for backfill.
+// Snapshot returns a copy of all current entries, oldest first, for backfill.
 func (rb *RingBuffer) Snapshot() []LogEntry {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-	out := make([]LogEntry, len(rb.entries))
-	copy(out, rb.entries)
+	out := make([]LogEntry, rb.count)
+	if rb.count < len(rb.entries) {
+		// Not yet wrapped: entries [0, count) are already in order.
+		copy(out, rb.entries[:rb.count])
+		return out
+	}
+	// Wrapped: oldest entry sits at pos.
+	n := copy(out, rb.entries[rb.pos:])
+	copy(out[n:], rb.entries[:rb.pos])
 	return out
 }
 
@@ -191,7 +199,9 @@ type ringHandler struct {
 }
 
 // NewMultiHandler creates a handler that sends records to both stdout
-// and the ring buffer. The ring buffer captures all levels from minLevel.
+// and the ring buffer. The ring buffer captures all levels from minLevel;
+// pass a *slog.LevelVar to retune the threshold at runtime. Enabled reports
+// false below both thresholds, so gated Debug calls cost nothing.
 func NewMultiHandler(stdout slog.Handler, buf *RingBuffer, minLevel slog.Leveler) slog.Handler {
 	return &multiHandler{
 		stdout: stdout,

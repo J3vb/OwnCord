@@ -8,7 +8,10 @@
 
 package telemetry
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 const (
 	scopeWS      = "github.com/owncord/server/ws"
@@ -35,25 +38,34 @@ type AppMetrics struct {
 }
 
 var (
-	appMetricsMu   sync.Mutex
-	appMetricsInst *AppMetrics
+	appMetricsMu   sync.Mutex // serializes construction and reset
+	appMetricsInst atomic.Pointer[AppMetrics]
 )
 
 // NewAppMetrics returns a process-wide AppMetrics, lazily constructed against
 // the current global provider. Calling it multiple times returns the same
 // instance until resetAppMetricsForInit() is called (which Init uses after
 // swapping the global provider so instruments re-bind to the new meter).
+//
+// The steady-state path is a single atomic load — service-method defers call
+// this per request, so it must not take a mutex once the bundle exists. A
+// plain sync.Once would give the same fast path but cannot be re-armed by
+// resetAppMetricsForInit, hence the pointer + construction mutex.
 func NewAppMetrics() *AppMetrics {
+	if m := appMetricsInst.Load(); m != nil {
+		return m
+	}
 	appMetricsMu.Lock()
 	defer appMetricsMu.Unlock()
-	if appMetricsInst != nil {
-		return appMetricsInst
+	// Re-check under the lock: another caller may have built it first.
+	if m := appMetricsInst.Load(); m != nil {
+		return m
 	}
 	ws := GlobalMeter(scopeWS)
 	svc := GlobalMeter(scopeService)
 	db := GlobalMeter(scopeDB)
 	voice := GlobalMeter(scopeVoice)
-	appMetricsInst = &AppMetrics{
+	m := &AppMetrics{
 		WSMessagesTotal:        ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
 		WSActiveConnections:    ws.Gauge("ws_active_connections", "Currently connected WebSocket clients"),
 		WSBroadcastLatency:     ws.Histogram("ws_broadcast_latency_seconds", "Wall-clock seconds from enqueue to fanout completion", "s"),
@@ -66,7 +78,8 @@ func NewAppMetrics() *AppMetrics {
 		VoiceParticipants:      voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
 		ServiceCallDurationSec: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),
 	}
-	return appMetricsInst
+	appMetricsInst.Store(m)
+	return m
 }
 
 // resetAppMetricsForInit drops the cached AppMetrics bundle so the next
@@ -76,5 +89,5 @@ func NewAppMetrics() *AppMetrics {
 func resetAppMetricsForInit() { //nolint:unused // called by otel-tagged build only
 	appMetricsMu.Lock()
 	defer appMetricsMu.Unlock()
-	appMetricsInst = nil
+	appMetricsInst.Store(nil)
 }

@@ -29,6 +29,63 @@ func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, chan
 	return nil
 }
 
+// PersistEvents appends a batch of events in a single transaction with one
+// prepared insert, so the persister's flush pays for one fsync instead of one
+// per event. CreatedAt on the input rows is ignored (the column defaults).
+//
+// Best-effort semantics are preserved: if the batched transaction fails (e.g.
+// one row has a duplicate seq), it falls back to per-row inserts so the good
+// rows still land. Returns the number of rows persisted and, when any row was
+// lost, the first per-row error.
+func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, error) {
+	if len(events) == 0 {
+		return 0, nil
+	}
+	if err := d.persistEventsTx(ctx, events); err == nil {
+		return len(events), nil
+	}
+	// Fallback: insert rows individually so one bad row doesn't drop the batch.
+	persisted := 0
+	var firstErr error
+	for _, e := range events {
+		if err := d.PersistEvent(ctx, e.Seq, e.EventType, e.ChannelID, e.Payload); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		persisted++
+	}
+	return persisted, firstErr
+}
+
+// persistEventsTx inserts all events inside one transaction; any failure
+// rolls the whole batch back.
+func (d *DB) persistEventsTx(ctx context.Context, events []PersistedEvent) error {
+	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("PersistEvents begin tx: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?)`,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("PersistEvents prepare: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, e := range events {
+		if _, err := stmt.ExecContext(ctx, e.Seq, e.EventType, e.ChannelID, e.Payload); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("PersistEvents insert seq %d: %w", e.Seq, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("PersistEvents commit: %w", err)
+	}
+	return nil
+}
+
 // GetEventsSince returns events with seq > afterSeq up to limit, ordered ASC.
 func (d *DB) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]PersistedEvent, error) {
 	rows, err := d.sqlDB.QueryContext(ctx,

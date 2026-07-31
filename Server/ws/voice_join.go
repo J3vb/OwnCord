@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
@@ -46,7 +46,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// Rate limit: voice_join broadcasts a voice_state update to every connected
 	// client, so cap how often a single user can trigger the fan-out. Mirrors the
 	// Limiter.Allow(...) idiom used by the voice control handlers.
-	ratKey := fmt.Sprintf("voice_join:%d", c.userID)
+	ratKey := auth.Key("voice_join", c.userID)
 	if h.limiter != nil && !h.limiter.Allow(ratKey, voiceJoinRateLimit, voiceJoinWindow) {
 		c.sendMsg(buildErrorMsg(ErrCodeRateLimited, "too many voice join attempts"))
 		return
@@ -169,11 +169,32 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// rollback does not broadcast a spurious voice_leave for an unannounced join.
 	if h.livekit != nil {
 		// Derive publish permissions from role — prevents SFU-level bypass
-		// when client connects directly via direct_url (BUG-128).
-		canPublish := h.hasChannelPerm(ctx, c, channelID, permissions.SpeakVoice)
+		// when client connects directly via direct_url (BUG-128). The three
+		// bits are answered from one role fetch + one overrides fetch via
+		// HasChannelPermBatch instead of three hasChannelPerm round trips
+		// (each of which is a role lookup plus an override lookup). Fails
+		// closed like hasChannelPerm: an unresolved role or override map
+		// yields no publish grants (admins bypass overrides, so an override
+		// fetch error cannot demote them).
+		var canPublish, canVideo, canScreenShare bool
 		canSubscribe := true
-		canVideo := h.hasChannelPerm(ctx, c, channelID, permissions.UseVideo)
-		canScreenShare := h.hasChannelPerm(ctx, c, channelID, permissions.ShareScreen)
+		role, roleErr := h.db.GetRoleForUser(ctx, c.userID)
+		if roleErr == nil && role != nil {
+			// Admins bypass overrides, so skip the fetch for them (mirrors
+			// computeAllowedChannels); HasChannelPermBatch answers true from
+			// the role bits alone.
+			var overrides map[int64]db.ChannelOverride
+			var oErr error
+			if !permissions.HasAdmin(role.Permissions) {
+				overrides, oErr = h.db.GetAllChannelPermissionsForRole(ctx, role.ID)
+			}
+			if oErr == nil {
+				po := permOverrides(overrides)
+				canPublish = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.SpeakVoice)
+				canVideo = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.UseVideo)
+				canScreenShare = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.ShareScreen)
+			}
+		}
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
@@ -260,7 +281,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	userID := info.UserID
 	channelID := info.VoiceChannelID
 
-	ratKey := fmt.Sprintf("voice_token_refresh:%d", userID)
+	ratKey := auth.Key("voice_token_refresh", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, 1, 60*time.Second) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "token refresh rate limited"}}
 	}

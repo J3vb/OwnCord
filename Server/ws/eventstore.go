@@ -13,6 +13,10 @@ import (
 // abstraction was removed in D3).
 type EventStore interface {
 	PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error
+	// PersistEvents writes a batch in one transaction, falling back to per-row
+	// inserts on tx failure (best-effort). Returns rows persisted and, when any
+	// row was lost, the first per-row error.
+	PersistEvents(ctx context.Context, events []db.PersistedEvent) (int, error)
 	GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error)
 	GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error)
 	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -66,7 +65,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		totpRateLimitKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
+		totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
 		// Atomically record this attempt and reject once the per-user failure cap
 		// is reached. Recording up-front — rather than a read-only Check now and
 		// Allow only on failure — closes a TOCTOU where many concurrent requests
@@ -155,7 +154,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 		}
 
 		// BUG-111: Per-user lockout for password confirmation.
-		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -180,7 +179,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 			})
 			return
 		}
-		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
+		failKey := auth.Key("pw_confirm_fail", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
@@ -222,7 +221,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		}
 
 		// BUG-111: Per-user lockout for password confirmation.
-		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -239,7 +238,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 			})
 			return
 		}
-		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
+		failKey := auth.Key("pw_confirm_fail", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
@@ -318,7 +317,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 		}
 
 		// BUG-111: Per-user lockout for password confirmation.
-		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -335,7 +334,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 			})
 			return
 		}
-		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
+		failKey := auth.Key("pw_confirm_fail", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)

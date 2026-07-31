@@ -231,3 +231,46 @@ func TestRateLimiter_ResetClearsLockout(t *testing.T) {
 		t.Error("Reset() should clear lockout, but key is still locked out")
 	}
 }
+
+func TestKey_MatchesSprintfShape(t *testing.T) {
+	cases := []struct {
+		prefix string
+		id     int64
+		want   string
+	}{
+		{"ping", 42, "ping:42"},
+		{"voice_join", 0, "voice_join:0"},
+		{"login", -7, "login:-7"},
+		{"session", 9223372036854775807, "session:9223372036854775807"},
+	}
+	for _, c := range cases {
+		if got := auth.Key(c.prefix, c.id); got != c.want {
+			t.Errorf("Key(%q, %d) = %q, want %q", c.prefix, c.id, got, c.want)
+		}
+	}
+	// Multi-part keys compose by nesting, matching the old "%d:%d" shape.
+	if got := auth.Key(auth.Key("voice_e2ee_offer", 3), 15); got != "voice_e2ee_offer:3:15" {
+		t.Errorf("nested Key = %q, want voice_e2ee_offer:3:15", got)
+	}
+}
+
+// TestRateLimiter_LenSumsAcrossShards pins the sharded rewrite: keys that hash
+// to different buckets must all be visible through Len and evictable through
+// Cleanup, exactly as with the old single-map limiter.
+func TestRateLimiter_LenSumsAcrossShards(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	const n = 100 // enough distinct keys to populate many of the 32 shards
+	for i := range n {
+		if !rl.Allow(auth.Key("shardspread", int64(i)), 1, time.Minute) {
+			t.Fatalf("Allow for fresh key %d = false, want true", i)
+		}
+	}
+	if wins, _ := rl.Len(); wins != n {
+		t.Fatalf("Len().windows = %d, want %d", wins, n)
+	}
+	time.Sleep(15 * time.Millisecond)
+	rl.Cleanup(10 * time.Millisecond)
+	if wins, _ := rl.Len(); wins != 0 {
+		t.Errorf("Len().windows = %d after Cleanup, want 0 across all shards", wins)
+	}
+}

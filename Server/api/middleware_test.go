@@ -72,6 +72,61 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_TouchSessionThrottled verifies the last_used write is
+// throttled per session: the first authenticated request touches the row, and
+// an immediate second request through the same middleware instance does not —
+// a hot session costs at most one write per interval instead of one per
+// request.
+func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "touchy", "hash", 4)
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+
+	const sentinel = "2000-01-01 00:00:00"
+	backdate := func() {
+		t.Helper()
+		if _, err := database.ExecContext(context.Background(),
+			`UPDATE sessions SET last_used = ? WHERE token = ?`, sentinel, hash); err != nil {
+			t.Fatalf("backdating last_used: %v", err)
+		}
+	}
+	lastUsed := func() string {
+		t.Helper()
+		sess, err := database.GetSessionByTokenHash(context.Background(), hash)
+		if err != nil || sess == nil {
+			t.Fatalf("GetSessionByTokenHash: %v (sess=%v)", err, sess)
+		}
+		return sess.LastUsed
+	}
+	do := func() {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+	}
+
+	// First request: the session has never been touched by this middleware
+	// instance, so last_used must be written.
+	backdate()
+	do()
+	if lastUsed() == sentinel {
+		t.Fatal("first request did not touch last_used")
+	}
+
+	// Second request inside the throttle interval: no write.
+	backdate()
+	do()
+	if lastUsed() != sentinel {
+		t.Error("second request within the throttle interval touched last_used; want it skipped")
+	}
+}
+
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	database := newAPITestDB(t)
 

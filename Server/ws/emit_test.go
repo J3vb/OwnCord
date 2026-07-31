@@ -73,6 +73,9 @@ func registerEmitTestVoiceClient(h *Hub, userID, channelID, voiceChID int64) cha
 	}
 	if voiceChID > 0 {
 		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+		// A real voice join also subscribes the voice topic (voice_join.go),
+		// which is how sendToVoiceChannelExcept reaches participants.
+		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
 	}
 	return send
 }

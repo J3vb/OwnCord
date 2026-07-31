@@ -10,8 +10,9 @@ import (
 	"database/sql"
 )
 
-const createMessage = `-- name: CreateMessage :execresult
+const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
 `
 
 type CreateMessageParams struct {
@@ -21,17 +22,31 @@ type CreateMessageParams struct {
 	ReplyTo   *int64 `json:"replyTo"`
 }
 
-func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createMessage,
+func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
+	row := q.db.QueryRowContext(ctx, createMessage,
 		arg.ChannelID,
 		arg.UserID,
 		arg.Content,
 		arg.ReplyTo,
 	)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.UserID,
+		&i.Content,
+		&i.ReplyTo,
+		&i.EditedAt,
+		&i.Deleted,
+		&i.Pinned,
+		&i.Timestamp,
+	)
+	return i, err
 }
 
-const editMessageContent = `-- name: EditMessageContent :exec
+const editMessageContent = `-- name: EditMessageContent :one
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
 `
 
 type EditMessageContentParams struct {
@@ -39,20 +54,33 @@ type EditMessageContentParams struct {
 	ID      int64  `json:"id"`
 }
 
-func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) error {
-	_, err := q.db.ExecContext(ctx, editMessageContent, arg.Content, arg.ID)
-	return err
+func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error) {
+	row := q.db.QueryRowContext(ctx, editMessageContent, arg.Content, arg.ID)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.UserID,
+		&i.Content,
+		&i.ReplyTo,
+		&i.EditedAt,
+		&i.Deleted,
+		&i.Pinned,
+		&i.Timestamp,
+	)
+	return i, err
 }
 
 const getChannelUnreadCounts = `-- name: GetChannelUnreadCounts :many
 SELECT c.id,
-       COALESCE(MAX(m.id), 0) AS last_msg_id,
-       COUNT(CASE WHEN m.id > COALESCE(rs.last_message_id, 0) AND m.deleted = 0 THEN 1 END) AS unread
+       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
+       (SELECT COUNT(*) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0
+           AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread
 FROM channels c
-LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
-LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
-WHERE c.type = 'text'
-GROUP BY c.id
+WHERE c.type IN ('text', 'announcement')
 `
 
 type GetChannelUnreadCountsRow struct {

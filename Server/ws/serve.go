@@ -234,14 +234,15 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user 
 		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
 	}
 
-	// Include the user's open DM channels.
-	dmChannels, dmErr := database.GetUserDMChannels(ctx, user.ID)
+	// Include the user's open DM channels. Only the ID set matters here, so
+	// use the PK-covered dm_open_state lookup instead of the full DM query.
+	dmIDs, dmErr := database.GetUserDMChannelIDs(ctx, user.ID)
 	if dmErr != nil {
-		slog.Warn("computeAllowedChannels GetUserDMChannels", "err", dmErr)
+		slog.Warn("computeAllowedChannels GetUserDMChannelIDs", "err", dmErr)
 		// Non-fatal: DM events will simply be filtered out.
 	} else {
-		for i := range dmChannels {
-			allowed[dmChannels[i].ChannelID] = true
+		for _, id := range dmIDs {
+			allowed[id] = true
 		}
 	}
 

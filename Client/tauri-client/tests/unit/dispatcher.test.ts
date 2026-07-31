@@ -36,9 +36,7 @@ vi.mock("@lib/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 
-import { isVoiceConnected as _isVoiceConnected } from "../../src/lib/livekitSession";
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
-const mockIsVoiceConnected = vi.mocked(_isVoiceConnected);
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
 // Suppress console output
@@ -731,13 +729,17 @@ describe("WS Dispatcher", () => {
       direct_url: "wss://direct.example.com",
     });
 
-    expect(handleVoiceToken).toHaveBeenCalledWith(
-      "lk-token",
-      "wss://livekit.example.com",
-      3,
-      "wss://direct.example.com",
-      undefined,
-    );
+    // livekitSession is dynamically imported by the handler, so the call
+    // lands after the import promise resolves.
+    await vi.waitFor(() => {
+      expect(handleVoiceToken).toHaveBeenCalledWith(
+        "lk-token",
+        "wss://livekit.example.com",
+        3,
+        "wss://direct.example.com",
+        undefined,
+      );
+    });
   });
 
   it("wires server_restart to transient error", () => {
@@ -1281,7 +1283,8 @@ describe("WS Dispatcher", () => {
   });
 
   it("ready sends voice_leave when user appears in voice_states but LiveKit is disconnected", () => {
-    mockIsVoiceConnected.mockReturnValue(false);
+    // A fresh reload always starts with an idle voice session — the stale case.
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
     // Set up auth so the current user ID is 42
     authStore.setState(() => ({
@@ -1309,7 +1312,9 @@ describe("WS Dispatcher", () => {
   });
 
   it("ready does NOT send voice_leave when LiveKit IS connected", () => {
-    mockIsVoiceConnected.mockReturnValue(true);
+    // A non-idle voice status means livekitSession is driving a live/pending
+    // session (the lazily-loaded module's store-backed "connected" flag).
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
 
     authStore.setState(() => ({
       token: "test-token",
@@ -1336,7 +1341,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
-    mockIsVoiceConnected.mockReturnValue(false);
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
     authStore.setState(() => ({
       token: "test-token",

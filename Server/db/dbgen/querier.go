@@ -29,7 +29,7 @@ type Querier interface {
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) error
 	CreateChannel(ctx context.Context, arg CreateChannelParams) (sql.Result, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
-	CreateMessage(ctx context.Context, arg CreateMessageParams) (sql.Result, error)
+	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
 	DeleteChannel(ctx context.Context, id int64) error
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
@@ -40,7 +40,7 @@ type Querier interface {
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
-	EditMessageContent(ctx context.Context, arg EditMessageContentParams) error
+	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
 	EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error)
 	EnablePlugin(ctx context.Context, id int64) error
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
@@ -82,6 +82,7 @@ type Querier interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
 	GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsParams) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)

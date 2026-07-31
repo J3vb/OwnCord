@@ -826,6 +826,42 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 	}
 }
 
+// TestHub_SweepRevokedSessions_KicksBannedClient verifies the sweep's batched
+// session lookup carries ban status through: a client whose user was banned
+// after connecting is disconnected even though its session row still exists.
+func TestHub_SweepRevokedSessions_KicksBannedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	uid, err := database.CreateUser(context.Background(), "soon-banned", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u, _ := database.GetUserByID(context.Background(), uid)
+
+	hash := auth.HashToken("ban-sweep-token")
+	if _, err := database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	s := make(chan []byte, 4)
+	c := ws.NewTestClientWithTokenHash(hub, u, hash, 0, s)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if err := database.BanUser(context.Background(), uid, "rule violation", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	hub.SweepRevokedSessionsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.GetClient(uid) != nil {
+		t.Error("banned client should have been kicked by the session sweep")
+	}
+}
+
 // TestHub_SweepRevokedSessions_NoDBNoPanic verifies the sweep is a no-op
 // when the hub has no database (nil-safe).
 func TestHub_SweepRevokedSessions_NoDBNoPanic(t *testing.T) {

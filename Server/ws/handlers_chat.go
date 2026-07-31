@@ -59,11 +59,14 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 
 	// DM path: build dm_channel_open events + sequenced message.
 	var events []Event
-	if result.SenderUser != nil {
+	if result.SenderUser != nil && len(result.OpenedDMFor) > 0 {
+		// The payload is identical for every recipient, so marshal it once
+		// outside the loop (delivery wraps it per-send without mutating it).
+		openPayload := buildDMChannelOpen(sendCmd.ChannelID(), result.SenderUser)
 		for _, pid := range result.OpenedDMFor {
 			events = append(events, DMChannelOpenEvent{
 				targetUserID: pid,
-				payload:      buildDMChannelOpen(sendCmd.ChannelID(), result.SenderUser),
+				payload:      openPayload,
 			})
 		}
 	}

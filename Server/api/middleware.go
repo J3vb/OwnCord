@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/owncord/server/auth"
@@ -27,10 +28,50 @@ const (
 	RoleKey
 )
 
+// sessionTouchInterval is the minimum time between last_used writes for the
+// same session. last_used feeds the sessions list in account settings, where
+// minute granularity is plenty — writing it on every request just serialized
+// API traffic behind the single SQLite writer.
+const sessionTouchInterval = 60 * time.Second
+
+// touchThrottleMaxEntries bounds the throttle map before stale entries are
+// pruned. Entries older than sessionTouchInterval are prunable — they no
+// longer suppress anything.
+const touchThrottleMaxEntries = 4096
+
+// touchThrottle remembers when each session hash was last touched so
+// TouchSession runs at most once per sessionTouchInterval per session.
+type touchThrottle struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+// shouldTouch reports whether the session's last_used write is due, and if so
+// records now as the latest touch. Stale entries are pruned opportunistically
+// once the map grows past touchThrottleMaxEntries.
+func (t *touchThrottle) shouldTouch(hash string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if last, ok := t.seen[hash]; ok && now.Sub(last) < sessionTouchInterval {
+		return false
+	}
+	if len(t.seen) >= touchThrottleMaxEntries {
+		cutoff := now.Add(-sessionTouchInterval)
+		for h, ts := range t.seen {
+			if ts.Before(cutoff) {
+				delete(t.seen, h)
+			}
+		}
+	}
+	t.seen[hash] = now
+	return true
+}
+
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
 // the session, and injects the user and session into the request context.
 // Returns 401 if the token is missing, invalid, or the session is expired.
 func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
+	touches := &touchThrottle{seen: make(map[string]time.Time)}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
@@ -95,12 +136,16 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Touch last-used — non-fatal. A login session is touched inline as
-			// before; an API-token principal (sess == nil) is touched off the hot
-			// path so it never adds latency to bot/CI traffic.
+			// Touch last-used — non-fatal. A login session is touched inline but
+			// throttled to once per sessionTouchInterval per session, so hot API
+			// traffic doesn't queue a write per request; an API-token principal
+			// (sess == nil) is touched off the hot path so it never adds latency
+			// to bot/CI traffic.
 			if sess != nil {
-				if err := database.TouchSession(r.Context(), hash); err != nil {
-					slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
+				if touches.shouldTouch(hash, time.Now()) {
+					if err := database.TouchSession(r.Context(), hash); err != nil {
+						slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
+					}
 				}
 			} else {
 				touchCtx := context.WithoutCancel(r.Context())

@@ -1,7 +1,6 @@
 package ws
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,9 +18,18 @@ type Topic string
 // TopicGlobal is the well-known topic every client subscribes to on connect.
 const TopicGlobal Topic = "global"
 
+// topicFor builds "<prefix><id>" via strconv.AppendInt — topics are built on
+// every broadcast and subscription change, so skip fmt.Sprintf's overhead.
+func topicFor(prefix string, id int64) Topic {
+	b := make([]byte, 0, len(prefix)+20)
+	b = append(b, prefix...)
+	b = strconv.AppendInt(b, id, 10)
+	return Topic(b)
+}
+
 // ChannelTopic returns the topic for a text channel.
 func ChannelTopic(channelID int64) Topic {
-	return Topic(fmt.Sprintf("channel:%d", channelID))
+	return topicFor("channel:", channelID)
 }
 
 // channelTopicID is the inverse of ChannelTopic: it returns the channel ID
@@ -40,12 +48,12 @@ func channelTopicID(t Topic) int64 {
 
 // VoiceTopic returns the topic for a voice channel.
 func VoiceTopic(channelID int64) Topic {
-	return Topic(fmt.Sprintf("voice:%d", channelID))
+	return topicFor("voice:", channelID)
 }
 
 // UserTopic returns the per-user topic for DMs and mentions.
 func UserTopic(userID int64) Topic {
-	return Topic(fmt.Sprintf("user:%d", userID))
+	return topicFor("user:", userID)
 }
 
 // PubSub provides topic-based publish/subscribe routing for WebSocket clients.
