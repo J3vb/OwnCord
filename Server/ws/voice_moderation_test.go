@@ -3,6 +3,7 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -130,15 +131,6 @@ func auditActions(t *testing.T, database *db.DB) []string {
 		actions = append(actions, e.Action)
 	}
 	return actions
-}
-
-func hasAction(actions []string, want string) bool {
-	for _, a := range actions {
-		if a == want {
-			return true
-		}
-	}
-	return false
 }
 
 // ─── authorization ────────────────────────────────────────────────────────────
@@ -279,7 +271,7 @@ func TestVoiceMod_Mute_SetsServerMutedAndBroadcasts(t *testing.T) {
 		t.Errorf("broadcast server_muted = %v, want true", payload["server_muted"])
 	}
 
-	if !hasAction(auditActions(t, database), "voice_mod_mute") {
+	if !slices.Contains(auditActions(t, database), "voice_mod_mute") {
 		t.Error("voice_mod_mute audit entry missing")
 	}
 }
@@ -345,7 +337,7 @@ func TestVoiceMod_Deafen_SetsServerDeafenedAndMutes(t *testing.T) {
 	if payload["server_deafened"] != true {
 		t.Errorf("broadcast server_deafened = %v, want true", payload["server_deafened"])
 	}
-	if !hasAction(auditActions(t, database), "voice_mod_deafen") {
+	if !slices.Contains(auditActions(t, database), "voice_mod_deafen") {
 		t.Error("voice_mod_deafen audit entry missing")
 	}
 }
@@ -373,7 +365,7 @@ func TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget(t *testing.T) {
 	if receiveMsgOfType(targetSend, "voice_disconnected", waitTimeout) == nil {
 		t.Error("target did not receive voice_disconnected")
 	}
-	if !hasAction(auditActions(t, database), "voice_mod_kick") {
+	if !slices.Contains(auditActions(t, database), "voice_mod_kick") {
 		t.Error("voice_mod_kick audit entry missing")
 	}
 }
@@ -406,7 +398,7 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 		return err == nil && state == nil
 	}, "target to be removed from the old channel pending re-join")
 
-	if !hasAction(auditActions(t, database), "voice_mod_move") {
+	if !slices.Contains(auditActions(t, database), "voice_mod_move") {
 		t.Error("voice_mod_move audit entry missing")
 	}
 }
