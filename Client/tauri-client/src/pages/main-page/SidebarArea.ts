@@ -605,9 +605,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             getToast()?.show(msg, "error");
           }
         },
-        onBan: async (userId, username) => {
+        onBan: async (userId, username, reason) => {
           try {
-            await api.adminBanMember(userId);
+            await api.adminBanMember(userId, reason);
             getToast()?.show(`Banned ${username}`, "success");
           } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to ban member";
@@ -616,7 +616,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         },
         onChangeRole: async (userId, username, newRole) => {
           const roleId = getRoleIdByName(newRole);
-          if (roleId === undefined) return;
+          if (roleId === undefined) {
+            // No silent failures: the role vanished from the server's list.
+            getToast()?.show(`Unknown role "${newRole}" — try reconnecting`, "error");
+            return;
+          }
           try {
             await api.adminChangeRole(userId, roleId);
             getToast()?.show(`Changed ${username}'s role to ${newRole}`, "success");

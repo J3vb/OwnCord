@@ -33,6 +33,9 @@ export interface InviteManagerOptions {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** How long a "Sure?" revoke stays armed before reverting. */
+const CONFIRM_TIMEOUT_MS = 4000;
+
 function maskCode(code: string): string {
   if (code.length <= 6) return code;
   return `${code.slice(0, 3)}...${code.slice(-3)}`;
@@ -85,12 +88,43 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
         { signal: ac.signal },
       );
 
+      // Revoking kills a live invite link — two-click confirm, then an
+      // in-flight state so a slow revoke isn't clicked twice.
       const revokeBtn = createElement("button", { class: "invite-item__revoke" });
+      const revokeLabel = document.createTextNode(" Revoke");
       revokeBtn.appendChild(createIcon("trash-2", 14));
-      revokeBtn.appendChild(document.createTextNode(" Revoke"));
+      revokeBtn.appendChild(revokeLabel);
+      let confirming = false;
+      let revoking = false;
+      let disarmTimer: ReturnType<typeof setTimeout> | null = null;
+      const disarm = (): void => {
+        confirming = false;
+        if (disarmTimer !== null) {
+          clearTimeout(disarmTimer);
+          disarmTimer = null;
+        }
+        revokeLabel.nodeValue = " Revoke";
+        revokeBtn.classList.remove("invite-item__revoke--confirming");
+      };
       revokeBtn.addEventListener(
         "click",
         () => {
+          if (revoking) return;
+          if (!confirming) {
+            confirming = true;
+            revokeLabel.nodeValue = " Sure?";
+            revokeBtn.classList.add("invite-item__revoke--confirming");
+            disarmTimer = setTimeout(disarm, CONFIRM_TIMEOUT_MS);
+            return;
+          }
+          if (disarmTimer !== null) {
+            clearTimeout(disarmTimer);
+            disarmTimer = null;
+          }
+          confirming = false;
+          revoking = true;
+          revokeBtn.disabled = true;
+          revokeLabel.nodeValue = " Revoking...";
           void options
             .onRevokeInvite(invite.code)
             .then(() => {
@@ -98,6 +132,10 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
               renderList();
             })
             .catch(() => {
+              revoking = false;
+              revokeBtn.disabled = false;
+              revokeBtn.classList.remove("invite-item__revoke--confirming");
+              revokeLabel.nodeValue = " Revoke";
               options.onError?.("Failed to revoke invite");
             });
         },
@@ -142,17 +180,28 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     const footer = createElement("div", { class: "modal-footer" });
     const createBtn = createElement("button", { class: "invite-manager__create btn-modal-save" });
     createBtn.appendChild(createIcon("external-link", 14));
-    createBtn.appendChild(document.createTextNode(" Create Invite"));
+    const createLabel = document.createTextNode(" Create Invite");
+    createBtn.appendChild(createLabel);
     createBtn.addEventListener(
       "click",
       () => {
+        // Without this guard an impatient double-click mints two invites.
+        if (createBtn.disabled) return;
+        createBtn.disabled = true;
+        createLabel.nodeValue = " Creating...";
+        const done = (): void => {
+          createBtn.disabled = false;
+          createLabel.nodeValue = " Create Invite";
+        };
         void options
           .onCreateInvite()
           .then((newInvite) => {
             invites = [...invites, newInvite];
             renderList();
+            done();
           })
           .catch(() => {
+            done();
             options.onError?.("Failed to create invite");
           });
       },

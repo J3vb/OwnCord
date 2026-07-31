@@ -95,7 +95,7 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
-    it("Ban requires double-click confirmation", () => {
+    it("Ban asks for a reason before it fires", () => {
       const onBan = vi.fn(async () => {});
       const { result } = makeMenu({ onBan });
 
@@ -105,11 +105,95 @@ describe("AdminActions", () => {
       ) as HTMLDivElement;
 
       banItem.click();
-      expect(banItem.textContent).toBe("Are you sure?");
+      expect(onBan).not.toHaveBeenCalled();
 
-      banItem.click();
-      expect(onBan).toHaveBeenCalledOnce();
+      const reasonInput = result.element.querySelector(
+        "[data-testid='ban-reason-input']",
+      ) as HTMLInputElement;
+      expect(reasonInput).not.toBeNull();
+      reasonInput.value = "  spamming  ";
+
+      const confirm = result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement;
+      confirm.click();
+
+      // The server stores and displays the reason, so it's trimmed, not raw.
+      expect(onBan).toHaveBeenCalledWith("spamming");
       result.destroy();
+    });
+
+    it("Ban sends an empty reason when none is typed", () => {
+      const onBan = vi.fn(async () => {});
+      const { result } = makeMenu({ onBan });
+
+      const banItem = Array.from(
+        result.element.querySelectorAll(".context-menu__item--danger"),
+      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      banItem.click();
+      (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
+
+      expect(onBan).toHaveBeenCalledWith("");
+      result.destroy();
+    });
+
+    it("Ban ignores a second click while the request is in flight", () => {
+      let release: (() => void) | null = null;
+      const onBan = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const { result } = makeMenu({ onBan });
+
+      const banItem = Array.from(
+        result.element.querySelectorAll(".context-menu__item--danger"),
+      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      banItem.click();
+      const confirm = result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement;
+      confirm.click();
+      expect(confirm.textContent).toBe("Banning...");
+      confirm.click();
+
+      expect(onBan).toHaveBeenCalledTimes(1);
+      release!();
+      result.destroy();
+    });
+
+    it("Kick shows an in-flight state and disarms after a pause", async () => {
+      vi.useFakeTimers();
+      try {
+        let release: (() => void) | null = null;
+        const onKick = vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              release = resolve;
+            }),
+        );
+        const { result } = makeMenu({ onKick });
+        const kickItem = Array.from(
+          result.element.querySelectorAll(".context-menu__item--danger"),
+        ).find((i) => i.textContent === "Kick") as HTMLDivElement;
+
+        // Armed, then left alone — a stray later click must not kick anyone.
+        kickItem.click();
+        expect(kickItem.textContent).toBe("Are you sure?");
+        vi.advanceTimersByTime(5000);
+        expect(kickItem.textContent).toBe("Kick");
+        kickItem.click();
+        expect(onKick).not.toHaveBeenCalled();
+
+        kickItem.click();
+        expect(onKick).toHaveBeenCalledOnce();
+        expect(kickItem.textContent).toBe("Kicking...");
+
+        release!();
+        await vi.waitFor(() => {
+          expect(kickItem.textContent).toBe("Kick");
+        });
+        result.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("renders separator between role and danger items", () => {

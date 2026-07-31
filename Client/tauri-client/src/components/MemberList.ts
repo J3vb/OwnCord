@@ -9,6 +9,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { membersStore, type Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { channelsStore } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
 import type { UserStatus } from "@lib/types";
 
@@ -16,8 +17,23 @@ import type { UserStatus } from "@lib/types";
 export interface MemberListOptions {
   readonly currentUserRole: string;
   readonly onKick: (userId: number, username: string) => Promise<void>;
-  readonly onBan: (userId: number, username: string) => Promise<void>;
+  readonly onBan: (userId: number, username: string, reason: string) => Promise<void>;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+}
+
+/** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
+const FALLBACK_ASSIGNABLE_ROLES: readonly string[] = ["admin", "moderator", "member"];
+
+/**
+ * Role names an admin can assign, taken from the server's role list. "owner" is
+ * excluded — ownership transfer isn't a context-menu action.
+ */
+function assignableRoleNames(): readonly string[] {
+  const roles = channelsStore
+    .getState()
+    .roles.map((r) => r.name.toLowerCase())
+    .filter((name) => name !== "owner");
+  return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
 }
 
 /** Ordered role groups with display names and CSS color variables. */
@@ -127,7 +143,10 @@ function createMemberItem(
       closeActiveMenu();
       document.removeEventListener("mousedown", handleOutsideClick);
 
-      const availableRoles = ["admin", "moderator", "member"];
+      // Roles come from the server's `ready` payload — a hardcoded list made
+      // custom roles unreachable and, worse, unresolvable to a role id, so
+      // picking one silently did nothing.
+      const availableRoles = assignableRoleNames();
 
       activeMenu = createMemberContextMenu({
         userId: member.id,
@@ -135,7 +154,7 @@ function createMemberItem(
         currentRole: member.role.toLowerCase(),
         availableRoles,
         onKick: () => opts.onKick(member.id, member.username),
-        onBan: () => opts.onBan(member.id, member.username),
+        onBan: (reason: string) => opts.onBan(member.id, member.username, reason),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
       });
 

@@ -15,7 +15,8 @@ export interface MemberContextMenuOptions {
   currentRole: string;
   availableRoles: readonly string[];
   onKick(): Promise<void>;
-  onBan(): Promise<void>;
+  /** The reason is stored and displayed by the server; empty means "no reason given". */
+  onBan(reason: string): Promise<void>;
   onChangeRole(newRole: string): Promise<void>;
 }
 
@@ -51,26 +52,70 @@ function createSeparator(): HTMLDivElement {
   return createElement("div", { class: "context-menu__separator" });
 }
 
+/** How long a "Are you sure?" state stays armed before reverting. */
+const CONFIRM_TIMEOUT_MS = 4000;
+
+/**
+ * Two-click confirm with an in-flight state.
+ *
+ * The armed state auto-disarms after a few seconds so a menu left open doesn't
+ * turn a stray second click into a ban, and the item shows progress while the
+ * request is running — a slow kick used to look like nothing happened.
+ */
 function withConfirmation(
   item: HTMLDivElement,
   confirmLabel: string,
-  onConfirm: () => void,
+  onConfirm: () => void | Promise<void>,
   signal: AbortSignal,
+  pendingLabel = "Working...",
 ): void {
   let confirming = false;
+  let running = false;
+  let disarmTimer: ReturnType<typeof setTimeout> | null = null;
   const originalLabel = item.textContent ?? "";
+
+  function disarm(): void {
+    confirming = false;
+    if (disarmTimer !== null) {
+      clearTimeout(disarmTimer);
+      disarmTimer = null;
+    }
+    setText(item, originalLabel);
+  }
+
+  signal.addEventListener("abort", () => {
+    if (disarmTimer !== null) clearTimeout(disarmTimer);
+  });
 
   item.addEventListener(
     "click",
     (e) => {
       e.stopPropagation();
-      if (confirming) {
-        confirming = false;
-        setText(item, originalLabel);
-        onConfirm();
-      } else {
+      if (running) return;
+      if (!confirming) {
         confirming = true;
         setText(item, confirmLabel);
+        disarmTimer = setTimeout(disarm, CONFIRM_TIMEOUT_MS);
+        return;
+      }
+      if (disarmTimer !== null) {
+        clearTimeout(disarmTimer);
+        disarmTimer = null;
+      }
+      confirming = false;
+      running = true;
+      setText(item, pendingLabel);
+      item.classList.add("context-menu__item--pending");
+      const done = (): void => {
+        running = false;
+        item.classList.remove("context-menu__item--pending");
+        setText(item, originalLabel);
+      };
+      const result = onConfirm();
+      if (result instanceof Promise) {
+        void result.then(done, done);
+      } else {
+        done();
       }
     },
     { signal },
@@ -142,17 +187,10 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     },
     "Kick",
   );
-  withConfirmation(
-    kickItem,
-    "Are you sure?",
-    () => {
-      void options.onKick();
-    },
-    ac.signal,
-  );
+  withConfirmation(kickItem, "Are you sure?", () => options.onKick(), ac.signal, "Kicking...");
   menu.appendChild(kickItem);
 
-  // Ban with confirmation
+  // Ban — collects the reason the server stores and displays alongside the ban.
   const banItem = createElement(
     "div",
     {
@@ -160,15 +198,74 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     },
     "Ban",
   );
-  withConfirmation(
-    banItem,
-    "Are you sure?",
-    () => {
-      void options.onBan();
-    },
-    ac.signal,
+  const banReasonRow = createElement("div", {
+    class: "context-menu__reason",
+    style: "display:none;padding:6px 8px",
+  });
+  const banReasonInput = createElement("input", {
+    class: "form-input",
+    type: "text",
+    placeholder: "Reason (optional)",
+    maxlength: "200",
+    "data-testid": "ban-reason-input",
+    style: "width:100%;font-size:12px",
+  });
+  const banConfirm = createElement(
+    "div",
+    { class: "context-menu__item context-menu__item--danger", "data-testid": "ban-confirm" },
+    "Confirm Ban",
   );
-  menu.appendChild(banItem);
+  appendChildren(banReasonRow, banReasonInput, banConfirm);
+
+  banItem.addEventListener(
+    "click",
+    (e) => {
+      e.stopPropagation();
+      banItem.style.display = "none";
+      banReasonRow.style.display = "";
+      banReasonInput.focus();
+    },
+    { signal: ac.signal },
+  );
+
+  // Typing a reason must not close the menu or trigger the outside-click guard.
+  banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal: ac.signal });
+  banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal: ac.signal });
+
+  let banRunning = false;
+  function submitBan(): void {
+    if (banRunning) return;
+    banRunning = true;
+    setText(banConfirm, "Banning...");
+    banConfirm.classList.add("context-menu__item--pending");
+    const done = (): void => {
+      banRunning = false;
+      banConfirm.classList.remove("context-menu__item--pending");
+      setText(banConfirm, "Confirm Ban");
+    };
+    void options.onBan(banReasonInput.value.trim()).then(done, done);
+  }
+
+  banConfirm.addEventListener(
+    "click",
+    (e) => {
+      e.stopPropagation();
+      submitBan();
+    },
+    { signal: ac.signal },
+  );
+  banReasonInput.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitBan();
+      }
+    },
+    { signal: ac.signal },
+  );
+
+  appendChildren(menu, banItem, banReasonRow);
 
   function destroy(): void {
     ac.abort();
@@ -217,10 +314,9 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
   withConfirmation(
     deleteItem,
     "Are you sure?",
-    () => {
-      void options.onDelete();
-    },
+    () => options.onDelete(),
     ac.signal,
+    "Deleting...",
   );
   menu.appendChild(deleteItem);
 
