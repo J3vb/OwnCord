@@ -346,9 +346,10 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 
 	// Make the safety copy impossible: VACUUM INTO refuses a destination that
 	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
-	// next few seconds' worth of candidates.
+	// next two minutes' worth of candidates — a 4-second window flaked on slow
+	// Windows CI runners where the request itself outlived it.
 	admin.SetBackupBaseDir(backupDir)
-	for i := range 4 {
+	for i := range 120 {
 		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
 		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
 			t.Fatalf("WriteFile blocker: %v", err)
