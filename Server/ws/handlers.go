@@ -208,6 +208,13 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 // connection — including the SPEAK/VIDEO grants baked into a freshly minted
 // LiveKit token — instead of persisting until the user reconnects. This mirrors
 // the V2 handlers, which already resolve the live role (deps.go).
+//
+// Deliberately NOT routed through the cached PermissionService: the only
+// production caller is sweepStaleVoiceStates, the last-line revocation backstop
+// that evicts live voice participants. Reading the DB live keeps that backstop
+// authoritative even for a permission change that somehow bypassed the
+// invalidation hooks, and the sweep runs once a minute for only the clients
+// currently in voice, so the uncached cost is negligible.
 func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64) bool {
 	role, err := h.db.GetRoleForUser(ctx, c.userID)
 	if err != nil || role == nil {
@@ -225,7 +232,7 @@ func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, pe
 // is what a channel id taken straight from a client frame requires: role bits
 // alone let any member through to a DM they are not a participant of.
 func (h *Hub) requireChannelAccess(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
-	if hasChannelAccess(ctx, h.db, h.permChecker, c.userID, channelID, perm) {
+	if hasChannelAccess(ctx, h.db, h.permChecker, h.perms, c.userID, channelID, perm) {
 		return true
 	}
 	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)

@@ -74,7 +74,7 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	}
 
 	// Permission check.
-	if r := requirePerm(ctx, d.DB, d.Permissions, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
+	if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
 		return *r
 	}
 
@@ -129,7 +129,7 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 	}
 
 	// Permission check.
-	if r := requirePerm(ctx, d.DB, d.Permissions, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
+	if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
 		return *r
 	}
 

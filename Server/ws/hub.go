@@ -39,6 +39,12 @@ type Hub struct {
 	lkProcess    *LiveKitProcess
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
+	// perms is the cached permission service (service.PermissionService). Nil in
+	// bare test hubs constructed without Services; every use falls back to the
+	// live permChecker path then. Revocation stays prompt because each mutation
+	// site invalidates synchronously (InvalidateUser on role change,
+	// InvalidateAll on channel-override change) — the cache TTL is a backstop.
+	perms *service.PermissionService
 	// messageSvc gates plugin broadcasts through the same posting policy as a
 	// real message send (permissions, DM membership, DM blocks). Nil only in
 	// bare test hubs; the broadcast gate fails closed then.
@@ -135,6 +141,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		presenceDeps.ChannelSvc = svc.Channels
 		reactionDeps.MessageSvc = svc.Messages
 		h.messageSvc = svc.Messages
+		h.perms = svc.Permissions
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -150,6 +157,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		DB:          h.db,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
+		PermSvc:     h.perms,
 		LiveKit:     h.livekit,
 		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
 		KeyHolder:   h,
