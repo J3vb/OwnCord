@@ -17,14 +17,14 @@ var blockedMagic = []struct {
 	name  string
 	magic []byte
 }{
-	{"PE executable", []byte("MZ")},                       // Windows .exe / .dll
-	{"ELF binary", []byte("\x7fELF")},                     // Linux binaries
-	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")},             // macOS 64-bit
-	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")},             // macOS 32-bit
-	{"shell script", []byte("#!")},                        // Shebang scripts (.sh, .py, etc.)
-	{"Java class", []byte("\xca\xfe\xba\xbe")},            // .class files
-	{"OLE2 document", []byte("\xd0\xcf\x11\xe0")},         // .doc/.xls with macros
-	{"WebAssembly", []byte("\x00asm")},                    // .wasm modules
+	{"PE executable", []byte("MZ")},                      // Windows .exe / .dll
+	{"ELF binary", []byte("\x7fELF")},                    // Linux binaries
+	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")},            // macOS 64-bit
+	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")},            // macOS 32-bit
+	{"shell script", []byte("#!")},                       // Shebang scripts (.sh, .py, etc.)
+	{"Java class", []byte("\xca\xfe\xba\xbe")},           // .class files
+	{"OLE2 document", []byte("\xd0\xcf\x11\xe0")},        // .doc/.xls with macros
+	{"WebAssembly", []byte("\x00asm")},                   // .wasm modules
 	{"Windows shortcut", []byte{0x4c, 0x00, 0x00, 0x00}}, // .lnk files
 }
 

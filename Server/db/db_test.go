@@ -204,9 +204,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	}
 
 	expectedIndexes := []string{
-		"idx_sessions_token",
 		"idx_messages_channel",
-		"idx_invites_code",
 		"idx_audit_timestamp",
 		"idx_attachments_message",
 		"idx_channel_overrides_role",
@@ -229,18 +227,27 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	}
 
 	// Migration 019 drops the duplicate of the channel_overrides UNIQUE
-	// auto-index.
-	t.Run("idx_channel_overrides_channel_role dropped", func(t *testing.T) {
-		var name string
-		err := database.QueryRowContext(context.Background(),
-			"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_channel_overrides_channel_role'",
-		).Scan(&name)
-		if err == nil {
-			t.Error("idx_channel_overrides_channel_role still exists after migration 019")
-		} else if err != sql.ErrNoRows {
-			t.Errorf("query error: %v", err)
-		}
-	})
+	// auto-index; migration 020 drops the duplicates of the sessions.token
+	// and invites.code UNIQUE auto-indexes.
+	droppedIndexes := []string{
+		"idx_channel_overrides_channel_role",
+		"idx_sessions_token",
+		"idx_invites_code",
+	}
+	for _, idx := range droppedIndexes {
+		t.Run(idx+" dropped", func(t *testing.T) {
+			var name string
+			err := database.QueryRowContext(context.Background(),
+				"SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+				idx,
+			).Scan(&name)
+			if err == nil {
+				t.Errorf("%s still exists after migrations", idx)
+			} else if err != sql.ErrNoRows {
+				t.Errorf("query error: %v", err)
+			}
+		})
+	}
 }
 
 func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {

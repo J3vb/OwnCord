@@ -8,10 +8,24 @@ import (
 )
 
 const (
-	bcryptCost = 12
 	minPassLen = 8
 	maxPassLen = 72 // bcrypt silently truncates beyond 72 bytes
 )
+
+// bcryptCost is a var (not a const) so SetCostForTesting can lower it in test
+// binaries. Production code never mutates it.
+var bcryptCost = 12
+
+// SetCostForTesting lowers the bcrypt cost for the current process and resets
+// the dummy timing pad so it is regenerated at the new cost. Intended to be
+// called from TestMain with bcrypt.MinCost: password hashing dominates the
+// api/admin test suites (~264 cost-12 hashes ≈ minutes of pure bcrypt), and
+// nothing about the tests depends on the hash strength.
+func SetCostForTesting(cost int) {
+	bcryptCost = cost
+	dummyHashOnce = sync.Once{}
+	dummyHash = nil
+}
 
 // ErrPasswordTooShort is returned when the password is below the minimum length.
 var ErrPasswordTooShort = errors.New("password must be at least 8 characters")
