@@ -103,10 +103,12 @@ export async function initPtt(): Promise<void> {
       // loaded lazily so it stays out of the startup path. In a voice channel
       // the module is necessarily already loaded, so this import resolves
       // from the module cache in a microtask.
-      void import("./livekitSession").then(({ setMuted }) => {
-        setMuted(!event.payload);
-        log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
-      });
+      void import("./livekitSession")
+        .then(({ setMuted }) => {
+          setMuted(!event.payload);
+          log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
+        })
+        .catch((e) => log.warn("Failed to apply PTT mute", e));
     });
     pttUnsubscribe = unsub;
 

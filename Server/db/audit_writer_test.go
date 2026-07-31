@@ -145,6 +145,120 @@ func TestAuditWriter_DrainOnStop(t *testing.T) {
 	}
 }
 
+// slowAuditStore models a store whose flushes take a while (a slow/stalled
+// disk). It tracks whether any flush ran after Close was called — mirroring
+// main.go closing the database right after AuditWriter.Stop returns.
+type slowAuditStore struct {
+	mu           sync.Mutex
+	delay        time.Duration
+	closed       bool
+	persisted    int
+	flushAfter   int // entries flushed after Close (a correctness violation)
+	flushesAfter int
+}
+
+func (s *slowAuditStore) PersistAudits(_ context.Context, entries []db.AuditEntry) (int, error) {
+	s.mu.Lock()
+	closedAtEntry := s.closed
+	delay := s.delay
+	s.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if closedAtEntry || s.closed {
+		s.flushesAfter++
+		s.flushAfter += len(entries)
+	}
+	s.persisted += len(entries)
+	return len(entries), nil
+}
+
+func (s *slowAuditStore) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+}
+
+func (s *slowAuditStore) stats() (persisted, flushAfter, flushesAfter int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persisted, s.flushAfter, s.flushesAfter
+}
+
+// TestAuditWriter_StopWaitsForGoroutineExit pins the fixed contract: Stop must
+// not return until the run goroutine has finished its in-flight flush, even
+// when the Stop context expires first. The store flush (200ms) far outlasts
+// the Stop ctx (20ms); the old select{done|ctx.Done} would have returned at
+// ~20ms with nothing persisted. The fix must return only after the flush
+// completes, with every entry persisted.
+func TestAuditWriter_StopWaitsForGoroutineExit(t *testing.T) {
+	store := &slowAuditStore{delay: 200 * time.Millisecond}
+	// Neither the batch (50) nor the ticker (1h) can flush; only Stop's drain
+	// flushes, so the in-flight flush is deterministic.
+	w := db.NewAuditWriter(store, 64, 50, time.Hour)
+	w.Start(context.Background())
+	for i := range int64(5) {
+		w.Enqueue(i, "slow_action", "user", i, "")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	w.Stop(ctx)
+	elapsed := time.Since(start)
+
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("Stop returned after %v, want it to block for the ~200ms flush "+
+			"(it must not abandon the goroutine when ctx expires)", elapsed)
+	}
+	persisted, flushAfter, _ := store.stats()
+	if persisted != 5 {
+		t.Errorf("persisted=%d, want 5 (Stop must wait for the flush to finish)", persisted)
+	}
+	if flushAfter != 0 {
+		t.Errorf("flushAfter=%d, want 0 (nothing was closed yet)", flushAfter)
+	}
+	if p, _, _, _ := w.Stats(); p != 5 {
+		t.Errorf("writer persisted counter = %d, want 5", p)
+	}
+}
+
+// TestAuditWriter_StopDrainsBeforeStoreClose reproduces main.go's LIFO
+// shutdown ordering (AuditWriter.Stop, then database.Close) and asserts the
+// fix: because Stop returns only after the goroutine exits, no flush can run
+// after the store is closed — so a slow-disk shutdown never writes into a
+// closed pool (the D8 audit-loss race).
+func TestAuditWriter_StopDrainsBeforeStoreClose(t *testing.T) {
+	store := &slowAuditStore{delay: 200 * time.Millisecond}
+	w := db.NewAuditWriter(store, 64, 50, time.Hour)
+	w.Start(context.Background())
+	for i := range int64(5) {
+		w.Enqueue(i, "shutdown_action", "user", i, "")
+	}
+
+	// Stop ctx expires long before the flush finishes, as in a >5s disk stall.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	w.Stop(ctx)
+
+	// Mirror main.go: close the store immediately after Stop returns.
+	store.close()
+
+	persisted, flushAfter, flushesAfter := store.stats()
+	if flushAfter != 0 || flushesAfter != 0 {
+		t.Errorf("%d entries across %d flushes ran after store close; want 0 "+
+			"(Stop must fully drain before the DB is closed)", flushAfter, flushesAfter)
+	}
+	if persisted != 5 {
+		t.Errorf("persisted=%d, want 5 before store close", persisted)
+	}
+}
+
 func TestAuditWriter_FlushFailureCountsAndLogs(t *testing.T) {
 	store := &fakeAuditStore{err: errors.New("disk on fire")}
 	w := db.NewAuditWriter(store, 16, 50, time.Hour)

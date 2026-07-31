@@ -3,7 +3,13 @@
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
-import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/logger";
+import {
+  getLogBuffer,
+  clearLogBuffer,
+  addLogListener,
+  setLogLevel,
+  getLogLevel,
+} from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
@@ -167,6 +173,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     if (savedMinLevel !== "") {
       levelSelect.value = savedMinLevel;
       setLogLevel(savedMinLevel);
+    } else {
+      // No saved pref: reflect the actual effective runtime level (the
+      // applyStoredLogLevel fallback — info in prod, debug in dev) instead of
+      // leaving the select on its first option (DEBUG). Purely cosmetic — no
+      // save/apply, so the runtime level is unchanged.
+      levelSelect.value = getLogLevel();
     }
     levelSelect.addEventListener(
       "change",

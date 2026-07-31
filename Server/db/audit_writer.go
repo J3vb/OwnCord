@@ -47,6 +47,12 @@ type AuditWriter struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
+	// stopCtxDone is the Done channel of the context passed to Stop. run's
+	// drain-on-stop loop reads it only after observing stop closed — the
+	// close/receive pair provides the happens-before, so there is no data
+	// race and no lock. A nil value (an uncancellable Stop ctx, e.g.
+	// context.Background) means "drain fully".
+	stopCtxDone <-chan struct{}
 
 	persisted atomic.Uint64
 	dropped   atomic.Uint64
@@ -116,23 +122,35 @@ func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID
 	}
 }
 
-// Stop signals the writer to drain remaining entries and exit. Blocks until
-// the goroutine exits or ctx is cancelled. Safe to call without a prior
-// Start: in that case there's no goroutine to wait for and Stop returns
-// immediately after closing the stop channel.
+// Stop signals the writer to drain remaining entries and exit, and returns
+// only after the run goroutine has fully exited (i.e. has stopped touching the
+// store). This is the load-bearing contract: main.go closes the database right
+// after Stop returns (LIFO defers), so Stop must guarantee no flush is still
+// in flight — otherwise a late flush writes into a closed pool and audits are
+// lost. ctx does NOT abandon that wait; it only bounds how long run() keeps
+// draining the queue before it stops accepting new entries, does one final
+// flush, and exits (see run). A single stuck flush therefore delays shutdown
+// by at most that flush rather than closing the DB underneath it.
+//
+// Safe to call without a prior Start: in that case there's no goroutine to
+// wait for and Stop returns immediately after closing the stop channel.
 func (w *AuditWriter) Stop(ctx context.Context) {
 	if w == nil {
 		return
 	}
-	w.stopOnce.Do(func() { close(w.stop) })
+	w.stopOnce.Do(func() {
+		// Published before close(w.stop): run() reads stopCtxDone only after
+		// its receive on w.stop observes the close, and the close/receive
+		// pair makes this write visible without a data race.
+		w.stopCtxDone = ctx.Done()
+		close(w.stop)
+	})
 	if !w.started.Load() {
 		// run() was never launched, so done will never be closed.
 		return
 	}
-	select {
-	case <-w.done:
-	case <-ctx.Done():
-	}
+	// Always wait for the goroutine to exit — never race it against ctx.
+	<-w.done
 }
 
 // Stats returns lifetime counters.
@@ -183,7 +201,13 @@ func (w *AuditWriter) run(ctx context.Context) {
 	for {
 		select {
 		case <-w.stop:
-			// Drain anything still in the channel before exiting.
+			// Drain anything still in the channel before exiting. The drain is
+			// bounded by the Stop context (w.stopCtxDone): once it fires we do
+			// one final flush and exit rather than keep pulling, so a slow
+			// store delays shutdown by at most one flush instead of
+			// unboundedly. Either way the goroutine finishes any in-flight
+			// flush before returning (and closing w.done), so Stop's caller
+			// never closes the store under a live flusher.
 			for {
 				select {
 				case a := <-w.queue:
@@ -191,6 +215,9 @@ func (w *AuditWriter) run(ctx context.Context) {
 					if len(batch) >= w.batchSize {
 						flush()
 					}
+				case <-w.stopCtxDone:
+					flush()
+					return
 				default:
 					flush()
 					return
