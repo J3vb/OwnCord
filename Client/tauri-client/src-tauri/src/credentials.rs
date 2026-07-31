@@ -161,9 +161,10 @@ pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
 /// Save the long-term identity private key for `host`.
 ///
 /// The write is read back before this returns. A machine whose credential store
-/// accepts writes without keeping them falls through to the DPAPI file; if that
-/// is also unavailable this returns an error rather than reporting a success
-/// that would leave peers rejecting the user's voice announce after a restart.
+/// accepts writes without keeping them falls through to the encrypted fallback
+/// file (DPAPI on Windows, sealed per-install key elsewhere); if that is also
+/// unavailable this returns an error rather than reporting a success that would
+/// leave peers rejecting the user's voice announce after a restart.
 #[tauri::command]
 pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<(), String> {
     require_non_empty(&host, "host")?;

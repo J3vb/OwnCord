@@ -32,15 +32,20 @@
 //!
 //! The keychain is the right store; the fallback is damage control, not a
 //! default. It engages only after a write has been proven not to round-trip,
-//! and only on Windows, where DPAPI can protect the file at rest with a
-//! user-scoped key. On macOS and Linux a failing Keychain / Secret Service is
-//! reported as an error rather than silently downgraded to a file — writing a
-//! login password or an identity private key to plaintext disk there would be a
-//! worse outcome than not persisting it.
+//! on every desktop platform. On Windows the fallback file is protected by
+//! DPAPI (user-scoped, key held by the OS). On macOS and Linux — where the
+//! thing that failed *is* the OS secret store, so no OS-held key is available
+//! — entries are sealed with ChaCha20-Poly1305 under a per-install random key
+//! file (owner-only, see [`crate::fallback_crypto`]). That is honest
+//! damage-control, not a vault: same-user malware can read both files, exactly
+//! as it could call DPAPI. What it fixes is the real-world failure this module
+//! kept hitting — a Linux desktop with no Secret Service provider (no
+//! gnome-keyring / KWallet) or a locked macOS Keychain previously had nowhere
+//! to save at all, so credentials and the voice-E2EE identity key silently
+//! never survived a restart. Secrets at rest are never plaintext, and the OS
+//! credential store always wins again the moment it starts round-tripping.
 
 use serde::Serialize;
-// Only the DPAPI fallback stores JSON values, and that is Windows-only.
-#[cfg(windows)]
 use serde_json::Value;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
@@ -59,10 +64,23 @@ pub const SERVICE: &str = "com.owncord.client";
 pub enum Backend {
     /// The OS credential store. The expected answer on every healthy machine.
     Keyring,
-    /// DPAPI-protected file under the app data dir, used only after the OS
-    /// credential store accepted a write and then failed to return it.
+    /// DPAPI-protected file under the app data dir (Windows), used only after
+    /// the OS credential store accepted a write and then failed to return it.
+    // Constructed only on its own platform; both variants exist everywhere so
+    // the serialized Backend union is identical across OS builds.
+    #[cfg_attr(not(windows), allow(dead_code))]
     DpapiFile,
+    /// ChaCha20-Poly1305-sealed file under the app data dir (macOS/Linux),
+    /// engaged under the same failed-round-trip condition as `DpapiFile`.
+    #[cfg_attr(windows, allow(dead_code))]
+    EncryptedFile,
 }
+
+/// The fallback backend this platform's build parks degraded secrets in.
+#[cfg(windows)]
+const FALLBACK_BACKEND: Backend = Backend::DpapiFile;
+#[cfg(not(windows))]
+const FALLBACK_BACKEND: Backend = Backend::EncryptedFile;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -114,10 +132,10 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
 
     set_fallback(app, account, secret)?;
     log::warn!(
-        "{SERVICE}: account '{account}' is stored in the DPAPI fallback file, not the OS \
+        "{SERVICE}: account '{account}' is stored in the encrypted fallback file, not the OS \
          credential store. See docs/credential-storage.md"
     );
-    Ok(Backend::DpapiFile)
+    Ok(FALLBACK_BACKEND)
 }
 
 /// Load the secret for `account`, or `None` when nothing is stored.
@@ -218,25 +236,64 @@ fn keyring_delete(account: &str) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Degraded-mode fallback (Windows only, DPAPI-protected)
+// Degraded-mode fallback (all desktop platforms; sealing differs per OS)
 // ---------------------------------------------------------------------------
 
-/// Entropy bound into the DPAPI blob for `account`.
+/// Associated data bound into the sealed blob for `account` (the DPAPI
+/// "entropy" on Windows, the AEAD AAD elsewhere).
 ///
 /// Including the service and account means a ciphertext lifted from one entry
 /// cannot be pasted over another and still decrypt — the identity key for one
 /// host cannot be made to load as another's.
-#[cfg(windows)]
-fn dpapi_entropy(account: &str) -> Vec<u8> {
+fn fallback_aad(account: &str) -> Vec<u8> {
     format!("{SERVICE}\u{1}{account}").into_bytes()
 }
 
+/// Seal `secret` for the fallback store. Windows: DPAPI (user-scoped, OS-held
+/// key). Elsewhere: ChaCha20-Poly1305 under the per-install key file.
 #[cfg(windows)]
+fn protect_secret(_app: &AppHandle, account: &str, secret: &str) -> Result<Vec<u8>, String> {
+    crate::dpapi::protect(secret.as_bytes(), &fallback_aad(account))
+        .map_err(|code| format!("DPAPI protect failed (Win32 error {code})"))
+}
+
+#[cfg(not(windows))]
+fn protect_secret(app: &AppHandle, account: &str, secret: &str) -> Result<Vec<u8>, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("cannot resolve the app data dir for the fallback key: {e}"))?;
+    let key = crate::fallback_crypto::load_or_create_key(&dir)?;
+    crate::fallback_crypto::protect(&key, secret.as_bytes(), &fallback_aad(account))
+}
+
+/// Open a blob written by [`protect_secret`]. Errors are logged by the caller.
+#[cfg(windows)]
+fn unprotect_secret(_app: &AppHandle, account: &str, blob: &[u8]) -> Result<Vec<u8>, String> {
+    crate::dpapi::unprotect(blob, &fallback_aad(account)).map_err(|code| {
+        format!(
+            "DPAPI unprotect failed (Win32 error {code}) — the entry was written by a \
+             different Windows user or on a different machine"
+        )
+    })
+}
+
+#[cfg(not(windows))]
+fn unprotect_secret(app: &AppHandle, account: &str, blob: &[u8]) -> Result<Vec<u8>, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("cannot resolve the app data dir for the fallback key: {e}"))?;
+    let key = crate::fallback_crypto::load_or_create_key(&dir)?;
+    crate::fallback_crypto::unprotect(&key, blob, &fallback_aad(account))
+}
+
 fn set_fallback(app: &AppHandle, account: &str, secret: &str) -> Result<(), String> {
     use base64::Engine as _;
 
-    let blob = crate::dpapi::protect(secret.as_bytes(), &dpapi_entropy(account))
-        .map_err(|code| format!("DPAPI protect failed (Win32 error {code})"))?;
+    let blob = protect_secret(app, account, secret)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(blob);
 
     let store = app
@@ -258,20 +315,6 @@ fn set_fallback(app: &AppHandle, account: &str, secret: &str) -> Result<(), Stri
     Ok(())
 }
 
-#[cfg(not(windows))]
-fn set_fallback(_app: &AppHandle, account: &str, _secret: &str) -> Result<(), String> {
-    // Deliberately no file fallback here: see the module header. The Keychain
-    // and Secret Service are the right stores on these platforms, and a
-    // plaintext file holding a login password or an identity private key is a
-    // worse outcome than failing to persist.
-    Err(format!(
-        "the OS credential store did not accept '{account}' and there is no fallback store on \
-         this platform — check that the Keychain (macOS) or a Secret Service provider such as \
-         gnome-keyring / KWallet (Linux) is running and unlocked"
-    ))
-}
-
-#[cfg(windows)]
 fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
     use base64::Engine as _;
 
@@ -287,20 +330,12 @@ fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
         .decode(encoded)
         .map_err(|e| log::warn!("credential fallback entry for '{account}' is not base64: {e}"))
         .ok()?;
-    let plaintext = crate::dpapi::unprotect(&blob, &dpapi_entropy(account))
-        .map_err(|code| {
-            log::warn!("DPAPI unprotect failed for '{account}' (Win32 error {code}) — the entry \
-                        was written by a different Windows user or on a different machine")
-        })
+    let plaintext = unprotect_secret(app, account, &blob)
+        .map_err(|e| log::warn!("credential fallback entry for '{account}' did not open: {e}"))
         .ok()?;
     String::from_utf8(plaintext)
         .map_err(|_| log::warn!("credential fallback entry for '{account}' is not valid UTF-8"))
         .ok()
-}
-
-#[cfg(not(windows))]
-fn get_fallback(_app: &AppHandle, _account: &str) -> Option<String> {
-    None
 }
 
 /// Drop any fallback copy of `account`. Best-effort: a failure here is logged,
@@ -353,9 +388,9 @@ mod tests {
     }
 
     /// Pins the IPC wire format to the variant names, which is what
-    /// `tauri-typegen` emits into `generated/types.ts` as
-    /// `type Backend = "Keyring" | "DpapiFile"`. Renaming a variant, or adding
-    /// a serde rename, desyncs the generated union from the runtime value.
+    /// `tauri-typegen` emits into `generated/types.ts`. Renaming a variant, or
+    /// adding a serde rename, desyncs the generated union from the runtime
+    /// value.
     #[test]
     fn backend_serializes_as_its_variant_name() {
         assert_eq!(
@@ -366,26 +401,29 @@ mod tests {
             serde_json::to_string(&Backend::DpapiFile).unwrap(),
             "\"DpapiFile\""
         );
+        assert_eq!(
+            serde_json::to_string(&Backend::EncryptedFile).unwrap(),
+            "\"EncryptedFile\""
+        );
     }
 
-    #[cfg(windows)]
     #[test]
-    fn dpapi_entropy_is_account_specific() {
-        assert_ne!(dpapi_entropy("host.example"), dpapi_entropy("identity:host.example"));
-        assert_eq!(dpapi_entropy("host.example"), dpapi_entropy("host.example"));
+    fn fallback_aad_is_account_specific() {
+        assert_ne!(fallback_aad("host.example"), fallback_aad("identity:host.example"));
+        assert_eq!(fallback_aad("host.example"), fallback_aad("host.example"));
     }
 
     #[cfg(windows)]
     #[test]
     fn dpapi_round_trips_and_rejects_foreign_entropy() {
         let secret = b"eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2In0";
-        let blob = crate::dpapi::protect(secret, &dpapi_entropy("identity:a.example")).unwrap();
+        let blob = crate::dpapi::protect(secret, &fallback_aad("identity:a.example")).unwrap();
         assert_ne!(blob.as_slice(), secret.as_slice(), "blob must not be plaintext");
 
-        let back = crate::dpapi::unprotect(&blob, &dpapi_entropy("identity:a.example")).unwrap();
+        let back = crate::dpapi::unprotect(&blob, &fallback_aad("identity:a.example")).unwrap();
         assert_eq!(back, secret);
 
         // A blob moved to another account's slot must not decrypt.
-        assert!(crate::dpapi::unprotect(&blob, &dpapi_entropy("identity:b.example")).is_err());
+        assert!(crate::dpapi::unprotect(&blob, &fallback_aad("identity:b.example")).is_err());
     }
 }

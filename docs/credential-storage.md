@@ -166,20 +166,32 @@ silently dropped.
 success. A store that accepts a write and does not return it is the one failure
 a `Result` cannot express, and it is exactly what caused this incident.
 
-When that check fails **on Windows**, the secret is encrypted with DPAPI
-(`CryptProtectData`, user-scoped, `CRYPTPROTECT_UI_FORBIDDEN`) and parked in
-`credential_fallback.json` in the app data dir. The account name is mixed into
-the DPAPI entropy, so a blob cannot be moved between entries and still decrypt.
-The fallback:
+When that check fails, the secret is sealed and parked in
+`credential_fallback.json` in the app data dir:
+
+- **Windows**: DPAPI (`CryptProtectData`, user-scoped,
+  `CRYPTPROTECT_UI_FORBIDDEN`). The encryption key is held by the OS.
+- **macOS / Linux**: ChaCha20-Poly1305 under a per-install random key stored in
+  `credential_fallback.key` beside it (owner-only, 0600). There is no OS-held
+  key available on these platforms when the OS secret store is itself the thing
+  that failed, so this is honest damage control rather than a vault: same-user
+  malware that can read both files has the secrets, exactly as it could invoke
+  DPAPI on Windows. What it guarantees is that secrets at rest are never
+  plaintext, that a copied `credential_fallback.json` is useless without the key
+  file next to it, and that the common no-Secret-Service Linux desktop (no
+  gnome-keyring / KWallet, e.g. a bare window manager) can still persist
+  credentials and the voice-E2EE identity key at all — previously those
+  machines had nowhere to save, so logins and identity keys silently vanished
+  on every restart.
+
+In both cases the account name is mixed in (DPAPI entropy / AEAD associated
+data), so a blob cannot be moved between entries and still decrypt. The
+fallback:
 
 - engages **only** after a write has been proven not to round-trip — never as
   the default;
 - is cleared automatically as soon as the OS credential store works again, so a
-  repaired machine returns to the real store with no migration step;
-- exists on Windows only. On macOS and Linux a failing Keychain / Secret Service
-  is reported as an error instead, because writing a login password or an
-  identity private key to a plaintext file there would be a worse outcome than
-  not persisting it.
+  repaired machine returns to the real store with no migration step.
 
 None of this weakens the fail-closed E2EE posture: a peer whose announce
 signature does not verify is still rejected. The fallback only affects whether
