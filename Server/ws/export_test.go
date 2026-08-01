@@ -214,6 +214,13 @@ func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
 	return h.buildAuthOK(context.Background(), user, roleName, "none")
 }
 
+// RunMentionCountsInlineForTest makes the hub's MessageService apply mention
+// counts synchronously instead of on a background goroutine, so a test can read
+// the counts deterministically right after driving a chat_send through the hub.
+func (h *Hub) RunMentionCountsInlineForTest() {
+	h.messageSvc.RunBackgroundInlineForTest()
+}
+
 // BuildReadyForTest exposes Hub.buildReady for external tests.
 // Passes nil role so no channels are visible (fail-closed, BUG-094).
 func (h *Hub) BuildReadyForTest(database *db.DB, userID int64) ([]byte, error) {

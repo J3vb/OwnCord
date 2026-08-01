@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -41,7 +42,11 @@ func newMentionFixture(t *testing.T) (*MessageService, *ChannelService, *db.DB) 
 
 	checker := permissions.NewChecker(database)
 	permSvc := NewPermissionService(database, checker)
-	return NewMessageService(database, permSvc, nil), NewChannelService(database, permSvc), database
+	msgSvc := NewMessageService(database, permSvc, nil)
+	// Mention counts are written on a background goroutine in production; run
+	// them inline here so the tests can read the counts right after a send.
+	msgSvc.RunBackgroundInlineForTest()
+	return msgSvc, NewChannelService(database, permSvc), database
 }
 
 func sendAs(t *testing.T, svc *MessageService, userID int64, content string) *SendMessageResult {
@@ -379,6 +384,29 @@ func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
 	if got := mentionCount(t, database, 3); got != 0 {
 		t.Errorf("uninvolved carol mention_count = %d, want 0", got)
 	}
+}
+
+// TestSendMessage_MentionCountsWrittenInBackground exercises the default async
+// path: the fixture normally forces the inline seam, so here we restore the
+// real `go fn()` dispatcher and confirm the count still lands shortly after
+// SendMessage returns.
+func TestSendMessage_MentionCountsWrittenInBackground(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// Undo the fixture's inline seam so bg is the production `go fn()` again.
+	svc.bg = func(fn func()) { go fn() }
+
+	sendAs(t, svc, 1, "@Bob ping")
+
+	// The write is on a goroutine; poll briefly rather than assuming timing.
+	const deadline = 2 * time.Second
+	var got int
+	for waited := time.Duration(0); waited < deadline; waited += 10 * time.Millisecond {
+		if got = mentionCount(t, database, 2); got == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("bob mention_count = %d after %s, want 1 (background write never landed)", got, deadline)
 }
 
 func TestSendMessage_SelfMentionDoesNotCount(t *testing.T) {
