@@ -43,45 +43,56 @@ func (r *Registry) RegisterUI(inst *Instance) error {
 // inst, rooted at the plugin's directory. Defense in depth:
 //  1. Manifest validation rejects absolute paths and "..".
 //  2. The handler only serves files explicitly declared by a manifest tab.
-//  3. After resolving the on-disk path we use filepath.Rel and reject any
-//     result containing ".." or that is absolute, which catches symlink
-//     escapes and the prefix-without-separator class of bug.
+//  3. Asset paths are resolved once at construction, not per request: the
+//     request path is used solely as a map key, so no on-disk path is ever
+//     built from user input. Each declared asset is checked with
+//     filepath.Rel and dropped if the result contains ".." or is absolute,
+//     which catches symlink escapes and the prefix-without-separator bug.
 //  4. A serve-time os.Lstat check rejects symlinks that were created AFTER
 //     install (the install-time rejectSymlinksUnder walk only runs once).
 //     This closes the TOCTOU window where a malicious or buggy process
 //     swaps a regular file for a symlink post-install — http.ServeFile
 //     would otherwise follow the link and leak host files.
 func (r *Registry) AssetHandler(inst *Instance) http.Handler {
-	allowed := make(map[string]bool, len(inst.Manifest.UI.Tabs))
-	for _, t := range inst.Manifest.UI.Tabs {
-		allowed[t.Asset] = true
-	}
 	pluginDir, dirErr := filepath.Abs(filepath.Dir(inst.WASMPath))
+
+	// Resolve and traversal-check every declared asset ONCE, here at
+	// construction, mapping the manifest's asset name to its absolute path.
+	// At serve time the request path is only ever used as a map key, never
+	// as a path component, so no filesystem path is built from user input
+	// at all. An asset that fails validation is simply absent from the map
+	// and 404s, exactly as an undeclared file does.
+	allowed := make(map[string]string, len(inst.Manifest.UI.Tabs))
+	if dirErr == nil {
+		for _, t := range inst.Manifest.UI.Tabs {
+			full, absErr := filepath.Abs(filepath.Join(pluginDir, t.Asset))
+			if absErr != nil {
+				continue
+			}
+			rel, relErr := filepath.Rel(pluginDir, full)
+			if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+				continue
+			}
+			allowed[t.Asset] = full
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if dirErr != nil {
 			http.Error(w, "plugin asset root unavailable", http.StatusInternalServerError)
 			return
 		}
 		rel := strings.TrimPrefix(req.URL.Path, "/")
-		if !allowed[rel] {
+		full, ok := allowed[rel]
+		if !ok {
 			http.NotFound(w, req)
-			return
-		}
-		full, absErr := filepath.Abs(filepath.Join(pluginDir, rel))
-		if absErr != nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		relCheck, relErr := filepath.Rel(pluginDir, full)
-		if relErr != nil || relCheck == "" || relCheck == "." || strings.HasPrefix(relCheck, "..") || filepath.IsAbs(relCheck) {
-			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		// Lstat (not Stat) so a symlink is detected instead of followed.
 		// This runs on every request — cheap relative to the file read —
 		// and closes the TOCTOU gap between install-time validation and
 		// runtime serving.
-		info, lerr := os.Lstat(full) //nolint:gosec // path traversal blocked above: rel validated and cleaned
+		info, lerr := os.Lstat(full) //nolint:gosec // not user input: full comes from the construction-time allowlist
 		if lerr != nil {
 			http.NotFound(w, req)
 			return
@@ -94,7 +105,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		f, openErr := os.Open(full) //nolint:gosec // path traversal blocked above: rel validated and cleaned
+		f, openErr := os.Open(full) //nolint:gosec // not user input: full comes from the construction-time allowlist
 		if openErr != nil {
 			http.NotFound(w, req)
 			return
