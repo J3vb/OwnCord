@@ -1,26 +1,52 @@
 /**
- * Channel context menu — right-click on a channel for Edit/Delete actions.
- * Only shown to admin/owner roles.
+ * Channel context menu — right-click on a channel for Mark as Read/Edit/Delete/
+ * Purge. Mark as Read is offered to everyone (it only touches the caller's own
+ * read state); Edit and Delete follow the server's MANAGE_CHANNELS gate; Purge
+ * follows its MANAGE_MESSAGES gate.
+ *
+ * Both gates are permission bits, not role names: a custom role granted
+ * MANAGE_CHANNELS could edit a channel through the API while the client hid
+ * the menu item, because the old check asked whether the role was literally
+ * called "owner" or "admin".
  */
 
 import { createElement } from "@lib/dom";
 import type { Channel } from "@stores/channels.store";
-import { getCurrentUser } from "@stores/auth.store";
+import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
+import { Permission } from "@lib/types";
+import { markChannelRead, hasUnread } from "@lib/read-state";
+import { isChannelMuted, toggleChannelMute } from "@lib/channel-mutes";
+import { appendPurgeSection } from "@components/purge-prompt";
 
-/** Attach a right-click context menu to a channel element for edit/delete. */
+/** Bubbles from a channel row when its mute is toggled. */
+export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
+
+/** Attach a right-click context menu to a channel element for edit/delete/purge. */
 export function attachChannelContextMenu(
   el: HTMLElement,
   channel: Channel,
   signal: AbortSignal,
   onEdit?: (channel: Channel) => void,
   onDelete?: (channel: Channel) => void,
+  onPurge?: (channel: Channel, count: number) => Promise<void>,
 ): void {
-  if (onEdit === undefined && onDelete === undefined) {
-    return;
-  }
-  const user = getCurrentUser();
-  const role = user?.role?.toLowerCase() ?? "";
-  if (role !== "owner" && role !== "admin") {
+  const canManage = canManageChannels();
+
+  // Voice channels hold no messages, and the server rejects a purge in a DM,
+  // so the section is offered only where it can succeed.
+  const canPurge =
+    onPurge !== undefined &&
+    channel.type !== "voice" &&
+    hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES);
+
+  const showEdit = canManage && onEdit !== undefined;
+  const showDelete = canManage && onDelete !== undefined;
+  // Mark as Read touches only the caller's own read state, so it needs no
+  // permission — but a voice channel holds no messages to read.
+  const showMarkRead = channel.type !== "voice";
+  // Muting silences notifications, which a voice channel does not produce.
+  const showMute = channel.type !== "voice";
+  if (!showMarkRead && !showMute && !showEdit && !showDelete && !canPurge) {
     return;
   }
 
@@ -40,7 +66,67 @@ export function attachChannelContextMenu(
       menu.style.left = `${e.clientX}px`;
       menu.style.top = `${e.clientY}px`;
 
-      if (onEdit !== undefined) {
+      if (showMarkRead) {
+        // Disabled rather than hidden: a menu whose entries move between
+        // right-clicks is harder to use than one with a greyed-out row.
+        const unread = hasUnread(channel.id);
+        const markItem = createElement(
+          "div",
+          {
+            class: unread ? "context-menu-item" : "context-menu-item disabled",
+            "data-testid": "ctx-mark-read",
+          },
+          "Mark as Read",
+        );
+        if (unread) {
+          markItem.addEventListener(
+            "click",
+            () => {
+              closeMenu();
+              markChannelRead(channel.id);
+            },
+            { signal },
+          );
+        }
+        menu.appendChild(markItem);
+      }
+
+      if (showMute) {
+        // "Until turned off": there is no timed mute, because a timed one needs
+        // a stored expiry the client would have to sweep, and the affordance it
+        // buys ("quiet for 8 hours") is one the user can reproduce by unmuting.
+        const muted = isChannelMuted(channel.id);
+        const muteItem = createElement(
+          "div",
+          { class: "context-menu-item", "data-testid": "ctx-mute-channel" },
+          muted ? "Unmute Channel" : "Mute Channel",
+        );
+        muteItem.addEventListener(
+          "click",
+          () => {
+            closeMenu();
+            toggleChannelMute(channel.id);
+            // Mute state lives in localStorage, so there is no store change to
+            // subscribe to. A bubbling DOM event lets the sidebar redraw the
+            // row without threading a callback through four layers of
+            // positional render arguments.
+            el.dispatchEvent(
+              new CustomEvent(CHANNEL_MUTE_CHANGED, {
+                bubbles: true,
+                detail: { channelId: channel.id },
+              }),
+            );
+          },
+          { signal },
+        );
+        menu.appendChild(muteItem);
+      }
+
+      if ((showMarkRead || showMute) && (showEdit || showDelete || canPurge)) {
+        menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+      }
+
+      if (showEdit && onEdit !== undefined) {
         const editItem = createElement(
           "div",
           { class: "context-menu-item", "data-testid": "ctx-edit-channel" },
@@ -57,8 +143,8 @@ export function attachChannelContextMenu(
         menu.appendChild(editItem);
       }
 
-      if (onDelete !== undefined) {
-        if (onEdit !== undefined) {
+      if (showDelete && onDelete !== undefined) {
+        if (showEdit) {
           menu.appendChild(createElement("div", { class: "context-menu-sep" }));
         }
         const deleteItem = createElement(
@@ -75,6 +161,17 @@ export function attachChannelContextMenu(
           { signal },
         );
         menu.appendChild(deleteItem);
+      }
+
+      if (canPurge && onPurge !== undefined) {
+        appendPurgeSection(menu, {
+          itemClass: "context-menu-item",
+          dangerItemClass: "context-menu-item danger",
+          separatorClass: showEdit || showDelete ? "context-menu-sep" : "",
+          onPurge: (count) => onPurge(channel, count),
+          signal,
+          onDone: () => closeMenu(),
+        });
       }
 
       document.body.appendChild(menu);

@@ -41,6 +41,7 @@ function resetStores(): void {
     loadedChannels: new Set(),
     hasMore: new Map(),
     historyLoadState: new Map(),
+    detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({
     members: new Map(),

@@ -35,7 +35,7 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -74,7 +74,7 @@ func TestAdminAPI_CheckUpdate_IncompleteReleaseNotInstallable(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -107,7 +107,7 @@ func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -124,7 +124,7 @@ func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 
 func TestAdminAPI_CheckUpdate_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", "", nil)
 	if w.Code != http.StatusUnauthorized {
@@ -134,7 +134,7 @@ func TestAdminAPI_CheckUpdate_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 
 	// Create admin user (not owner - role 2)
 	adminUID, _ := database.CreateUser(context.Background(), "adminonly2", "hash", 2)
@@ -154,7 +154,7 @@ func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 func TestAdminAPI_ApplyUpdate_NilUpdater(t *testing.T) {
 	database := openAdminTestDB(t)
 	// nil updater — the endpoint should return 503
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -167,7 +167,7 @@ func TestAdminAPI_ApplyUpdate_NilUpdater(t *testing.T) {
 // in the 503 response.
 func TestAdminAPI_ApplyUpdate_NilUpdater_ErrorCode(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -199,7 +199,7 @@ func TestAdminAPI_ApplyUpdate_NoUpdateAvailable(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -230,7 +230,7 @@ func TestAdminAPI_ApplyUpdate_CheckFails(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -258,7 +258,7 @@ func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -279,7 +279,7 @@ func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 // unauthenticated requests to POST /updates/apply.
 func TestAdminAPI_ApplyUpdate_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", "", nil)
 	if w.Code != http.StatusUnauthorized {
@@ -346,7 +346,7 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 	// the important thing is that the code path is executed.
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)

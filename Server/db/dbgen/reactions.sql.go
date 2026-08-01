@@ -59,6 +59,52 @@ func (q *Queries) GetReactionCounts(ctx context.Context, messageID int64) ([]Get
 	return items, nil
 }
 
+const getReactionUsers = `-- name: GetReactionUsers :many
+SELECT u.id, u.username, COALESCE(u.avatar, '') AS avatar
+FROM reactions r
+JOIN users u ON u.id = r.user_id
+WHERE r.message_id = ? AND r.emoji = ?
+ORDER BY r.id
+LIMIT ?
+`
+
+type GetReactionUsersParams struct {
+	MessageID int64  `json:"messageId"`
+	Emoji     string `json:"emoji"`
+	Limit     int64  `json:"limit"`
+}
+
+type GetReactionUsersRow struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+}
+
+// Reactors for one (message, emoji) pair, oldest reaction first. The reactions
+// table has no timestamp column, so the autoincrement id carries the order.
+func (q *Queries) GetReactionUsers(ctx context.Context, arg GetReactionUsersParams) ([]GetReactionUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, getReactionUsers, arg.MessageID, arg.Emoji, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetReactionUsersRow{}
+	for rows.Next() {
+		var i GetReactionUsersRow
+		if err := rows.Scan(&i.ID, &i.Username, &i.Avatar); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeReaction = `-- name: RemoveReaction :execresult
 DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?
 `

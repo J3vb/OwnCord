@@ -13,6 +13,7 @@ func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 	r.RegisterV2(MsgTypeTypingStart, handleTypingV2, deps)
 	r.RegisterV2(MsgTypePresenceUpdate, handlePresenceV2, deps)
 	r.RegisterV2(MsgTypeChannelFocus, handleChannelFocusV2, deps)
+	r.RegisterV2(MsgTypeMarkRead, handleMarkReadV2, deps)
 }
 
 // handleTypingV2 is the V2 handler for typing_start messages.
@@ -68,15 +69,12 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	userID := info.UserID
 	status := presenceCmd.Status()
 
-	if err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, d.Limiter); err != nil {
+	customStatus, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus(), d.Limiter)
+	if err != nil {
 		return serviceErrorToResult(err)
 	}
 
-	return Result{
-		Events: []Event{
-			PresenceEvent{payload: buildPresenceMsg(userID, status)},
-		},
-	}
+	return Result{Events: presenceEvents(userID, status, customStatus)}
 }
 
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.
@@ -96,4 +94,23 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 
 	return Result{SetChannelID: &chID}
+}
+
+// handleMarkReadV2 is the V2 handler for mark_read messages. It runs the same
+// access check and read-state advance as channel_focus but deliberately leaves
+// SetChannelID unset: marking a channel read from its context menu must not
+// move the connection's focus off the channel the user is actually looking at
+// (which would misroute typing/read bookkeeping for the visible channel).
+func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(PresenceDeps)
+	markCmd := cmd.(MarkReadCmd)
+
+	_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, markCmd.ChannelID())
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
+		}
+		return Result{} // silently drop other errors
+	}
+	return Result{}
 }

@@ -15,3 +15,6 @@ LIMIT 1;
 
 -- name: ListBlockedUsers :many
 SELECT blocked_id FROM user_blocks WHERE blocker_id = ? ORDER BY created_at DESC;
+
+-- name: ListBlockersOfUser :many
+SELECT blocker_id FROM user_blocks WHERE blocked_id = ?;

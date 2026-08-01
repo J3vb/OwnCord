@@ -97,15 +97,17 @@ func (d *DB) GetVoiceState(ctx context.Context, userID int64) (*VoiceState, erro
 		return nil, fmt.Errorf("GetVoiceState: %w", err)
 	}
 	vs := VoiceState{
-		UserID:      r.UserID,
-		ChannelID:   r.ChannelID,
-		Username:    r.Username,
-		Muted:       r.Muted != 0,
-		Deafened:    r.Deafened != 0,
-		Speaking:    r.Speaking != 0,
-		Camera:      r.Camera != 0,
-		Screenshare: r.Screenshare != 0,
-		JoinedAt:    r.JoinedAt,
+		UserID:         r.UserID,
+		ChannelID:      r.ChannelID,
+		Username:       r.Username,
+		Muted:          r.Muted != 0,
+		Deafened:       r.Deafened != 0,
+		Speaking:       r.Speaking != 0,
+		Camera:         r.Camera != 0,
+		Screenshare:    r.Screenshare != 0,
+		ServerMuted:    r.ServerMuted != 0,
+		ServerDeafened: r.ServerDeafened != 0,
+		JoinedAt:       r.JoinedAt,
 	}
 	return &vs, nil
 }
@@ -120,15 +122,17 @@ func (d *DB) GetChannelVoiceStates(ctx context.Context, channelID int64) ([]Voic
 	states := make([]VoiceState, 0, len(rows))
 	for _, r := range rows {
 		states = append(states, VoiceState{
-			UserID:      r.UserID,
-			ChannelID:   r.ChannelID,
-			Username:    r.Username,
-			Muted:       r.Muted != 0,
-			Deafened:    r.Deafened != 0,
-			Speaking:    r.Speaking != 0,
-			Camera:      r.Camera != 0,
-			Screenshare: r.Screenshare != 0,
-			JoinedAt:    r.JoinedAt,
+			UserID:         r.UserID,
+			ChannelID:      r.ChannelID,
+			Username:       r.Username,
+			Muted:          r.Muted != 0,
+			Deafened:       r.Deafened != 0,
+			Speaking:       r.Speaking != 0,
+			Camera:         r.Camera != 0,
+			Screenshare:    r.Screenshare != 0,
+			ServerMuted:    r.ServerMuted != 0,
+			ServerDeafened: r.ServerDeafened != 0,
+			JoinedAt:       r.JoinedAt,
 		})
 	}
 	return states, nil
@@ -144,15 +148,17 @@ func (d *DB) GetAllVoiceStates(ctx context.Context) ([]VoiceState, error) {
 	states := make([]VoiceState, 0, len(rows))
 	for _, r := range rows {
 		states = append(states, VoiceState{
-			UserID:      r.UserID,
-			ChannelID:   r.ChannelID,
-			Username:    r.Username,
-			Muted:       r.Muted != 0,
-			Deafened:    r.Deafened != 0,
-			Speaking:    r.Speaking != 0,
-			Camera:      r.Camera != 0,
-			Screenshare: r.Screenshare != 0,
-			JoinedAt:    r.JoinedAt,
+			UserID:         r.UserID,
+			ChannelID:      r.ChannelID,
+			Username:       r.Username,
+			Muted:          r.Muted != 0,
+			Deafened:       r.Deafened != 0,
+			Speaking:       r.Speaking != 0,
+			Camera:         r.Camera != 0,
+			Screenshare:    r.Screenshare != 0,
+			ServerMuted:    r.ServerMuted != 0,
+			ServerDeafened: r.ServerDeafened != 0,
+			JoinedAt:       r.JoinedAt,
 		})
 	}
 	return states, nil
@@ -178,6 +184,38 @@ func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool)
 		UserID:   userID,
 	}); err != nil {
 		return fmt.Errorf("UpdateVoiceDeafen: %w", err)
+	}
+	return nil
+}
+
+// SetVoiceServerMute applies or clears the moderator-imposed mute. Applying it
+// also sets muted so the client state matches immediately; clearing it leaves
+// muted alone, so a user who was muted before the moderator acted stays muted
+// until they unmute themselves.
+func (d *DB) SetVoiceServerMute(ctx context.Context, userID int64, serverMuted bool) error {
+	var err error
+	if serverMuted {
+		err = d.q.ApplyVoiceServerMute(ctx, userID)
+	} else {
+		err = d.q.ClearVoiceServerMute(ctx, userID)
+	}
+	if err != nil {
+		return fmt.Errorf("SetVoiceServerMute: %w", err)
+	}
+	return nil
+}
+
+// SetVoiceServerDeafen applies or clears the moderator-imposed deafen.
+// Mirrors SetVoiceServerMute, including the asymmetric handling of deafened.
+func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID int64, serverDeafened bool) error {
+	var err error
+	if serverDeafened {
+		err = d.q.ApplyVoiceServerDeafen(ctx, userID)
+	} else {
+		err = d.q.ClearVoiceServerDeafen(ctx, userID)
+	}
+	if err != nil {
+		return fmt.Errorf("SetVoiceServerDeafen: %w", err)
 	}
 	return nil
 }

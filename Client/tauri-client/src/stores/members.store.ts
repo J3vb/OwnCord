@@ -12,6 +12,12 @@ export interface Member {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Nickname to render instead of `username`. Null = unset. Optional only so
+   *  the many inline Member test fixtures need not restate it. Mentions still
+   *  resolve against `username` — it is the unique handle. */
+  readonly displayName?: string | null;
+  /** Free-text status line shown under the name. Null = unset. */
+  readonly customStatus?: string | null;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). The store
    *  always sets it (null when the user has not published one); optional only so
    *  the many inline Member test fixtures need not restate it. */
@@ -56,6 +62,8 @@ export function setMembers(members: readonly ReadyMember[]): void {
       avatar: m.avatar,
       role: m.role,
       status: m.status,
+      displayName: m.display_name ?? null,
+      customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
     });
   }
@@ -71,7 +79,11 @@ export function setMembers(members: readonly ReadyMember[]): void {
   }));
 }
 
-/** Add a member from a member_join event. */
+/** Add a member from a member_join event.
+ *  status comes from the payload's viewer-safe field, never assumed —
+ *  an invisible user's join broadcasts "offline", and a server old enough to
+ *  omit the field entirely must fail safe the same way rather than flash the
+ *  member online. */
 export function addMember(payload: MemberJoinPayload): void {
   membersStore.setState((prev) => {
     const next = new Map(prev.members);
@@ -80,7 +92,11 @@ export function addMember(payload: MemberJoinPayload): void {
       username: payload.user.username,
       avatar: payload.user.avatar,
       role: payload.user.role,
-      status: "online",
+      status: payload.status ?? "offline",
+      displayName: payload.user.display_name ?? null,
+      // member_join carries no custom status; a presence event follows it and
+      // is what fills this in.
+      customStatus: prev.members.get(payload.user.id)?.customStatus ?? null,
       identityPublicKey: payload.user.identity_public_key ?? null,
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
@@ -107,14 +123,43 @@ export function updateMemberRole(userId: number, role: string): void {
   });
 }
 
-/** Update a member's profile (username, avatar, identity key) from a
- *  user_update event. `identityPublicKey` is only applied when provided, so a
- *  profile update that omits it doesn't clobber a pinned key. */
-export function updateMemberProfile(
+/** The profile fields a user_update event replaces. `identityPublicKey` and
+ *  `displayName` are only applied when provided, so an older server's payload
+ *  (or a partial one) doesn't clobber a pinned key or a nickname. */
+export interface MemberProfilePatch {
+  readonly username: string;
+  readonly avatar: string | null;
+  readonly displayName?: string | null;
+  readonly identityPublicKey?: string | null;
+}
+
+/** Update a member's profile from a user_update event. */
+export function updateMemberProfile(userId: number, patch: MemberProfilePatch): void {
+  membersStore.setState((prev) => {
+    const existing = prev.members.get(userId);
+    if (!existing) return prev;
+    const next = new Map(prev.members);
+    next.set(userId, {
+      ...existing,
+      username: patch.username,
+      avatar: patch.avatar,
+      displayName: patch.displayName === undefined ? existing.displayName : patch.displayName,
+      identityPublicKey:
+        patch.identityPublicKey === undefined
+          ? existing.identityPublicKey
+          : patch.identityPublicKey,
+    });
+    return { ...prev, members: next };
+  });
+}
+
+/** Update a member's presence status, and the custom status line that rides
+ *  along with it. `customStatus` is only applied when the event carried the
+ *  field — a bare status flip must not blank the text. */
+export function updatePresence(
   userId: number,
-  username: string,
-  avatar: string | null,
-  identityPublicKey?: string | null,
+  status: UserStatus,
+  customStatus?: string | null,
 ): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -122,24 +167,20 @@ export function updateMemberProfile(
     const next = new Map(prev.members);
     next.set(userId, {
       ...existing,
-      username,
-      avatar,
-      identityPublicKey:
-        identityPublicKey === undefined ? existing.identityPublicKey : identityPublicKey,
+      status,
+      customStatus: customStatus === undefined ? existing.customStatus : customStatus,
     });
     return { ...prev, members: next };
   });
 }
 
-/** Update a member's presence status. */
-export function updatePresence(userId: number, status: UserStatus): void {
-  membersStore.setState((prev) => {
-    const existing = prev.members.get(userId);
-    if (!existing) return prev;
-    const next = new Map(prev.members);
-    next.set(userId, { ...existing, status });
-    return { ...prev, members: next };
-  });
+/** The name to render for a member: display name when set, username otherwise.
+ *  The one place that answers it, so the member list, message rows and the
+ *  profile popup cannot disagree. */
+export function memberDisplayName(member: Pick<Member, "username" | "displayName">): string {
+  const display = member.displayName;
+  if (typeof display === "string" && display.trim().length > 0) return display;
+  return member.username;
 }
 
 /** Mark a user as typing in a channel. Auto-clears after 5 seconds. */

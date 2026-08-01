@@ -60,7 +60,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -716,8 +719,12 @@ func TestResetAllUserStatuses(t *testing.T) {
 	if u1.Status != "offline" {
 		t.Errorf("user1 status = %q, want 'offline'", u1.Status)
 	}
-	if u2.Status != "offline" {
-		t.Errorf("user2 status = %q, want 'offline'", u2.Status)
+	// A chosen status survives the startup reset: nothing is connected yet, so
+	// "online" is the only value that can be a leftover session. dnd is a
+	// preference, and the read path renders a user with no live connection as
+	// offline regardless of what the column holds.
+	if u2.Status != "dnd" {
+		t.Errorf("user2 status = %q, want 'dnd' (chosen statuses survive the reset)", u2.Status)
 	}
 }
 

@@ -4,10 +4,12 @@
  */
 
 import { loadPref } from "./preferences";
+import { notificationAllowed } from "./channel-mutes";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import type { ChatMessagePayload } from "./types";
+import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
 
 const log = createLogger("notifications");
@@ -15,11 +17,6 @@ const log = createLogger("notifications");
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {
   return document.hasFocus();
-}
-
-/** Check if message content contains @everyone or @here. */
-function containsEveryone(content: string): boolean {
-  return content.includes("@everyone") || content.includes("@here");
 }
 
 /** Get the channel name for a given channel ID. */
@@ -47,10 +44,29 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const activeChannelId = channelsStore.getState().activeChannelId;
   if (isWindowFocused() && payload.channel_id === activeChannelId) return;
 
-  // Check @everyone suppression
-  if (loadPref<boolean>("suppressEveryone", false) && containsEveryone(payload.content)) {
+  const mentionInfo = {
+    mentions: payload.mentions,
+    mentionsEveryone: payload.mentions_everyone,
+  };
+  const directMention = mentionsCurrentUser(payload.content, mentionInfo);
+  const everyoneMention = payload.mentions_everyone === true;
+
+  // "Suppress @everyone" now means exactly that: only a notification the
+  // @everyone/@here caused is dropped. A message that also names the user is
+  // theirs to see, and an @everyone the sender lacked the permission for never
+  // reached mention status in the first place, so it is not suppressed either.
+  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) {
     return;
   }
+
+  const mentioned = directMention || everyoneMention;
+
+  // A muted channel stops making noise entirely — popup, chime AND taskbar
+  // flash, because a flashing taskbar is exactly the interruption the mute was
+  // asked for. The unread badge is untouched (it is drawn from the store, not
+  // from here) and just renders dimmed. A message that names the reader is
+  // never silenced: see @lib/channel-mutes.
+  if (!notificationAllowed(payload.channel_id, mentioned)) return;
 
   // Do Not Disturb — the settings panel promises "You will not receive desktop
   // notifications", so honour it for the popup and the chime. The taskbar
@@ -66,7 +82,12 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
     return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
   }
 
-  const title = sanitizeNotif(`${payload.user.username} in #${channelName}`, 80);
+  const title = sanitizeNotif(
+    mentioned
+      ? `${payload.user.username} mentioned you in #${channelName}`
+      : `${payload.user.username} in #${channelName}`,
+    80,
+  );
   const body = sanitizeNotif(payload.content, 100);
 
   // Desktop notification
@@ -137,12 +158,37 @@ let notifAudioCtx: AudioContext | null = null;
 
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
 export function cleanupNotificationAudio(): void {
+  stopRingChime();
   if (notifAudioCtx !== null) {
     notifAudioCtx.close().catch((err) => {
       log.warn("Failed to close notification AudioContext", err);
     });
     notifAudioCtx = null;
   }
+}
+
+// The ring chime repeats until the call is answered, declined or times out —
+// unlike a message chime, which fires once. It reuses playNotificationSound so
+// a call sounds like the app rather than like a second app.
+let ringInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Start the repeating incoming-call chime. Idempotent. */
+export function startRingChime(): void {
+  if (ringInterval !== null) return;
+  // DND silences a call chime for the same reason it silences a message one:
+  // the settings panel promises no notification sounds, and a ringing phone is
+  // the loudest possible violation of that. The banner still appears.
+  if (loadUserStatus() === "dnd") return;
+  if (!loadPref<boolean>("notificationSounds", true)) return;
+  playNotificationSound();
+  ringInterval = setInterval(() => playNotificationSound(), 2000);
+}
+
+/** Stop the repeating incoming-call chime. Idempotent. */
+export function stopRingChime(): void {
+  if (ringInterval === null) return;
+  clearInterval(ringInterval);
+  ringInterval = null;
 }
 
 /** Play a brief notification chime. */

@@ -3,7 +3,11 @@ mod constants;
 mod credentials;
 #[cfg(windows)]
 mod dpapi;
+#[cfg(not(windows))]
+mod fallback_crypto;
 mod http_proxy;
+#[cfg(target_os = "linux")]
+mod linux_media;
 mod livekit_proxy;
 mod ptt;
 mod secret_store;
@@ -135,6 +139,10 @@ pub fn run() {
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
             tray::create_tray(app.handle())?;
+            // WebKitGTK denies mic/camera access by default — grant it so
+            // voice/video works on Linux (no-op elsewhere; see linux_media).
+            #[cfg(target_os = "linux")]
+            linux_media::enable_media_capture(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

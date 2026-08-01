@@ -15,13 +15,17 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
+import { createNsfwGate } from "@components/NsfwGate";
+import { nsfwGateRequired } from "@lib/nsfw-gate";
 import {
   getChannelMessages,
   setMessagePinned,
   addOptimisticMessage,
   markSendFailed,
   removeOptimistic,
+  reattachToPresent,
 } from "@stores/messages.store";
+import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
@@ -29,11 +33,11 @@ import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
-import { dmStore } from "@stores/dm.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 
 const log = createLogger("channel-ctrl");
@@ -97,6 +101,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
+  // The age gate covering the message area of an NSFW channel, while it is up.
+  let nsfwGate: MountableComponent | null = null;
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
@@ -111,6 +117,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelAbort = null;
     }
 
+    if (nsfwGate !== null) {
+      nsfwGate.destroy?.();
+      nsfwGate = null;
+    }
     if (messageList !== null) {
       messageList.destroy?.();
       messageList = null;
@@ -218,6 +228,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
       },
+      // A reply bar (and any other in-row jump) goes through the same jumper
+      // as search hits and permalinks, so an out-of-window target fetches its
+      // around-window instead of silently doing nothing.
+      onJumpToMessage: (msgId: number) => {
+        jumpToMessage(channelId, msgId);
+      },
+      onJumpToPresent: () => {
+        // Dropping the detached flag also clears "loaded", so loadMessages
+        // refetches the live tail instead of short-circuiting.
+        reattachToPresent(channelId);
+        if (channelAbort !== null) {
+          void msgCtrl.loadMessages(channelId, channelAbort.signal);
+        }
+      },
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);
         const msg = msgs.find((m) => m.id === msgId);
@@ -321,10 +345,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // composer disables (with a reason) when the socket is down or the user
     // may not post here, instead of accepting a click and failing. For DM
     // channels the reason also covers block state (channels-members-dms.md §3.2).
-    const dmRecipientId =
+    // Block gating is a 1:1 rule (Discord semantics, mirrored by the server's
+    // requireDMNotBlocked): a group DM is a shared room, and gating one
+    // member's composer over a block with one other member would leave the
+    // group reading a conversation that person cannot join.
+    const gatedDm =
       channelType === "dm"
-        ? (dmStore.getState().channels.find((c) => c.channelId === channelId)?.recipient.id ?? null)
-        : null;
+        ? dmStore.getState().channels.find((c) => c.channelId === channelId)
+        : undefined;
+    const dmRecipientId = gatedDm !== undefined && !gatedDm.isGroup ? gatedDm.recipient.id : null;
     // Slow mode as affordance: after an accepted send the composer disables
     // itself for the channel's cooldown with a live countdown, instead of
     // taking a message the server will bounce with SLOW_MODE (UX spec §5,
@@ -444,22 +473,62 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       { signal },
     );
 
+    // Age gate. Mounted over the message area — the channel is live underneath,
+    // so accepting reveals it without a refetch, and declining leaves the
+    // channel rather than pretending it is empty. Only the first open of a
+    // flagged channel in a session shows it (see @lib/nsfw-gate).
+    const storedChannel = channelsStore.getState().channels.get(channelId);
+    if (storedChannel !== undefined && nsfwGateRequired(storedChannel)) {
+      const gate = createNsfwGate({
+        channelId,
+        channelName,
+        onContinue: () => {
+          gate.destroy?.();
+          if (nsfwGate === gate) nsfwGate = null;
+        },
+        onCancel: () => {
+          // Leave the channel entirely: keeping the gate up over a channel the
+          // reader declined would strand them on a screen with no way out that
+          // is not also "continue".
+          destroyChannel();
+          setActiveChannel(null);
+        },
+      });
+      gate.mount(slots.messagesSlot);
+      nsfwGate = gate;
+    }
+
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
-      // Look up the recipient's actual status from DM store or members store
       const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      let recipientStatus = "Offline";
-      if (dmChannel !== undefined) {
+      // A group has no single presence to show, so the subtitle lists who is
+      // in it instead — that is the fact a group header is asked for, and a
+      // first member's status presented as the group's would be a lie.
+      let subtitle = "Offline";
+      if (dmChannel !== undefined && dmChannel.isGroup) {
+        const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
+        subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
+      } else if (dmChannel !== undefined) {
         const member = membersStore.getState().members.get(dmChannel.recipient.id);
-        recipientStatus = member?.status ?? dmChannel.recipient.status ?? "Offline";
+        const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
+        subtitle = status.charAt(0).toUpperCase() + status.slice(1);
       }
-      const displayStatus = recipientStatus.charAt(0).toUpperCase() + recipientStatus.slice(1);
-      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: displayStatus });
+      const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
+      updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
       }
+      // Show the channel topic and keep it live across channel_update events.
+      const topicEl = chatHeaderRefs.topicEl;
+      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
+      composerGatingUnsubs.push(
+        channelsStore.subscribeSelector(
+          (s) => s.channels.get(channelId)?.topic ?? "",
+          (topic) => setText(topicEl, topic),
+        ),
+      );
     } else if (chatHeaderName !== null) {
       setText(chatHeaderName, channelName);
     }

@@ -21,6 +21,10 @@ import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
+import {
+  clearReactionUsersCache,
+  setReactionUsersFetcher,
+} from "../../src/components/message-list/reaction-tooltip";
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -34,6 +38,17 @@ function resetStores(): void {
     serverName: null,
     motd: null,
     isAuthenticated: false,
+  }));
+}
+
+/** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */
+function seedMentionMembers(): void {
+  membersStore.setState((prev) => ({
+    ...prev,
+    members: new Map([
+      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
+      [11, { id: 11, username: "bob", avatar: null, role: "member", status: "online" as const }],
+    ]),
   }));
 }
 
@@ -168,7 +183,8 @@ describe("renderers", () => {
   });
 
   describe("renderMentions", () => {
-    it("wraps @mentions in span with mention class", () => {
+    it("wraps resolvable @mentions in span with mention class", () => {
+      seedMentionMembers();
       const fragment = renderMentions("Hello @alice how are you?");
       container.appendChild(fragment);
 
@@ -186,6 +202,7 @@ describe("renderers", () => {
     });
 
     it("handles multiple mentions", () => {
+      seedMentionMembers();
       const fragment = renderMentions("@alice and @bob");
       container.appendChild(fragment);
 
@@ -410,6 +427,52 @@ describe("renderers", () => {
       expect(reactionChips.length).toBe(2);
 
       ac.abort();
+    });
+
+    // The who-reacted tooltip hangs off the pill, so the pill has to carry its
+    // emoji and be focusable for a keyboard user to reach the tooltip at all.
+    it("makes reaction pills focusable and tags them with their emoji", () => {
+      const msg = makeMessage({
+        reactions: [{ emoji: "\uD83D\uDC4D", count: 3, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const chip = container.querySelector(
+        ".reaction-chip:not(.add-reaction)",
+      ) as HTMLElement | null;
+      expect(chip?.dataset.emoji).toBe("\uD83D\uDC4D");
+      expect(chip?.getAttribute("tabindex")).toBe("0");
+
+      ac.abort();
+    });
+
+    it("shows the who-reacted tooltip after hovering a pill", async () => {
+      setReactionUsersFetcher(() =>
+        Promise.resolve([
+          { id: 1, username: "alice", avatar: "" },
+          { id: 2, username: "bob", avatar: "" },
+        ]),
+      );
+      clearReactionUsersCache();
+
+      const msg = makeMessage({
+        reactions: [{ emoji: "\uD83D\uDC4D", count: 2, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const chip = container.querySelector(".reaction-chip:not(.add-reaction)") as HTMLElement;
+      chip.dispatchEvent(new Event("mouseenter"));
+
+      await vi.waitFor(() => {
+        expect(chip.querySelector(".reaction-tooltip-names")?.textContent).toBe("alice and bob");
+      });
+
+      ac.abort();
+      setReactionUsersFetcher(null);
     });
 
     it("renders attachments for image types", () => {
@@ -740,6 +803,7 @@ describe("renderers", () => {
         user: { id: 0, username: "System", avatar: null },
         content: "@alice was promoted to admin",
       });
+      seedMentionMembers();
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
@@ -1229,6 +1293,7 @@ describe("renderers", () => {
     });
 
     it("renders @mention at start of text", () => {
+      seedMentionMembers();
       const fragment = renderMentionSegment("@alice hello");
       container.appendChild(fragment);
       const mention = container.querySelector(".mention");
@@ -1258,6 +1323,7 @@ describe("renderers", () => {
     });
 
     it("renders mention inside non-code text", () => {
+      seedMentionMembers();
       const fragment = renderInlineContent("hello @alice and `code`");
       container.appendChild(fragment);
       expect(container.querySelector(".mention")).not.toBeNull();
@@ -1464,5 +1530,97 @@ describe("renderers", () => {
 
       ac.abort();
     });
+  });
+});
+
+// ─── Phase 6: display names and avatars on message rows ──────────────────────
+
+describe("message row author identity", () => {
+  beforeEach(() => {
+    resetStores();
+  });
+
+  afterEach(() => {
+    resetStores();
+  });
+
+  it("renders the display name from the member store, keeping the username as a title", () => {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName: "Alice A.",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+
+    const el = renderMessage(
+      makeMessage({ user: { id: 10, username: "alice", avatar: null } }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    const author = el.querySelector(".msg-author");
+    expect(author?.textContent).toBe("Alice A.");
+    // The handle you would @mention is one hover away.
+    expect(author?.getAttribute("title")).toBe("alice");
+    // And the letter follows the rendered name.
+    expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("A");
+  });
+
+  it("prefers the live member store over the identity frozen into the payload", () => {
+    // A rename arrives as a user_update and patches the member store; the
+    // messages already on screen still carry the old name in their payload.
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "renamed",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+
+    const el = renderMessage(
+      makeMessage({ user: { id: 10, username: "old-name", avatar: null } }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    expect(el.querySelector(".msg-author")?.textContent).toBe("renamed");
+  });
+
+  it("falls back to the payload for an author who is not in the member list", () => {
+    const el = renderMessage(
+      makeMessage({
+        user: { id: 99, username: "ghost", avatar: null, display_name: "Ghosty" },
+      }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    expect(el.querySelector(".msg-author")?.textContent).toBe("Ghosty");
+    expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("G");
   });
 });

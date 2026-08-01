@@ -1,18 +1,25 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
+	"github.com/owncord/server/storage"
+	"github.com/owncord/server/ws"
 )
 
 // ─── Request / Response types ────────────────────────────────────────────────
@@ -24,6 +31,11 @@ type updateProfileRequest struct {
 	Username          string  `json:"username"`
 	Avatar            *string `json:"avatar"`
 	IdentityPublicKey *string `json:"identity_public_key"`
+	// DisplayName and About are omitted = unchanged, "" = cleared. Both are
+	// sanitized and length-checked in UserService, which is also the path a
+	// non-REST caller would take.
+	DisplayName *string `json:"display_name"`
+	About       *string `json:"about"`
 }
 
 // changePasswordRequest is the JSON body for PUT /api/v1/users/me/password.
@@ -52,12 +64,16 @@ type sessionsListResponse struct {
 // ProfileBroadcaster is the interface the profile handler uses to notify
 // connected WebSocket clients about profile changes.
 type ProfileBroadcaster interface {
-	BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string)
+	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
 // MountProfileRoutes registers user profile management endpoints.
 // All routes require authentication. trustedProxies is used for rate limiting.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+//
+// store may be nil, in which case the avatar-upload route is not registered —
+// a server with no storage backend has nowhere to put the bytes, and a route
+// that 500s on every call is worse than one that 404s.
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store *storage.Storage, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
@@ -66,6 +82,11 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 
 		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter))
+
+		if store != nil {
+			r.With(MaxBodySize(avatarMaxBodySize)).
+				Post("/avatar", handleUploadAvatar(database, svc, store, limiter, broadcaster))
+		}
 
 		r.Get("/sessions", handleListSessions(svc))
 		r.Delete("/sessions/{id}", handleRevokeSession(svc))
@@ -107,6 +128,32 @@ func validateAvatarURL(avatar string) error {
 		return fmt.Errorf("avatar URL must use https://")
 	}
 	return nil
+}
+
+// validateDisplayName rejects a nickname that would render as something other
+// than what it says. Length and emptiness are the service's job (empty clears
+// the field); this is the character-class check auth.ValidateUsername applies
+// for the same reason — a display name stands in for a username on every
+// message row, so a bidi override or a control character in one is a spoof.
+func validateDisplayName(name string) error {
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return fmt.Errorf("display_name must not contain control or invisible characters")
+		}
+	}
+	return nil
+}
+
+// allowedAvatarMIME is the set of image types an avatar may be, matched against
+// the type sniffed from the file's own bytes. GIF is absent (an animated
+// avatar in every message row is a distraction the renderer cannot opt out of)
+// and so is SVG, for the same reason emoji refuse it: it is markup with script
+// and external-fetch capability, and an avatar is rendered inline by
+// definition.
+var allowedAvatarMIME = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/webp": true,
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -156,6 +203,19 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			req.Avatar = &trimmed
 		}
 
+		// display_name gets the same username-shaped scrutiny beyond length:
+		// it is rendered wherever a username is, so control characters and
+		// bidi overrides are exactly as unwelcome here. Length, sanitization
+		// and the empty-clears-it rule live in UserService.
+		if req.DisplayName != nil {
+			if err := validateDisplayName(*req.DisplayName); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error: "INVALID_INPUT", Message: err.Error(),
+				})
+				return
+			}
+		}
+
 		// Validate the identity key before any write so the request is
 		// all-or-nothing.
 		if req.IdentityPublicKey != nil {
@@ -169,7 +229,12 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			req.IdentityPublicKey = &trimmed
 		}
 
-		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, req.Username, req.Avatar)
+		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
+			Username:    req.Username,
+			Avatar:      req.Avatar,
+			DisplayName: req.DisplayName,
+			About:       req.About,
+		})
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -183,13 +248,27 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			}
 		}
 
-		// Broadcast profile change to all connected WebSocket clients.
-		if broadcaster != nil {
-			broadcaster.BroadcastUserUpdate(updated.ID, updated.Username, updated.Avatar, updated.IdentityPublicKey)
-		}
+		broadcastUserUpdate(broadcaster, updated)
 
 		writeJSON(w, http.StatusOK, toUserResponse(updated))
 	}
+}
+
+// broadcastUserUpdate pushes a profile snapshot to every connected client.
+// Every profile mutation goes through it so a new one cannot ship half the
+// fields — user_update replaces the client's copy wholesale.
+func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
+	if broadcaster == nil || u == nil {
+		return
+	}
+	broadcaster.BroadcastUserUpdate(ws.UserUpdate{
+		UserID:            u.ID,
+		Username:          u.Username,
+		Avatar:            u.Avatar,
+		DisplayName:       u.DisplayName,
+		About:             u.About,
+		IdentityPublicKey: u.IdentityPublicKey,
+	})
 }
 
 // handleChangePassword processes PUT /api/v1/users/me/password.
@@ -358,5 +437,160 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleUploadAvatar processes POST /api/v1/users/me/avatar (multipart: `file`).
+//
+// The bytes land in the ordinary attachments table with no channel, and the
+// user's avatar column is pointed at /api/v1/files/{id}. That is what makes
+// the picture readable: an unlinked attachment is private to its uploader, and
+// handleServeFile additionally admits one that some user's avatar currently
+// points at — so an avatar is public exactly while it is in use and stops
+// being readable the moment it is replaced.
+//
+// PATCH /users/me still takes an https:// URL; this route is the other way to
+// set the same field, and both end at the same column.
+func handleUploadAvatar(
+	database *db.DB,
+	svc *service.Services,
+	store *storage.Storage,
+	limiter *auth.RateLimiter,
+	broadcaster ProfileBroadcaster,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "not authenticated",
+			})
+			return
+		}
+
+		if limiter != nil && !limiter.Allow(auth.Key("avatar_upload", user.ID), avatarUploadRateLimitPerMinute, time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error: "RATE_LIMITED", Message: "avatar upload rate limit exceeded, try again later",
+			})
+			return
+		}
+
+		// Bound the body before the multipart parser touches it: the route
+		// carries MaxBodySize too, but the parser is what turns an unbounded
+		// body into heap, so the handler states its own limit.
+		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
+		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "invalid multipart form",
+			})
+			return
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "missing file field",
+			})
+			return
+		}
+		defer file.Close() //nolint:errcheck
+
+		// Read one byte past the cap so "exactly at the limit" passes and "one
+		// byte over" is caught, without buffering an unbounded body.
+		raw, err := io.ReadAll(io.LimitReader(file, maxAvatarFileBytes+1))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "failed to read uploaded file",
+			})
+			return
+		}
+		if int64(len(raw)) > maxAvatarFileBytes {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10),
+			})
+			return
+		}
+
+		// Never trust the client's Content-Type — sniff the bytes.
+		mimeType := http.DetectContentType(raw)
+		if !allowedAvatarMIME[mimeType] {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "avatar must be a PNG, JPEG or WebP image",
+			})
+			return
+		}
+
+		width, height, err := imageDimensions(raw, mimeType)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "could not read image dimensions",
+			})
+			return
+		}
+		// Measured from the sniffed image, not from anything the client said.
+		// The client crops to a square before uploading; the server does not
+		// re-encode (that would mean decoding and re-compressing every upload
+		// to change nothing a CSS circle mask does not already do), it just
+		// refuses a picture too big to be an avatar.
+		if width <= 0 || height <= 0 || width > maxAvatarDimension || height > maxAvatarDimension {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height),
+			})
+			return
+		}
+
+		fileID := uuid.New().String()
+		written, saveErr := store.Save(fileID, bytes.NewReader(raw))
+		if saveErr != nil {
+			slog.Warn("avatar upload rejected by storage", "error", saveErr)
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: fmt.Sprintf("upload rejected: %s", saveErr),
+			})
+			return
+		}
+
+		filename := sanitizeUploadFilename(header.Filename)
+		if err := database.CreateAttachment(r.Context(), fileID, user.ID, filename, fileID, mimeType, written, &width, &height); err != nil {
+			if delErr := store.Delete(fileID); delErr != nil {
+				slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
+			}
+			slog.Error("failed to create avatar attachment record", "error", err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error: "INTERNAL_ERROR", Message: "failed to save avatar",
+			})
+			return
+		}
+
+		avatarURL := service.AvatarFileURL(fileID)
+		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
+			Username: user.Username,
+			Avatar:   &avatarURL,
+		})
+		if err != nil {
+			// The column never moved, so the file and its row are orphans.
+			if delErr := store.Delete(fileID); delErr != nil {
+				slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
+			}
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+
+		// The previous avatar's bytes are deliberately left on disk: a message
+		// that was rendered with it may still be cached client-side, and a
+		// blind delete here would race any request already in flight for it.
+		// Reclaiming them is an operator-side sweep, not a request-path action.
+		broadcastUserUpdate(broadcaster, updated)
+
+		slog.Info("avatar uploaded", "user_id", user.ID, "id", fileID, "size", written, "mime", mimeType)
+		writeJSON(w, http.StatusCreated, uploadResponse{
+			ID:       fileID,
+			Filename: filename,
+			Size:     written,
+			Mime:     mimeType,
+			URL:      avatarURL,
+			Width:    &width,
+			Height:   &height,
+		})
 	}
 }

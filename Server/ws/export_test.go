@@ -151,6 +151,12 @@ func ClientUserIDForTest(c *Client) int64 {
 	return c.userID
 }
 
+// ClientChannelIDForTest returns the client's currently focused channel for
+// external tests.
+func ClientChannelIDForTest(c *Client) int64 {
+	return c.getChannelID()
+}
+
 // TouchForTest exposes Client.touch for external tests.
 func TouchForTest(c *Client) {
 	c.touch()
@@ -206,6 +212,13 @@ func (h *Hub) PubSubForTest() *PubSub {
 // path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
 	return h.buildAuthOK(context.Background(), user, roleName, "none")
+}
+
+// RunMentionCountsInlineForTest makes the hub's MessageService apply mention
+// counts synchronously instead of on a background goroutine, so a test can read
+// the counts deterministically right after driving a chat_send through the hub.
+func (h *Hub) RunMentionCountsInlineForTest() {
+	h.messageSvc.RunBackgroundInlineForTest()
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
@@ -305,9 +318,19 @@ func QualityBitrateForTest(quality string) int {
 	return qualityBitrate(quality)
 }
 
-// BuildDMChannelOpenForTest exposes buildDMChannelOpen for external tests.
+// BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests.
 func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
-	return buildDMChannelOpen(channelID, recipient)
+	return buildDMChannelOpenFor(channelID, recipient, 0)
+}
+
+// BuildDMChannelOpenInfoForTest exposes the group-aware buildDMChannelOpen.
+func BuildDMChannelOpenInfoForTest(info db.DMChannelInfo) []byte {
+	return buildDMChannelOpen(info)
+}
+
+// BuildCallSignalForTest exposes buildCallSignal for external tests.
+func BuildCallSignalForTest(msgType string, channelID, fromUserID int64, username string) []byte {
+	return buildCallSignal(msgType, channelID, fromUserID, username)
 }
 
 // HandleWebhookParticipantLeftForTest exposes handleWebhookParticipantLeft for
@@ -354,4 +377,12 @@ func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 // HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
 func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 	return h.hasChannelPerm(context.Background(), c, channelID, perm)
+}
+
+// BroadcastVoiceEventForTest exposes Hub.broadcastVoiceEvent for external
+// tests so a load/soak test can drive the channelReadAudience-resolved
+// voice_state/voice_leave fan-out directly, without a full LiveKit join
+// round-trip.
+func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
+	h.broadcastVoiceEvent(context.Background(), channelID, msg)
 }

@@ -1,10 +1,25 @@
 /**
- * Per-user volume context menu — right-click on a voice user row
- * to adjust their playback volume locally.
+ * Per-user context menu on a voice participant row: local playback volume for
+ * everyone, plus a moderation section for users whose role holds MUTE_MEMBERS.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+
+/** Moderation section wiring. Passed only when the local user may moderate
+ *  voice; the menu renders the section iff this is present, so the permission
+ *  decision stays with the caller (which knows the role list). */
+export interface VoiceModMenuOptions {
+  /** Current moderator-imposed state of the target, for the toggle labels. */
+  readonly serverMuted: boolean;
+  readonly serverDeafened: boolean;
+  /** Voice channels the target can be moved to (the current one excluded). */
+  readonly moveTargets: readonly { readonly id: number; readonly name: string }[];
+  readonly onServerMute: (muted: boolean) => void;
+  readonly onServerDeafen: (deafened: boolean) => void;
+  readonly onMove: (toChannelId: number) => void;
+  readonly onDisconnect: () => void;
+}
 
 export function showUserVolumeMenu(
   userId: number,
@@ -12,6 +27,7 @@ export function showUserVolumeMenu(
   x: number,
   y: number,
   signal: AbortSignal,
+  mod?: VoiceModMenuOptions,
 ): void {
   // Remove any existing context menus and abort their dismiss controllers
   document.querySelectorAll(".user-vol-menu").forEach((el) => {
@@ -85,6 +101,12 @@ export function showUserVolumeMenu(
   });
   menu.appendChild(resetBtn);
 
+  if (mod !== undefined) {
+    appendModerationSection(menu, mod, () => {
+      menu.remove();
+    });
+  }
+
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   document.body.appendChild(menu);
@@ -111,4 +133,79 @@ export function showUserVolumeMenu(
     menu.remove();
     dismissAc.abort();
   });
+}
+
+/** Builds the moderation rows. close() runs after any action so the menu does
+ *  not linger showing stale labels while the server round-trip is in flight. */
+function appendModerationSection(
+  menu: HTMLElement,
+  mod: VoiceModMenuOptions,
+  close: () => void,
+): void {
+  menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+
+  const muteItem = createElement(
+    "div",
+    { class: "context-menu-item", "data-action": "server-mute" },
+    mod.serverMuted ? "Server Unmute" : "Server Mute",
+  );
+  muteItem.addEventListener("click", () => {
+    mod.onServerMute(!mod.serverMuted);
+    close();
+  });
+  menu.appendChild(muteItem);
+
+  const deafenItem = createElement(
+    "div",
+    { class: "context-menu-item", "data-action": "server-deafen" },
+    mod.serverDeafened ? "Server Undeafen" : "Server Deafen",
+  );
+  deafenItem.addEventListener("click", () => {
+    mod.onServerDeafen(!mod.serverDeafened);
+    close();
+  });
+  menu.appendChild(deafenItem);
+
+  if (mod.moveTargets.length > 0) {
+    // Hover-revealed flyout, same shape as the AdminActions role submenu.
+    const moveWrap = createElement("div", {
+      class: "context-menu-item context-menu-item--submenu",
+      "data-action": "move-to",
+    });
+    moveWrap.appendChild(createElement("span", {}, "Move to"));
+    const sub = createElement("div", { class: "context-menu__submenu" });
+    sub.style.display = "none";
+    moveWrap.addEventListener("mouseenter", () => {
+      sub.style.display = "";
+    });
+    moveWrap.addEventListener("mouseleave", () => {
+      sub.style.display = "none";
+    });
+    for (const ch of mod.moveTargets) {
+      const item = createElement(
+        "div",
+        { class: "context-menu-item", "data-move-channel": String(ch.id) },
+        ch.name,
+      );
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        mod.onMove(ch.id);
+        close();
+      });
+      sub.appendChild(item);
+    }
+    moveWrap.appendChild(sub);
+    menu.appendChild(moveWrap);
+  }
+
+  const kickItem = createElement(
+    "div",
+    { class: "context-menu-item danger", "data-action": "voice-disconnect" },
+    "Disconnect",
+  );
+  kickItem.addEventListener("click", () => {
+    mod.onDisconnect();
+    close();
+  });
+  menu.appendChild(kickItem);
 }

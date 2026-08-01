@@ -448,12 +448,14 @@ describe("LiveKitSession", () => {
     it("does nothing when no active room", async () => {
       // Should not throw
       await session.switchInputDevice("device-1");
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
   });
 
   describe("switchOutputDevice", () => {
     it("does nothing when no active room", async () => {
       await session.switchOutputDevice("device-1");
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
   });
 
@@ -762,8 +764,21 @@ describe("LiveKitSession", () => {
 
   describe("handleVoiceTokenRefresh", () => {
     it("stores the token and restarts the timer", () => {
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 7,
+        latestToken: "old-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+      };
+
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
       session.handleVoiceTokenRefresh("new-token");
-      // No throw — timer is started internally
+
+      expect((session as any)._state.latestToken).toBe("new-token");
+      // Timer restarted: the 23h refresh timer is re-armed on every refresh.
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 23 * 60 * 60 * 1000);
     });
 
     it("handles undefined token", () => {

@@ -10,6 +10,7 @@ import { createIcon } from "@lib/icons";
 import { loadPref } from "@lib/preferences";
 import { canManageMessages } from "@lib/permissions";
 import { showToast } from "@lib/toast";
+import { formatMessageLink } from "@lib/deep-link";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -47,8 +48,10 @@ export { setServerHost } from "./attachments";
 // -- Imports for composite functions ------------------------------------------
 
 import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
-import { getUserRole, roleColorVar } from "./formatting";
+import { getUserRole, resolveAuthor, roleColorVar } from "./formatting";
+import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
+import { highlightsCurrentUser } from "@lib/mentions";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
 import { renderReactions } from "./reactions";
@@ -66,24 +69,70 @@ export function renderDayDivider(iso: string): HTMLDivElement {
   return divider;
 }
 
-function renderReplyRef(replyToId: number, allMessages: readonly Message[]): HTMLDivElement {
+/**
+ * The "NEW" line above the first message the reader has not seen. Built exactly
+ * like the day divider — same rule/label/rule shape — so the two read as one
+ * family; only the accent colour distinguishes them.
+ */
+export function renderNewDivider(): HTMLDivElement {
+  const divider = createElement("div", {
+    class: "msg-new-divider",
+    role: "separator",
+    "data-testid": "new-messages-divider",
+  });
+  appendChildren(
+    divider,
+    createElement("span", { class: "line" }),
+    createElement("span", { class: "label" }, "NEW"),
+    createElement("span", { class: "line" }),
+  );
+  return divider;
+}
+
+/**
+ * The quoted bar above a reply. Clicking it jumps to the replied-to message —
+ * including when that message is outside the loaded window, which is why the
+ * bar stays clickable even in the "unknown message" case: the id is known, and
+ * the jump path can fetch the window around it.
+ */
+function renderReplyRef(
+  replyToId: number,
+  allMessages: readonly Message[],
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
-  const bar = createElement("div", { class: "msg-reply-ref" });
+  const bar = createElement("div", {
+    class: "msg-reply-ref",
+    role: "button",
+    tabindex: "0",
+    "data-reply-to": String(replyToId),
+    title: "Jump to the replied-to message",
+  });
+  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  bar.addEventListener("click", jump, { signal });
+  bar.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jump();
+      }
+    },
+    { signal },
+  );
   if (ref) {
     const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
     const role = getUserRole(ref.user.id);
-    const miniAvatar = createElement(
-      "div",
-      {
-        class: "rr-avatar",
-        style: `background: ${roleColorVar(role)}`,
-      },
-      ref.user.username.charAt(0).toUpperCase(),
-    );
+    const author = resolveAuthor(ref.user);
+    const miniAvatar = createAvatarElement(author, {
+      className: "rr-avatar",
+      background: roleColorVar(role),
+    });
     appendChildren(
       bar,
       miniAvatar,
-      createElement("span", { class: "rr-author" }, ref.user.username),
+      createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement("span", { class: "rr-text" }, preview),
     );
   } else {
@@ -136,21 +185,23 @@ export function renderMessage(
 
   const statusClass =
     msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
+  const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+  // A deleted row shows no content, so it must not keep the mention accent.
+  const mentionedClass =
+    !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";
   const el = createElement("div", {
-    class: (isGrouped ? "message grouped" : "message") + statusClass,
+    class: (isGrouped ? "message grouped" : "message") + statusClass + mentionedClass,
     "data-testid": `message-${msg.id}`,
   });
 
   const role = getUserRole(msg.user.id);
-  const initial = msg.user.username.charAt(0).toUpperCase();
-  const avatar = createElement(
-    "div",
-    {
-      class: "msg-avatar",
-      style: `background: ${roleColorVar(role)}`,
-    },
-    initial,
-  );
+  // The author's current identity, not the one frozen into the payload: a
+  // rename or a new avatar has to show up on the messages already on screen.
+  const author = resolveAuthor(msg.user);
+  const avatar = createAvatarElement(author, {
+    className: "msg-avatar",
+    background: roleColorVar(role),
+  });
   el.appendChild(avatar);
 
   if (isGrouped) {
@@ -166,24 +217,27 @@ export function renderMessage(
   }
 
   if (msg.replyTo !== null) {
-    el.appendChild(renderReplyRef(msg.replyTo, allMessages));
+    el.appendChild(renderReplyRef(msg.replyTo, allMessages, opts, signal));
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const author = createElement(
+  const authorEl = createElement(
     "span",
     {
       class: "msg-author",
+      // The username stays as the title so the handle you would @mention is
+      // one hover away even when a display name is standing in for it.
+      title: author.username,
       style: `color: ${roleColorVar(role)}`,
     },
-    msg.user.username,
+    resolveDisplayName(author),
   );
   const time = createElement(
     "span",
     { class: "msg-time", title: formatFullDate(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
-  appendChildren(header, author, time);
+  appendChildren(header, authorEl, time);
   el.appendChild(header);
 
   if (msg.deleted) {
@@ -193,7 +247,7 @@ export function renderMessage(
     setText(text, "[message deleted]");
     el.appendChild(text);
   } else {
-    el.appendChild(renderMessageContent(msg.content));
+    el.appendChild(renderMessageContent(msg.content, mentionInfo));
     if (msg.editedAt !== null) {
       el.appendChild(createElement("span", { class: "msg-edited" }, "(edited)"));
     }
@@ -292,6 +346,26 @@ export function renderMessage(
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);
     }
+
+    const copyLinkBtn = createElement("button", {
+      "data-testid": `msg-copy-link-${msg.id}`,
+      "aria-label": "Copy Message Link",
+    });
+    copyLinkBtn.appendChild(createIcon("link", 16));
+    copyLinkBtn.title = "Copy Message Link";
+    copyLinkBtn.addEventListener(
+      "click",
+      () => {
+        // No silent success: a copy with no feedback is indistinguishable
+        // from a clipboard that refused.
+        void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
+          () => showToast("Message link copied", "success"),
+          () => showToast("Couldn't copy the message link", "error"),
+        );
+      },
+      { signal },
+    );
+    actionsBar.appendChild(copyLinkBtn);
 
     if (developerModeEnabled) {
       const copyIdBtn = createElement("button", {

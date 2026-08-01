@@ -127,9 +127,14 @@ describe("VoiceWidget", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
+        topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });
@@ -161,9 +166,14 @@ describe("VoiceWidget", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
+        topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });
@@ -195,9 +205,14 @@ describe("VoiceWidget", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
+        topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });

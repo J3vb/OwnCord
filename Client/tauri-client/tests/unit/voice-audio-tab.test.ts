@@ -725,7 +725,10 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("cleanup stops mic and camera streams", () => {
+  it("cleanup stops mic and camera streams", async () => {
+    // A saved video device is required for the camera preview to start at all.
+    localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
+
     const stopMicTrack = vi.fn();
     const stopCamTrack = vi.fn();
     const micStream = { getTracks: () => [{ stop: stopMicTrack }] } as unknown as MediaStream;
@@ -734,17 +737,32 @@ describe("VoiceAudioTab UI structure", () => {
     vi.stubGlobal("navigator", {
       mediaDevices: {
         enumerateDevices: vi.fn().mockResolvedValue([]),
-        getUserMedia: vi.fn().mockResolvedValue(micStream),
+        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
+          if (constraints.video && constraints.audio === false) {
+            return Promise.resolve(camStream);
+          }
+          return Promise.resolve(micStream);
+        }),
       },
     });
 
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
-    tab.build();
+    const el = tab.build();
+    document.body.appendChild(el);
+    const preview = el.querySelector("video") as HTMLVideoElement;
+
+    // Wait for both the mic-monitoring and camera-preview getUserMedia calls to
+    // resolve and register their streams before triggering cleanup.
+    await vi.waitFor(() => {
+      expect(preview.srcObject).toBe(camStream);
+    });
+
     tab.cleanup();
 
-    // After cleanup, streams should be stopped
-    // (the mic track stop is called in cleanupMic)
+    expect(stopMicTrack).toHaveBeenCalled();
+    expect(stopCamTrack).toHaveBeenCalled();
+
     ac.abort();
   });
 

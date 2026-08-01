@@ -5,7 +5,7 @@
  * unified sidebar layout with a quick-switch overlay for server switching.
  */
 
-import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
+import { createElement, setText, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -20,15 +20,23 @@ import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
-import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./VoiceCallbacks";
+import {
+  createVoiceWidgetCallbacks,
+  createSidebarVoiceCallbacks,
+  createVoiceModerationCallbacks,
+} from "./VoiceCallbacks";
 import { createSidebarMemberSection } from "./SidebarMemberSection";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
   selectDmConversation,
   handleCreateDm,
+  handleCreateGroupDm,
   buildDmConversations,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
+import { createMemberPickerModal } from "./MemberPickerModal";
+import { createPromptModal } from "@lib/modalFactory";
+import { toggleChannelMute } from "@lib/channel-mutes";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
@@ -36,6 +44,8 @@ import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, removeDmChannel } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import { openAdminPanel } from "@lib/admin-panel";
+import { canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +104,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Quick-switch overlay instance
   let quickSwitchInstance: MountableComponent | null = null;
 
+  // Re-render hook for the DM sidebar, set while DM mode is mounted. Mute state
+  // lives in localStorage rather than a store, so toggling it has no subscriber
+  // to wake — this is how the row redraws dimmed.
+  let refreshDmSidebarRef: (() => void) | null = null;
+
   // ---------------------------------------------------------------------------
   // Sidebar wrapper (replaces old channel-sidebar root)
   // ---------------------------------------------------------------------------
@@ -143,6 +158,59 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     headerInviteCtrl.cleanup();
   });
 
+  // ---------------------------------------------------------------------------
+  // Audit log entry point
+  // ---------------------------------------------------------------------------
+  //
+  // The audit log itself stays in the admin panel — it is a paginated,
+  // filterable table over an endpoint this client otherwise never calls, and a
+  // second implementation would be a second thing to keep correct. What belongs
+  // here is the way in, for the moderators who hold VIEW_AUDIT_LOG and would
+  // otherwise have to know the panel's URL by heart.
+  //
+  // Rendered once per mount and kept in sync with the role list: `ready` may
+  // land after this header is built, and a moderator whose role only becomes
+  // known then would never see the entry otherwise.
+  const auditBtn = createElement(
+    "button",
+    {
+      class: "sidebar-audit-btn",
+      title: "Open the audit log in the admin panel (opens in your browser)",
+      "data-testid": "audit-log-btn",
+    },
+    "Audit Log",
+  );
+  auditBtn.addEventListener("click", () => {
+    const host = api.getConfig().host ?? "";
+    if (host === "") {
+      getToast()?.show("Not connected to a server", "error");
+      return;
+    }
+    void openAdminPanel(host, "audit").catch(() => {
+      getToast()?.show("Could not open the admin panel", "error");
+    });
+  });
+
+  const syncAuditBtn = (): void => {
+    auditBtn.style.display = canViewAuditLog() ? "" : "none";
+  };
+  syncAuditBtn();
+  serverHeader.appendChild(auditBtn);
+  // The permission is derived from the signed-in user's role plus the role
+  // list, so both have to be watched.
+  unsubscribers.push(
+    authStore.subscribeSelector(
+      (s) => s.user?.role ?? null,
+      () => syncAuditBtn(),
+    ),
+  );
+  unsubscribers.push(
+    channelsStore.subscribeSelector(
+      (s) => s.roles,
+      () => syncAuditBtn(),
+    ),
+  );
+
   sidebarWrapper.appendChild(serverHeader);
 
   // Load per-server collapsed category state from localStorage
@@ -186,6 +254,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     return createChannelSidebar({
       onVoiceJoin: sidebarVoice.onVoiceJoin,
       onVoiceLeave: sidebarVoice.onVoiceLeave,
+      onVoiceModerate: createVoiceModerationCallbacks(ws),
       onWatchStream: opts.onWatchStream,
       onCreateChannel: (category) => {
         if (activeModal !== null) return;
@@ -211,10 +280,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
+        // Pre-fill from the store rather than from the sidebar's row: the store
+        // is what channel_update writes into, so the modal opens on the current
+        // values even if the row was rendered before the last edit landed.
+        const stored = channelsStore.getState().channels.get(channel.id);
         const modal = createEditChannelModal({
           channelId: channel.id,
           channelName: channel.name,
           channelType: channel.type,
+          channelTopic: stored?.topic ?? "",
+          channelCategory: stored?.category ?? "",
+          channelSlowMode: stored?.slowMode ?? 0,
+          channelNsfw: stored?.nsfw ?? false,
+          channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
+          channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
           onSave: async (data) => {
             try {
               await api.adminUpdateChannel(channel.id, data);
@@ -261,6 +340,22 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           void api.adminUpdateChannel(r.channelId, { position: r.newPosition });
         }
       },
+      onPurgeChannel: async (channel, count) => {
+        try {
+          // The store is updated by the chat_bulk_deleted broadcast, so the
+          // response is only used for the toast's honest count.
+          const result = await api.purgeMessages(channel.id, count);
+          getToast()?.show(
+            result.count === 0
+              ? `No messages to purge in #${channel.name}`
+              : `Purged ${result.count} message${result.count === 1 ? "" : "s"} from #${channel.name}`,
+            result.count === 0 ? "info" : "success",
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to purge messages";
+          getToast()?.show(msg, "error");
+        }
+      },
     });
   }
 
@@ -277,85 +372,29 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
   };
 
-  /** Show a simple member picker modal and call createDm on selection. */
+  /**
+   * Show the member picker. One selection opens a 1:1 DM; two or more create a
+   * group — the picker itself decides which, so the sidebar does not need two
+   * entry points for what the user experiences as one action.
+   */
   function showMemberPicker(): void {
     if (activeModal !== null) return;
 
-    const members = membersStore.getState().members;
-    const currentUserId = authStore.getState().user?.id ?? 0;
-
-    const overlay = createElement("div", { class: "modal-overlay visible" });
-    const modal = createElement("div", {
-      class: "modal dm-member-picker-modal",
-      style: "padding:20px;",
-    });
-    const title = createElement("h3", {}, "New Direct Message");
-    const subtitle = createElement(
-      "p",
-      { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
-      "Select a member to start a conversation",
-    );
-    const listContainer = createElement("div", {
-      class: "dm-member-picker-list",
-      style: "max-height:300px;overflow-y:auto;",
-    });
-
-    for (const member of members.values()) {
-      if (member.id === currentUserId) continue;
-      const item = createElement("div", {
-        class: "dm-member-picker-item channel-item",
-        style: "cursor:pointer;padding:6px 8px;display:flex;align-items:center;gap:8px;",
-      });
-      const avatar = createElement("div", {
-        class: "dm-avatar",
-        style:
-          "width:28px;height:28px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:white;flex-shrink:0;",
-      });
-      setText(avatar, member.username.charAt(0).toUpperCase());
-      const nameEl = createElement("span", {}, member.username);
-      const statusEl = createElement(
-        "span",
-        {
-          style: `font-size:0.75rem;margin-left:auto;color:${member.status === "online" ? "var(--green)" : "var(--text-micro)"};`,
-        },
-        member.status,
-      );
-      appendChildren(item, avatar, nameEl, statusEl);
-
-      item.addEventListener("click", () => {
+    const picker = createMemberPickerModal({
+      onSelect: (userId) => {
         closePickerModal();
-        void handleCreateDm(member.id, dmDeps);
-      });
-      listContainer.appendChild(item);
-    }
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "btn btn-secondary",
-        style: "margin-top:12px;width:100%;",
+        void handleCreateDm(userId, dmDeps);
       },
-      "Cancel",
-    );
-    cancelBtn.addEventListener("click", () => closePickerModal());
-
-    appendChildren(modal, title, subtitle, listContainer, cancelBtn);
-    overlay.appendChild(modal);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) closePickerModal();
+      onSelectGroup: (userIds, name) => {
+        closePickerModal();
+        void handleCreateGroupDm(userIds, name, dmDeps);
+      },
+      onClose: () => {
+        activeModal = null;
+      },
     });
-
-    const pickerComponent: MountableComponent = {
-      mount: (container: Element) => {
-        container.appendChild(overlay);
-      },
-      destroy: () => {
-        overlay.remove();
-      },
-    };
-
-    activeModal = pickerComponent;
-    pickerComponent.mount(document.body);
+    activeModal = picker;
+    picker.mount(document.body);
   }
 
   function closePickerModal(): void {
@@ -369,48 +408,91 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // DM sidebar builder (dms mode)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Leave the DM list gracefully after a conversation goes away: fall back to
+   * another DM if there is one, otherwise to the channel the user came from.
+   */
+  function fallBackFromDm(): void {
+    const remaining = dmStore.getState().channels;
+    if (remaining.length > 0) {
+      selectDmConversation(remaining[0]!, dmDeps);
+      return;
+    }
+    setSidebarMode("channels");
+    if (channelBeforeDm !== null) {
+      setActiveChannel(channelBeforeDm);
+      return;
+    }
+    for (const ch of channelsStore.getState().channels.values()) {
+      if (ch.type === "text") {
+        setActiveChannel(ch.id);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Close a 1:1 DM or leave a group.
+   *
+   * The client does not decide which: the server's DELETE /dms/{id} is a hide
+   * for a 1:1 and a leave for a group, and duplicating that branch here would
+   * be a second place to get it wrong. Locally, both mean "drop it from the
+   * list" — the row is removed optimistically because the request is a
+   * fire-and-forget one whose failure the sidebar cannot usefully recover from
+   * (the next `ready` restores the truth either way).
+   */
+  function closeOrLeaveDm(channelId: number): void {
+    const wasActive = channelsStore.getState().activeChannelId === channelId;
+    removeDmChannel(channelId);
+    void api.closeDm(channelId).catch(() => {
+      getToast()?.show("Could not leave that conversation", "error");
+    });
+    if (wasActive) fallBackFromDm();
+  }
+
+  /** Rename a group DM (participants only; the server refuses a 1:1). */
+  function renameGroup(channelId: number): void {
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dm === undefined || !dm.isGroup) return;
+    createPromptModal({
+      title: "Rename Group",
+      label: "Leave it empty to go back to listing the members.",
+      initialValue: dm.name,
+      placeholder: "Group name",
+      maxLength: 100,
+      testId: "dm-rename-input",
+      onSubmit: (name) => {
+        // The store is updated by the dm_channel_open the server fans out to
+        // every participant, so the response is only used for the error path.
+        void api.renameGroupDm(channelId, name).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Failed to rename group";
+          getToast()?.show(msg, "error");
+        });
+      },
+    });
+  }
+
   function buildDmSidebar(): MountableComponent {
     const serverName = authStore.getState().serverName ?? "Server";
-    const activeDmUserId = uiStore.getState().activeDmUserId;
+    const activeChannelId = channelsStore.getState().activeChannelId;
     const dmChannels = dmStore.getState().channels;
-    const conversations = buildDmConversations(activeDmUserId);
+    const conversations = buildDmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
-      onSelectConversation: (userId) => {
-        const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
+      onSelectConversation: (channelId) => {
+        const dmChannel = dmChannels.find((c) => c.channelId === channelId);
         if (dmChannel !== undefined) {
           selectDmConversation(dmChannel, dmDeps);
         }
       },
-      onCloseDm: (userId) => {
-        const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
-        if (dmChannel !== undefined) {
-          const wasActive = channelsStore.getState().activeChannelId === dmChannel.channelId;
-          removeDmChannel(dmChannel.channelId);
-          void api.closeDm(dmChannel.channelId);
-
-          if (wasActive) {
-            const remaining = dmStore.getState().channels;
-            if (remaining.length > 0) {
-              selectDmConversation(remaining[0]!, dmDeps);
-            } else {
-              setSidebarMode("channels");
-              if (channelBeforeDm !== null) {
-                setActiveChannel(channelBeforeDm);
-              } else {
-                const channels = channelsStore.getState().channels;
-                for (const ch of channels.values()) {
-                  if (ch.type === "text") {
-                    setActiveChannel(ch.id);
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
+      onCloseDm: (channelId) => closeOrLeaveDm(channelId),
+      onToggleMute: (channelId) => {
+        toggleChannelMute(channelId);
+        // Mute state is not in a store, so nothing re-renders on its own.
+        refreshDmSidebarRef?.();
       },
+      onRenameGroup: (channelId) => renameGroup(channelId),
       onNewDm: () => {
         showMemberPicker();
       },
@@ -420,8 +502,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           setActiveChannel(channelBeforeDm);
           channelBeforeDm = null;
         } else {
-          const channels = channelsStore.getState().channels;
-          for (const ch of channels.values()) {
+          for (const ch of channelsStore.getState().channels.values()) {
             if (ch.type === "text") {
               setActiveChannel(ch.id);
               break;
@@ -497,7 +578,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- Member list (below DM section) ---
       // Same wiring lives in SidebarMemberSection; this used to be a private
       // copy of it, and a fix to one silently missed the other.
-      const memberSection = createSidebarMemberSection({ api, getToast });
+      const memberSection = createSidebarMemberSection({
+        api,
+        getToast,
+        onMessageUser: (userId) => {
+          void handleCreateDm(userId, dmDeps);
+        },
+      });
       contentSlot.appendChild(memberSection.element);
       channelModeExtras.push(memberSection.memberListComponent);
       channelModeUnsubs.push(memberSection.destroy);
@@ -529,6 +616,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         contentSlot.appendChild(freshSlot);
       }
 
+      refreshDmSidebarRef = refreshDmSidebar;
+      channelModeUnsubs.push(() => {
+        refreshDmSidebarRef = null;
+      });
+
       // Re-render DM sidebar when DM store changes (new DMs, message updates)
       const unsubDmStore = dmStore.subscribeSelector(
         (s) => s.channels,
@@ -538,9 +630,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       );
       channelModeUnsubs.push(unsubDmStore);
 
-      // Re-render DM sidebar when active DM user changes
-      const unsubDmActive = uiStore.subscribeSelector(
-        (s) => s.activeDmUserId,
+      // Re-render DM sidebar when the active conversation changes. Keyed on the
+      // active channel rather than activeDmUserId, which a group DM leaves null.
+      const unsubDmActive = channelsStore.subscribeSelector(
+        (s) => s.activeChannelId,
         () => {
           refreshDmSidebar();
         },

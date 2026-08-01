@@ -65,6 +65,7 @@ describe("SettingsOverlay", () => {
     onClose: vi.fn(),
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+    onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),
@@ -497,7 +498,9 @@ describe("SettingsOverlay", () => {
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
 
-    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
     editInput.value = "taken-name";
 
     const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
@@ -524,7 +527,9 @@ describe("SettingsOverlay", () => {
     ) as HTMLElement;
     editProfileBtn.click();
 
-    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
     expect(editInput).not.toBeNull();
     // The edit form should be visible
     const editForm = editInput.closest(".setting-row") as HTMLElement;
@@ -548,7 +553,9 @@ describe("SettingsOverlay", () => {
     cancelBtn.click();
 
     // Edit form should be hidden
-    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
     const editForm = editInput.closest(".setting-row") as HTMLElement;
     expect(editForm.style.display).toBe("none");
 
@@ -764,7 +771,9 @@ describe("SettingsOverlay", () => {
     editBtn.click();
 
     // Type a single character
-    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
     editInput.value = "A";
 
     // Click Save
@@ -786,7 +795,9 @@ describe("SettingsOverlay", () => {
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
 
-    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
     editInput.value = "AB";
 
     const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
@@ -794,21 +805,24 @@ describe("SettingsOverlay", () => {
     ) as HTMLElement;
     saveBtn.click();
 
-    expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith("AB");
+    expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith({ username: "AB" });
 
     overlay.destroy?.();
   });
 
   // --- Status selector ---
 
-  it("labels the offline status as 'Offline' (not 'Invisible')", () => {
+  // Phase 6 flipped this: "invisible" is a real, settable status now (the
+  // server stores it and shows everyone else offline), so the option says what
+  // it does instead of borrowing "offline"'s name.
+  it("offers Invisible as a status, not Offline", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
     const statusLabels = container.querySelectorAll(".settings-status-label");
     const labels = Array.from(statusLabels).map((el) => el.textContent);
-    expect(labels).toContain("Offline");
-    expect(labels).not.toContain("Invisible");
+    expect(labels).toContain("Invisible");
+    expect(labels).not.toContain("Offline");
 
     overlay.destroy?.();
   });

@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +91,8 @@ CREATE TABLE IF NOT EXISTS channels (
     slow_mode      INTEGER NOT NULL DEFAULT 0,
     archived       INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
-    voice_max_users INTEGER NOT NULL DEFAULT 0
+    voice_max_users INTEGER NOT NULL DEFAULT 0,
+    is_group        INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,8 +101,15 @@ CREATE TABLE IF NOT EXISTS messages (
     content     TEXT    NOT NULL,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     edited_at   TEXT,
-    deleted     INTEGER NOT NULL DEFAULT 0
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 CREATE TABLE IF NOT EXISTS attachments (
     id          TEXT    PRIMARY KEY,
     message_id  INTEGER,
@@ -123,6 +134,14 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     allow      INTEGER NOT NULL DEFAULT 0,
     deny       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS settings (

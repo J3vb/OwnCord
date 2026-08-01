@@ -23,7 +23,7 @@ func buildProfileRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
 	return r
 }
 

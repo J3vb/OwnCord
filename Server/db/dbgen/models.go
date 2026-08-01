@@ -56,12 +56,21 @@ type Channel struct {
 	VoiceQuality    *string `json:"voiceQuality"`
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
+	Nsfw            int64   `json:"nsfw"`
+	IsGroup         int64   `json:"isGroup"`
 }
 
 type ChannelOverride struct {
 	ID        int64 `json:"id"`
 	ChannelID int64 `json:"channelId"`
 	RoleID    int64 `json:"roleId"`
+	Allow     int64 `json:"allow"`
+	Deny      int64 `json:"deny"`
+}
+
+type ChannelUserOverride struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
 	Allow     int64 `json:"allow"`
 	Deny      int64 `json:"deny"`
 }
@@ -83,6 +92,7 @@ type Emoji struct {
 	Filename   string `json:"filename"`
 	UploadedBy int64  `json:"uploadedBy"`
 	CreatedAt  string `json:"createdAt"`
+	MimeType   string `json:"mimeType"`
 }
 
 type Event struct {
@@ -114,15 +124,21 @@ type LoginAttempt struct {
 }
 
 type Message struct {
-	ID        int64   `json:"id"`
-	ChannelID int64   `json:"channelId"`
-	UserID    int64   `json:"userId"`
-	Content   string  `json:"content"`
-	ReplyTo   *int64  `json:"replyTo"`
-	EditedAt  *string `json:"editedAt"`
-	Deleted   int64   `json:"deleted"`
-	Pinned    int64   `json:"pinned"`
-	Timestamp string  `json:"timestamp"`
+	ID               int64   `json:"id"`
+	ChannelID        int64   `json:"channelId"`
+	UserID           int64   `json:"userId"`
+	Content          string  `json:"content"`
+	ReplyTo          *int64  `json:"replyTo"`
+	EditedAt         *string `json:"editedAt"`
+	Deleted          int64   `json:"deleted"`
+	Pinned           int64   `json:"pinned"`
+	Timestamp        string  `json:"timestamp"`
+	MentionsEveryone int64   `json:"mentionsEveryone"`
+}
+
+type MessageMention struct {
+	MessageID       int64 `json:"messageId"`
+	MentionedUserID int64 `json:"mentionedUserId"`
 }
 
 type MessagesFt struct {
@@ -211,6 +227,9 @@ type User struct {
 	BanReason         *string `json:"banReason"`
 	BanExpires        *string `json:"banExpires"`
 	IdentityPublicKey *string `json:"identityPublicKey"`
+	DisplayName       *string `json:"displayName"`
+	About             *string `json:"about"`
+	CustomStatus      *string `json:"customStatus"`
 }
 
 type UserBlock struct {
@@ -220,12 +239,14 @@ type UserBlock struct {
 }
 
 type VoiceState struct {
-	UserID      int64  `json:"userId"`
-	ChannelID   int64  `json:"channelId"`
-	Muted       int64  `json:"muted"`
-	Deafened    int64  `json:"deafened"`
-	Speaking    int64  `json:"speaking"`
-	JoinedAt    string `json:"joinedAt"`
-	Camera      int64  `json:"camera"`
-	Screenshare int64  `json:"screenshare"`
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	Muted          int64  `json:"muted"`
+	Deafened       int64  `json:"deafened"`
+	Speaking       int64  `json:"speaking"`
+	JoinedAt       string `json:"joinedAt"`
+	Camera         int64  `json:"camera"`
+	Screenshare    int64  `json:"screenshare"`
+	ServerMuted    int64  `json:"serverMuted"`
+	ServerDeafened int64  `json:"serverDeafened"`
 }

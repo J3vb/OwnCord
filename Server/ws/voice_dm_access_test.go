@@ -140,3 +140,96 @@ func TestVoiceTokenRefresh_DMParticipant_StillRefreshes(t *testing.T) {
 		t.Error("a DM participant must still be able to refresh their voice token")
 	}
 }
+
+// Group DMs need no separate voice authorization path: dm_participants holds
+// one row per participant and the gate is a lookup on (user_id, channel_id).
+// These two pin that the existing path genuinely covers the N-participant case
+// — a third member gets in, and an outsider still does not.
+func TestVoiceJoin_GroupDMParticipant_Joins(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "grpvoice-alice")
+	bob := seedMemberUser(t, database, "grpvoice-bob")
+	carol := seedMemberUser(t, database, "grpvoice-carol")
+	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, carol, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
+
+	if !hasVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond)) {
+		t.Error("the third member of a group DM must receive a voice token")
+	}
+
+	state, err := database.GetVoiceState(context.Background(), carol.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil || state.ChannelID != chID {
+		t.Fatalf("group participant voice state = %+v, want channel %d", state, chID)
+	}
+}
+
+// channelReadAudience used to resolve a DM's audience via the role scan (DMs
+// carry no channel_overrides), so any connected user whose base role held
+// READ_MESSAGES received the DM call's voice_state/voice_leave events —
+// leaking who is in a private call and their mute/camera state to the whole
+// server. The audience must be the DM's participants, not a role-wide scan.
+func TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "dmleak-alice")
+	bob := seedMemberUser(t, database, "dmleak-bob")
+	mallory := seedMemberUser(t, database, "dmleak-mallory") // connected, has READ_MESSAGES, NOT a participant
+	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	aliceSend := make(chan []byte, 32)
+	bobSend := make(chan []byte, 32)
+	mallorySend := make(chan []byte, 32)
+	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
+	bobClient := ws.NewTestClientWithUser(hub, bob, 0, bobSend)
+	malloryClient := ws.NewTestClientWithUser(hub, mallory, 0, mallorySend)
+	hub.Register(aliceClient)
+	hub.Register(bobClient)
+	hub.Register(malloryClient)
+	waitRegistered(t, hub, malloryClient)
+
+	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
+
+	bobMsgs := drainChanTimeout(bobSend, 300*time.Millisecond)
+	foundVoiceState := false
+	for _, m := range bobMsgs {
+		if extractType(t, m) == "voice_state" {
+			foundVoiceState = true
+		}
+	}
+	if !foundVoiceState {
+		t.Error("a DM participant must still receive voice_state for their own DM call")
+	}
+
+	malloryMsgs := drainChanTimeout(mallorySend, 300*time.Millisecond)
+	for _, m := range malloryMsgs {
+		if extractType(t, m) == "voice_state" {
+			t.Fatal("voice_state for a DM call leaked to a connected non-participant")
+		}
+	}
+}
+
+func TestVoiceJoin_GroupDMNonParticipant_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "grpvoice-x-alice")
+	bob := seedMemberUser(t, database, "grpvoice-x-bob")
+	carol := seedMemberUser(t, database, "grpvoice-x-carol")
+	mallory := seedMemberUser(t, database, "grpvoice-x-mallory")
+	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
+
+	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
+}

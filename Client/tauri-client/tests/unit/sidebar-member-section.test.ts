@@ -391,14 +391,19 @@ describe("SidebarMemberSection", () => {
     /** Extract the callbacks passed to createMemberList */
     function getCapturedCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (userId: number, username: string, reason: string) => Promise<void>;
+      onBan: (
+        userId: number,
+        username: string,
+        reason: string,
+        durationHours: number,
+      ) => Promise<void>;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
       return calls[calls.length - 1]![0];
     }
 
-    it("kick: calls API and shows success toast", async () => {
+    it("force logout: calls API and shows success toast", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockResolvedValue(undefined),
@@ -417,12 +422,12 @@ describe("SidebarMemberSection", () => {
       await callbacks.onKick(2, "Alice");
 
       expect(mockApi.adminKickMember).toHaveBeenCalledWith(2);
-      expect(mockShow).toHaveBeenCalledWith("Kicked Alice", "success");
+      expect(mockShow).toHaveBeenCalledWith("Forced Alice to log out", "success");
 
       section.destroy();
     });
 
-    it("kick: shows error toast on API failure", async () => {
+    it("force logout: shows error toast on API failure", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockRejectedValue(new Error("Kick denied")),
@@ -445,7 +450,7 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("kick: shows generic error for non-Error exceptions", async () => {
+    it("force logout: shows generic error for non-Error exceptions", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockRejectedValue("string error"),
@@ -463,7 +468,7 @@ describe("SidebarMemberSection", () => {
       const callbacks = getCapturedCallbacks();
       await callbacks.onKick(2, "Alice");
 
-      expect(mockShow).toHaveBeenCalledWith("Failed to kick member", "error");
+      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
 
       section.destroy();
     });
@@ -484,9 +489,9 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "spamming");
+      await callbacks.onBan(3, "Bob", "spamming", 0);
 
-      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3, "spamming");
+      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0);
       expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
 
       section.destroy();
@@ -508,7 +513,7 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "");
+      await callbacks.onBan(3, "Bob", "", 0);
 
       expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
 
@@ -531,7 +536,7 @@ describe("SidebarMemberSection", () => {
       container.appendChild(section.element);
 
       const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "");
+      await callbacks.onBan(3, "Bob", "", 0);
 
       expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
 

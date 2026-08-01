@@ -193,7 +193,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 			var overrides map[int64]db.ChannelOverride
 			var oErr error
 			if !permissions.HasAdmin(role.Permissions) {
-				overrides, oErr = h.db.GetAllChannelPermissionsForRole(ctx, role.ID)
+				overrides, oErr = h.db.GetChannelOverridesFor(ctx, role.ID, c.userID)
 			}
 			if oErr == nil {
 				po := permOverrides(overrides)

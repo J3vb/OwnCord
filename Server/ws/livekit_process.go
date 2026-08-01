@@ -81,11 +81,21 @@ func (p *LiveKitProcess) generateConfig() (string, error) {
 
 	// Sanitize credentials for safe YAML interpolation: reject strings
 	// containing characters that could break YAML structure.
-	for _, cred := range []string{p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret} {
-		for _, ch := range cred {
-			if ch == ':' || ch == '#' || ch == '{' || ch == '}' || ch == '\n' || ch == '\r' || ch == '"' || ch == '\\' {
-				return "", fmt.Errorf("LiveKit credential contains unsafe YAML character %q", string(ch))
-			}
+	//
+	// The error names the offending config field but never echoes the
+	// offending byte: this error is wrapped by Start() and logged by the
+	// caller, so quoting a character from the key or secret would write a
+	// byte of a credential to the server log in clear text.
+	const unsafeYAML = ":#{}\n\r\"\\"
+	for _, cred := range []struct {
+		field string
+		value string
+	}{
+		{"voice.livekit_api_key", p.cfg.LiveKitAPIKey},
+		{"voice.livekit_api_secret", p.cfg.LiveKitAPISecret},
+	} {
+		if strings.ContainsAny(cred.value, unsafeYAML) {
+			return "", fmt.Errorf(`%s contains a character that cannot be safely written to livekit.yaml (one of : # { } " \ CR LF)`, cred.field)
 		}
 	}
 	// Build node_ip line only when configured (required for remote users behind NAT).

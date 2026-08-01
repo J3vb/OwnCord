@@ -18,6 +18,7 @@ func fullV2Registry() *HandlerRegistry {
 	registerReactionHandlers(r, ReactionDeps{})
 	r.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{})
 	registerVoiceControlsV2(r, VoiceDeps{})
+	registerCallHandlers(r, CallDeps{})
 	return r
 }
 
@@ -111,6 +112,7 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"typing_start",
 		"presence_update",
 		"channel_focus",
+		"mark_read",
 		"reaction_add",
 		"reaction_remove",
 		"chat_send",
@@ -123,9 +125,15 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"voice_deafen",
 		"voice_camera",
 		"voice_screenshare",
+		"voice_mod_mute",
+		"voice_mod_deafen",
+		"voice_mod_move",
+		"voice_mod_kick",
 		"voice_e2ee_announce",
 		"voice_e2ee_offer",
 		"voice_token_refresh",
+		"call_ring",
+		"call_decline",
 	}
 
 	registered := r.RegisteredV2Types()
@@ -179,6 +187,7 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeTypingStart:       TypingStartCmd{userID: 1, channelID: 1},
 		MsgTypePresenceUpdate:    PresenceUpdateCmd{userID: 1, status: "online"},
 		MsgTypeChannelFocus:      ChannelFocusCmd{userID: 1, channelID: 1},
+		MsgTypeMarkRead:          MarkReadCmd{userID: 1, channelID: 1},
 		MsgTypeReactionAdd:       ReactionAddCmd{userID: 1, messageID: 1, emoji: "👍"},
 		MsgTypeReactionRemove:    ReactionRemoveCmd{userID: 1, messageID: 1, emoji: "👍"},
 		MsgTypeVoiceJoin:         VoiceJoinCmd{userID: 1, channelID: 1},
@@ -187,9 +196,15 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeVoiceDeafen:       VoiceDeafenCmd{userID: 1},
 		MsgTypeVoiceCamera:       VoiceCameraCmd{userID: 1},
 		MsgTypeVoiceScreenshare:  VoiceScreenshareCmd{userID: 1},
+		MsgTypeVoiceModMute:      VoiceModMuteCmd{userID: 1, channelID: 1, targetID: 2},
+		MsgTypeVoiceModDeafen:    VoiceModDeafenCmd{userID: 1, channelID: 1, targetID: 2},
+		MsgTypeVoiceModMove:      VoiceModMoveCmd{userID: 1, targetID: 2, toChannelID: 2},
+		MsgTypeVoiceModKick:      VoiceModKickCmd{userID: 1, targetID: 2},
 		MsgTypeVoiceE2EEAnnounce: VoiceE2EEAnnounceCmd{userID: 1},
 		MsgTypeVoiceE2EEOffer:    VoiceE2EEOfferCmd{userID: 1},
 		MsgTypeVoiceTokenRefresh: VoiceTokenRefreshCmd{userID: 1},
+		MsgTypeCallRing:          CallRingCmd{userID: 1, channelID: 1},
+		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, channelID: 1},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {

@@ -155,6 +155,16 @@ so surrounding context and reply references stay intact.
 > (`messages.store.ts:282`); there is no local optimistic toggle. Target adds the
 > optimistic toggle for immediacy, consistent with §3.
 
+**Who reacted (✓ implemented 2026-08):** hovering (or focusing) a reaction pill
+for 300 ms fetches the reactor list and shows a tooltip reading
+*"alice, bob, carol and 4 others reacted with 👍"*. The debounce mirrors
+`lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
+The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
+(oldest first, capped at 100 server-side) and is cached per message+emoji in
+`message-list/reaction-tooltip.ts`; a `reaction_update` for that message evicts
+every one of its lists, since the event names only the emoji that changed.
+Usernames are inserted as text nodes — never markup.
+
 ---
 
 ## 6. Attachments
@@ -175,6 +185,26 @@ Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
 calls `onUnauthorized` (clearAuth → connect page with "Your session expired —
 sign in again.") and throws `ApiClientError(401)`.
 
+**Inline players (✓ implemented 2026-08):** a received attachment renders by MIME
+family, not as a download chip for everything but images:
+
+| MIME | Rendering |
+|------|-----------|
+| `image/*` except `image/svg+xml` | Inline `<img>` (existing) |
+| `video/mp4`, `video/webm`, `video/ogg` | Inline `<video controls preload="metadata">` in the same max box as an image, with the download button on hover |
+| `audio/mpeg`/`mp3`, `audio/ogg`, `audio/opus`, `audio/wav`, `audio/webm` | Inline `<audio controls preload="metadata">` row with filename, size and download |
+| anything else, including `image/svg+xml` | Download chip |
+
+Both player families are allowlists, not `video/`/`audio/` prefix tests: an
+unknown container gets a chip rather than a player that fails to decode. SVG is
+excluded from every inline path because it can carry script.
+
+`/api/v1/files/{id}` is permission-checked, so a player cannot point at the raw
+URL. The source is fetched through the same cert-pinned proxy with the session
+bearer token that images use, then handed over as a `blob:` URL — deliberately
+not the image path's base64 data URI, which would inflate a 50 MB video into a
+string and park it in the LRU + IndexedDB caches.
+
 ---
 
 ## 7. Replies, pins, search, read/unread
@@ -189,6 +219,114 @@ sign in again.") and throws `ApiClientError(401)`.
 **Read-state target rule:** unread counts must be suppressed during reconnect
 replay (already handled via `isReplaying()`), so catching up 500 buffered
 messages doesn't light every channel red.
+
+**New-messages divider (✓ implemented 2026-08):** opening a channel that had
+unread messages renders a red **NEW** line above the first one. Opening the
+channel clears the badge, which destroys the only record of where the reader had
+got to, so `setActiveChannel` snapshots the count first
+(`channels.store.getUnreadOnOpen`); MessageList reads it once at mount and places
+the line above the last *N* loaded messages. Consequences of that derivation: the
+line is suppressed while the message window is detached (a slice around some old
+message is not the tail), and it clears on the next visit, when the snapshot is 0.
+The message under the line never renders as a grouped continuation of the one
+above it.
+
+**Explicit mark-as-read (✓ implemented 2026-08):** the channel context menu gains
+**Mark as Read** (disabled when the channel is already read, absent for voice
+channels), and the sidebar's server header gains **Mark All as Read**, which
+appears only while something is unread. Both go through `lib/read-state.ts`,
+which sends the `mark_read` WS message and clears the local badges. `mark_read`
+rather than `channel_focus`: focus also rebinds the connection's focused channel,
+which would misroute unread bookkeeping for the channel actually on screen.
+
+**DM badges (✓ implemented 2026-08):** the DM sidebar renders the real unread
+count (and a red mention count that outranks it) instead of a bare dot. The ready
+payload's `dm_channels[]` now carries `mention_count` — `GetChannelUnreadCounts`
+includes the caller's DM rows — so a DM mention badge survives a reconnect
+instead of resetting to 0.
+
+---
+
+## 7a. Jumping to a message
+
+Every affordance that can jump — a search hit, a pinned entry, the quoted
+reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
+opened from the OS — goes through one path (`lib/message-navigation.ts`
+registry → `main-page/MessageJump.ts`), so they behave identically.
+
+| Step | Target UX |
+|------|-----------|
+| Target loaded | Scroll to the row and flash it (`.highlight-flash`, 1.5s) |
+| Target not loaded | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash |
+| Target in another channel | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
+| Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link |
+
+**Detached windows.** An around-window whose `has_more_after` is true is
+*detached*: the bottom of the list is history, not "now". While detached the
+store refuses to append live broadcasts (they belong below a gap, and splicing
+them on would be a lie about ordering) and the message list shows a **Jump to
+Present** pill. Clicking it reattaches and refetches the live tail. Scrolling
+further up (`prependMessages`) keeps the window detached; only a fresh tail
+fetch reattaches.
+
+**Permalinks.** The hover action bar's *Copy Message Link* yields
+`owncord://message/{channelId}/{messageId}`. Pasted back into chat, that link
+renders as a compact chip (channel name + *Jump*) rather than a bare URL; a
+link to a channel the reader cannot see stays plain text.
+
+---
+
+## 7b. Mentions
+
+The server resolves mentions at send time and ships `mentions` (user IDs) +
+`mentions_everyone` on `chat_message`, `chat_edited` and REST history, plus a
+per-channel `mention_count` in `ready`. The client treats those fields as
+authoritative and only falls back to parsing `@tokens` locally when an older
+server omits them.
+
+| Surface | Target UX |
+|---------|-----------|
+| `@username` | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text |
+| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client |
+| Mention of *you* | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background) |
+| `#channel-name` | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use |
+| Channel badge | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row |
+| Notification | "*X* mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime |
+| Composer | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username; `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends |
+
+**Editing rule:** an edit re-resolves mentions (the row's highlight follows the
+new text) but never re-notifies and never re-increments a badge — that is
+enforced server-side and mirrored here by never incrementing off `chat_edited`.
+
+---
+
+## 7c. Markdown
+
+Message text is rendered as Discord-flavoured markdown. Parsing is entirely
+client-side — the server stores and ships the raw text — and the renderer
+builds DOM nodes only: `innerHTML` is never used with message content, and
+every `href` passes `isSafeUrl` first.
+
+| Construct | Syntax | Notes |
+|-----------|--------|-------|
+| Bold / italic / underline / strike | `**b**`, `*i*` or `_i_`, `__u__`, `~~s~~` | Nest freely (`**bold *and italic***`). `_` only opens on a word boundary, so `snake_case_names` stay literal |
+| Spoiler | `\|\|hidden\|\|` | Obscured `role="button"` span with `aria-pressed`; revealing is per-span and one-way, and the revealing click is swallowed so a link underneath cannot open with it |
+| Escape | `\*literal\*` | A backslash neutralises any markdown punctuation; escapes are inert inside code |
+| Block quote | `> line` at line start | Contiguous `>` lines merge into one quote; `>>>` quotes the rest of the message. Quotes may contain other blocks, one level deep |
+| Heading | `# `, `## `, `### ` at line start | h1–h3; the space is required, so `#nospace` and `#channel` are untouched |
+| Lists | `- ` / `* ` bullets, `1. ` ordered | Contiguous items form one list; two leading spaces nest a single level; an ordered list keeps its starting number |
+| Masked link | `[text](url)` | `http(s)` absolute URLs only — `javascript:`, `data:` and relative URLs render as literal source text. Shows `title=url`, and produces **no** link embed (an author who hid the address does not get it previewed back) |
+| Inline code | `` `code` ``, ``` ``code`` ``` | Markdown, mentions and autolinking are all dead inside |
+| Code fence | ` ```lang ` … ` ``` ` | The tag renders as a label and selects a lightweight highlighter (js/ts, go, python, rust, json, bash, css, html — anything else falls back to plain). Copy button unchanged |
+
+Bare URLs are still autolinked, and mention/`#channel` chips render inside
+styled spans — a URL's own `_` and `*` are treated as address, not markup.
+
+**Composer:** Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in `**`, `*` and
+`__` (and unwrap it when it is already wrapped); with an empty selection the
+markers are inserted around the caret. The composer stops propagation on those
+keys, so Ctrl+U formats while typing and only opens the file picker when the
+message box does not have focus.
 
 ---
 
@@ -228,5 +366,10 @@ the same signal in future.
 (+ `message-input/`), `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
-`src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`;
-server `Server/service/message.go`, `Server/ws/handlers_chat.go`.
+`src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
+`src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
+`src/components/message-list/content-parser.ts` (+ `markdown.ts`,
+`syntax-highlight.ts`),
+`src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+server `Server/service/message.go`, `Server/service/mentions.go`,
+`Server/ws/handlers_chat.go`.

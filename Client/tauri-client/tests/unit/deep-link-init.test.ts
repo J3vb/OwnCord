@@ -113,6 +113,56 @@ describe("initDeepLinks", () => {
     expect(onInvite).toHaveBeenCalledWith("WARM", "h.example");
   });
 
+  it("routes a message permalink to onMessage, not onInvite", async () => {
+    getCurrent.mockResolvedValue(["owncord://message/5/42"]);
+    const onInvite = vi.fn();
+    const onMessage = vi.fn();
+
+    await initDeepLinks(onInvite, onMessage);
+
+    expect(onMessage).toHaveBeenCalledWith(5, 42);
+    expect(onInvite).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a warm-launch message permalink", async () => {
+    const onMessage = vi.fn();
+    await initDeepLinks(vi.fn(), onMessage);
+
+    const handler = onOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+    handler(["owncord://message/9/7"]);
+
+    expect(onMessage).toHaveBeenCalledWith(9, 7);
+  });
+
+  it("ignores a message permalink when no onMessage handler was supplied", async () => {
+    // The old two-argument-free call site must not start feeding permalinks
+    // into the invite flow, and must not throw.
+    getCurrent.mockResolvedValue(["owncord://message/5/42"]);
+    const onInvite = vi.fn();
+
+    await expect(initDeepLinks(onInvite)).resolves.toBeUndefined();
+
+    expect(onInvite).not.toHaveBeenCalled();
+  });
+
+  it("mixes invites and permalinks in one batch", async () => {
+    getCurrent.mockResolvedValue([
+      "owncord://message/1/2",
+      "owncord://invite/CODE",
+      "owncord://message/3/4",
+    ]);
+    const onInvite = vi.fn();
+    const onMessage = vi.fn();
+
+    await initDeepLinks(onInvite, onMessage);
+
+    expect(onInvite).toHaveBeenCalledTimes(1);
+    expect(onInvite).toHaveBeenCalledWith("CODE", undefined);
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    expect(onMessage).toHaveBeenNthCalledWith(1, 1, 2);
+    expect(onMessage).toHaveBeenNthCalledWith(2, 3, 4);
+  });
+
   it("swallows a getCurrent rejection without wiring a listener", async () => {
     getCurrent.mockRejectedValue(new Error("ipc down"));
     const onInvite = vi.fn();

@@ -1,0 +1,15 @@
+-- Phase 6 (custom emoji): give the long-dormant `emoji` table the one column it
+-- was missing to be servable.
+--
+-- The table has existed since 001 with (shortcode, filename, uploaded_by) and
+-- no server code at all. `filename` now holds the storage UUID the file was
+-- written under (same convention as attachments.stored_as), which is enough to
+-- find the bytes but not enough to serve them: the emoji image route has to
+-- send a Content-Type, and re-sniffing the file on every GET would mean opening
+-- and reading it before ServeContent does the same again.
+--
+-- The sniffed type is decided once at upload (png/jpeg/gif/webp only, from the
+-- magic bytes, never from the client's header) and recorded here. The DEFAULT
+-- exists only so the ALTER is legal on a table that in practice has no rows --
+-- nothing has ever written to it.
+ALTER TABLE emoji ADD COLUMN mime_type TEXT NOT NULL DEFAULT 'image/png';

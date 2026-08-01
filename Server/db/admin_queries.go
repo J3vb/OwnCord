@@ -141,15 +141,48 @@ func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, t
 	return res.LastInsertId()
 }
 
-// AdminUpdateChannel updates all mutable channel fields.
-func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, name, topic string, slowMode, position int, archived bool) error {
+// ChannelUpdate is the full set of mutable channel fields an admin edit writes.
+//
+// A struct rather than a positional argument list: the update covers nine
+// fields now, four of them ints, and `AdminUpdateChannel(ctx, id, name, topic,
+// category, slowMode, position, archived, nsfw, maxUsers, maxVideo)` invites
+// exactly the silent transposition (slow mode into user limit) that no test
+// would catch. Every field is written unconditionally, so callers must start
+// from the channel's current values — the handler does, which is what makes a
+// partial PATCH body safe.
+type ChannelUpdate struct {
+	Name     string
+	Topic    string
+	Category string
+	SlowMode int
+	Position int
+	Archived bool
+	// NSFW is stored and broadcast only; it drives no server-side content
+	// behaviour (see migration 025).
+	NSFW bool
+	// VoiceMaxUsers / VoiceMaxVideo are the voice capacity limits the ws
+	// voice-join path already enforces (0 = unlimited). They are meaningless
+	// on a text channel but are still written there, because refusing them
+	// would make the value depend on a type that can never change anyway.
+	VoiceMaxUsers int
+	VoiceMaxVideo int
+}
+
+// AdminUpdateChannel updates all mutable channel fields, category included —
+// moving a channel between categories is a rename of free text, not a
+// structural change, so it rides on the ordinary update.
+func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
 	if err := d.q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
-		Name:     name,
-		Topic:    strToNullPtr(topic),
-		SlowMode: int64(slowMode),
-		Position: int64(position),
-		Archived: b2i64(archived),
-		ID:       id,
+		Name:          u.Name,
+		Topic:         strToNullPtr(u.Topic),
+		Category:      strToNullPtr(u.Category),
+		SlowMode:      int64(u.SlowMode),
+		Position:      int64(u.Position),
+		Archived:      b2i64(u.Archived),
+		Nsfw:          b2i64(u.NSFW),
+		VoiceMaxUsers: int64(u.VoiceMaxUsers),
+		VoiceMaxVideo: int64(u.VoiceMaxVideo),
+		ID:            id,
 	}); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
 	}

@@ -15,6 +15,8 @@ import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
 import type { ChannelController } from "./ChannelController";
+import { createMessageJumper } from "./MessageJump";
+import { setMessageJumpHandler } from "@lib/message-navigation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,6 +28,8 @@ export interface ChatAreaOptions {
   readonly getToast: () => ToastContainer | null;
   readonly getChannelCtrl: () => ChannelController | null;
   readonly onToggleDmProfile?: () => void;
+  /** Start a call in the current DM (join its voice channel + ring). */
+  readonly onStartCall?: () => void;
 }
 
 export interface ChatAreaResult {
@@ -64,15 +68,26 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   const children: MountableComponent[] = [];
   const unsubscribers: Array<() => void> = [];
 
+  // --- Message jumping ---
+  // One implementation for every jump affordance. Registering it globally lets
+  // parts that have no handle on this page — permalink chips inside a rendered
+  // message, owncord://message links from the OS — reach the same path.
+  const jumper = createMessageJumper({ api, getChannelCtrl });
+  unsubscribers.push(
+    setMessageJumpHandler((channelId, messageId) => {
+      void jumper.jumpTo(channelId, messageId);
+    }),
+  );
+
   // --- Overlay controllers ---
   const pinnedCtrl = createPinnedPanelController({
     api,
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     onJumpToMessage: (msgId: number) => {
-      const ctrl = getChannelCtrl();
-      if (ctrl == null || ctrl.messageList == null) return false;
-      return ctrl.messageList.scrollToMessage(msgId);
+      const channelId = getChannelCtrl()?.currentChannelId;
+      if (channelId == null) return;
+      void jumper.jumpTo(channelId, msgId);
     },
   });
   unsubscribers.push(() => {
@@ -83,10 +98,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     api,
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
-    onJumpToMessage: (_channelId: number, msgId: number) => {
-      const ctrl = getChannelCtrl();
-      if (ctrl == null || ctrl.messageList == null) return false;
-      return ctrl.messageList.scrollToMessage(msgId);
+    onJumpToMessage: (channelId: number, msgId: number) => {
+      void jumper.jumpTo(channelId, msgId);
     },
   });
   unsubscribers.push(() => {
@@ -102,6 +115,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       searchCtrl.open();
     },
     onToggleDmProfile: opts.onToggleDmProfile,
+    onStartCall: opts.onStartCall,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
 

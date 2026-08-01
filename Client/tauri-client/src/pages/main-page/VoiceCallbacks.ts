@@ -7,6 +7,7 @@ import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
+import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,
   setMuted as voiceSessionSetMuted,
@@ -69,6 +70,10 @@ export function createVoiceWidgetCallbacks(
     onMuteToggle: () => {
       if (!limiters.voice.tryConsume()) return;
       const state = voiceStore.getState();
+      // A moderator-imposed mute is not ours to lift; the server refuses the
+      // unmute, so don't spend the round-trip (keybinds reach here too, not
+      // just the disabled button).
+      if (state.localServerMuted === true) return;
       if (state.localMuted) {
         voiceSessionSetMuted(false);
         ws.send({ type: "voice_mute", payload: { muted: false } });
@@ -84,6 +89,7 @@ export function createVoiceWidgetCallbacks(
     onDeafenToggle: () => {
       if (!limiters.voice.tryConsume()) return;
       const state = voiceStore.getState();
+      if (state.localServerDeafened === true) return;
       if (state.localDeafened) {
         voiceSessionSetDeafened(false);
         ws.send({ type: "voice_deafen", payload: { deafened: false } });
@@ -128,6 +134,40 @@ export function createVoiceWidgetCallbacks(
 // ---------------------------------------------------------------------------
 // Sidebar Voice Callbacks
 // ---------------------------------------------------------------------------
+
+/** Moderator voice actions. Fire-and-forget sends: the server answers with a
+ *  voice_state / voice_leave broadcast on success and an error frame on
+ *  refusal, so there is no optimistic local state to roll back. */
+export function createVoiceModerationCallbacks(ws: WsClient): VoiceModerationCallbacks {
+  return {
+    onServerMute: (channelId, userId, muted) => {
+      if (!socketLive()) return;
+      log.info("Server mute", { channelId, userId, muted });
+      ws.send({
+        type: "voice_mod_mute",
+        payload: { channel_id: channelId, user_id: userId, muted },
+      });
+    },
+    onServerDeafen: (channelId, userId, deafened) => {
+      if (!socketLive()) return;
+      log.info("Server deafen", { channelId, userId, deafened });
+      ws.send({
+        type: "voice_mod_deafen",
+        payload: { channel_id: channelId, user_id: userId, deafened },
+      });
+    },
+    onMove: (userId, toChannelId) => {
+      if (!socketLive()) return;
+      log.info("Move voice user", { userId, toChannelId });
+      ws.send({ type: "voice_mod_move", payload: { user_id: userId, to_channel_id: toChannelId } });
+    },
+    onDisconnect: (userId) => {
+      if (!socketLive()) return;
+      log.info("Disconnect voice user", { userId });
+      ws.send({ type: "voice_mod_kick", payload: { user_id: userId } });
+    },
+  };
+}
 
 export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks {
   return {

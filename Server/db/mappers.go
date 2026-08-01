@@ -72,6 +72,9 @@ func userFromGen(u dbgen.User) *User {
 		BanReason:         u.BanReason,
 		BanExpires:        u.BanExpires,
 		IdentityPublicKey: u.IdentityPublicKey,
+		DisplayName:       u.DisplayName,
+		About:             u.About,
+		CustomStatus:      u.CustomStatus,
 	}
 }
 

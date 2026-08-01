@@ -36,7 +36,7 @@ func wizardRunningCfg() *config.Config {
 // that signals restarted (buffered) instead of respawning the process.
 func wizardHandler(t *testing.T, database *db.DB, cfgPath string, restarted chan string) http.Handler {
 	t.Helper()
-	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database),
+	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database),
 		admin.SetupOptions{
 			ConfigPath: cfgPath,
 			RunningCfg: wizardRunningCfg(),

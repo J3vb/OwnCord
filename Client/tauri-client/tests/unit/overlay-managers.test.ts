@@ -341,17 +341,17 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
   });
 
-  it("onJumpToMessage shows toast when message not in loaded window", async () => {
+  it("closes and delegates even for a message outside the loaded window", async () => {
     const api = makeMockApi();
     const toast = makeMockToast();
-    const mockScrollToMessage = vi.fn().mockReturnValue(false);
+    const mockJump = vi.fn();
 
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
 
       getCurrentChannelId: () => 42,
-      onJumpToMessage: mockScrollToMessage,
+      onJumpToMessage: mockJump,
     });
 
     await controller.toggle();
@@ -362,10 +362,12 @@ describe("createPinnedPanelController", () => {
 
     opts.onJumpToMessage(999);
 
-    expect(mockScrollToMessage).toHaveBeenCalledWith(999);
-    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining("not in"), "info");
-    // Panel should NOT close when message not found
-    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+    // The jumper fetches the around-window for an unloaded target and reports
+    // its own failures, so the panel no longer second-guesses it with a
+    // "not in loaded window" toast — it just gets out of the way.
+    expect(mockJump).toHaveBeenCalledWith(999);
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("shows toast when toggle fails to load pins", async () => {
@@ -1131,9 +1133,9 @@ describe("createSearchOverlayController", () => {
     expect(mockLogError).toHaveBeenCalled();
   });
 
-  it("onSelectResult sets active channel and calls onJumpToMessage", () => {
+  it("onSelectResult hands the whole jump to onJumpToMessage", () => {
     const api = makeMockApi();
-    const mockJump = vi.fn().mockReturnValue(true);
+    const mockJump = vi.fn();
 
     const controller = createSearchOverlayController({
       api: api as never,
@@ -1146,26 +1148,19 @@ describe("createSearchOverlayController", () => {
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
-    };
-
-    // Mock requestAnimationFrame to execute immediately
-    const origRaf = globalThis.requestAnimationFrame;
-    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
-      cb(0);
-      return 0;
     };
 
     opts.onSelectResult({ channel_id: 3, message_id: 42 });
 
-    expect(mockSetActiveChannel).toHaveBeenCalledWith(3);
     expect(mockJump).toHaveBeenCalledWith(3, 42);
-
-    globalThis.requestAnimationFrame = origRaf;
+    // The jumper owns the channel switch too, so the around-window fetch it
+    // may need is sequenced after the switch instead of racing it.
+    expect(mockSetActiveChannel).not.toHaveBeenCalled();
   });
 
-  it("onSelectResult shows toast when message not found", () => {
+  it("onSelectResult does not second-guess the jumper with a toast", () => {
     const api = makeMockApi();
-    const mockJump = vi.fn().mockReturnValue(false);
+    const mockJump = vi.fn();
 
     const controller = createSearchOverlayController({
       api: api as never,
@@ -1180,17 +1175,10 @@ describe("createSearchOverlayController", () => {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
     };
 
-    const origRaf = globalThis.requestAnimationFrame;
-    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
-      cb(0);
-      return 0;
-    };
-
     opts.onSelectResult({ channel_id: 3, message_id: 999 });
 
-    expect(mockShowToast).toHaveBeenCalledWith("Message not in loaded history", "info");
-
-    globalThis.requestAnimationFrame = origRaf;
+    // A hit outside the loaded page is now a fetch, not a dead end.
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("onSelectResult works without onJumpToMessage callback", () => {

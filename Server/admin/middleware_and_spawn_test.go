@@ -55,7 +55,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,7 +93,9 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,8 +106,15 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
     reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    edited_at  TEXT
+    edited_at  TEXT,
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 CREATE TABLE IF NOT EXISTS invites (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    NOT NULL UNIQUE,
@@ -250,7 +262,7 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 // role_id has been set to a nonexistent value returns 401.
 func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil)
 
 	uid, err := database.CreateUser(context.Background(), "noroleuser", "$2a$12$x", 1)
 	if err != nil {
@@ -404,6 +416,8 @@ func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                 {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                        {}
 func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                {}
+func (m *mockHubWB) RefreshAllChannelVisibility()                           {}
+func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                  {}
 func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
 // isolateSpawnedTestBinary makes it safe for a test to re-exec the test binary

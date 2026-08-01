@@ -63,7 +63,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
+       display_name, about, custom_status
 FROM users WHERE id = ?
 `
 
@@ -84,13 +85,17 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.BanReason,
 		&i.BanExpires,
 		&i.IdentityPublicKey,
+		&i.DisplayName,
+		&i.About,
+		&i.CustomStatus,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
+       display_name, about, custom_status
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
@@ -111,12 +116,16 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.BanReason,
 		&i.BanExpires,
 		&i.IdentityPublicKey,
+		&i.DisplayName,
+		&i.About,
+		&i.CustomStatus,
 	)
 	return i, err
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key
+SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
+       u.display_name, u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.banned = 0
@@ -131,6 +140,8 @@ type ListMembersRow struct {
 	Status            string  `json:"status"`
 	Lower             string  `json:"lower"`
 	IdentityPublicKey *string `json:"identityPublicKey"`
+	DisplayName       *string `json:"displayName"`
+	CustomStatus      *string `json:"customStatus"`
 }
 
 func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
@@ -149,6 +160,8 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 			&i.Status,
 			&i.Lower,
 			&i.IdentityPublicKey,
+			&i.DisplayName,
+			&i.CustomStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -163,10 +176,30 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 	return items, nil
 }
 
-const resetAllUserStatuses = `-- name: ResetAllUserStatuses :exec
-UPDATE users SET status = 'offline' WHERE status != 'offline'
+const markUserDisconnected = `-- name: MarkUserDisconnected :exec
+UPDATE users
+SET status = CASE WHEN status = 'online' THEN 'offline' ELSE status END,
+    last_seen = datetime('now')
+WHERE id = ?
 `
 
+// Disconnect bookkeeping. It clears only 'online', which is the one status
+// that means "has a live session"; idle, dnd and invisible are choices the
+// user made and are what the next connect reads instead of stamping online
+// (db.ConnectStatus). A stale choice never renders as "present" because the
+// read path treats a member with no live connection as offline regardless.
+func (q *Queries) MarkUserDisconnected(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, markUserDisconnected, id)
+	return err
+}
+
+const resetAllUserStatuses = `-- name: ResetAllUserStatuses :exec
+UPDATE users SET status = 'offline' WHERE status = 'online'
+`
+
+// Startup reset: nothing is connected yet, so every 'online' is a leftover
+// from the previous process. Chosen statuses survive for the same reason they
+// survive a disconnect.
 func (q *Queries) ResetAllUserStatuses(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, resetAllUserStatuses)
 	return err

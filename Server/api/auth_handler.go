@@ -42,9 +42,17 @@ type loginRequest struct {
 
 // userResponse is the user shape included in auth responses.
 type userResponse struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	Avatar      string `json:"avatar,omitempty"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar,omitempty"`
+	// DisplayName and About are always present (null = unset) so the settings
+	// form can tell "cleared" from "the server does not know this field".
+	DisplayName *string `json:"display_name"`
+	About       *string `json:"about"`
+	// CustomStatus is the user's own free-text status line.
+	CustomStatus *string `json:"custom_status"`
+	// Status is the user's own true status, invisible included. This response
+	// only ever describes the caller, so there is nothing to hide from them.
 	Status      string `json:"status"`
 	RoleID      int64  `json:"role_id"`
 	TOTPEnabled bool   `json:"totp_enabled"`
@@ -466,6 +474,14 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// A custom status is a "what I am doing right now" note. Leaving it
+		// standing after the user signed out states something about them that
+		// is no longer true, so logout clears it — unlike the chosen presence
+		// status, which is a preference and deliberately survives.
+		if err := database.UpdateUserCustomStatus(context.WithoutCancel(r.Context()), sess.UserID, nil); err != nil {
+			slog.Warn("failed to clear custom status on logout", "user_id", sess.UserID, "err", err)
+		}
+
 		slog.Info("user logged out", "user_id", sess.UserID)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, sess.UserID, "user_logout", "user", sess.UserID, "")
 
@@ -580,13 +596,16 @@ func toUserResponse(u *db.User) *userResponse {
 		avatar = *u.Avatar
 	}
 	resp := &userResponse{
-		ID:          u.ID,
-		Username:    u.Username,
-		Avatar:      avatar,
-		Status:      u.Status,
-		RoleID:      u.RoleID,
-		TOTPEnabled: u.TOTPSecret != nil,
-		CreatedAt:   u.CreatedAt,
+		ID:           u.ID,
+		Username:     u.Username,
+		Avatar:       avatar,
+		DisplayName:  u.DisplayName,
+		About:        u.About,
+		CustomStatus: u.CustomStatus,
+		Status:       u.Status,
+		RoleID:       u.RoleID,
+		TOTPEnabled:  u.TOTPSecret != nil,
+		CreatedAt:    u.CreatedAt,
 	}
 	return resp
 }

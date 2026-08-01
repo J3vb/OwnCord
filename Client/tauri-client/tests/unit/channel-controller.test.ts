@@ -87,6 +87,25 @@ vi.mock("@components/MessageInput", () => ({
   }),
 }));
 
+// The gate component itself is covered by nsfw-gate.test.ts; what the
+// controller owns is WHETHER and with what it is mounted.
+const { mockNsfwGateMount, mockNsfwGateDestroy, mockCreateNsfwGate, capturedNsfwOpts } = vi.hoisted(
+  () => ({
+    mockNsfwGateMount: vi.fn(),
+    mockNsfwGateDestroy: vi.fn(),
+    mockCreateNsfwGate: vi.fn(),
+    capturedNsfwOpts: { value: null as any },
+  }),
+);
+
+vi.mock("@components/NsfwGate", () => ({
+  createNsfwGate: (opts: any) => {
+    capturedNsfwOpts.value = opts;
+    mockCreateNsfwGate(opts);
+    return { mount: mockNsfwGateMount, destroy: mockNsfwGateDestroy };
+  },
+}));
+
 vi.mock("@components/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({
     mount: mockTypingMount,
@@ -104,12 +123,22 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
 
+const { mockReattachToPresent, mockJumpToMessage } = vi.hoisted(() => ({
+  mockReattachToPresent: vi.fn(),
+  mockJumpToMessage: vi.fn(),
+}));
+
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
   addOptimisticMessage: mockAddOptimistic,
   markSendFailed: mockMarkSendFailed,
   removeOptimistic: mockRemoveOptimistic,
+  reattachToPresent: mockReattachToPresent,
+}));
+
+vi.mock("@lib/message-navigation", () => ({
+  jumpToMessage: mockJumpToMessage,
 }));
 
 vi.mock("@stores/auth.store", () => ({
@@ -131,6 +160,10 @@ const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
     channels: [] as Array<{
       channelId: number;
       recipient: { id: number; username: string; avatar: string; status: string };
+      // Group DMs: the participant list, the optional name and the group flag.
+      participants: Array<{ id: number; username: string; avatar: string; status: string }>;
+      name: string;
+      isGroup: boolean;
       lastMessageId: number | null;
       lastMessage: string;
       lastMessageAt: string;
@@ -140,9 +173,16 @@ const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
   mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
 }));
 
-vi.mock("@stores/dm.store", () => ({
-  dmStore: { getState: mockDmStoreGetState },
-}));
+vi.mock("@stores/dm.store", async () => {
+  // dmDisplayName is real: it is the single answer to "what is this DM
+  // called", and mocking it would let the controller and the sidebar disagree
+  // in a test while agreeing in production.
+  const actual = await vi.importActual<typeof import("@stores/dm.store")>("@stores/dm.store");
+  return {
+    dmStore: { getState: mockDmStoreGetState },
+    dmDisplayName: actual.dmDisplayName,
+  };
+});
 
 vi.mock("@stores/members.store", () => ({
   membersStore: { getState: mockMembersStoreGetState },
@@ -175,6 +215,7 @@ import { createChannelController } from "../../src/pages/main-page/ChannelContro
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore, setChannels, setActiveChannel, setRoles } from "@stores/channels.store";
+import { acknowledgeNsfw } from "@lib/nsfw-gate";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -416,6 +457,34 @@ describe("createChannelController", () => {
       capturedMessageListOpts.onRetryLoad();
 
       expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+    });
+
+    it("onJumpToMessage routes a reply-bar jump through the shared jumper", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts.onJumpToMessage(1234);
+
+      // Scoped to the mounted channel: a reply always points inside it.
+      expect(mockJumpToMessage).toHaveBeenCalledWith(42, 1234);
+    });
+
+    it("onJumpToPresent reattaches the channel and refetches the live tail", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
+
+      capturedMessageListOpts.onJumpToPresent();
+
+      // Reattaching first is what makes the refetch actually happen —
+      // loadMessages short-circuits while the channel is still "loaded".
+      expect(mockReattachToPresent).toHaveBeenCalledWith(42);
+      expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+      expect(mockReattachToPresent.mock.invocationCallOrder[0]).toBeLessThan(
+        (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+      );
     });
 
     it("onRetry re-sends the failed draft with a fresh correlation id", () => {
@@ -764,6 +833,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -779,6 +851,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -798,6 +871,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "bob", avatar: "", status: "dnd" },
+            participants: [{ id: 5, username: "bob", avatar: "", status: "dnd" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -813,6 +889,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -832,6 +909,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -849,6 +927,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -994,6 +1073,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -1039,6 +1121,38 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general", "text");
       expect(blocksSubscribers).toHaveLength(0);
     });
+
+    // Discord semantics, mirrored by the server's requireDMNotBlocked: a group
+    // DM is a shared room, and gating one member's composer over a block with
+    // one other member would leave the group reading a conversation that person
+    // cannot join. Blocks are enforced when the group is created instead.
+    it("does not gate a group DM's composer on block state", () => {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [
+              { id: 5, username: "alice", avatar: "", status: "online" },
+              { id: 6, username: "bob", avatar: "", status: "online" },
+            ],
+            name: "Crew",
+            isGroup: true,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockDmComposerBlockReason.mockReturnValue("You've blocked this user.");
+
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "Crew", "dm");
+
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(blocksSubscribers).toHaveLength(0);
+    });
   });
 
   describe("destroyChannel edge cases", () => {
@@ -1065,6 +1179,99 @@ describe("createChannelController", () => {
       vi.clearAllMocks();
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
       expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+  });
+  // ─── NSFW age gate ────────────────────────────────────────────────────────
+
+  describe("NSFW age gate", () => {
+    function seedChannel(nsfw: boolean): void {
+      setChannels([
+        {
+          id: 42,
+          name: "spicy",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          nsfw,
+        },
+      ]);
+    }
+
+    beforeEach(() => {
+      sessionStorage.clear();
+      mockCreateNsfwGate.mockClear();
+      mockNsfwGateMount.mockClear();
+      mockNsfwGateDestroy.mockClear();
+      capturedNsfwOpts.value = null;
+    });
+
+    it("is not mounted for an unflagged channel", () => {
+      seedChannel(false);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+      expect(mockCreateNsfwGate).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("mounts over the message area for a flagged channel", () => {
+      seedChannel(true);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "spicy");
+
+      expect(mockCreateNsfwGate).toHaveBeenCalledTimes(1);
+      expect(capturedNsfwOpts.value.channelId).toBe(42);
+      expect(capturedNsfwOpts.value.channelName).toBe("spicy");
+      // Over the messages, not over the whole app: the sidebar stays usable.
+      expect(mockNsfwGateMount).toHaveBeenCalledWith(opts.slots.messagesSlot);
+      ctrl.destroyChannel();
+    });
+
+    it("tears the gate down when Continue is accepted", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      capturedNsfwOpts.value.onContinue();
+
+      expect(mockNsfwGateDestroy).toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("leaves the channel when the reader declines", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      capturedNsfwOpts.value.onCancel();
+
+      expect(ctrl.currentChannelId).toBeNull();
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+    });
+
+    // Once per session: the stored acknowledgement (written by the gate's
+    // Continue button, which is stubbed out here) is what suppresses the second
+    // ask, so switching away and back must not re-prompt.
+    it("does not mount for a channel already acknowledged this session", () => {
+      acknowledgeNsfw(42);
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+
+      ctrl.mountChannel(42, "spicy");
+
+      expect(mockCreateNsfwGate).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("destroys an unaccepted gate when the channel unmounts", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      ctrl.destroyChannel();
+
+      expect(mockNsfwGateDestroy).toHaveBeenCalled();
     });
   });
 });

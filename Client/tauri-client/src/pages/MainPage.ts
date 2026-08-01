@@ -5,6 +5,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
+import type { UserStatus } from "@lib/types";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
@@ -20,9 +21,11 @@ import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
 import { loadUserStatus } from "@lib/userStatus";
+import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
-import { dmStore } from "@stores/dm.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
+import { clearCustomEmoji } from "@stores/emoji.store";
 import {
   cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
@@ -33,6 +36,12 @@ import {
   setOnError as setVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
+import { clearAttachmentCaches } from "@components/message-list/attachments";
+import {
+  setReactionUsersFetcher,
+  clearReactionUsersCache,
+} from "@components/message-list/reaction-tooltip";
+import { setMarkReadSender } from "@lib/read-state";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -47,6 +56,12 @@ import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
 import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
+import { createIncomingCallBanner } from "@components/IncomingCallBanner";
+import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
+import { createRingController } from "@lib/call-ring";
+import type { RingController } from "@lib/call-ring";
+import { startRingChime, stopRingChime } from "@lib/notifications";
+import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -79,6 +94,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setLiveKitServerHost(apiConfig.host);
   }
 
+  // "Mark as Read" affordances need the socket but are reached from deep inside
+  // the sidebar; register the sender once instead of threading ws through.
+  setMarkReadSender((channelId) => {
+    ws.send({ type: "mark_read", payload: { channel_id: channelId } });
+  });
+
+  // The who-reacted tooltip fetches on hover; give it the live REST client the
+  // same way the attachment renderer is given the server host.
+  clearReactionUsersCache();
+  setReactionUsersFetcher(async (channelId, messageId, emoji) => {
+    const res = await api.getReactionUsers(channelId, messageId, emoji);
+    return res.users;
+  });
+
   const limiters = createRateLimiterSet();
 
   let container: Element | null = null;
@@ -102,6 +131,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let reactionCtrl: ReactionController | null = null;
   let videoModeCtrl: VideoModeController | null = null;
   let channelCtrl: ChannelController | null = null;
+  /** Inactivity watcher that flips the status to idle after ten quiet
+   *  minutes. Started once the socket is up, torn down with the page. */
+  let autoIdle: AutoIdleController | null = null;
 
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
@@ -109,6 +141,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM profile sidebar (right panel, toggled via DM header click)
   let dmProfileSidebar: DmProfileSidebarComponent | null = null;
   let dmProfileSlot: HTMLDivElement | null = null;
+
+  // DM calls: the banner draws a ring, the controller owns its lifetime.
+  let callBanner: IncomingCallBannerComponent | null = null;
+  let ringCtrl: RingController | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -119,13 +155,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   /**
-   * Re-assert the status the user picked in settings. The server starts every
-   * session as "online", so without this a saved "Do Not Disturb" would show
-   * as selected in the panel while everyone else saw the user as online.
+   * Re-assert the status the user picked, if the server disagrees.
+   *
+   * This used to fire on every connect, because the server stamped everyone
+   * online at handshake and the client had to race to correct it — which is
+   * what made a chosen Do Not Disturb (and "appear offline") flash online on
+   * every reconnect. The server now reads the saved status and announces
+   * *that*, so this is a no-op in the normal case and only speaks up when the
+   * two genuinely differ (an older server, or a status changed while the
+   * socket was down).
    */
   function restoreSavedPresence(): void {
     const status = loadUserStatus();
-    if (status === "online") return;
+    const serverStatus = authStore.getState().user?.status;
+    if (serverStatus === status) return;
     const userId = getCurrentUserId();
     if (userId !== 0) {
       updatePresence(userId, status);
@@ -135,15 +178,31 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     }
   }
 
-  /** Resolve display name for a channel — for DMs, use recipient username from DM store. */
+  /** Send a presence change and reflect it locally. Shared by the settings
+   *  tab, the user bar and the auto-idle timer so all three agree. */
+  function applyPresence(status: UserStatus): void {
+    const userId = getCurrentUserId();
+    if (userId !== 0) {
+      updatePresence(userId, status);
+    }
+    if (limiters.presence.tryConsume()) {
+      ws.send({ type: "presence_update", payload: { status } });
+    }
+  }
+
+  /**
+   * Resolve a channel's display name. A DM is named by who is in it (or, for a
+   * group, by its name), and the store is the authority on that — the channels
+   * store carries a synthesised copy that can lag a rename or a departure.
+   */
   function resolveChannelName(
     channelId: number,
     channelName: string,
     channelType?: string,
   ): string {
-    if (channelType === "dm" && (!channelName || channelName === "")) {
+    if (channelType === "dm") {
       const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      if (dm !== undefined) return dm.recipient.username;
+      if (dm !== undefined) return dmDisplayName(dm);
     }
     return channelName;
   }
@@ -190,6 +249,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
     });
     dmProfileSidebar.mount(dmProfileSlot);
+  }
+
+  /**
+   * Start a call in the currently open DM: join its voice channel and ring the
+   * other participants.
+   *
+   * Joining first is deliberate. A "call" is presence in the DM's voice
+   * channel, so the ring is only truthful once the caller is actually there —
+   * ringing first would offer an empty room to whoever accepts.
+   */
+  function startCall(): void {
+    const active = getActiveChannel();
+    if (active === null || active.type !== "dm") return;
+    createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
+    ws.send({ type: "call_ring", payload: { channel_id: active.id } });
+    showToast("Calling…", "info");
   }
 
   /** Close the DM profile sidebar if open. */
@@ -241,10 +316,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     applyConnectionStatus(banner, uiStore.getState().connectionStatus);
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
+    // Auto-idle. It only ever moves a status it is itself responsible for
+    // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
+    // Invisible is never touched — so it is safe to leave running for the
+    // whole session.
+    autoIdle = startAutoIdle({ onStatusChange: (status) => applyPresence(status) });
+
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
         try {
-          if (banner !== null) {
+          // A "shutdown" broadcast kicks back to the login screen (handled in
+          // the dispatcher) — no point starting a countdown on a page that is
+          // about to unmount.
+          if (banner !== null && payload.reason !== "shutdown") {
             banner.showRestart(payload.delay_seconds);
           }
         } catch (err) {
@@ -281,6 +365,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
+      onStartCall: () => {
+        startCall();
+      },
     });
     dmProfileSlot = chatAreaResult.dmProfileSlot;
     children.push(...chatAreaResult.children);
@@ -315,13 +402,36 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           throw err;
         }
       },
-      onUpdateProfile: async (username) => {
+      onUpdateProfile: async (patch) => {
         try {
-          const updated = await api.updateProfile({ username });
-          updateUser({ username: updated.username });
+          // The username is required by the API but optional in the patch (the
+          // profile form only edits the display name and about), so fill it in
+          // from the current user rather than making every caller repeat it.
+          const username = patch.username ?? authStore.getState().user?.username ?? "";
+          const updated = await api.updateProfile({ ...patch, username });
+          updateUser({
+            username: updated.username,
+            display_name: updated.display_name ?? null,
+            about: updated.about ?? null,
+          });
           showToast("Profile updated", "success");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to update profile";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onUploadAvatar: async (file) => {
+        try {
+          const uploaded = await api.uploadAvatar(file);
+          // The server has already pointed the column at the served file and
+          // broadcast a user_update; this keeps the local copy from lagging a
+          // round-trip behind.
+          updateUser({ avatar: uploaded.url });
+          showToast("Avatar updated", "success");
+          return uploaded.url;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to upload avatar";
           showToast(msg, "error");
           throw err;
         }
@@ -363,15 +473,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           throw err;
         }
       },
-      onStatusChange: (status) => {
-        const userId = getCurrentUserId();
-        if (userId !== 0) {
-          updatePresence(userId, status);
-        }
-        if (limiters.presence.tryConsume()) {
-          ws.send({ type: "presence_update", payload: { status } });
-        }
-      },
+      onStatusChange: (status) => applyPresence(status),
     });
     settingsOverlay.mount(root);
     children.push(settingsOverlay);
@@ -399,6 +501,67 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     toast.mount(root);
     children.push(toast);
     initToast(toast);
+
+    // --- DM calls ---
+    // The banner is mounted on the page root rather than inside the chat area
+    // so a ring stays visible while the user is looking at another channel —
+    // which is exactly when a call most needs to be answerable.
+    ringCtrl = createRingController({
+      onRingStateChange: (state) => callBanner?.setRing(state),
+      onChime: (playing) => (playing ? startRingChime() : stopRingChime()),
+      onAccept: (channelId) => {
+        createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
+      },
+      onDecline: (channelId) => {
+        ws.send({ type: "call_decline", payload: { channel_id: channelId } });
+      },
+    });
+    callBanner = createIncomingCallBanner({
+      onAccept: () => ringCtrl?.accept(),
+      onDecline: () => ringCtrl?.decline(),
+    });
+    callBanner.mount(root);
+    children.push(callBanner);
+
+    unsubscribers.push(
+      ws.on("call_incoming", (payload) => {
+        try {
+          // A call in the DM you are already sitting in still rings: the
+          // channel being open does not mean the app has focus, and Discord
+          // rings there too.
+          ringCtrl?.incoming({
+            channelId: payload.channel_id,
+            fromUserId: payload.from_user,
+            fromUsername: payload.username,
+          });
+        } catch (err) {
+          log.error("call_incoming handler error", err);
+        }
+      }),
+    );
+    unsubscribers.push(
+      ws.on("call_declined", (payload) => {
+        ringCtrl?.cancel(payload.channel_id);
+      }),
+    );
+    // The ringer hanging up before anyone answered: their voice_leave is the
+    // only signal there is that the call is over, because there is no call
+    // record to close. Ringing for a room with nobody in it is worse than a
+    // missed call, so a leave stops the ring for that channel.
+    unsubscribers.push(
+      ws.on("voice_leave", (payload) => {
+        const ringing = ringCtrl?.current();
+        if (ringing === null || ringing === undefined) return;
+        if (payload.user_id === ringing.fromUserId) {
+          ringCtrl?.cancel(ringing.channelId);
+        }
+      }),
+    );
+    unsubscribers.push(() => {
+      ringCtrl?.destroy();
+      ringCtrl = null;
+      callBanner = null;
+    });
 
     // Message loading controller
     msgCtrl = createMessageController({
@@ -548,6 +711,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       voiceCleanupAll();
+      // Custom emoji belong to the server this page was connected to. The set
+      // is module-global, so without this a switch to another server would keep
+      // rendering the previous one's shortcodes until its own list arrived.
+      clearCustomEmoji();
+      // Image/video/audio caches are module-global too — without this every
+      // clip viewed this session stays pinned (as a blob: URL or a cached
+      // data: URI) past logout.
+      clearAttachmentCaches();
+      autoIdle?.destroy();
+      autoIdle = null;
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 

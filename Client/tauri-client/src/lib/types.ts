@@ -8,8 +8,15 @@
 // Common / Shared Types
 // -----------------------------------------------------------------------------
 
-/** Status values allowed by the protocol. */
-export type UserStatus = "online" | "idle" | "dnd" | "offline";
+/**
+ * Status values allowed by the protocol.
+ *
+ * "invisible" is a real, settable status since phase 6: the server stores it
+ * as chosen and maps it to "offline" for every OTHER user, so the owner keeps
+ * seeing their own true state. "offline" is what the server broadcasts for a
+ * user with no live session — it is no longer something a user picks.
+ */
+export type UserStatus = "online" | "idle" | "dnd" | "invisible" | "offline";
 
 /** Channel types supported by the server. */
 export type ChannelType = "text" | "voice" | "announcement" | "dm";
@@ -71,12 +78,21 @@ export interface MessageUser {
   readonly id: number;
   readonly username: string;
   readonly avatar: string | null;
+  /** Nickname to render instead of `username`. Absent/null = use `username`.
+   *  Mentions still resolve against `username`, which is the unique handle. */
+  readonly display_name?: string | null;
 }
 
 /** User object with role, used in auth_ok and member_join. */
 export interface UserWithRole extends MessageUser {
   readonly role: string;
   readonly totp_enabled?: boolean;
+  /** The signed-in user's own profile text. Null = unset. */
+  readonly about?: string | null;
+  readonly custom_status?: string | null;
+  /** The signed-in user's OWN true status, "invisible" included. Only ever
+   *  present on their own auth_ok / REST me payload. */
+  readonly status?: UserStatus;
   /** Long-term E2EE identity public key (base64), pinned by peers on first
    *  sight (F3 TOFU). Omitted/null when the user has not published one. */
   readonly identity_public_key?: string | null;
@@ -110,6 +126,8 @@ export interface ReadyChannel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** Channel topic ("" = none). Absent from older servers. */
+  readonly topic?: string;
   readonly position: number;
   readonly unread_count?: number;
   readonly last_message_id?: number;
@@ -125,6 +143,26 @@ export interface ReadyChannel {
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
   readonly slow_mode?: number;
+  /**
+   * Unread messages in this channel that mention the current user (directly or
+   * via @everyone/@here). Always ≤ unread_count. Absent from older servers.
+   */
+  readonly mention_count?: number;
+  /**
+   * Whether the channel is flagged as possibly carrying sensitive content.
+   * A pure label: the server stores and ships it but applies no content
+   * behaviour of its own, so what it means is entirely this client's choice
+   * (a one-time-per-session age gate and a sidebar marker). Absent from older
+   * servers, which is read as "not flagged".
+   */
+  readonly nsfw?: boolean;
+  /**
+   * Voice capacity limits (0 = unlimited), the same values the server enforces
+   * on join with CHANNEL_FULL / VIDEO_LIMIT. Shipped so the sidebar can show
+   * "3/5"; the client enforces nothing. Absent from older servers.
+   */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 /** Member object in the ready payload. */
@@ -134,6 +172,10 @@ export interface ReadyMember {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Nickname to render instead of `username`. Null = unset. */
+  readonly display_name?: string | null;
+  /** Free-text status line shown under the name. Null = unset. */
+  readonly custom_status?: string | null;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
   readonly identity_public_key?: string | null;
 }
@@ -144,14 +186,26 @@ export interface ReadyVoiceState {
   readonly user_id: number;
   readonly muted: boolean;
   readonly deafened: boolean;
+  /** Moderator-imposed; optional so an older server's payload still parses. */
+  readonly server_muted?: boolean;
+  readonly server_deafened?: boolean;
 }
 
-/** Role object in the ready payload. */
+/** Role object in the ready payload and in roles_update. */
 export interface ReadyRole {
   readonly id: number;
   readonly name: string;
   readonly color: string | null;
   readonly permissions: number;
+  /**
+   * Hierarchy rank — higher outranks lower. Optional because servers predating
+   * role management shipped the list without it; nothing in the client sorts
+   * on it yet, but role management makes positions mutable, so a stale copy
+   * must be replaceable rather than inferred from list order.
+   */
+  readonly position?: number;
+  /** True for the fallback role members land on when their role is deleted. */
+  readonly is_default?: boolean;
 }
 
 // -----------------------------------------------------------------------------
@@ -172,6 +226,7 @@ export enum Permission {
   KICK_MEMBERS = 0x40000,
   BAN_MEMBERS = 0x80000,
   MUTE_MEMBERS = 0x100000,
+  MENTION_EVERYONE = 0x200000,
   MANAGE_ROLES = 0x1000000,
   MANAGE_SERVER = 0x2000000,
   MANAGE_INVITES = 0x4000000,
@@ -220,6 +275,18 @@ export interface ChatMessagePayload {
   readonly reply_to: number | null;
   readonly attachments: readonly Attachment[];
   readonly timestamp: string;
+  /**
+   * Server-resolved user IDs this message mentions, ordered by first
+   * appearance. Absent from older servers — callers fall back to resolving
+   * @tokens against the member list. Never contains @everyone/@here.
+   */
+  readonly mentions?: readonly number[];
+  /**
+   * Whether an @everyone/@here in the content cleared the sender's
+   * MENTION_EVERYONE gate. A token without the bit carries no mention
+   * semantics at all. Absent from older servers.
+   */
+  readonly mentions_everyone?: boolean;
 }
 
 export interface ChatSendOkPayload {
@@ -232,11 +299,20 @@ export interface ChatEditedPayload {
   readonly channel_id: number;
   readonly content: string;
   readonly edited_at: string;
+  /** Re-resolved mentions for the new content. An edit never re-notifies. */
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
 }
 
 export interface ChatDeletedPayload {
   readonly message_id: number;
   readonly channel_id: number;
+}
+
+/** Bulk moderator delete (channel purge). `ids` is newest-first and never null. */
+export interface ChatBulkDeletedPayload {
+  readonly channel_id: number;
+  readonly ids: readonly number[];
 }
 
 export interface ReactionUpdatePayload {
@@ -256,6 +332,10 @@ export interface TypingPayload {
 export interface PresencePayload {
   readonly user_id: number;
   readonly status: UserStatus;
+  /** The user's current custom status line. Always present on the wire
+   *  (null = none), so a cleared text is distinguishable from an event that
+   *  simply does not mention it. */
+  readonly custom_status?: string | null;
 }
 
 export interface ChannelCreatePayload {
@@ -263,15 +343,33 @@ export interface ChannelCreatePayload {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
+  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  readonly nsfw?: boolean;
+  /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 export interface ChannelUpdatePayload {
   readonly id: number;
   readonly name?: string;
+  readonly topic?: string;
+  /**
+   * The category the channel now sits under ("" = uncategorized). Moving a
+   * channel between categories is an edit, so the broadcast carries it and
+   * the sidebar regroups without a reconnect.
+   */
+  readonly category?: string | null;
   readonly position?: number;
   readonly slow_mode?: number;
+  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  readonly nsfw?: boolean;
+  /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 export interface ChannelDeletePayload {
@@ -287,6 +385,21 @@ export interface VoiceStatePayload {
   readonly speaking: boolean;
   readonly camera: boolean;
   readonly screenshare: boolean;
+  /** Moderator-imposed; the user cannot lift these themselves. Optional so an
+   *  older server's payload still parses. */
+  readonly server_muted?: boolean;
+  readonly server_deafened?: boolean;
+}
+
+/** Server -> Client: a moderator moved this client to another voice channel. */
+export interface VoiceMovedPayload {
+  readonly to_channel_id: number;
+}
+
+/** Server -> Client: a moderator removed this client from voice. */
+export interface VoiceDisconnectedPayload {
+  readonly channel_id: number;
+  readonly reason: string;
 }
 
 export interface VoiceLeavePayload {
@@ -340,10 +453,36 @@ export interface VoiceE2EEOfferPayload {
 
 export interface MemberJoinPayload {
   readonly user: UserWithRole;
+  /** Viewer-safe presence the connecting user comes online as (broadcast
+   *  collapse of their real status — an invisible connector reports
+   *  "offline" here, never their true chosen status). Optional only for
+   *  compatibility with an older server that omits it; a caller MUST treat a
+   *  missing value as "offline", not assume "online", so a hidden user does
+   *  not render visible just because the field wasn't sent yet. */
+  readonly status?: UserStatus;
 }
 
 export interface MemberLeavePayload {
   readonly user_id: number;
+}
+
+/**
+ * Full role list after any role mutation. The server sends the whole list
+ * rather than a delta, so the store is replaced wholesale — a dropped
+ * intermediate event can never leave a deleted role on screen.
+ */
+export interface RolesUpdatePayload {
+  readonly roles: readonly ReadyRole[];
+}
+
+/**
+ * `emoji_update` — the server's whole custom-emoji set after an upload or a
+ * delete. Whole-set for the same reason roles_update is: the client replaces
+ * its map rather than patching it, so a dropped event cannot leave a deleted
+ * emoji rendering.
+ */
+export interface EmojiUpdatePayload {
+  readonly emoji: readonly EmojiResponse[];
 }
 
 export interface MemberUpdatePayload {
@@ -355,6 +494,10 @@ export interface UserUpdatePayload {
   readonly user_id: number;
   readonly username: string;
   readonly avatar: string | null;
+  /** Always present (null = cleared): user_update replaces the client's copy
+   *  of the profile wholesale. */
+  readonly display_name?: string | null;
+  readonly about?: string | null;
   /** Updated E2EE identity public key (base64) — lets peers detect an
    *  identity-key change (TOFU mismatch) as it happens (F3). */
   readonly identity_public_key?: string | null;
@@ -374,25 +517,53 @@ export interface DmRecipient {
   readonly username: string;
   readonly avatar: string;
   readonly status: string;
+  /** Chosen nickname, "" when unset. Absent from pre-phase-6 servers. */
+  readonly display_name?: string;
 }
 
 /** DM channel object in ready payload and dm_channel_open event. */
 export interface DmChannelPayload {
   readonly channel_id: number;
+  /**
+   * The other participant of a 1:1 DM. Retained for backward compatibility;
+   * for a group it carries the first of `recipients` so an older payload
+   * shape still renders something. Prefer `recipients`.
+   */
   readonly recipient: DmRecipient;
+  /**
+   * Every participant except the current user. Absent from pre-group servers,
+   * where `recipient` is the whole membership.
+   */
+  readonly recipients?: readonly DmRecipient[];
+  /** Optional group name. "" (or absent) for a 1:1 DM. */
+  readonly name?: string;
+  /** True for a group DM. Absent from pre-group servers, which had none. */
+  readonly is_group?: boolean;
   readonly last_message_id: number | null;
   readonly last_message: string;
   readonly last_message_at: string;
   readonly unread_count: number;
+  /**
+   * Unread messages in this DM that mention the current user. Absent from
+   * older servers, which shipped no DM mention state at all — treat as 0.
+   */
+  readonly mention_count?: number;
 }
 
-export interface DmChannelOpenPayload {
+/** dm_channel_open carries the same shape as a ready-payload DM entry. */
+export type DmChannelOpenPayload = DmChannelPayload;
+
+/** call_incoming / call_declined. Ephemeral: there is no call id because a
+ *  call is presence in the DM's voice channel, not a server-side record. */
+export interface CallSignalPayload {
   readonly channel_id: number;
-  readonly recipient: DmRecipient;
-  readonly last_message_id: number | null;
-  readonly last_message: string;
-  readonly last_message_at: string;
-  readonly unread_count: number;
+  readonly from_user: number;
+  readonly username: string;
+}
+
+/** call_ring / call_decline (client → server). */
+export interface CallSignalRequestPayload {
+  readonly channel_id: number;
 }
 
 export interface DmChannelClosePayload {
@@ -452,8 +623,20 @@ export interface ChannelFocusPayload {
   readonly channel_id: number;
 }
 
+/**
+ * mark_read — advance the read state for a channel the user is *not* viewing.
+ * Same shape as channel_focus, deliberately a different message: focus also
+ * rebinds the connection's focused channel, which would be wrong here.
+ */
+export interface MarkReadPayload {
+  readonly channel_id: number;
+}
+
 export interface PresenceUpdatePayload {
   readonly status: UserStatus;
+  /** Omitted = leave the stored text alone (what the auto-idle timer sends);
+   *  "" = clear it. */
+  readonly custom_status?: string;
 }
 
 export interface VoiceJoinPayload {
@@ -479,6 +662,29 @@ export interface VoiceScreensharePayload {
   readonly enabled: boolean;
 }
 
+/** Client -> Server: moderator sets another user's server mute. channel_id is
+ *  the channel the moderator sees them in; the server refuses a mismatch. */
+export interface VoiceModMutePayload {
+  readonly channel_id: number;
+  readonly user_id: number;
+  readonly muted: boolean;
+}
+
+export interface VoiceModDeafenPayload {
+  readonly channel_id: number;
+  readonly user_id: number;
+  readonly deafened: boolean;
+}
+
+export interface VoiceModMovePayload {
+  readonly user_id: number;
+  readonly to_channel_id: number;
+}
+
+export interface VoiceModKickPayload {
+  readonly user_id: number;
+}
+
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages
 // -----------------------------------------------------------------------------
@@ -491,6 +697,7 @@ export type ServerMessage =
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
+  | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
@@ -502,6 +709,8 @@ export type ServerMessage =
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
   | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
   | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
+  | (WsEnvelope<VoiceMovedPayload> & { readonly type: "voice_moved" })
+  | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
@@ -509,8 +718,12 @@ export type ServerMessage =
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
+  | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
+  | (WsEnvelope<CallSignalPayload> & { readonly type: "call_incoming" })
+  | (WsEnvelope<CallSignalPayload> & { readonly type: "call_declined" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
   | (WsEnvelope<ErrorPayload> & { readonly type: "error" });
 
@@ -527,6 +740,7 @@ export type ClientMessage =
   | (WsEnvelope<ReactionRemovePayload> & { readonly type: "reaction_remove" })
   | (WsEnvelope<TypingStartPayload> & { readonly type: "typing_start" })
   | (WsEnvelope<ChannelFocusPayload> & { readonly type: "channel_focus" })
+  | (WsEnvelope<MarkReadPayload> & { readonly type: "mark_read" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
@@ -534,13 +748,19 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
+  | (WsEnvelope<VoiceModMutePayload> & { readonly type: "voice_mod_mute" })
+  | (WsEnvelope<VoiceModDeafenPayload> & { readonly type: "voice_mod_deafen" })
+  | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
+  | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
   | (WsEnvelope<{ public_key: string; signature?: string }> & {
       readonly type: "voice_e2ee_announce";
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
-    });
+    })
+  | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_ring" })
+  | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_decline" });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types
@@ -590,12 +810,52 @@ export interface MessageResponse {
   readonly edited_at: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
+  /** Server-resolved mentioned user IDs. Absent from older servers. */
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
 }
 
 /** Paginated messages response. */
 export interface MessagesResponse {
   readonly messages: readonly MessageResponse[];
   readonly has_more: boolean;
+}
+
+/**
+ * A window of history centred on one message, from
+ * `GET /channels/{id}/messages/around/{messageId}`.
+ *
+ * Unlike {@link MessagesResponse}, `messages` is **oldest-first** — it is
+ * already in render order and must not be reversed. `has_more_after` true
+ * means the window is detached from the live tail.
+ */
+export interface MessagesAroundResponse {
+  readonly messages: readonly MessageResponse[];
+  readonly has_more_before: boolean;
+  readonly has_more_after: boolean;
+}
+
+/** One reactor in the who-reacted list. `avatar` is `""` when unset. */
+export interface ReactionUser {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string;
+}
+
+/**
+ * Who reacted to a message with one emoji, from
+ * `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`.
+ * Ordered oldest reaction first and capped at 100 by the server.
+ */
+export interface ReactionUsersResponse {
+  readonly users: readonly ReactionUser[];
+}
+
+/** Result of a channel purge — the ids actually soft-deleted, newest-first. */
+export interface PurgeResponse {
+  readonly channel_id: number;
+  readonly ids: readonly number[];
+  readonly count: number;
 }
 
 /** Member object from REST API. */
@@ -605,6 +865,9 @@ export interface MemberResponse {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  readonly display_name?: string | null;
+  readonly about?: string | null;
+  readonly custom_status?: string | null;
 }
 
 /** Search result item. */
@@ -628,13 +891,17 @@ export interface ApiError {
   readonly message: string;
 }
 
-/** Single emoji object from GET /api/emoji. */
+/**
+ * Single custom emoji from GET/POST /api/v1/emoji.
+ *
+ * `url` is server-relative and behind the session token — it is fetched the
+ * same authenticated, cert-pinned way attachments are, never assigned straight
+ * to an <img src>.
+ */
 export interface EmojiResponse {
   readonly id: number;
   readonly shortcode: string;
-  readonly filename: string;
-  readonly uploaded_by: number;
-  readonly created_at: string;
+  readonly url: string;
 }
 
 /** Single sound object from GET /api/sounds. */
@@ -708,6 +975,10 @@ export interface CreateDmResponse {
   readonly recipient: DmRecipient;
   readonly created: boolean;
 }
+
+/** POST /api/v1/dms/group and PATCH /api/v1/dms/{id} both answer with the
+ *  same DM summary shape the list and the ready payload use. */
+export type GroupDmResponse = DmChannelPayload;
 
 /** GET /api/v1/blocks response. */
 export interface BlockedUsersResponse {

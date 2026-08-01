@@ -9,6 +9,7 @@ import type {
   ChatMessagePayload,
   ChatEditedPayload,
   ChatDeletedPayload,
+  ChatBulkDeletedPayload,
   ReactionUpdatePayload,
   MessageUser,
   Attachment,
@@ -49,6 +50,14 @@ export interface Message {
   readonly correlationId: string | null;
   /** Error code when status === "failed" (e.g. "SLOW_MODE", "FORBIDDEN"). */
   readonly errorCode: string | null;
+  /**
+   * Server-resolved mentioned user IDs. Optional so the many inline Message
+   * fixtures need not restate it; undefined means "the server didn't say",
+   * which sends rendering down the local @token resolution path.
+   */
+  readonly mentions?: readonly number[];
+  /** Whether an honoured @everyone/@here is present. Optional, as above. */
+  readonly mentionsEveryone?: boolean;
 }
 
 export interface MessagesState {
@@ -65,6 +74,14 @@ export interface MessagesState {
    * never requested) — the message region then renders normally/empty.
    */
   readonly historyLoadState: ReadonlyMap<number, "loading" | "error">;
+  /**
+   * Channels whose loaded window is an around-window detached from the live
+   * tail: newer messages exist on the server below what is rendered. While a
+   * channel is here the list shows a "Jump to Present" pill and incoming
+   * broadcasts are *not* appended — they belong below the window, and
+   * appending them would fake continuity across a gap.
+   */
+  readonly detachedChannels: ReadonlySet<number>;
 }
 
 // -----------------------------------------------------------------------------
@@ -87,6 +104,8 @@ function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     status: "sent",
     correlationId: null,
     errorCode: null,
+    mentions: payload.mentions,
+    mentionsEveryone: payload.mentions_everyone,
   };
 }
 
@@ -106,6 +125,8 @@ function messageResponseToMessage(response: MessageResponse): Message {
     status: "sent",
     correlationId: null,
     errorCode: null,
+    mentions: response.mentions,
+    mentionsEveryone: response.mentions_everyone,
   };
 }
 
@@ -122,6 +143,7 @@ const INITIAL_STATE: MessagesState = {
   loadedChannels: new Set(),
   hasMore: new Map(),
   historyLoadState: new Map(),
+  detachedChannels: new Set(),
 };
 
 // -----------------------------------------------------------------------------
@@ -174,7 +196,11 @@ export function addMessage(payload: ChatMessagePayload): void {
       return { ...prev, messagesByChannel: updated };
     }
 
-    // 3. Append as a new message.
+    // 3. Append as a new message — unless the channel is showing a detached
+    //    around-window, in which case the new message belongs to the live tail
+    //    below the gap and must wait for "Jump to Present".
+    if (prev.detachedChannels.has(channelId)) return prev;
+
     let updatedMsgs = [...existing, message];
     // Evict oldest messages if over the cap
     if (updatedMsgs.length > MAX_MESSAGES_PER_CHANNEL) {
@@ -312,13 +338,91 @@ export function setMessages(
     const updatedLoadState = new Map(prev.historyLoadState);
     updatedLoadState.delete(channelId);
 
+    // Loading the plain tail always reattaches: this *is* the live end.
+    const updatedDetached = new Set(prev.detachedChannels);
+    updatedDetached.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       loadedChannels: updatedLoaded,
       hasMore: updatedHasMore,
       historyLoadState: updatedLoadState,
+      detachedChannels: updatedDetached,
     };
+  });
+}
+
+/**
+ * Replace a channel's loaded window with an around-window centred on a jump
+ * target. Unlike setMessages the payload is already oldest-first, so it is not
+ * reversed.
+ *
+ * `hasMoreAfter` marks the window as detached from the live tail: the list
+ * offers "Jump to Present" and live broadcasts stop being appended until
+ * reattachToPresent (or a fresh setMessages) lands.
+ */
+export function setAroundMessages(
+  channelId: number,
+  messages: readonly MessageResponse[],
+  hasMoreBefore: boolean,
+  hasMoreAfter: boolean,
+): void {
+  const converted = messages.map(messageResponseToMessage);
+  // Defensive: the server caps a window at 100, so this never fires today.
+  // If it ever does, keep the older head — dropping the newest end is what the
+  // detached flag below already describes, whereas dropping the head would
+  // silently move the window past the jump target.
+  const trimmed =
+    converted.length > MAX_MESSAGES_PER_CHANNEL
+      ? converted.slice(0, MAX_MESSAGES_PER_CHANNEL)
+      : converted;
+  messagesStore.setState((prev) => {
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(channelId, trimmed);
+
+    const updatedLoaded = new Set(prev.loadedChannels);
+    updatedLoaded.add(channelId);
+
+    const updatedHasMore = new Map(prev.hasMore);
+    updatedHasMore.set(channelId, hasMoreBefore);
+
+    const updatedLoadState = new Map(prev.historyLoadState);
+    updatedLoadState.delete(channelId);
+
+    const updatedDetached = new Set(prev.detachedChannels);
+    // Trimming the tail of an oversized window also strands newer messages,
+    // so the window is detached either way.
+    if (hasMoreAfter || trimmed.length < converted.length) {
+      updatedDetached.add(channelId);
+    } else {
+      updatedDetached.delete(channelId);
+    }
+
+    return {
+      ...prev,
+      messagesByChannel: updatedMessages,
+      loadedChannels: updatedLoaded,
+      hasMore: updatedHasMore,
+      historyLoadState: updatedLoadState,
+      detachedChannels: updatedDetached,
+    };
+  });
+}
+
+/**
+ * Drop a channel's detached window so the next history fetch reloads the live
+ * tail. Clears the loaded flag too — otherwise MessageController short-circuits
+ * on "already loaded" and the stale window stays on screen.
+ */
+export function reattachToPresent(channelId: number): void {
+  messagesStore.setState((prev) => {
+    if (!prev.detachedChannels.has(channelId)) return prev;
+    const updatedDetached = new Set(prev.detachedChannels);
+    updatedDetached.delete(channelId);
+    const updatedLoaded = new Set(prev.loadedChannels);
+    updatedLoaded.delete(channelId);
+    return { ...prev, detachedChannels: updatedDetached, loadedChannels: updatedLoaded };
   });
 }
 
@@ -361,7 +465,13 @@ export function editMessage(payload: ChatEditedPayload): void {
 
     const updatedList = channelMessages.map((msg) =>
       msg.id === payload.message_id
-        ? { ...msg, content: payload.content, editedAt: payload.edited_at }
+        ? {
+            ...msg,
+            content: payload.content,
+            editedAt: payload.edited_at,
+            mentions: payload.mentions,
+            mentionsEveryone: payload.mentions_everyone,
+          }
         : msg,
     );
 
@@ -379,6 +489,30 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 
     const updatedList = channelMessages.map((msg) =>
       msg.id === payload.message_id ? { ...msg, deleted: true } : msg,
+    );
+
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(payload.channel_id, updatedList);
+    return { ...prev, messagesByChannel: updatedMessages };
+  });
+}
+
+/**
+ * Soft-delete every id in one purge. Renders exactly like a single delete —
+ * the rows stay as tombstones — but touches the channel's list once instead of
+ * once per message.
+ */
+export function bulkDeleteMessages(payload: ChatBulkDeletedPayload): void {
+  if (payload.ids.length === 0) return;
+  messagesStore.setState((prev) => {
+    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
+    if (!channelMessages) return prev;
+
+    const purged = new Set(payload.ids);
+    if (!channelMessages.some((msg) => purged.has(msg.id) && !msg.deleted)) return prev;
+
+    const updatedList = channelMessages.map((msg) =>
+      purged.has(msg.id) ? { ...msg, deleted: true } : msg,
     );
 
     const updatedMessages = new Map(prev.messagesByChannel);
@@ -457,12 +591,16 @@ export function clearChannelMessages(channelId: number): void {
     const updatedLoadState = new Map(prev.historyLoadState);
     updatedLoadState.delete(channelId);
 
+    const updatedDetached = new Set(prev.detachedChannels);
+    updatedDetached.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       loadedChannels: updatedLoaded,
       hasMore: updatedHasMore,
       historyLoadState: updatedLoadState,
+      detachedChannels: updatedDetached,
     };
   });
 }
@@ -530,4 +668,19 @@ export function hasMoreMessages(channelId: number): boolean {
 /** First-page history fetch state for a channel; null when idle/loaded. */
 export function getHistoryLoadState(channelId: number): "loading" | "error" | null {
   return messagesStore.select((s) => s.historyLoadState.get(channelId) ?? null);
+}
+
+/**
+ * Whether the channel's loaded window is an around-window detached from the
+ * live tail — newer messages exist below what is rendered.
+ */
+export function isWindowDetached(channelId: number): boolean {
+  return messagesStore.select((s) => s.detachedChannels.has(channelId));
+}
+
+/** Whether a message id is present in a channel's loaded window. */
+export function hasMessageLoaded(channelId: number, messageId: number): boolean {
+  return messagesStore.select(
+    (s) => s.messagesByChannel.get(channelId)?.some((m) => m.id === messageId) ?? false,
+  );
 }

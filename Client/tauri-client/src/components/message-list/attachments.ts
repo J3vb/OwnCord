@@ -10,6 +10,7 @@ import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
+import { getToken } from "@stores/auth.store";
 import { save } from "@tauri-apps/plugin-dialog";
 
 const log = createLogger("attachments");
@@ -55,8 +56,48 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Strip any `; codecs=…` parameters and normalise case before matching. */
+function baseMime(mime: string): string {
+  return (mime.split(";")[0] ?? "").trim().toLowerCase();
+}
+
+/** Whether the attachment should render as an inline <img>.
+ *  image/svg+xml is excluded: an SVG can carry script, and it is the one image
+ *  type the data-URI allowlist already refuses — inlining it only ever produced
+ *  a permanently-loading placeholder, so it belongs on the download chip. */
 export function isImageMime(mime: string): boolean {
-  return mime.startsWith("image/");
+  const base = baseMime(mime);
+  return base.startsWith("image/") && base !== "image/svg+xml";
+}
+
+/** Container MIME types we are willing to hand to a <video> element.
+ *  An allowlist, not a `video/` prefix test: an unknown container gets the
+ *  download chip rather than a player that silently fails to decode. */
+const INLINE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/ogg"]);
+
+/** Container MIME types we are willing to hand to an <audio> element.
+ *  Includes the common aliases servers emit for MP3 and WAV. */
+const INLINE_AUDIO_MIMES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/ogg",
+  "audio/opus",
+  "audio/wav",
+  "audio/wave",
+  "audio/x-wav",
+  "audio/webm",
+]);
+
+/** Whether the attachment should render as an inline <video> player.
+ *  image/svg+xml can never reach here — SVG stays excluded from every inline
+ *  path because it can carry script. */
+export function isVideoMime(mime: string): boolean {
+  return INLINE_VIDEO_MIMES.has(baseMime(mime));
+}
+
+/** Whether the attachment should render as an inline <audio> player. */
+export function isAudioMime(mime: string): boolean {
+  return INLINE_AUDIO_MIMES.has(baseMime(mime));
 }
 
 export function isSafeUrl(url: string): boolean {
@@ -81,6 +122,11 @@ export function clearAttachmentCaches(): void {
   attachmentCacheGeneration += 1;
   memoryCache.clear();
   inFlight.clear();
+  for (const objectUrl of mediaObjectUrls.values()) {
+    revokeObjectUrl(objectUrl);
+  }
+  mediaObjectUrls.clear();
+  mediaInFlight.clear();
 }
 
 /** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
@@ -125,16 +171,23 @@ export function isTrustedServerUrl(url: string): boolean {
 }
 
 /**
- * If `url` targets the OwnCord server, return an equivalent URL pointing at the
- * Rust HTTP TOFU proxy's loopback origin (cert-pinned) with the same path and
- * query. Non-server URLs (external images) are returned unchanged so they use a
- * normal validated HTTPS fetch.
+ * Fetch `url`, routing OwnCord-server URLs through the Rust HTTP TOFU proxy's
+ * loopback origin (cert-pinned) with the session bearer token attached —
+ * /api/v1/files/{id} enforces channel ACLs, so an unauthenticated request
+ * would 401. The token is only ever sent to the configured server host;
+ * non-server URLs (external images) get a normal validated HTTPS fetch with
+ * no credentials.
  */
-async function toFetchUrl(url: string): Promise<string> {
-  if (!isServerUrl(url)) return url;
+async function fetchServerFile(url: string): Promise<Response> {
+  if (!isServerUrl(url)) return tauriFetch(url);
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
-  return `${origin}${parsed.pathname}${parsed.search}`;
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token !== null) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return tauriFetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
@@ -253,7 +306,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // use a normal validated HTTPS fetch. isSafeUrl restricts to http/https and
     // responses are only used as image data, never executed.
     try {
-      const res = await tauriFetch(await toFetchUrl(url));
+      const res = await fetchServerFile(url);
       if (!res.ok) return null;
 
       const rawCt = res.headers.get("content-type") ?? "";
@@ -291,11 +344,183 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
   return promise;
 }
 
+// ---------------------------------------------------------------------------
+// Media (video/audio) sources
+// ---------------------------------------------------------------------------
+
+/** Resolved blob: URLs keyed by attachment URL, so re-rendering a row (virtual
+ *  scroll rebuilds the window constantly) reuses one download. */
+const mediaObjectUrls = new Map<string, string>();
+/** In-flight media fetches, deduplicated the same way images are. */
+const mediaInFlight = new Map<string, Promise<string | null>>();
+/** FIFO cap mirroring memoryCache's CACHE_MAX, kept far lower: each entry
+ *  pins a whole video/audio Blob (not a small base64 thumbnail string), so an
+ *  unbounded map here quietly holds every clip ever viewed in the session. */
+const MEDIA_CACHE_MAX = 20;
+
+function createObjectUrl(blob: Blob): string | null {
+  // jsdom (and any non-browser host) may not implement the object-URL API.
+  if (typeof URL.createObjectURL !== "function") return null;
+  return URL.createObjectURL(blob);
+}
+
+function revokeObjectUrl(objectUrl: string): void {
+  if (typeof URL.revokeObjectURL !== "function") return;
+  URL.revokeObjectURL(objectUrl);
+}
+
+/**
+ * Fetch a video/audio attachment through the same authenticated,
+ * cert-pinned path images use (fetchServerFile attaches the session bearer
+ * token, which /api/v1/files/{id} requires) and hand back a blob: URL.
+ *
+ * Deliberately not the image path: a data: URI means base64-inflating the whole
+ * file into a string and parking it in the LRU + IndexedDB caches, which is
+ * fine for a 200 KB thumbnail and ruinous for a 50 MB video. The Content-Type
+ * goes through the same allowlist so a crafted header cannot turn a
+ * permission-checked download into an executable type.
+ */
+export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
+  const generation = attachmentCacheGeneration;
+
+  const cached = mediaObjectUrls.get(url);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const existing = mediaInFlight.get(url);
+  if (existing !== undefined) return existing;
+
+  const promise = (async (): Promise<string | null> => {
+    try {
+      const res = await fetchServerFile(url);
+      if (!res.ok) return null;
+      const contentType = sanitizeContentType(res.headers.get("content-type") ?? "");
+      const buffer = await res.arrayBuffer();
+      const objectUrl = createObjectUrl(new Blob([buffer], { type: contentType }));
+      if (objectUrl === null) return null;
+      // A cache clear (channel switch, logout) during the fetch means this
+      // blob belongs to a session that is gone — release it rather than
+      // resurrecting it into the fresh cache.
+      if (generation !== attachmentCacheGeneration) {
+        revokeObjectUrl(objectUrl);
+        return null;
+      }
+      if (mediaObjectUrls.size >= MEDIA_CACHE_MAX) {
+        const firstKey = mediaObjectUrls.keys().next().value;
+        if (firstKey !== undefined) {
+          const evicted = mediaObjectUrls.get(firstKey);
+          mediaObjectUrls.delete(firstKey);
+          if (evicted !== undefined) revokeObjectUrl(evicted);
+        }
+      }
+      mediaObjectUrls.set(url, objectUrl);
+      return objectUrl;
+    } catch (err) {
+      log.error("Failed to fetch media attachment", { url, error: String(err) });
+      return null;
+    }
+  })();
+
+  mediaInFlight.set(url, promise);
+  void promise.finally(() => {
+    if (mediaInFlight.get(url) === promise) {
+      mediaInFlight.delete(url);
+    }
+  });
+
+  return promise;
+}
+
 // -- Attachment rendering -----------------------------------------------------
+
+/** The filename + size + download row shared by the audio player and the
+ *  generic file chip. */
+function buildFileMeta(att: Attachment, resolvedUrl: string): HTMLDivElement {
+  const info = createElement("div", { class: "msg-file-meta" });
+  const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
+  nameEl.addEventListener("click", () => {
+    void downloadFile(resolvedUrl, att.filename);
+  });
+  const sizeEl = createElement("div", { class: "msg-file-size" }, formatFileSize(att.size));
+  appendChildren(info, nameEl, sizeEl);
+  return info;
+}
+
+/** The circular download button used by every non-image attachment shape. */
+function buildDownloadButton(att: Attachment, resolvedUrl: string): HTMLButtonElement {
+  const btn = createElement("button", {
+    class: "msg-file-download",
+    title: "Download",
+    "aria-label": `Download ${att.filename}`,
+  });
+  btn.appendChild(createIcon("download", 16));
+  btn.addEventListener("click", () => {
+    void downloadFile(resolvedUrl, att.filename);
+  });
+  return btn;
+}
+
+/** Inline <video> player. Sized by the same .msg-image box as images so a
+ *  video never blows the message column out; the source arrives asynchronously
+ *  because it needs the session token attached. */
+function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-image msg-video" });
+
+  const video = createElement("video", { preload: "metadata" });
+  video.controls = true;
+  video.setAttribute("aria-label", att.filename);
+  wrap.appendChild(video);
+
+  const overlay = createElement("div", { class: "msg-media-overlay" });
+  overlay.appendChild(buildDownloadButton(att, resolvedUrl));
+  wrap.appendChild(overlay);
+
+  void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
+    if (objectUrl !== null) {
+      video.src = objectUrl;
+    } else {
+      wrap.classList.add("msg-media-failed");
+    }
+  });
+
+  return wrap;
+}
+
+/** Inline <audio> player: a compact row carrying the player plus the same
+ *  filename / size / download affordances as the file chip. */
+function renderAudioAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-file msg-audio" });
+  const inner = createElement("div", { class: "msg-file-inner" });
+
+  const info = buildFileMeta(att, resolvedUrl);
+  const audio = createElement("audio", { preload: "metadata" });
+  audio.controls = true;
+  audio.setAttribute("aria-label", att.filename);
+  info.appendChild(audio);
+
+  appendChildren(inner, info, buildDownloadButton(att, resolvedUrl));
+  wrap.appendChild(inner);
+
+  void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
+    if (objectUrl !== null) {
+      audio.src = objectUrl;
+    } else {
+      wrap.classList.add("msg-media-failed");
+    }
+  });
+
+  return wrap;
+}
 
 export function renderAttachment(att: Attachment): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
-  if (isImageMime(att.mime) && isSafeUrl(resolvedUrl)) {
+  const inlineable = isSafeUrl(resolvedUrl);
+  if (inlineable && isVideoMime(att.mime)) {
+    return renderVideoAttachment(att, resolvedUrl);
+  }
+  if (inlineable && isAudioMime(att.mime)) {
+    return renderAudioAttachment(att, resolvedUrl);
+  }
+  if (isImageMime(att.mime) && inlineable) {
     const wrap = createElement("div", { class: "msg-image" });
 
     // Reserve space using server-provided dimensions to prevent layout shift.
@@ -383,22 +608,12 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   const inner = createElement("div", { class: "msg-file-inner" });
   const icon = createElement("div", { class: "msg-file-icon" });
   icon.appendChild(createIcon("file-text", 20));
-  const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
-  nameEl.addEventListener("click", () => {
-    void downloadFile(resolvedUrl, att.filename);
-  });
-  const sizeEl = createElement("div", { class: "msg-file-size" }, formatFileSize(att.size));
-  const info = createElement("div", {});
-  appendChildren(info, nameEl, sizeEl);
-  const downloadBtn = createElement("button", {
-    class: "msg-file-download",
-    title: "Download",
-  });
-  downloadBtn.appendChild(createIcon("download", 16));
-  downloadBtn.addEventListener("click", () => {
-    void downloadFile(resolvedUrl, att.filename);
-  });
-  appendChildren(inner, icon, info, downloadBtn);
+  appendChildren(
+    inner,
+    icon,
+    buildFileMeta(att, resolvedUrl),
+    buildDownloadButton(att, resolvedUrl),
+  );
   wrap.appendChild(inner);
   return wrap;
 }
@@ -413,8 +628,9 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const filePath = await save({ defaultPath: filename });
     if (filePath === null) return; // User cancelled
 
-    // Fetch file data — server downloads go through the cert-pinned HTTP proxy.
-    const res = await tauriFetch(await toFetchUrl(url));
+    // Fetch file data — server downloads go through the cert-pinned HTTP proxy
+    // with the session bearer token (the files endpoint requires auth).
+    const res = await fetchServerFile(url);
     if (!res.ok) {
       log.error("Download failed", { filename, status: res.status });
       alert(`Download failed: server returned ${res.status}`);

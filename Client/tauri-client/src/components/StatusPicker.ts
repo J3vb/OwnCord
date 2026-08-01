@@ -8,6 +8,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
+import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,11 +17,18 @@ import type { UserStatus } from "@lib/types";
 export interface StatusPickerOptions {
   readonly currentStatus: UserStatus;
   readonly onStatusChange: (status: UserStatus) => void;
+  /** The custom status line to pre-fill the input with. */
+  readonly currentCustomStatus?: string;
+  /** Called when the user commits a custom status (Enter or blur). Passing an
+   *  empty string means "clear it". Omitted = the input is not rendered. */
+  readonly onCustomStatusChange?: (text: string) => void;
 }
 
 export type StatusPickerComponent = MountableComponent & {
   /** Update the displayed status without recreating the picker. */
   setStatus(status: UserStatus): void;
+  /** Update the custom status input without recreating the picker. */
+  setCustomStatus(text: string): void;
 };
 
 // ---------------------------------------------------------------------------
@@ -33,11 +41,17 @@ interface StatusDef {
   readonly color: string;
 }
 
+/**
+ * "invisible" is its own value now, not "offline" wearing a different label.
+ * The server stores it as chosen and shows everyone else offline, so the
+ * picker can finally send what it means — and the status survives a reconnect
+ * instead of flashing back to online.
+ */
 const STATUS_DEFS: readonly StatusDef[] = [
   { value: "online", label: "Online", color: "#3ba55d" },
   { value: "idle", label: "Idle", color: "#faa61a" },
   { value: "dnd", label: "Do Not Disturb", color: "#ed4245" },
-  { value: "offline", label: "Invisible", color: "#747f8d" },
+  { value: "invisible", label: "Invisible", color: "#747f8d" },
 ];
 
 function colorForStatus(status: UserStatus): string {
@@ -57,6 +71,11 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
   let dotEl: HTMLDivElement | null = null;
   let dropdownEl: HTMLDivElement | null = null;
   let checkEls = new Map<UserStatus, HTMLSpanElement>();
+  let customInputEl: HTMLInputElement | null = null;
+  /** Last text handed to the callback. Guards the blur-after-Enter double
+   *  send, which would otherwise cost a second presence_update against the
+   *  server's one-per-ten-seconds limit. */
+  let lastCommittedCustom = options.currentCustomStatus ?? "";
 
   // ---- Dropdown visibility --------------------------------------------------
 
@@ -144,6 +163,58 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     return row;
   }
 
+  /**
+   * The "Set a custom status" row. Only built when a handler was supplied —
+   * an input whose value goes nowhere is worse than no input.
+   */
+  function buildCustomStatusRow(onChange: (text: string) => void): HTMLDivElement {
+    const row = createElement("div", { class: "status-picker-custom" });
+    const input = createElement("input", {
+      class: "status-picker-custom-input",
+      type: "text",
+      placeholder: "Set a custom status",
+      maxlength: String(MAX_CUSTOM_STATUS_LEN),
+      "aria-label": "Custom status",
+      "data-testid": "custom-status-input",
+    });
+    input.value = options.currentCustomStatus ?? "";
+    customInputEl = input;
+
+    const commit = (): void => {
+      const text = input.value.trim().slice(0, MAX_CUSTOM_STATUS_LEN);
+      if (text === lastCommittedCustom) return;
+      lastCommittedCustom = text;
+      input.value = text;
+      onChange(text);
+    };
+
+    input.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        // Keystrokes inside the input must not reach the dropdown's own
+        // Enter/Escape handling, which would close the menu mid-edit.
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+          closeDropdown();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          input.value = lastCommittedCustom;
+          closeDropdown();
+        }
+      },
+      { signal },
+    );
+    input.addEventListener("blur", commit, { signal });
+    // The row is inside the dropdown; clicking the input must not be treated
+    // as picking a status or as an outside click.
+    input.addEventListener("click", (e: MouseEvent) => e.stopPropagation(), { signal });
+
+    row.appendChild(input);
+    return row;
+  }
+
   // ---- MountableComponent ---------------------------------------------------
 
   function mount(container: Element): void {
@@ -186,6 +257,11 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     for (const def of STATUS_DEFS) {
       dropdownEl.appendChild(buildOption(def));
     }
+    const onCustomStatusChange = options.onCustomStatusChange;
+    if (onCustomStatusChange !== undefined) {
+      dropdownEl.appendChild(createElement("div", { class: "status-picker-divider" }));
+      dropdownEl.appendChild(buildCustomStatusRow(onCustomStatusChange));
+    }
 
     appendChildren(root, dotEl, dropdownEl);
     container.appendChild(root);
@@ -221,11 +297,17 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     root = null;
     dotEl = null;
     dropdownEl = null;
+    customInputEl = null;
   }
 
   function setStatus(status: UserStatus): void {
     applyStatus(status);
   }
 
-  return { mount, destroy, setStatus };
+  function setCustomStatus(text: string): void {
+    lastCommittedCustom = text;
+    if (customInputEl !== null) customInputEl.value = text;
+  }
+
+  return { mount, destroy, setStatus, setCustomStatus };
 }

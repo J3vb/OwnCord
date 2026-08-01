@@ -1,0 +1,14 @@
+-- Phase 5 (role management): make role names case-insensitively unique.
+--
+-- roles.name already carries a UNIQUE constraint, but with SQLite's default
+-- BINARY collation — so "Moderator" and "moderator" were two distinct roles.
+-- Role CRUD resolves names case-insensitively (the client matches role names
+-- case-insensitively too, see getRoleIdByName), so the uniqueness rule has to
+-- agree with the lookup rule or two roles could shadow each other.
+--
+-- A partial rebuild of the table to change the column collation would rewrite
+-- every FK-referencing row, while a second unique index costs one B-tree and is
+-- exactly as strong. Creating it fails loudly if an existing database already
+-- holds a case-colliding pair, which is the correct outcome — the operator has
+-- to rename one before role management can be trusted.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_name_nocase ON roles(name COLLATE NOCASE);

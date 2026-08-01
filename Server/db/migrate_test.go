@@ -694,3 +694,54 @@ func TestMigrate_LargeNumberOfMigrations(t *testing.T) {
 		t.Errorf("schema_versions has %d rows, want %d", got, n)
 	}
 }
+
+// TestMigrate_022SeedsMentionEveryone locks migration 022: the privileged
+// seeded roles gain MENTION_EVERYONE (bit 21) and the plain Member role does
+// not, so @everyone stays gated after an upgrade of an existing database.
+func TestMigrate_022SeedsMentionEveryone(t *testing.T) {
+	database := openMemory(t)
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+
+	const mentionEveryone = int64(0x200000)
+	for _, tc := range []struct {
+		roleID int64
+		name   string
+		want   bool
+	}{
+		{1, "Owner", true},
+		{2, "Admin", true},
+		{3, "Moderator", true},
+		{4, "Member", false},
+	} {
+		var perms int64
+		if err := database.QueryRowContext(context.Background(),
+			`SELECT permissions FROM roles WHERE id = ?`, tc.roleID).Scan(&perms); err != nil {
+			t.Fatalf("read role %s: %v", tc.name, err)
+		}
+		if got := perms&mentionEveryone != 0; got != tc.want {
+			t.Errorf("%s MENTION_EVERYONE = %v, want %v (perms=0x%X)", tc.name, got, tc.want, perms)
+		}
+	}
+}
+
+// TestMigrate_022CreatesMentionSchema locks the storage phase 3 relies on.
+func TestMigrate_022CreatesMentionSchema(t *testing.T) {
+	database := openMemory(t)
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+	if !tableExists(t, database, "message_mentions") {
+		t.Error("message_mentions table not created")
+	}
+	var n int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'mentions_everyone'`,
+	).Scan(&n); err != nil {
+		t.Fatalf("pragma_table_info: %v", err)
+	}
+	if n != 1 {
+		t.Error("messages.mentions_everyone column not added")
+	}
+}

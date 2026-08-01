@@ -30,7 +30,11 @@ vi.mock("@components/GifPicker", () => ({
   },
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import {
+  createMessageInput,
+  wrapWithMarker,
+  type MessageInputOptions,
+} from "@components/MessageInput";
 import type { GifApi } from "@lib/gifProvider";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
@@ -970,6 +974,136 @@ describe("MessageInput", () => {
       expect(gifBtn.hasAttribute("disabled")).toBe(true);
 
       comp.destroy?.();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Formatting shortcuts
+  // -------------------------------------------------------------------------
+
+  describe("formatting shortcuts", () => {
+    /** Mount a composer with `value` selected from `start` to `end`. */
+    function mountWithSelection(
+      value: string,
+      start: number,
+      end: number,
+    ): { textarea: HTMLTextAreaElement; destroy: () => void } {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = value;
+      textarea.selectionStart = start;
+      textarea.selectionEnd = end;
+      return { textarea, destroy: () => comp.destroy?.() };
+    }
+
+    function press(textarea: HTMLTextAreaElement, key: string): KeyboardEvent {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(event);
+      return event;
+    }
+
+    it("Ctrl+B wraps the selection in **", () => {
+      const { textarea, destroy } = mountWithSelection("make this bold", 5, 9);
+      const event = press(textarea, "b");
+      expect(textarea.value).toBe("make **this** bold");
+      expect(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)).toBe("this");
+      expect(event.defaultPrevented).toBe(true);
+      destroy();
+    });
+
+    it("Ctrl+I wraps the selection in *", () => {
+      const { textarea, destroy } = mountWithSelection("hello", 0, 5);
+      press(textarea, "i");
+      expect(textarea.value).toBe("*hello*");
+      destroy();
+    });
+
+    it("Ctrl+U wraps the selection in __ instead of opening the file picker", () => {
+      const onUploadFile = vi.fn();
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "hello";
+      textarea.selectionStart = 0;
+      textarea.selectionEnd = 5;
+
+      // The global Ctrl+U shortcut listens on document — the composer must
+      // stop the event before it gets there.
+      const globalHandler = vi.fn();
+      document.addEventListener("keydown", globalHandler);
+
+      press(textarea, "u");
+
+      expect(textarea.value).toBe("__hello__");
+      expect(globalHandler).not.toHaveBeenCalled();
+      expect(onUploadFile).not.toHaveBeenCalled();
+      document.removeEventListener("keydown", globalHandler);
+      comp.destroy?.();
+    });
+
+    it("inserts empty markers and parks the caret between them", () => {
+      const { textarea, destroy } = mountWithSelection("ab", 1, 1);
+      press(textarea, "b");
+      expect(textarea.value).toBe("a****b");
+      expect(textarea.selectionStart).toBe(3);
+      expect(textarea.selectionEnd).toBe(3);
+      destroy();
+    });
+
+    it("unwraps an already-bold selection", () => {
+      const { textarea, destroy } = mountWithSelection("**this**", 0, 8);
+      press(textarea, "b");
+      expect(textarea.value).toBe("this");
+      destroy();
+    });
+
+    it("leaves other Ctrl combos alone", () => {
+      const { textarea, destroy } = mountWithSelection("hello", 0, 5);
+      const event = press(textarea, "k");
+      expect(textarea.value).toBe("hello");
+      expect(event.defaultPrevented).toBe(false);
+      destroy();
+    });
+
+    it("does nothing while the composer is disabled", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      comp.setDisabled("Read-only channel");
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "hello";
+      textarea.selectionStart = 0;
+      textarea.selectionEnd = 5;
+      press(textarea, "b");
+      expect(textarea.value).toBe("hello");
+      comp.destroy?.();
+    });
+  });
+
+  describe("wrapWithMarker", () => {
+    it("wraps a selection and reselects the inner text", () => {
+      expect(wrapWithMarker("abc", 1, 2, "~~")).toEqual({
+        value: "a~~b~~c",
+        selectionStart: 3,
+        selectionEnd: 4,
+      });
+    });
+
+    it("unwraps markers that surround the selection", () => {
+      expect(wrapWithMarker("a**b**c", 3, 4, "**")).toEqual({
+        value: "abc",
+        selectionStart: 1,
+        selectionEnd: 2,
+      });
+    });
+
+    it("does not mistake a short selection for a wrapped one", () => {
+      expect(wrapWithMarker("**", 0, 2, "**").value).toBe("******");
     });
   });
 });

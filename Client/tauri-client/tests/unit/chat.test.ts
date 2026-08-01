@@ -37,6 +37,7 @@ function resetStores(): void {
     loadedChannels: new Set(),
     hasMore: new Map(),
     historyLoadState: new Map(),
+    detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -258,7 +259,16 @@ describe("MessageList", () => {
   });
 
   describe("@mention parsing", () => {
-    it("wraps @username in .mention span", () => {
+    /** @tokens only highlight when they resolve, so seed the members first. */
+    function seedMentionMembers(): void {
+      setMembers([
+        { id: 11, username: "Bob", avatar: null, role: "member", status: "online" },
+        { id: 12, username: "Charlie", avatar: null, role: "member", status: "online" },
+      ]);
+    }
+
+    it("wraps a resolvable @username in a .mention span", () => {
+      seedMentionMembers();
       setMessages(
         1,
         [makeMessage(1, 10, "Alice", "Hey @Bob check this", "2026-03-15T10:00:00Z")],
@@ -285,6 +295,7 @@ describe("MessageList", () => {
     });
 
     it("handles multiple @mentions in one message", () => {
+      seedMentionMembers();
       setMessages(
         1,
         [makeMessage(1, 10, "Alice", "@Bob and @Charlie look", "2026-03-15T10:00:00Z")],
@@ -306,6 +317,31 @@ describe("MessageList", () => {
 
       const mentions = container.querySelectorAll(".mention");
       expect(mentions.length).toBe(2);
+      list.destroy?.();
+    });
+
+    it("leaves an unresolvable @token as plain text", () => {
+      setMessages(
+        1,
+        [makeMessage(1, 10, "Alice", "Hey @nobody check this", "2026-03-15T10:00:00Z")],
+        false,
+      );
+
+      const list = createMessageList({
+        channelId: 1,
+        channelName: "general",
+        currentUserId: 1,
+        onScrollTop: vi.fn(),
+        onReplyClick: vi.fn(),
+        onEditClick: vi.fn(),
+        onDeleteClick: vi.fn(),
+        onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
+      });
+      list.mount(container);
+
+      expect(container.querySelectorAll(".mention").length).toBe(0);
+      expect(container.textContent).toContain("@nobody");
       list.destroy?.();
     });
   });

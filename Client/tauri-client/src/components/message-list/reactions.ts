@@ -5,6 +5,8 @@
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
+import { attachReactionTooltip } from "./reaction-tooltip";
+import { buildCustomEmojiNode } from "./custom-emoji";
 
 // -- Reaction rendering -------------------------------------------------------
 
@@ -17,12 +19,30 @@ export function renderReactions(
   for (const reaction of msg.reactions) {
     const chip = createElement("span", {
       class: reaction.me ? "reaction-chip me" : "reaction-chip",
+      // Focusable so the who-reacted tooltip is reachable without a pointer.
+      tabindex: "0",
+      "data-emoji": reaction.emoji,
     });
-    const emoji = document.createTextNode(reaction.emoji);
+    // Reaction strings are free-form, so a custom reaction is stored as the
+    // literal ":shortcode:" text. Render the image when that resolves; when it
+    // does not (the emoji was deleted, or the reaction predates it) the plain
+    // text is exactly what the reaction is, and toggling it still works.
+    const emoji: Node =
+      buildCustomEmojiNode(reaction.emoji) ?? document.createTextNode(reaction.emoji);
     const count = createElement("span", { class: "rc-count" }, String(reaction.count));
     chip.appendChild(emoji);
     chip.appendChild(count);
     chip.addEventListener("click", () => opts.onReactionClick(msg.id, reaction.emoji), { signal });
+    attachReactionTooltip(
+      chip,
+      {
+        channelId: msg.channelId,
+        messageId: msg.id,
+        emoji: reaction.emoji,
+        count: reaction.count,
+      },
+      signal,
+    );
     container.appendChild(chip);
   }
   const addBtn = createElement("span", { class: "reaction-chip add-reaction" }, "+");

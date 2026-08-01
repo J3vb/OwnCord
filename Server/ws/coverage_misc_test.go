@@ -305,7 +305,7 @@ func TestHandlePresence_InvalidStatus(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"type": "presence_update",
 		"payload": map[string]any{
-			"status": "invisible", // not allowed per CLAUDE.md
+			"status": "afk", // not a protocol status (invisible IS one since phase 6)
 		},
 	})
 	hub.HandleMessageForTest(c, raw)

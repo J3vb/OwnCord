@@ -21,9 +21,14 @@ describe("AdminActions", () => {
         username: "TestUser",
         currentRole: "member",
         availableRoles: ["admin", "moderator", "member"],
+        showAdminActions: overrides?.showAdminActions ?? true,
+        isBlocked: overrides?.isBlocked ?? false,
+        onToggleBlock: overrides?.onToggleBlock ?? vi.fn(async () => {}),
         onKick: overrides?.onKick ?? vi.fn(async () => {}),
         onBan: overrides?.onBan ?? vi.fn(async () => {}),
         onChangeRole: overrides?.onChangeRole ?? vi.fn(async () => {}),
+        // Per-action gates (canKick/canBan/canManageRoles) come through as-is.
+        ...overrides,
       };
       const result = createMemberContextMenu(options);
       container.appendChild(result.element);
@@ -66,27 +71,27 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
-    it("renders Kick and Ban items with danger class", () => {
+    it("renders Force Logout and Ban items with danger class", () => {
       const { result } = makeMenu();
       const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
       const texts = Array.from(dangerItems).map((i) => i.textContent);
-      expect(texts).toContain("Kick");
+      expect(texts).toContain("Force Logout");
       expect(texts).toContain("Ban");
       result.destroy();
     });
 
-    it("Kick requires double-click confirmation", () => {
+    it("Force Logout requires double-click confirmation", () => {
       const onKick = vi.fn(async () => {});
       const { result } = makeMenu({ onKick });
 
       const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
       const kickItem = Array.from(dangerItems).find(
-        (i) => i.textContent === "Kick",
+        (i) => i.textContent === "Force Logout",
       ) as HTMLDivElement;
 
       // First click changes text to confirmation
       kickItem.click();
-      expect(kickItem.textContent).toBe("Are you sure?");
+      expect(kickItem.textContent).toBe("Log them out?");
       expect(onKick).not.toHaveBeenCalled();
 
       // Second click confirms
@@ -117,7 +122,29 @@ describe("AdminActions", () => {
       confirm.click();
 
       // The server stores and displays the reason, so it's trimmed, not raw.
-      expect(onBan).toHaveBeenCalledWith("spamming");
+      // Default duration is 0 (permanent).
+      expect(onBan).toHaveBeenCalledWith("spamming", 0);
+      result.destroy();
+    });
+
+    it("Ban passes the selected duration in hours", () => {
+      const onBan = vi.fn(async () => {});
+      const { result } = makeMenu({ onBan });
+
+      const banItem = Array.from(
+        result.element.querySelectorAll(".context-menu__item--danger"),
+      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      banItem.click();
+
+      const durationSelect = result.element.querySelector(
+        "[data-testid='ban-duration-select']",
+      ) as HTMLSelectElement;
+      expect(durationSelect).not.toBeNull();
+      durationSelect.value = "24";
+
+      (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
+
+      expect(onBan).toHaveBeenCalledWith("", 24);
       result.destroy();
     });
 
@@ -131,7 +158,7 @@ describe("AdminActions", () => {
       banItem.click();
       (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
 
-      expect(onBan).toHaveBeenCalledWith("");
+      expect(onBan).toHaveBeenCalledWith("", 0);
       result.destroy();
     });
 
@@ -159,7 +186,7 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
-    it("Kick shows an in-flight state and disarms after a pause", async () => {
+    it("Force Logout shows an in-flight state and disarms after a pause", async () => {
       vi.useFakeTimers();
       try {
         let release: (() => void) | null = null;
@@ -172,23 +199,23 @@ describe("AdminActions", () => {
         const { result } = makeMenu({ onKick });
         const kickItem = Array.from(
           result.element.querySelectorAll(".context-menu__item--danger"),
-        ).find((i) => i.textContent === "Kick") as HTMLDivElement;
+        ).find((i) => i.textContent === "Force Logout") as HTMLDivElement;
 
-        // Armed, then left alone — a stray later click must not kick anyone.
+        // Armed, then left alone — a stray later click must not log anyone out.
         kickItem.click();
-        expect(kickItem.textContent).toBe("Are you sure?");
+        expect(kickItem.textContent).toBe("Log them out?");
         vi.advanceTimersByTime(5000);
-        expect(kickItem.textContent).toBe("Kick");
+        expect(kickItem.textContent).toBe("Force Logout");
         kickItem.click();
         expect(onKick).not.toHaveBeenCalled();
 
         kickItem.click();
         expect(onKick).toHaveBeenCalledOnce();
-        expect(kickItem.textContent).toBe("Kicking...");
+        expect(kickItem.textContent).toBe("Logging out...");
 
         release!();
         await vi.waitFor(() => {
-          expect(kickItem.textContent).toBe("Kick");
+          expect(kickItem.textContent).toBe("Force Logout");
         });
         result.destroy();
       } finally {
@@ -209,6 +236,90 @@ describe("AdminActions", () => {
       result.destroy();
       expect(container.querySelector(".context-menu")).toBeNull();
     });
+
+    it("renders only the Block item when showAdminActions is false", () => {
+      const { result } = makeMenu({ showAdminActions: false });
+      const items = result.element.querySelectorAll(".context-menu__item");
+      const texts = Array.from(items).map((i) => i.textContent);
+      expect(texts).toEqual(["Block"]);
+      result.destroy();
+    });
+
+    it("Block requires double-click confirmation", () => {
+      const onToggleBlock = vi.fn(async () => {});
+      const { result } = makeMenu({ showAdminActions: false, onToggleBlock });
+      const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+      expect(blockItem).not.toBeNull();
+      blockItem?.click();
+      expect(blockItem?.textContent).toBe("Are you sure?");
+      expect(onToggleBlock).not.toHaveBeenCalled();
+      blockItem?.click();
+      expect(onToggleBlock).toHaveBeenCalledOnce();
+      result.destroy();
+    });
+
+    it("Unblock fires on a single click when already blocked", () => {
+      const onToggleBlock = vi.fn(async () => {});
+      const { result } = makeMenu({ showAdminActions: false, isBlocked: true, onToggleBlock });
+      const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+      expect(blockItem?.textContent).toBe("Unblock");
+      blockItem?.click();
+      expect(onToggleBlock).toHaveBeenCalledOnce();
+      result.destroy();
+    });
+
+    it("admin menu also includes the Block item", () => {
+      const { result } = makeMenu();
+      const blockItem = result.element.querySelector('[data-testid="block-toggle"]');
+      expect(blockItem).not.toBeNull();
+      result.destroy();
+    });
+
+    // Per-action gates: the caller maps the server's KICK_MEMBERS /
+    // BAN_MEMBERS / MANAGE_ROLES bits onto these, so a moderator holding only
+    // some of them must not see the rest.
+    describe("per-action permission gates", () => {
+      /** Top-level item labels (role submenu entries share the item class). */
+      function topLevelLabels(el: HTMLElement): string[] {
+        return Array.from(el.children)
+          .filter((c) => c.classList.contains("context-menu__item"))
+          .map((c) => c.firstChild?.textContent ?? "");
+      }
+
+      it("omits Change Role when canManageRoles is false", () => {
+        const { result } = makeMenu({ canManageRoles: false });
+        const labels = topLevelLabels(result.element);
+        expect(labels).not.toContain("Change Role");
+        expect(result.element.querySelector(".context-menu__submenu")).toBeNull();
+        expect(labels).toContain("Force Logout");
+        expect(labels).toContain("Ban");
+        result.destroy();
+      });
+
+      it("omits Force Logout when canKick is false", () => {
+        const { result } = makeMenu({ canKick: false });
+        const labels = topLevelLabels(result.element);
+        expect(labels).not.toContain("Force Logout");
+        expect(labels).toContain("Ban");
+        result.destroy();
+      });
+
+      it("omits the whole ban flow when canBan is false", () => {
+        const { result } = makeMenu({ canBan: false });
+        const labels = topLevelLabels(result.element);
+        expect(labels).not.toContain("Ban");
+        expect(result.element.querySelector('[data-testid="ban-confirm"]')).toBeNull();
+        expect(labels).toContain("Force Logout");
+        expect(labels).toContain("Block");
+        result.destroy();
+      });
+
+      it("falls back to Block-only when no action bit is held", () => {
+        const { result } = makeMenu({ canKick: false, canBan: false, canManageRoles: false });
+        expect(topLevelLabels(result.element)).toEqual(["Block"]);
+        result.destroy();
+      });
+    });
   });
 
   describe("ChannelContextMenu", () => {
@@ -219,6 +330,8 @@ describe("AdminActions", () => {
         onEdit: overrides?.onEdit ?? vi.fn(),
         onDelete: overrides?.onDelete ?? vi.fn(async () => {}),
         onCreate: overrides?.onCreate ?? vi.fn(),
+        // Purge is opt-in: the section is absent unless the caller passes it.
+        ...(overrides?.onPurge !== undefined ? { onPurge: overrides.onPurge } : {}),
       };
       const result = createChannelContextMenu(options);
       container.appendChild(result.element);
@@ -291,6 +404,86 @@ describe("AdminActions", () => {
       expect(container.querySelector(".context-menu")).not.toBeNull();
       result.destroy();
       expect(container.querySelector(".context-menu")).toBeNull();
+    });
+
+    it("omits the purge section when onPurge is not supplied", () => {
+      const { result } = makeMenu();
+      expect(result.element.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+      result.destroy();
+    });
+
+    it("purge asks for a count before it fires and clamps to 1-100", async () => {
+      const onPurge = vi.fn(async () => {});
+      const { result } = makeMenu({ onPurge });
+
+      const trigger = result.element.querySelector(
+        '[data-testid="ctx-purge-messages"]',
+      ) as HTMLDivElement;
+      expect(trigger.textContent).toBe("Purge Messages…");
+
+      const form = result.element.querySelector('[data-testid="purge-form"]') as HTMLDivElement;
+      expect(form.style.display).toBe("none");
+      trigger.click();
+      expect(form.style.display).toBe("");
+      expect(onPurge).not.toHaveBeenCalled();
+
+      const input = result.element.querySelector(
+        '[data-testid="purge-count-input"]',
+      ) as HTMLInputElement;
+      input.value = "0";
+      (result.element.querySelector('[data-testid="purge-confirm"]') as HTMLDivElement).click();
+
+      await vi.waitFor(() => {
+        expect(onPurge).toHaveBeenCalledWith(1);
+      });
+      result.destroy();
+    });
+
+    it("purge falls back to the default count for a non-numeric entry", async () => {
+      const onPurge = vi.fn(async () => {});
+      const { result } = makeMenu({ onPurge });
+
+      (
+        result.element.querySelector('[data-testid="ctx-purge-messages"]') as HTMLDivElement
+      ).click();
+      const input = result.element.querySelector(
+        '[data-testid="purge-count-input"]',
+      ) as HTMLInputElement;
+      input.value = "";
+      (result.element.querySelector('[data-testid="purge-confirm"]') as HTMLDivElement).click();
+
+      await vi.waitFor(() => {
+        expect(onPurge).toHaveBeenCalledWith(50);
+      });
+      result.destroy();
+    });
+
+    it("purge shows an in-flight state and ignores a second click", async () => {
+      let release: (() => void) | null = null;
+      const onPurge = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const { result } = makeMenu({ onPurge });
+
+      (
+        result.element.querySelector('[data-testid="ctx-purge-messages"]') as HTMLDivElement
+      ).click();
+      const confirm = result.element.querySelector(
+        '[data-testid="purge-confirm"]',
+      ) as HTMLDivElement;
+      confirm.click();
+      expect(confirm.textContent).toBe("Purging…");
+      confirm.click();
+      expect(onPurge).toHaveBeenCalledTimes(1);
+
+      release!();
+      await vi.waitFor(() => {
+        expect(confirm.textContent).toBe("Confirm Purge");
+      });
+      result.destroy();
     });
   });
 });

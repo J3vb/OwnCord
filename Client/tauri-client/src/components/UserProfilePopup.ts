@@ -9,11 +9,12 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
-import { isSafeUrl } from "./message-list/attachments";
+import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
+import { roleColorVar } from "./message-list/formatting";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +26,12 @@ export interface UserProfileData {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Nickname. When set the popup shows it as the heading and the username
+   *  underneath, because the username is still the handle you @mention. */
+  readonly displayName?: string | null;
   readonly about?: string | null;
+  /** Free-text status line, shown under the name. */
+  readonly customStatus?: string | null;
   readonly joinDate?: string | null;
   readonly isDeleted?: boolean;
 }
@@ -58,6 +64,9 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   online: "#3ba55d",
   idle: "#faa61a",
   dnd: "#ed4245",
+  // Only ever reached for the signed-in user looking at their own profile —
+  // the server maps invisible to offline for everyone else.
+  invisible: "#747f8d",
   offline: "#747f8d",
 };
 
@@ -65,14 +74,8 @@ const STATUS_LABELS: Record<UserStatus, string> = {
   online: "Online",
   idle: "Idle",
   dnd: "Do Not Disturb",
+  invisible: "Invisible",
   offline: "Offline",
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  owner: "#e74c3c",
-  admin: "#f39c12",
-  moderator: "#2ecc71",
-  member: "#949ba4",
 };
 
 // ---------------------------------------------------------------------------
@@ -132,28 +135,22 @@ export function createUserProfilePopup(
   }
 
   function buildAvatar(user: UserProfileData): HTMLDivElement {
-    const wrapper = createElement("div", { class: "upp-avatar" });
-
-    if (user.isDeleted === true) {
-      wrapper.style.background = "#4e5058";
-      const text = createElement("span", {}, "?");
-      wrapper.appendChild(text);
-    } else if (user.avatar !== null && user.avatar.length > 0 && isSafeUrl(user.avatar)) {
-      const img = createElement("img", {
-        src: user.avatar,
-        alt: user.username,
-        class: "upp-avatar-img",
-      });
-      img.style.width = "64px";
-      img.style.height = "64px";
-      img.style.borderRadius = "50%";
-      wrapper.appendChild(img);
-    } else {
-      wrapper.style.background = "var(--accent, #5865f2)";
-      const initial = user.username.charAt(0).toUpperCase() || "?";
-      const text = createElement("span", {}, initial);
-      wrapper.appendChild(text);
-    }
+    // The shared helper is what makes uploaded avatars work here and in the
+    // message rows and member list at the same time: it fetches the
+    // authenticated file through the cert-pinned path and falls back to the
+    // letter until (or unless) the bytes arrive.
+    const wrapper = createAvatarElement(
+      {
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        isDeleted: user.isDeleted,
+      },
+      {
+        className: "upp-avatar",
+        background: user.isDeleted === true ? "#4e5058" : "var(--accent, #5865f2)",
+      },
+    );
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "upp-status-dot" });
@@ -167,7 +164,7 @@ export function createUserProfilePopup(
   function mount(container: Element): void {
     previousFocus = document.activeElement;
     const user = options.user;
-    const displayName = user.isDeleted === true ? "[deleted]" : user.username;
+    const displayName = user.isDeleted === true ? "[deleted]" : resolveDisplayName(user);
 
     // Overlay for outside-click detection
     overlay = createElement("div", {
@@ -207,10 +204,24 @@ export function createUserProfilePopup(
       nameEl.style.color = "var(--text-faint, #80848e)";
     }
 
+    // Username line, shown only when a display name is standing in for it.
+    // @mentions still resolve by username, so the popup has to keep telling
+    // you what to type.
+    const handleEl = createElement("div", { class: "upp-username-handle" });
+    if (user.isDeleted !== true && displayName !== user.username) {
+      setText(handleEl, `@${user.username}`);
+    }
+
+    // Custom status line — the user's own words, under the name.
+    const customStatusEl = createElement("div", { class: "upp-custom-status" });
+    if (typeof user.customStatus === "string" && user.customStatus.length > 0) {
+      setText(customStatusEl, user.customStatus);
+    }
+
     // Role badge
     const roleBadge = createElement("span", { class: "upp-role-badge" });
     const roleDot = createElement("span", { class: "upp-role-dot" });
-    roleDot.style.background = ROLE_COLORS[user.role] ?? ROLE_COLORS.member ?? "";
+    roleDot.style.background = roleColorVar(user.role.toLowerCase());
     const roleLabel = createElement(
       "span",
       {},
@@ -244,53 +255,64 @@ export function createUserProfilePopup(
     // Divider
     const divider = createElement("div", { class: "upp-divider" });
 
-    // Actions
+    // Actions — only render buttons that are actually wired up, so the popup
+    // never shows a dead control (e.g. Call before DM calls exist, or Message
+    // on your own profile).
     const actions = createElement("div", { class: "upp-actions" });
 
-    const messageBtn = createElement("button", {
-      class: "upp-action-btn",
-      "data-testid": "upp-message-btn",
-    });
-    messageBtn.appendChild(createIcon("send", 16));
-    messageBtn.appendChild(document.createTextNode(" Message"));
-    messageBtn.addEventListener(
-      "click",
-      () => {
-        options.onMessage?.(user.id);
-        close();
-      },
-      { signal },
-    );
+    if (options.onMessage !== undefined) {
+      const onMessage = options.onMessage;
+      const messageBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-message-btn",
+      });
+      messageBtn.appendChild(createIcon("send", 16));
+      messageBtn.appendChild(document.createTextNode(" Message"));
+      messageBtn.addEventListener(
+        "click",
+        () => {
+          onMessage(user.id);
+          close();
+        },
+        { signal },
+      );
+      actions.appendChild(messageBtn);
+    }
 
-    const callBtn = createElement("button", {
-      class: "upp-action-btn",
-      "data-testid": "upp-call-btn",
-    });
-    callBtn.appendChild(createIcon("phone", 16));
-    callBtn.appendChild(document.createTextNode(" Call"));
-    callBtn.addEventListener(
-      "click",
-      () => {
-        options.onCall?.(user.id);
-        close();
-      },
-      { signal },
-    );
-
-    appendChildren(actions, messageBtn, callBtn);
+    if (options.onCall !== undefined) {
+      const onCall = options.onCall;
+      const callBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-call-btn",
+      });
+      callBtn.appendChild(createIcon("phone", 16));
+      callBtn.appendChild(document.createTextNode(" Call"));
+      callBtn.addEventListener(
+        "click",
+        () => {
+          onCall(user.id);
+          close();
+        },
+        { signal },
+      );
+      actions.appendChild(callBtn);
+    }
 
     // Assemble popup
     appendChildren(
       popup,
       avatar,
       nameEl,
+      handleEl,
+      customStatusEl,
       roleBadge,
       statusLine,
       aboutSection,
       joinSection,
-      divider,
-      actions,
     );
+    if (actions.childElementCount > 0) {
+      appendChildren(popup, divider, actions);
+    }
 
     overlay.appendChild(popup);
     container.appendChild(overlay);
