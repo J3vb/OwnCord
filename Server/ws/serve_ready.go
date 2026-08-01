@@ -32,12 +32,58 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"role":     roleName,
+				// The signed-in user's own profile fields. Null when unset;
+				// display_name falls back to username client-side, and about
+				// is what the "edit my profile" form pre-fills from.
+				"display_name":  user.DisplayName,
+				"about":         user.About,
+				"custom_status": user.CustomStatus,
+				// The user's own true status — invisible included. Only their
+				// own auth_ok ever carries it, which is the whole point: the
+				// picker has to render what they chose, while every other
+				// client is told offline.
+				"status": user.Status,
 			},
 			"server_name":   serverName,
 			"motd":          motd,
 			"replay_source": replaySource,
 		},
 	})
+}
+
+// presentableMembers rewrites each member's status into what viewerID may see.
+//
+// Two rules, both applied here so no payload builder can implement only one:
+//
+//  1. A member with no live connection is offline, whatever the row says.
+//     users.status keeps a *chosen* idle/dnd/invisible across a disconnect so
+//     the next connect can honour it, which would otherwise leave a signed-out
+//     user showing as "Do Not Disturb" indefinitely.
+//  2. An invisible member is offline to everyone but themselves
+//     (db.StatusForViewer). The owner keeps their true state so their own
+//     picker renders the status they actually chose.
+func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []db.MemberSummary {
+	connected := h.connectedUserIDs()
+	out := make([]db.MemberSummary, 0, len(members))
+	for _, m := range members {
+		if !connected[m.ID] {
+			m.Status = db.StatusOffline
+			m.CustomStatus = nil
+		}
+		out = append(out, m.ForViewer(viewerID))
+	}
+	return out
+}
+
+// connectedUserIDs snapshots the ids with a live WebSocket connection.
+func (h *Hub) connectedUserIDs() map[int64]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	set := make(map[int64]bool, len(h.clients))
+	for uid := range h.clients {
+		set[uid] = true
+	}
+	return set
 }
 
 // channelRefs maps db channels to the checker's db-agnostic ChannelRef so
@@ -108,6 +154,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		slog.Warn("buildReady ListMembers", "err", err)
 		members = []db.MemberSummary{}
 	}
+	members = h.presentableMembers(members, userID)
 
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay

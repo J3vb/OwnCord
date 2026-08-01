@@ -27,12 +27,18 @@ type Querier interface {
 	CountActiveInvites(ctx context.Context) (int64, error)
 	CountActiveMessages(ctx context.Context) (int64, error)
 	CountChannels(ctx context.Context) (int64, error)
+	CountDMParticipants(ctx context.Context, channelID int64) (int64, error)
 	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
 	CountUsers(ctx context.Context) (int64, error)
+	// Authorization probe for the file route: an unlinked attachment is readable by
+	// everyone exactly while some user's avatar points at it. Covered by the
+	// partial index on users(avatar) added in migration 027.
+	CountUsersWithAvatar(ctx context.Context, avatar *string) (int64, error)
 	CountUsersWithoutTOTP(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (sql.Result, error)
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) error
 	CreateChannel(ctx context.Context, arg CreateChannelParams) (sql.Result, error)
+	CreateEmoji(ctx context.Context, arg CreateEmojiParams) (CreateEmojiRow, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
@@ -40,6 +46,7 @@ type Querier interface {
 	DeleteChannel(ctx context.Context, id int64) error
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
 	DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error
+	DeleteEmoji(ctx context.Context, id int64) (sql.Result, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteLockout(ctx context.Context, key string) error
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
@@ -70,9 +77,16 @@ type Querier interface {
 	GetChannelUserPermission(ctx context.Context, arg GetChannelUserPermissionParams) (GetChannelUserPermissionRow, error)
 	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]GetChannelVoiceStatesRow, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	GetDMParticipants(ctx context.Context, channelID int64) ([]GetDMParticipantsRow, error)
+	// Every participant of every DM the user has open, in one pass. Includes the
+	// user themselves so a caller can tell "group of three" from "group of three
+	// others"; the Go layer filters when it needs the others.
+	GetDMParticipantsForUser(ctx context.Context, userID int64) ([]GetDMParticipantsForUserRow, error)
 	// The fallback role every member lands on when their role is deleted. Highest
 	// position wins if a database somehow carries more than one default.
 	GetDefaultRole(ctx context.Context) (Role, error)
+	GetEmojiByID(ctx context.Context, id int64) (GetEmojiByIDRow, error)
+	GetEmojiByShortcode(ctx context.Context, shortcode string) (GetEmojiByShortcodeRow, error)
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
 	GetInvite(ctx context.Context, code string) (GetInviteRow, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
@@ -104,7 +118,11 @@ type Querier interface {
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	GetUserChannelPermissions(ctx context.Context, userID int64) ([]GetUserChannelPermissionsRow, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
-	GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsParams) ([]GetUserDMChannelsRow, error)
+	// A DM row carries no recipient any more: dm_participants holds N users, so
+	// "the other one" is only well defined for a two-person DM. The participant
+	// set comes from GetDMParticipantsForUser below, one extra query for the whole
+	// list rather than one per channel, and the Go layer stitches them together.
+	GetUserDMChannels(ctx context.Context, userID int64) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
@@ -113,6 +131,7 @@ type Querier interface {
 	IsBlocked(ctx context.Context, arg IsBlockedParams) (int64, error)
 	IsDMParticipant(ctx context.Context, arg IsDMParticipantParams) (int64, error)
 	IsEitherBlocked(ctx context.Context, arg IsEitherBlockedParams) (int64, error)
+	IsGroupDM(ctx context.Context, id int64) (int64, error)
 	// server_muted / server_deafened are deliberately absent from both upserts'
 	// reset lists: a moderator-imposed mute must survive a channel switch, which
 	// reaches the ON CONFLICT branch. It is scoped to the voice session:
@@ -128,6 +147,7 @@ type Querier interface {
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error)
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
+	ListEmoji(ctx context.Context) ([]ListEmojiRow, error)
 	ListInvites(ctx context.Context) ([]ListInvitesRow, error)
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
@@ -144,6 +164,12 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
 	LogAudit(ctx context.Context, arg LogAuditParams) error
+	// Disconnect bookkeeping. It clears only 'online', which is the one status
+	// that means "has a live session"; idle, dnd and invisible are choices the
+	// user made and are what the next connect reads instead of stamping online
+	// (db.ConnectStatus). A stale choice never renders as "present" because the
+	// read path treats a member with no live connection as offline regardless.
+	MarkUserDisconnected(ctx context.Context, id int64) error
 	OpenDM(ctx context.Context, arg OpenDMParams) error
 	// seq is supplied by the hub so the row seq matches the wrapped-payload seq.
 	PersistEvent(ctx context.Context, arg PersistEventParams) error
@@ -151,13 +177,18 @@ type Querier interface {
 	PluginKVGet(ctx context.Context, arg PluginKVGetParams) ([]byte, error)
 	PluginKVSet(ctx context.Context, arg PluginKVSetParams) error
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
+	RemoveDMParticipant(ctx context.Context, arg RemoveDMParticipantParams) error
 	RemoveReaction(ctx context.Context, arg RemoveReactionParams) (sql.Result, error)
+	// Startup reset: nothing is connected yet, so every 'online' is a leftover
+	// from the previous process. Chosen statuses survive for the same reason they
+	// survive a disconnect.
 	ResetAllUserStatuses(ctx context.Context) error
 	RevokeAPIToken(ctx context.Context, id int64) (sql.Result, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error)
 	RevokeInvite(ctx context.Context, code string) error
 	SetChannelSlowMode(ctx context.Context, arg SetChannelSlowModeParams) error
 	SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error
+	SetDMChannelName(ctx context.Context, arg SetDMChannelNameParams) error
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
@@ -172,6 +203,10 @@ type Querier interface {
 	// only caller, and a focused channel has no outstanding mentions by definition.
 	UpdateReadState(ctx context.Context, arg UpdateReadStateParams) error
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) error
+	// Separate from UpdateUserProfile because a custom status arrives over the
+	// WebSocket presence path, not the REST profile PATCH, and must not be able to
+	// clobber the username/avatar of a profile edit racing it.
+	UpdateUserCustomStatus(ctx context.Context, arg UpdateUserCustomStatusParams) error
 	UpdateUserIdentityKey(ctx context.Context, arg UpdateUserIdentityKeyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (sql.Result, error)

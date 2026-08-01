@@ -136,10 +136,12 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		Limiter: h.limiter,
 	}
 	reactionDeps := ReactionDeps{}
+	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels
 		reactionDeps.MessageSvc = svc.Messages
+		callDeps.DMSvc = svc.DMs
 		h.messageSvc = svc.Messages
 		h.perms = svc.Permissions
 	}
@@ -147,6 +149,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	registerChatHandlers(reg, chatDeps)
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
+	registerCallHandlers(reg, callDeps)
 	// Phase C Step 9 — plugin slash commands. Registry is read live because
 	// SetPluginRegistry wires it after NewHub; MessageSvc gates broadcasts.
 	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{

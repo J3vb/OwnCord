@@ -160,6 +160,10 @@ const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
     channels: [] as Array<{
       channelId: number;
       recipient: { id: number; username: string; avatar: string; status: string };
+      // Group DMs: the participant list, the optional name and the group flag.
+      participants: Array<{ id: number; username: string; avatar: string; status: string }>;
+      name: string;
+      isGroup: boolean;
       lastMessageId: number | null;
       lastMessage: string;
       lastMessageAt: string;
@@ -169,9 +173,16 @@ const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
   mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
 }));
 
-vi.mock("@stores/dm.store", () => ({
-  dmStore: { getState: mockDmStoreGetState },
-}));
+vi.mock("@stores/dm.store", async () => {
+  // dmDisplayName is real: it is the single answer to "what is this DM
+  // called", and mocking it would let the controller and the sidebar disagree
+  // in a test while agreeing in production.
+  const actual = await vi.importActual<typeof import("@stores/dm.store")>("@stores/dm.store");
+  return {
+    dmStore: { getState: mockDmStoreGetState },
+    dmDisplayName: actual.dmDisplayName,
+  };
+});
 
 vi.mock("@stores/members.store", () => ({
   membersStore: { getState: mockMembersStoreGetState },
@@ -822,6 +833,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -837,6 +851,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -856,6 +871,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "bob", avatar: "", status: "dnd" },
+            participants: [{ id: 5, username: "bob", avatar: "", status: "dnd" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -871,6 +889,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -890,6 +909,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -907,6 +927,7 @@ describe("createChannelController", () => {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1052,6 +1073,9 @@ describe("createChannelController", () => {
           {
             channelId: 42,
             recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
@@ -1095,6 +1119,38 @@ describe("createChannelController", () => {
     it("does not subscribe to block state for non-DM channels", () => {
       const ctrl = createChannelController(makeOpts());
       ctrl.mountChannel(42, "general", "text");
+      expect(blocksSubscribers).toHaveLength(0);
+    });
+
+    // Discord semantics, mirrored by the server's requireDMNotBlocked: a group
+    // DM is a shared room, and gating one member's composer over a block with
+    // one other member would leave the group reading a conversation that person
+    // cannot join. Blocks are enforced when the group is created instead.
+    it("does not gate a group DM's composer on block state", () => {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            participants: [
+              { id: 5, username: "alice", avatar: "", status: "online" },
+              { id: 6, username: "bob", avatar: "", status: "online" },
+            ],
+            name: "Crew",
+            isGroup: true,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockDmComposerBlockReason.mockReturnValue("You've blocked this user.");
+
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "Crew", "dm");
+
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
       expect(blocksSubscribers).toHaveLength(0);
     });
   });

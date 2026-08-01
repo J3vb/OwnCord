@@ -48,7 +48,8 @@ export { setServerHost } from "./attachments";
 // -- Imports for composite functions ------------------------------------------
 
 import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
-import { getUserRole, roleColorVar } from "./formatting";
+import { getUserRole, resolveAuthor, roleColorVar } from "./formatting";
+import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { renderUrlEmbeds } from "./media";
@@ -123,18 +124,15 @@ function renderReplyRef(
   if (ref) {
     const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
     const role = getUserRole(ref.user.id);
-    const miniAvatar = createElement(
-      "div",
-      {
-        class: "rr-avatar",
-        style: `background: ${roleColorVar(role)}`,
-      },
-      ref.user.username.charAt(0).toUpperCase(),
-    );
+    const author = resolveAuthor(ref.user);
+    const miniAvatar = createAvatarElement(author, {
+      className: "rr-avatar",
+      background: roleColorVar(role),
+    });
     appendChildren(
       bar,
       miniAvatar,
-      createElement("span", { class: "rr-author" }, ref.user.username),
+      createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement("span", { class: "rr-text" }, preview),
     );
   } else {
@@ -197,15 +195,13 @@ export function renderMessage(
   });
 
   const role = getUserRole(msg.user.id);
-  const initial = msg.user.username.charAt(0).toUpperCase();
-  const avatar = createElement(
-    "div",
-    {
-      class: "msg-avatar",
-      style: `background: ${roleColorVar(role)}`,
-    },
-    initial,
-  );
+  // The author's current identity, not the one frozen into the payload: a
+  // rename or a new avatar has to show up on the messages already on screen.
+  const author = resolveAuthor(msg.user);
+  const avatar = createAvatarElement(author, {
+    className: "msg-avatar",
+    background: roleColorVar(role),
+  });
   el.appendChild(avatar);
 
   if (isGrouped) {
@@ -225,20 +221,23 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const author = createElement(
+  const authorEl = createElement(
     "span",
     {
       class: "msg-author",
+      // The username stays as the title so the handle you would @mention is
+      // one hover away even when a display name is standing in for it.
+      title: author.username,
       style: `color: ${roleColorVar(role)}`,
     },
-    msg.user.username,
+    resolveDisplayName(author),
   );
   const time = createElement(
     "span",
     { class: "msg-time", title: formatFullDate(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
-  appendChildren(header, author, time);
+  appendChildren(header, authorEl, time);
   el.appendChild(header);
 
   if (msg.deleted) {

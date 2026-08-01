@@ -12,6 +12,13 @@ import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore } from "../../src/stores/blocks.store";
+import {
+  emojiStore,
+  setCustomEmoji,
+  clearCustomEmoji,
+  listCustomEmoji,
+  resolveEmoji,
+} from "../../src/stores/emoji.store";
 import { uiStore } from "../../src/stores/ui.store";
 import {
   clearReactionUsersCache,
@@ -158,6 +165,8 @@ describe("WS Dispatcher", () => {
     dmStore.setState(() => ({ channels: [] }));
     blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
+    clearCustomEmoji();
+    emojiStore.flush();
 
     mock = createMockWs();
     cleanup = wireDispatcher(mock.ws);
@@ -335,6 +344,44 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("presence", { user_id: 1, status: "idle" });
     expect(membersStore.getState().members.get(1)?.status).toBe("idle");
+  });
+
+  it("carries a custom status on presence, and leaves it alone when omitted", () => {
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("presence", { user_id: 1, status: "idle", custom_status: "afk" });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("afk");
+
+    // A bare status flip (what the auto-idle timer sends) must not blank it.
+    mock.dispatch("presence", { user_id: 1, status: "online" });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("afk");
+
+    // An explicit null clears it.
+    mock.dispatch("presence", { user_id: 1, status: "online", custom_status: null });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBeNull();
+  });
+
+  it("wires user_update display_name into the member store", () => {
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("user_update", {
+      user_id: 1,
+      username: "alex",
+      avatar: "/api/v1/files/abc",
+      display_name: "Alex A.",
+      about: "hi",
+    });
+    const member = membersStore.getState().members.get(1);
+    expect(member?.displayName).toBe("Alex A.");
+    expect(member?.avatar).toBe("/api/v1/files/abc");
   });
 
   it("wires typing to members store", () => {
@@ -858,6 +905,38 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().roles).toEqual([]);
   });
 
+  it("wires emoji_update to replace the custom-emoji set", () => {
+    setCustomEmoji([
+      { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
+      { id: 2, shortcode: "gone", url: "/api/v1/emoji/2/image" },
+    ]);
+    emojiStore.flush();
+
+    // The deleted emoji must not survive the replace — the whole point of
+    // sending the set rather than a delta.
+    mock.dispatch("emoji_update", {
+      emoji: [
+        { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
+        { id: 3, shortcode: "party", url: "/api/v1/emoji/3/image" },
+      ],
+    });
+    emojiStore.flush();
+
+    expect(listCustomEmoji().map((e) => e.shortcode)).toEqual(["wave", "party"]);
+    expect(resolveEmoji("gone")).toBeNull();
+    expect(resolveEmoji("party")?.id).toBe(3);
+  });
+
+  it("treats an emoji_update with no emoji field as an empty set", () => {
+    setCustomEmoji([{ id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" }]);
+    emojiStore.flush();
+
+    mock.dispatch("emoji_update", {} as { emoji: [] });
+    emojiStore.flush();
+
+    expect(listCustomEmoji()).toEqual([]);
+  });
+
   it("wires voice_state and auto-joins if current user", () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -1221,6 +1300,9 @@ describe("WS Dispatcher", () => {
         {
           channelId: 7,
           recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
           lastMessageId: null,
           lastMessage: "",
           lastMessageAt: "",
@@ -1308,6 +1390,36 @@ describe("WS Dispatcher", () => {
     }) => Promise<unknown>;
     await closure({ identity_public_key: "k" });
     expect(updateProfile).toHaveBeenCalledWith({ identity_public_key: "k" });
+  });
+
+  it("on ready loads the custom-emoji set from the REST list", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listEmoji = vi
+      .fn()
+      .mockResolvedValue([{ id: 4, shortcode: "wave", url: "/api/v1/emoji/4/image" }]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+
+    expect(listEmoji).toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
+    emojiStore.flush();
+    expect(resolveEmoji("wave")?.id).toBe(4);
+  });
+
+  it("survives a failed emoji load — shortcodes just stay plain text", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listEmoji = vi.fn().mockRejectedValue(new Error("offline"));
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+    emojiStore.flush();
+    expect(listCustomEmoji()).toEqual([]);
   });
 
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
@@ -1441,6 +1553,9 @@ describe("WS Dispatcher", () => {
     const dmChannel = {
       channelId: 50,
       recipient: { id: 10, username: "bob", avatar: "", status: "online" as const },
+      participants: [],
+      name: "",
+      isGroup: false,
       lastMessageId: null,
       lastMessage: "",
       lastMessageAt: "",
@@ -1568,6 +1683,52 @@ describe("WS Dispatcher", () => {
       expect(channels[0]!.recipient.username).toBe("bob");
     });
 
+    // A pre-group server sends only `recipient`, which for it IS the whole
+    // membership — so the fallback has to be a one-element list, not an empty
+    // one, or every group-aware call site breaks against an old server.
+    it("treats a recipient-only payload as a one-person participant list", () => {
+      mock.dispatch("dm_channel_open", {
+        channel_id: 50,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const dm = dmStore.getState().channels[0]!;
+      expect(dm.participants).toHaveLength(1);
+      expect(dm.participants[0]!.id).toBe(10);
+      expect(dm.isGroup).toBe(false);
+      expect(dm.name).toBe("");
+    });
+
+    it("maps a group dm_channel_open with its full participant list", () => {
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        recipients: [
+          { id: 10, username: "bob", avatar: "", status: "online", display_name: "Bobby" },
+          { id: 11, username: "cat", avatar: "", status: "idle" },
+        ],
+        name: "Crew",
+        is_group: true,
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 51)!;
+      expect(dm.isGroup).toBe(true);
+      expect(dm.name).toBe("Crew");
+      expect(dm.participants.map((p) => p.id)).toEqual([10, 11]);
+      expect(dm.participants[0]!.displayName).toBe("Bobby");
+      // The compat recipient is the first of the list, so an older render path
+      // still shows somebody rather than nothing.
+      expect(dm.recipient.id).toBe(10);
+    });
+
     it("should call removeDmChannel on dm_channel_close", () => {
       // Seed a DM channel first
       dmStore.setState(() => ({
@@ -1575,6 +1736,9 @@ describe("WS Dispatcher", () => {
           {
             channelId: 50,
             recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",

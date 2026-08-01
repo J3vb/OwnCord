@@ -253,6 +253,30 @@ func TestSendMessage_HereSkipsOfflineUsers(t *testing.T) {
 	}
 }
 
+// TestSendMessage_HereSkipsInvisibleUsers locks the phase-6 half of the @here
+// rule. users.status stores the status the user *chose*, so an invisible reader
+// holds the literal "invisible" here — a bare == "offline" test would ping them,
+// which is the one thing "appear offline" exists to prevent. The fan-out has to
+// collapse through db.BroadcastStatus first, so @here agrees with what everyone
+// else can see of that reader.
+func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusInvisible); err != nil {
+		t.Fatalf("UpdateUserStatus(invisible): %v", err)
+	}
+
+	sendAs(t, svc, 4, "@here quick question")
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("invisible bob mention_count = %d, want 0", got)
+	}
+	// A plain @everyone still reaches them: only @here narrows on presence.
+	sendAs(t, svc, 4, "@everyone meeting now")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("invisible bob @everyone mention_count = %d, want 1", got)
+	}
+}
+
 // TestSendMessage_EveryoneSkipsUsersWithoutRead locks that the @everyone
 // fan-out honors per-channel denies, not just the base role mask.
 func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {

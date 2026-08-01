@@ -57,6 +57,7 @@ type Channel struct {
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
 	Nsfw            int64   `json:"nsfw"`
+	IsGroup         int64   `json:"isGroup"`
 }
 
 type ChannelOverride struct {
@@ -91,6 +92,7 @@ type Emoji struct {
 	Filename   string `json:"filename"`
 	UploadedBy int64  `json:"uploadedBy"`
 	CreatedAt  string `json:"createdAt"`
+	MimeType   string `json:"mimeType"`
 }
 
 type Event struct {
@@ -225,6 +227,9 @@ type User struct {
 	BanReason         *string `json:"banReason"`
 	BanExpires        *string `json:"banExpires"`
 	IdentityPublicKey *string `json:"identityPublicKey"`
+	DisplayName       *string `json:"displayName"`
+	About             *string `json:"about"`
+	CustomStatus      *string `json:"customStatus"`
 }
 
 type UserBlock struct {

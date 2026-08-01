@@ -13,12 +13,17 @@ export interface ChatHeaderRefs {
   readonly hashEl: HTMLSpanElement;
   readonly nameEl: HTMLSpanElement;
   readonly topicEl: HTMLSpanElement;
+  /** The DM call button. Hidden outside DMs — a guild voice channel is joined
+   *  from the sidebar, and a text channel has nobody in particular to call. */
+  readonly callBtn: HTMLButtonElement;
 }
 
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   readonly onSearchFocus?: () => void;
   readonly onToggleDmProfile?: () => void;
+  /** Start a call in the current DM: join its voice channel and ring. */
+  readonly onStartCall?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +63,19 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const topicEl = createElement("span", { class: "ch-topic" }, "");
 
   const tools = createElement("div", { class: "ch-tools" });
+  const callBtn = createElement("button", {
+    type: "button",
+    class: "call-btn",
+    title: "Start a call",
+    "aria-label": "Start a call",
+    "data-testid": "call-btn",
+  });
+  callBtn.appendChild(createIcon("phone", 18));
+  callBtn.style.display = "none";
+  if (opts.onStartCall !== undefined) {
+    const start = opts.onStartCall;
+    callBtn.addEventListener("click", () => start());
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -82,16 +100,23 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       searchInput.blur();
     });
   }
-  appendChildren(tools, searchInput, pinBtn);
+  appendChildren(tools, searchInput, callBtn, pinBtn);
 
   appendChildren(header, nameGroup, divider, topicEl, tools);
-  return { element: header, refs: { hashEl: hash, nameEl, topicEl } };
+  return { element: header, refs: { hashEl: hash, nameEl, topicEl, callBtn } };
 }
 
 // ---------------------------------------------------------------------------
 // DM mode helper
 // ---------------------------------------------------------------------------
 
+/**
+ * Put the header into DM mode (or, with null, back into channel mode).
+ *
+ * `subtitle` is what sits where a channel topic would: the other party's
+ * presence for a 1:1 DM, and the member list for a group — a group has no
+ * single status to show, and "who is in here" is the fact that matters.
+ */
 export function updateChatHeaderForDm(
   refs: ChatHeaderRefs,
   recipient: { username: string; status: string } | null,
@@ -100,7 +125,9 @@ export function updateChatHeaderForDm(
     setText(refs.hashEl, "@");
     setText(refs.nameEl, recipient.username);
     setText(refs.topicEl, recipient.status);
+    refs.callBtn.style.display = "";
   } else {
     setText(refs.hashEl, "#");
+    refs.callBtn.style.display = "none";
   }
 }

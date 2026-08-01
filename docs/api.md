@@ -87,6 +87,9 @@ Create a new account using an invite code. The first user is created via `/admin
     "id": 2,
     "username": "alex",
     "avatar": "",
+    "display_name": null,
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": false,
@@ -94,6 +97,8 @@ Create a new account using an invite code. The first user is created via `/admin
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 #### Errors
 
@@ -134,7 +139,10 @@ If the account does not have TOTP enabled:
   "user": {
     "id": 1,
     "username": "alex",
-    "avatar": "uuid.png",
+    "avatar": "/api/v1/files/uuid",
+    "display_name": "Alex",
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": false,
@@ -142,6 +150,8 @@ If the account does not have TOTP enabled:
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 If the account has TOTP enabled:
 
@@ -188,7 +198,10 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
   "user": {
     "id": 1,
     "username": "alex",
-    "avatar": "uuid.png",
+    "avatar": "/api/v1/files/uuid",
+    "display_name": "Alex",
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": true,
@@ -196,6 +209,8 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 #### Errors
 
@@ -219,7 +234,10 @@ Get the current authenticated user's profile.
 {
   "id": 1,
   "username": "alex",
-  "avatar": "uuid.png",
+  "avatar": "/api/v1/files/uuid",
+  "display_name": "Alex",
+  "about": "A short bio.",
+  "custom_status": "building things",
   "status": "online",
   "role_id": 2,
   "totp_enabled": true,
@@ -227,12 +245,18 @@ Get the current authenticated user's profile.
 }
 ```
 
+This is the canonical **user object**, also returned as `user` by register,
+login and the TOTP challenge.
+
 | Field | Type | Description |
 | ----- | ---- | ----------- |
 | `id` | int64 | User ID |
-| `username` | string | Display name |
-| `avatar` | string | Avatar filename (UUID) or empty string |
-| `status` | string | One of: `online`, `idle`, `dnd`, `offline` |
+| `username` | string | Unique handle; the name `@mentions` resolve against |
+| `avatar` | string | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string |
+| `display_name` | string\|null | Nickname rendered instead of `username`; null when unset |
+| `about` | string\|null | Profile bio, max 300 characters; null when unset |
+| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST |
+| `status` | string | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to *anyone else* reports `offline` instead |
 | `role_id` | int64 | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member) |
 | `totp_enabled` | bool | Whether the user has a confirmed TOTP secret |
 | `created_at` | string | ISO 8601 timestamp |
@@ -348,8 +372,9 @@ Disable TOTP for the authenticated user.
 
 ### PATCH /api/v1/users/me
 
-Update the authenticated user's profile (username and/or avatar).
-Broadcasts a `user_update` WebSocket message to all clients on success.
+Update the authenticated user's profile. Broadcasts a `user_update` WebSocket
+message to all clients on success, carrying the full profile snapshot (the
+event replaces the client's copy rather than patching it).
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute
@@ -359,15 +384,82 @@ Broadcasts a `user_update` WebSocket message to all clients on success.
 ```json
 {
   "username": "newname",
-  "avatar": "upload-uuid.png"
+  "avatar": "https://example.com/pic.png",
+  "display_name": "New Name",
+  "about": "A short bio."
 }
 ```
 
-Both fields optional; `avatar` may be `null` to clear it.
+| Field          | Rules                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `username`     | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
+| `avatar`       | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
+| `display_name` | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
+| `about`        | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
+
+Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
+`display_name` and `about` are HTML-sanitized and trimmed server-side, and the
+length caps count characters, not bytes.
 
 #### Response 200 OK
 
 Returns the updated user object (same shape as `GET /api/v1/auth/me`).
+
+---
+
+### POST /api/v1/users/me/avatar
+
+Upload an avatar image and point the authenticated user's avatar at it.
+Broadcasts a `user_update` on success, exactly like the PATCH above.
+
+The bytes are stored as an ordinary attachment with no channel, and
+`users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
+picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
+attachment only to its uploader, and additionally admits one that some user's
+avatar currently points at — so an avatar is readable by every authenticated
+user for exactly as long as it is in use, and stops being readable the moment
+it is replaced.
+
+Not registered when the server has no working storage backend.
+
+**Auth:** Required
+**Rate limit:** 5 uploads/minute per user
+
+#### Request
+
+`multipart/form-data` with a single `file` part.
+
+| Rule       | Value                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 1 MiB                                                                                                                 |
+| Dimensions | 1024x1024, measured from the sniffed image                                                                            |
+
+GIF is refused (an animated avatar renders in every message row), and so is
+SVG — it is markup with script and external-fetch capability, and an avatar is
+rendered inline by definition. The server does not re-encode or crop; the
+client is expected to downscale and square-crop before uploading.
+
+#### Response 201 Created
+
+```json
+{
+  "id": "5f2c...",
+  "filename": "me.png",
+  "size": 20481,
+  "mime": "image/png",
+  "url": "/api/v1/files/5f2c...",
+  "width": 256,
+  "height": 256
+}
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                          |
+| ------ | -------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
+| 429    | `RATE_LIMITED` | Too many uploads                                               |
 
 ---
 
@@ -908,12 +1000,31 @@ List all open DM channels for the authenticated user, ordered by most recent act
   "dm_channels": [
     {
       "channel_id": 100,
+      "name": "Lunch crew",
+      "is_group": true,
       "recipient": {
         "id": 2,
         "username": "jordan",
-        "avatar": "uuid.png",
+        "display_name": "Jo",
+        "avatar": "/api/v1/files/uuid",
         "status": "online"
       },
+      "recipients": [
+        {
+          "id": 2,
+          "username": "jordan",
+          "display_name": "Jo",
+          "avatar": "/api/v1/files/uuid",
+          "status": "online"
+        },
+        {
+          "id": 3,
+          "username": "sam",
+          "display_name": "",
+          "avatar": "",
+          "status": "idle"
+        }
+      ],
       "last_message_id": 5042,
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
@@ -923,15 +1034,119 @@ List all open DM channels for the authenticated user, ordered by most recent act
 }
 ```
 
+| Field        | Description                                                                                                            |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`  | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients` | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`       | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`   | True for a group DM. Stored, not derived from the live participant count.                                              |
+
+`status` is viewer-adjusted: an `invisible` participant reads as `offline`.
+
+---
+
+### POST /api/v1/dms/group
+
+Create a group DM between the caller and 2–8 other users (3–10 total).
+
+Unlike `POST /api/v1/dms` this **always creates**: the same set of people may
+reasonably want more than one group, so there is no "the group for these users"
+to look up.
+
+Blocks are enforced in both directions, per recipient — a user may neither pull
+someone they have blocked into a room with them nor use a group to reach
+someone who has blocked them. The check is creation-time only; see
+`docs/protocol.md` § DM Authorization for why sending into a group is not
+block-checked.
+
+**Auth:** Required
+
+#### Request
+
+```json
+{
+  "recipient_ids": [2, 3],
+  "name": "Lunch crew"
+}
+```
+
+| Field           | Type   | Required | Description                                                                     |
+| --------------- | ------ | -------- | ------------------------------------------------------------------------------- |
+| `recipient_ids` | int[]  | Yes      | 2–8 other users. De-duplicated; the caller is dropped if named.                 |
+| `name`          | string | No       | Group name, ≤ 100 characters. HTML-stripped. Omit or `""` for an unnamed group. |
+
+#### Response 201 Created
+
+The same DM summary shape `GET /api/v1/dms` returns, from the creator's seat.
+Every participant — the creator included — also receives a `dm_channel_open`.
+
+#### Errors
+
+| Status | Code          | Reason                                                                |
+| ------ | ------------- | --------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
+| 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 404    | `NOT_FOUND`   | A recipient does not exist                                            |
+
+---
+
+### PATCH /api/v1/dms/{channelId}
+
+Set or clear a group DM's name.
+
+Any participant may rename it. That is Discord's rule and the only one that
+works here: a group DM has no owner column and no roles, so "who may rename" has
+exactly one answer that does not require inventing an ownership model. A 1:1 DM
+refuses — its name is who is in it.
+
+**Auth:** Required (participant)
+
+#### Request
+
+```json
+{ "name": "Lunch crew" }
+```
+
+An empty name clears it, and the group falls back to listing its members.
+
+#### Response 200 OK
+
+The DM summary shape, from the caller's seat. Every participant also receives a
+`dm_channel_open` carrying the new name.
+
+#### Errors
+
+| Status | Code          | Reason                                                      |
+| ------ | ------------- | ----------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 404    | `NOT_FOUND`   | Not a participant of this DM                                |
+
 ---
 
 ### DELETE /api/v1/dms/{channelId}
 
-Close a DM channel for the authenticated user (hides it from their sidebar). The channel and messages remain in the database. If the other user sends a new message, the channel is automatically re-opened.
+Remove a DM from the caller's sidebar. What that means depends on the kind of DM,
+and the route is shared because the _gesture_ is shared:
 
-**Auth:** Required
+- **1:1 DM** — a hide. The channel and messages remain, the caller remains a
+  participant, and a new message from either side re-opens it.
+- **Group DM** — a **leave**. The caller comes out of `dm_participants`, stops
+  receiving the group's messages, and cannot return unaided. When the last
+  participant leaves, the channel row is deleted (a DM nobody is in is reachable
+  by nobody, and its messages cascade off the channel).
+
+The caller receives `dm_channel_close`; after a group leave the remaining
+participants receive a fresh `dm_channel_open` with the new membership.
+
+**Auth:** Required (participant)
 
 #### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                       |
+| ------ | ----------- | ---------------------------- |
+| 404    | `NOT_FOUND` | Not a participant of this DM |
 
 ---
 
@@ -1079,6 +1294,126 @@ Serve a previously uploaded file by its UUID.
 Supports HTTP range requests and conditional requests. MIME types that could
 execute under the app origin (HTML, SVG, XML, PDF) are served with
 `Content-Disposition: attachment` to force download.
+
+---
+
+## Custom Emoji
+
+Server-wide custom emoji, usable as `:shortcode:` in message content and as
+reaction strings.
+
+**Permission model.** Reading the set is open to any authenticated member —
+an emoji nobody can render is not an emoji, and the set is server-wide with no
+per-channel scope to leak. Adding and removing require **MANAGE_SERVER**.
+
+That is a deliberate reuse rather than a new permission bit: a bit is a
+schema-visible, forever decision, and "who may change server-wide branding" is
+exactly what MANAGE_SERVER already answers for the server name, icon and
+settings. There is no `MANAGE_EMOJI`.
+
+### GET /api/v1/emoji
+
+List every custom emoji, ordered by shortcode.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 3, "shortcode": "wave", "url": "/api/v1/emoji/3/image" },
+  { "id": 7, "shortcode": "party_blob", "url": "/api/v1/emoji/7/image" }
+]
+```
+
+`url` is server-relative and authenticated — see GET /api/v1/emoji/{id}/image.
+
+---
+
+### POST /api/v1/emoji
+
+Upload one custom emoji as multipart form data.
+
+**Auth:** Required — **MANAGE_SERVER**
+**Rate limit:** 10 requests/minute per user
+**Body size limit:** 1 MiB (the image itself is capped at 512 KiB)
+**Content-Type:** `multipart/form-data`
+
+| Field       | Type   | Notes                                                                                                                                           |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shortcode` | string | `[a-z0-9_]{2,32}`; surrounding colons are stripped and the value is lowercased before validation, so `:WAVE:` and `wave` are the same shortcode |
+| `file`      | file   | PNG, JPEG, GIF or WebP                                                                                                                          |
+
+Validation, in the order it is applied — the permission check runs before the
+multipart body is read, so a member without the bit never causes a spool to
+disk:
+
+1. MANAGE_SERVER, then the rate limit, then the shortcode format.
+2. At most **512 KiB** of image bytes.
+3. The MIME type is **sniffed from the file's own bytes**, never taken from the
+   client's part header. Only `image/png`, `image/jpeg`, `image/gif` and
+   `image/webp` are accepted. SVG is refused outright: it is markup with script
+   and external-fetch capability, and an emoji is by definition rendered inline.
+4. Dimensions are re-read from the sniffed image (WebP headers are parsed
+   directly, since the standard library has no WebP decoder) and must be at
+   most **128 x 128**.
+5. Shortcodes are unique case-insensitively; a collision is `409 CONFLICT`.
+6. A server holds at most 200 emoji.
+
+On success the full set is broadcast as `emoji_update` (see protocol.md), so
+every connected client converges without a reconnect.
+
+#### Response 201 Created
+
+```json
+{ "id": 3, "shortcode": "wave", "url": "/api/v1/emoji/3/image" }
+```
+
+#### Errors
+
+| Status | Code           | Cause                                           |
+| ------ | -------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST`  | bad shortcode, wrong format, too large, too big |
+| 403    | `FORBIDDEN`    | caller lacks MANAGE_SERVER                      |
+| 409    | `CONFLICT`     | an emoji with that shortcode already exists     |
+| 429    | `RATE_LIMITED` | upload rate limit exceeded                      |
+
+---
+
+### GET /api/v1/emoji/{id}/image
+
+Serve one emoji's image bytes.
+
+**Auth:** Required (Bearer token)
+**Caching:** `Cache-Control: private, max-age=86400, immutable`
+
+Authenticated rather than public so an emoji cannot be used as an
+unauthenticated tracking pixel hosted on someone else's server. There is no
+per-channel ACL to apply — emoji are server-wide by construction, so
+authentication is the whole check. An emoji's bytes never change for a given
+id (a replacement is a new row), which is what lets the response be cached
+hard. Unknown ids answer 404.
+
+---
+
+### DELETE /api/v1/emoji/{id}
+
+Delete one custom emoji and unlink its stored file.
+
+**Auth:** Required — **MANAGE_SERVER**
+
+Messages and reactions that used the shortcode fall back to rendering the
+literal `:shortcode:` text. Broadcasts `emoji_update` on success.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                        |
+| ------ | ------------- | ---------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
+| 404    | `NOT_FOUND`   | no emoji with that id        |
 
 ---
 

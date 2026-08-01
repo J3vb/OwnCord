@@ -1170,6 +1170,46 @@
   font-size: 13px;
 }
 
+/* Custom emoji — inline images that stand in for a :shortcode: token.
+   Sized in a way that keeps the line height of ordinary text: 22px matches the
+   cap height of the 16px message font closely enough that a line with emoji
+   does not jump taller than the one above it. */
+.custom-emoji {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  vertical-align: -0.3em;
+  margin: 0 1px;
+  /* An emoji whose bytes have not arrived (or never will) falls back to its
+     alt text, so the box must not clip the shortcode. */
+  min-width: 22px;
+}
+
+/* A message that is nothing but emoji renders them large, Discord-style. The
+   class sits on .msg-text so it sizes the unicode glyphs and the custom-emoji
+   images together — nothing downstream needs to know. */
+.message .msg-text-jumbo {
+  font-size: 48px;
+  line-height: 1.15;
+}
+.message .msg-text-jumbo .custom-emoji {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  vertical-align: -0.1em;
+  margin: 0 2px;
+}
+
+/* In a reaction pill the emoji sits next to the count, so it follows the
+   pill's own 14px scale rather than the message body's. */
+.reaction-chip .custom-emoji {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  vertical-align: middle;
+  margin: 0;
+}
+
 /* @mention highlights */
 .mention {
   background: rgba(88, 101, 242, 0.3);
@@ -2666,6 +2706,31 @@ ul.md-list-nested {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The `:shortcode` popup shows what it is about to insert, so a row reads as
+   the emoji rather than as its name. Fixed width keeps the labels aligned
+   whether the preview is a glyph or a custom-emoji image. */
+.emoji-autocomplete .ea-preview {
+  width: 20px;
+  min-width: 20px;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+}
+.emoji-autocomplete .ea-preview .custom-emoji {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  vertical-align: middle;
+  margin: 0;
+}
+/* A custom emoji in the picker grid fills its cell like a glyph would. */
+.ep-emoji-custom .custom-emoji {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  vertical-align: middle;
+  margin: 0;
+}
 .ep-header {
   padding: 12px;
   border-bottom: 1px solid var(--border);
@@ -3714,32 +3779,6 @@ ul.md-list-nested {
 }
 .dm-search::placeholder {
   color: var(--text-micro);
-}
-
-.dm-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  margin: 1px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-muted);
-  transition: all 0.1s;
-  font-size: 14px;
-}
-.dm-nav-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-normal);
-}
-.dm-nav-item.active {
-  background: var(--bg-active);
-  color: white;
-}
-.dm-nav-item .dm-nav-icon {
-  font-size: 18px;
-  width: 20px;
-  text-align: center;
 }
 
 .dm-section-label {
@@ -5249,4 +5288,224 @@ ul.md-list-nested {
   display: flex;
   gap: 8px;
   justify-content: center;
+}
+
+/* ── Phase 6: avatars, display names, custom status ── */
+
+/*
+ * Every avatar surface (message row, reply preview, member list, user bar,
+ * profile popup, account card) is a fixed-size circle that until now held a
+ * single letter. An uploaded picture has to fill that same circle exactly,
+ * whatever the source aspect ratio, so it is cover-cropped rather than
+ * letterboxed — the server refuses anything over 1024px but does not force a
+ * square, and a stretched face is worse than a centred crop.
+ */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+
+/* The member row grew a second line, so the name column stacks. */
+.member-item .mi-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.member-item .mi-custom-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Profile popup: the @handle under a display name, and the status line. */
+.upp-username-handle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: -2px;
+}
+.upp-username-handle:empty,
+.upp-custom-status:empty {
+  display: none;
+}
+.upp-custom-status {
+  font-size: 13px;
+  color: var(--text-secondary, var(--text-muted));
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+/* Status picker: the custom-status input sits below the four options. */
+.status-picker-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.status-picker-custom {
+  padding: 6px 8px;
+}
+.status-picker-custom-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input, var(--bg-active));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.status-picker-custom-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Account tab: the avatar uploader sits under the profile card. */
+.account-avatar-upload {
+  margin: 12px 0 4px;
+}
+
+/* ── Group DMs ─────────────────────────────────────────────────────────── */
+
+/* Two overlapping faces instead of one avatar. The stack is the same size as
+   a single avatar so a mixed list of 1:1 and group rows stays on one grid. */
+.dm-avatar-stack {
+  position: relative;
+  background: transparent !important;
+}
+.dm-avatar-stack .dm-avatar-face {
+  position: absolute;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: white;
+  overflow: hidden;
+  border: 2px solid var(--bg-secondary);
+}
+.dm-avatar-stack .dm-avatar-face-0 {
+  width: 68%;
+  height: 68%;
+  top: 0;
+  left: 0;
+}
+.dm-avatar-stack .dm-avatar-face-1 {
+  width: 68%;
+  height: 68%;
+  bottom: 0;
+  right: 0;
+}
+
+.dm-member-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-micro);
+  padding: 0 4px;
+}
+
+.dm-member-picker-item.selected {
+  background: var(--bg-active);
+}
+.dm-member-picker-item.selected::after {
+  content: "\2713";
+  margin-left: 6px;
+  color: var(--green);
+}
+
+/* ── Muted channels ────────────────────────────────────────────────────── */
+
+/* A mute dims, it does not hide: the conversation is still there, it has just
+   stopped asking for attention. The mention badge is deliberately untouched. */
+.channel-item.muted .ch-name,
+.dm-item.muted .dm-name {
+  opacity: 0.45;
+}
+.unread-badge.muted,
+.dm-unread-badge.muted {
+  background: var(--text-micro) !important;
+  opacity: 0.7;
+}
+
+.settings-muted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.settings-muted-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.settings-muted-row .settings-muted-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Incoming call banner ──────────────────────────────────────────────── */
+
+/* A banner, not a modal: a ring is an offer, and blocking the whole app until
+   a 30-second timer expires is not an offer. */
+.incoming-call-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-floating, var(--bg-secondary));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  max-width: min(92vw, 460px);
+}
+.incoming-call-icon {
+  display: flex;
+  align-items: center;
+  color: var(--green);
+}
+.incoming-call-info {
+  flex: 1;
+  min-width: 0;
+}
+.incoming-call-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.incoming-call-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.incoming-call-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.call-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+.call-btn:hover {
+  color: var(--green);
 }

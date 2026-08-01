@@ -40,7 +40,7 @@ func TestHub_BroadcastUserUpdate(t *testing.T) {
 
 	avatar := "avatar.png"
 	identityKey := "pubkey-abc"
-	hub.BroadcastUserUpdate(42, "renamed", &avatar, &identityKey)
+	hub.BroadcastUserUpdate(ws.UserUpdate{UserID: 42, Username: "renamed", Avatar: &avatar, IdentityPublicKey: &identityKey})
 
 	msg := awaitMessage(t, send)
 	if msg["type"] != "user_update" {
@@ -74,7 +74,7 @@ func TestHub_BroadcastUserUpdate_NilOptionalFields(t *testing.T) {
 	send := make(chan []byte, 8)
 	hub.RegisterNowForTest(ws.NewTestClient(hub, 1, send))
 
-	hub.BroadcastUserUpdate(42, "noextras", nil, nil)
+	hub.BroadcastUserUpdate(ws.UserUpdate{UserID: 42, Username: "noextras"})
 
 	msg := awaitMessage(t, send)
 	payload, ok := msg["payload"].(map[string]any)
@@ -104,7 +104,7 @@ func TestHub_BroadcastUserUpdate_ReachesEveryClient(t *testing.T) {
 	hub.RegisterNowForTest(ws.NewTestClient(hub, 1, a))
 	hub.RegisterNowForTest(ws.NewTestClient(hub, 2, b))
 
-	hub.BroadcastUserUpdate(7, "everyone", nil, nil)
+	hub.BroadcastUserUpdate(ws.UserUpdate{UserID: 7, Username: "everyone"})
 
 	for i, ch := range []chan []byte{a, b} {
 		msg := awaitMessage(t, ch)
@@ -129,7 +129,7 @@ func TestHub_BroadcastDropCount(t *testing.T) {
 
 	send := make(chan []byte, 8)
 	hub.RegisterNowForTest(ws.NewTestClient(hub, 1, send))
-	hub.BroadcastUserUpdate(1, "u", nil, nil)
+	hub.BroadcastUserUpdate(ws.UserUpdate{UserID: 1, Username: "u"})
 	awaitMessage(t, send)
 
 	// A single delivered broadcast must not increment the drop counter.

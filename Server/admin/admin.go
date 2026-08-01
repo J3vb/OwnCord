@@ -48,8 +48,13 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	}
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// img-src adds blob: for the Emoji section: /api/v1/emoji/{id}/image
+		// requires an Authorization header, which <img src> cannot send, so
+		// each thumbnail is fetched with the session token and swapped in as a
+		// blob: URL. blob: is same-origin, opaque and unreadable across
+		// documents — it widens nothing an attacker could aim at.
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+			"default-src 'self'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
 		_, _ = w.Write(indexHTML)
 	})
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))

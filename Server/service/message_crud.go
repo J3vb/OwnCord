@@ -139,6 +139,19 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		sender, _ := s.st.GetUserByID(ctx, p.UserID)
 		result.SenderUser = sender
 
+		// Viewer-neutral (viewerID 0 matches nobody, so every status is
+		// broadcast-collapsed); the ws layer re-derives "who is the recipient"
+		// per addressee. A read failure is non-fatal — the message is already
+		// committed, and the caller falls back to the 1:1 shape.
+		if participants, partErr := s.st.GetDMParticipants(ctx, p.ChannelID, 0); partErr == nil {
+			result.DMParticipants = participants
+		} else {
+			slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
+		}
+		if isGroup, gErr := s.st.IsGroupDM(ctx, p.ChannelID); gErr == nil {
+			result.DMIsGroup = isGroup
+		}
+
 		for _, pid := range participantIDs {
 			if pid == p.UserID {
 				continue

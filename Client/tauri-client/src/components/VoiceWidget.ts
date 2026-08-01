@@ -11,6 +11,7 @@ import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
 import {
   createConnectionStatsPoller,
@@ -230,9 +231,16 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     updateStatus(voice.voiceStatus);
     updateFrozen(uiStore.getState().connectionStatus);
 
-    // Channel name
+    // Channel name. A DM call resolves through the DM store rather than the
+    // channels store: the channels-store row for a DM is synthesised when the
+    // conversation is opened, so accepting a call for a DM the user has not
+    // looked at yet would otherwise label the call "Voice Channel".
     const channel = channelsStore.getState().channels.get(channelId);
-    setText(channelNameEl, channel?.name ?? "Voice Channel");
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    setText(
+      channelNameEl,
+      dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? "Voice Channel"),
+    );
 
     // Toggle button active states, swap icons, and update aria-pressed
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);

@@ -39,11 +39,14 @@ export const ServerMessageType = {
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",
+  EMOJI_UPDATE: "emoji_update",
   SERVER_RESTART: "server_restart",
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  CALL_INCOMING: "call_incoming",
+  CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
 } as const;
@@ -79,6 +82,8 @@ export const ClientMessageType = {
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
+  CALL_RING: "call_ring",
+  CALL_DECLINE: "call_decline",
 } as const;
 
 export type ClientMessageTypeValue = (typeof ClientMessageType)[keyof typeof ClientMessageType];

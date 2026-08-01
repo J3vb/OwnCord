@@ -110,16 +110,18 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 
 	var username string
-	var avatar *string
+	var avatar, displayName *string
 	if c.user != nil {
 		username = c.user.Username
 		avatar = c.user.Avatar
+		displayName = c.user.DisplayName
 	}
 	voiceChID, voiceJoinTok := c.getVoiceState()
 	info := ClientInfo{
 		UserID:         c.userID,
 		Username:       username,
 		Avatar:         avatar,
+		DisplayName:    displayName,
 		RoleName:       c.roleName,
 		ReqID:          env.ID,
 		VoiceChannelID: voiceChID,

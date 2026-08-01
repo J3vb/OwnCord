@@ -552,3 +552,85 @@ describe("MemberList", () => {
     expect(container.querySelector(".mi-name")?.textContent).toBe("Solo");
   });
 });
+
+// ─── Phase 6: display names, custom status, invisible ────────────────────────
+
+describe("MemberList profile fields", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+
+  const opts: MemberListOptions = {
+    currentUserRole: "member",
+    onKick: vi.fn(),
+    onBan: vi.fn(),
+    onChangeRole: vi.fn(),
+    onToggleBlock: vi.fn(),
+  };
+
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    list?.destroy?.();
+    list = null;
+    container.remove();
+    resetStore();
+  });
+
+  it("renders the display name and falls back to the username", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
+      makeMember({ id: 2, username: "bob", displayName: null }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const names = Array.from(container.querySelectorAll(".mi-name")).map((el) => el.textContent);
+    expect(names).toContain("Alice A.");
+    expect(names).toContain("bob");
+    // The username is not shown twice — the display name replaces it here.
+    expect(names).not.toContain("alice");
+  });
+
+  it("shows a custom status under the name, and omits the line without one", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", customStatus: "shipping phase 6" }),
+      makeMember({ id: 2, username: "bob" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const withStatus = container.querySelector('[data-testid="member-custom-status-1"]');
+    expect(withStatus?.textContent).toBe("shipping phase 6");
+    expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
+  });
+
+  it("renders an invisible member the way it renders an offline one", () => {
+    // Only ever the signed-in user's own row — everyone else is mapped to
+    // offline server-side — but it has to look like what others see.
+    setTestMembers([makeMember({ id: 1, username: "ghost", status: "invisible" as UserStatus })]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const row = container.querySelector('[data-testid="member-1"]');
+    expect(row?.classList.contains("offline")).toBe(true);
+  });
+
+  it("re-renders (not just recolors) when a custom status changes", () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+    expect(container.querySelector('[data-testid="member-custom-status-1"]')).toBeNull();
+
+    updatePresence(1, "online", "back in 5");
+    membersStore.flush();
+    // A custom status is its own line, so it needs a structural render — the
+    // presence-only fast path would have left the row without it.
+    expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
+      "back in 5",
+    );
+  });
+});

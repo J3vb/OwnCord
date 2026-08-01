@@ -33,6 +33,9 @@ function dm(channelId: number, unread: number, mentions = 0): DmChannel {
   return {
     channelId,
     recipient: { id: channelId * 10, username: `u${channelId}`, avatar: "", status: "online" },
+    participants: [],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",

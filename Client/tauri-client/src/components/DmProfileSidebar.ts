@@ -49,6 +49,9 @@ const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
   online: "#3ba55d",
   idle: "#faa61a",
   dnd: "#ed4245",
+  // A DM partner is never invisible from here — the server maps it to offline
+  // for everyone but its owner — but the map has to be total over UserStatus.
+  invisible: "#747f8d",
   offline: "#747f8d",
 };
 
@@ -56,6 +59,7 @@ const STATUS_LABELS: Readonly<Record<UserStatus, string>> = {
   online: "Online",
   idle: "Idle",
   dnd: "Do Not Disturb",
+  invisible: "Invisible",
   offline: "Offline",
 };
 

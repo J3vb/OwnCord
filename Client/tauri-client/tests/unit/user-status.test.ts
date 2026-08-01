@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { loadUserStatus, saveUserStatus, onUserStatusChange } from "@lib/userStatus";
+import {
+  MAX_CUSTOM_STATUS_LEN,
+  loadCustomStatus,
+  loadUserStatus,
+  loadUserStatusOrigin,
+  onUserStatusChange,
+  saveCustomStatus,
+  saveUserStatus,
+} from "@lib/userStatus";
 
 describe("userStatus", () => {
   beforeEach(() => {
@@ -33,8 +41,42 @@ describe("userStatus", () => {
     expect(seen).toHaveBeenCalledWith("idle");
 
     unsub();
-    saveUserStatus("offline");
+    saveUserStatus("invisible");
     expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it("migrates a stored 'offline' to invisible", () => {
+    // "offline" was this client's old spelling of "appear offline"; phase 6
+    // gave that its own value, and a user who picked it meant invisible.
+    localStorage.setItem("owncord:settings:userStatus", JSON.stringify("offline"));
+    expect(loadUserStatus()).toBe("invisible");
+  });
+
+  it("records who chose the status", () => {
+    saveUserStatus("dnd");
+    expect(loadUserStatusOrigin()).toBe("manual");
+
+    saveUserStatus("idle", "auto");
+    expect(loadUserStatusOrigin()).toBe("auto");
+
+    // The default is "manual" on purpose: everything that is not the idle
+    // timer is a deliberate choice, and defaulting the other way would let a
+    // real choice be silently revoked.
+    saveUserStatus("online");
+    expect(loadUserStatusOrigin()).toBe("manual");
+  });
+
+  it("defaults the origin to manual when nothing is stored", () => {
+    expect(loadUserStatusOrigin()).toBe("manual");
+  });
+
+  it("round-trips and bounds the custom status text", () => {
+    expect(loadCustomStatus()).toBe("");
+    saveCustomStatus("shipping phase 6");
+    expect(loadCustomStatus()).toBe("shipping phase 6");
+
+    saveCustomStatus("x".repeat(MAX_CUSTOM_STATUS_LEN + 50));
+    expect(loadCustomStatus()).toHaveLength(MAX_CUSTOM_STATUS_LEN);
   });
 
   it("ignores unrelated preference changes", () => {

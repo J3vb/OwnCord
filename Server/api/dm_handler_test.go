@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -78,7 +81,8 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_quality    TEXT,
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
-    nsfw             INTEGER NOT NULL DEFAULT 0
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (

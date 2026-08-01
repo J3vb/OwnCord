@@ -93,9 +93,10 @@ The sequence number system enables reconnection with state recovery.
 | Category | Has seq? | Examples |
 |----------|----------|---------|
 | Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
-| Global broadcasts | Yes | `presence`, `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
+| Global broadcasts | Yes | `presence` (except the invisible split, see Presence), `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral | No | `typing` |
 | DM messages | No | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `dm_channel_open`, `dm_channel_close` |
+| Call signalling | No | `call_incoming`, `call_declined` |
 | Direct responses | No | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong` |
 
 ---
@@ -130,8 +131,12 @@ After the WebSocket connection is established, the client sends the first messag
     "user": {
       "id": 1,
       "username": "alex",
-      "avatar": "uuid.png",
-      "role": "admin"
+      "avatar": "/api/v1/files/5f2c...",
+      "role": "admin",
+      "display_name": "Alex A.",
+      "about": "A short bio.",
+      "custom_status": "shipping phase 6",
+      "status": "invisible"
     },
     "server_name": "My Server",
     "motd": "Welcome!",
@@ -139,6 +144,18 @@ After the WebSocket connection is established, the client sends the first messag
   }
 }
 ```
+
+`display_name`, `about` and `custom_status` are the signed-in user's own
+profile fields, `null` when unset. `display_name` is what clients render
+instead of `username`; `@mentions` still resolve against `username`, which is
+the unique handle.
+
+`status` is the user's **own true status**, `"invisible"` included. Only this
+message and their own `ready` entry ever carry it — every other client is told
+`"offline"` for an invisible user (see Presence). The connection comes online
+as the status saved from the last session when that was `idle`, `dnd` or
+`invisible`, and as `online` otherwise; a client should not re-assert a status
+the server already agreed with.
 
 `replay_source` reports which replay tier served this (re)connection:
 `"none"` (fresh connection / full re-sync), `"buffer"` (in-memory ring
@@ -168,7 +185,7 @@ The server broadcasts to all connected clients:
 
 ```json
 { "type": "member_join", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" } } }
-{ "type": "presence", "payload": { "user_id": 1, "status": "online" } }
+{ "type": "presence", "payload": { "user_id": 1, "status": "online", "custom_status": null } }
 ```
 
 ### Periodic Session Revalidation
@@ -263,7 +280,17 @@ A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+
+`status` is per-viewer. Two rules apply, in this order, so a client never has
+to reconstruct them:
+
+1. A member with no live connection is `"offline"`, whatever status they last
+   chose — a chosen `idle`/`dnd`/`invisible` is preserved server-side across a
+   disconnect so the next connect can honour it, but it must not render as
+   "present" in the meantime.
+2. An `"invisible"` member is `"offline"` to everyone but themselves. The
+   viewer's own entry carries their true status.
 
 **voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `muted`, `deafened`, `server_muted`, `server_deafened`
 
@@ -450,6 +477,13 @@ are soft, so clients mark each id as a tombstone exactly as they do for
 
 Rate limited at 5/sec. Requires `ADD_REACTIONS` permission (or DM participant).
 
+`emoji` is a free-form string, not a fixed enum: it is a unicode emoji, or the
+literal `:shortcode:` of a custom emoji (see api.md). It must be non-empty, at
+most **34 runes** — the longest custom shortcode (32) plus its two colons —
+carry no control characters, and survive the HTML sanitizer unchanged. A
+reaction whose `:shortcode:` no longer names an existing emoji stays a valid
+reaction and renders as its plain text.
+
 ### reaction_update (Server -> Client, broadcast)
 
 ```json
@@ -502,10 +536,26 @@ Typing broadcasts are ephemeral -- they are NOT stored in the replay ring buffer
 ### presence_update (Client -> Server)
 
 ```json
-{ "type": "presence_update", "payload": { "status": "online" } }
+{
+  "type": "presence_update",
+  "payload": { "status": "invisible", "custom_status": "heads down" }
+}
 ```
 
-Valid values: `"online"`, `"idle"`, `"dnd"`, `"offline"`. Rate limited: 1 per 10 seconds.
+Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
+`"offline"` is still accepted from older clients (which used it to mean
+"appear offline") and is treated as the plain offline it says. Rate limited:
+1 per 10 seconds.
+
+`custom_status` is optional and max 128 characters, HTML-sanitized and trimmed
+server-side. **Omitting the field leaves the stored text alone**; sending `""`
+clears it. The distinction matters because a client's auto-idle timer sends a
+bare status flip several times an hour and must not blank the text the user
+typed.
+
+The chosen status is stored as chosen, `invisible` included, and persists
+across reconnects (see `auth_ok`). A custom status persists too, and is
+cleared on `POST /api/v1/auth/logout`.
 
 ### presence (Server -> Client, broadcast)
 
@@ -515,10 +565,22 @@ Valid values: `"online"`, `"idle"`, `"dnd"`, `"offline"`. Rate limited: 1 per 10
   "type": "presence",
   "payload": {
     "user_id": 1,
-    "status": "online"
+    "status": "online",
+    "custom_status": "shipping phase 6"
   }
 }
 ```
+
+`custom_status` is always present (`null` when unset), so "cleared it" is
+distinguishable from "this event does not mention it"; every presence
+broadcast carries the current value.
+
+**Invisible splits this message in two.** When a user's status is
+`"invisible"`, everyone else receives a broadcast that says `"offline"`, and
+the user themselves receives a separate, targeted `presence` carrying their
+true `"invisible"`. A client must therefore not assume it sees the same
+presence value for a user that everyone else does — and must not "correct" its
+own status back to online on the strength of a broadcast it did not receive.
 
 ---
 
@@ -626,14 +688,16 @@ Sent when a user first connects (fresh connection, not reconnect replay).
       "username": "newuser",
       "avatar": null,
       "role": "member",
+      "display_name": "New User",
       "identity_public_key": "base64-identity-pubkey"
     }
   }
 }
 ```
 
-`identity_public_key` is the user's long-term E2EE identity public key (see
-voice E2EE TOFU); omitted when the user has not published one.
+`display_name` is the nickname to render instead of `username`; omitted when
+unset. `identity_public_key` is the user's long-term E2EE identity public key
+(see voice E2EE TOFU); omitted when the user has not published one.
 
 ### member_update (Server -> Client, broadcast)
 
@@ -687,10 +751,42 @@ channel visibility is delivered separately, as targeted
 `channel_create`/`channel_delete` messages, and a role deletion additionally
 sends one `member_update` per reassigned member.
 
+### emoji_update (Server -> Client, broadcast)
+
+Sent to every connected client after a custom emoji is uploaded or deleted
+through `/api/v1/emoji`. Like `roles_update` this carries the **whole** set
+rather than a delta — the client replaces its shortcode map wholesale, so a
+dropped intermediate event can never leave a deleted emoji rendering in the
+messages that name it.
+
+```json
+{
+  "seq": 74,
+  "type": "emoji_update",
+  "payload": {
+    "emoji": [
+      { "id": 3, "shortcode": "wave", "url": "/api/v1/emoji/3/image" },
+      { "id": 7, "shortcode": "party_blob", "url": "/api/v1/emoji/7/image" }
+    ]
+  }
+}
+```
+
+`emoji` is always an array, `[]` when the last emoji was deleted. Shortcodes
+are lowercase and `[a-z0-9_]{2,32}`; `url` is a server-relative path that
+requires the session token (see api.md). Ordered by shortcode.
+
+Unfiltered on purpose, for the same reason `roles_update` is: emoji are
+server-wide with no channel scope, and every client may already `GET
+/api/v1/emoji` for the same list. The set is **not** in the `ready` payload —
+it changes rarely and belongs to the server, not the session, so clients load
+it once over REST and keep it fresh from this event.
+
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
-(username, avatar and/or identity key).
+or `POST /api/v1/users/me/avatar` (username, avatar, display name, about
+and/or identity key).
 
 ```json
 {
@@ -699,15 +795,21 @@ Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
   "payload": {
     "user_id": 5,
     "username": "newname",
-    "avatar": "uuid.png",
+    "avatar": "/api/v1/files/5f2c...",
+    "display_name": "New Name",
+    "about": "A short bio.",
     "identity_public_key": "base64-identity-pubkey"
   }
 }
 ```
 
-`avatar` may be `null` when unset. `identity_public_key` carries the user's
-current long-term E2EE identity key and is omitted when none is published;
-peers that pinned a different key must surface a TOFU mismatch.
+The payload is a full snapshot, not a delta: it **replaces** the client's copy
+of that user's profile. `avatar`, `display_name` and `about` are always present
+and may be `null` (unset/cleared) — a profile edit that removes a field has to
+be distinguishable from one that leaves it alone.
+`identity_public_key` carries the user's current long-term E2EE identity key
+and is omitted when none is published; peers that pinned a different key must
+surface a TOFU mismatch.
 
 ### member_leave (reserved)
 
@@ -1048,22 +1150,62 @@ Delivered only to `target_user_id`, with the sender attached:
 
 ### dm_channel_open (Server -> Client)
 
-Sent when a DM is opened, created, or auto-reopened by an incoming message.
+Sent when a DM is opened, created, auto-reopened by an incoming message, or has
+its membership changed (a group created, renamed, or left).
+
+The payload is the same shape as one entry of the `ready` payload's
+`dm_channels` and of `GET /api/v1/dms`, so a client has exactly one DM shape to
+parse. It is built **per viewer**: `recipient` and `recipients` are both defined
+relative to who is reading them, and the reader never appears in their own
+`recipients`.
 
 ```json
 {
   "type": "dm_channel_open",
   "payload": {
     "channel_id": 100,
+    "name": "Lunch crew",
+    "is_group": true,
     "recipient": {
       "id": 2,
       "username": "jordan",
-      "avatar": "uuid.png",
+      "display_name": "Jo",
+      "avatar": "/api/v1/files/uuid",
       "status": "online"
-    }
+    },
+    "recipients": [
+      {
+        "id": 2,
+        "username": "jordan",
+        "display_name": "Jo",
+        "avatar": "/api/v1/files/uuid",
+        "status": "online"
+      },
+      {
+        "id": 3,
+        "username": "sam",
+        "display_name": "",
+        "avatar": "",
+        "status": "idle"
+      }
+    ],
+    "last_message_id": null,
+    "last_message": "",
+    "last_message_at": "",
+    "unread_count": 0
   }
 }
 ```
+
+| Field        | Type   | Description                                                                                                                                                    |
+| ------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recipient`  | object | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients` so a pre-group client renders something. |
+| `recipients` | array  | Every participant except the reader. The field group-aware clients read.                                                                                       |
+| `name`       | string | Optional group name. `""` for a 1:1 DM and for an unnamed group.                                                                                               |
+| `is_group`   | bool   | True for a group DM. Stored (`channels.is_group`), not derived from the live participant count — a group people have left stays a group.                       |
+
+`status` is viewer-adjusted: an `invisible` participant reads as `offline` to
+everyone but themselves.
 
 ### dm_channel_close (Server -> Client)
 
@@ -1074,9 +1216,81 @@ Sent when a DM is opened, created, or auto-reopened by an incoming message.
 }
 ```
 
+Sent to the caller of `DELETE /api/v1/dms/{id}`. For a group that is a _leave_,
+and the remaining participants receive a fresh `dm_channel_open` carrying the
+new membership.
+
 ### DM Authorization
 
-All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`.
+All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`, `call_ring`, `call_decline`.
+
+Group DMs need no special case: `dm_participants` holds one row per
+participant, and every check is a lookup on `(user_id, channel_id)`.
+
+**Blocks are a 1:1 rule.** A block refuses DM creation and gates every
+interaction sink in a two-person DM, but is _not_ consulted inside a group: a
+group is a shared room, and dropping one member's messages for one other member
+would leave the two of them reading different conversations under the same
+name. Blocks are instead enforced when the group is created — a user may
+neither add someone they have blocked nor add someone who has blocked them.
+
+---
+
+## DM Calls
+
+A "call" in a DM is **not** a server-side object. It is somebody being present
+in that DM's voice channel — which `voice_state` already broadcasts — and
+ringing is transient signalling on top of it. There is no call id and no call
+record: a persisted call would be one more thing a crashed client can leave
+dangling, in exchange for information the presence already carries.
+
+### call_ring (Client -> Server)
+
+```json
+{
+  "type": "call_ring",
+  "payload": { "channel_id": 100 }
+}
+```
+
+Only a participant of the DM may ring it (`FORBIDDEN` otherwise). Rate limited
+to one ring every 3 seconds per user — per _user_, not per channel, because the
+abuse it prevents is spamming somebody with call banners.
+
+The client joins the DM's voice channel **before** ringing: the ring is only
+truthful once the caller is actually there.
+
+### call_incoming (Server -> Client)
+
+Forwarded to every other participant that is connected. An offline addressee is
+a no-op by construction — a ring that arrives after the fact is worse than no
+ring.
+
+```json
+{
+  "type": "call_incoming",
+  "payload": { "channel_id": 100, "from_user": 2, "username": "jordan" }
+}
+```
+
+### call_decline (Client -> Server) / call_declined (Server -> Client)
+
+```json
+{
+  "type": "call_decline",
+  "payload": { "channel_id": 100 }
+}
+```
+
+Answered with `call_declined` (same payload shape as `call_incoming`) to the
+DM's other participants. It is addressed to all of them rather than to "the
+ringer" because the server does not know who that was — no call state, by
+design — and in a group more than one person may be ringing.
+
+A declining client stops its own ring; a ringing client stops on
+`call_declined`, on the ringer's `voice_leave`, or after a 30 second timeout.
+A timeout deliberately sends **no** `call_decline`: it means "nobody was there",
+and the ringer's own 30s window already covers it.
 
 ---
 

@@ -15,7 +15,7 @@ func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 	}
 
 	avatar := "https://example.com/avatar.png"
-	if err := database.UpdateUserProfile(context.Background(), id, "newname", &avatar); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), id, "newname", &avatar, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 
@@ -35,7 +35,7 @@ func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 	database := newTestDB(t)
 	id, _ := database.CreateUser(context.Background(), "keepavatar", "hash", 4)
 
-	if err := database.UpdateUserProfile(context.Background(), id, "renamed", nil); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), id, "renamed", nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 	database.CreateUser(context.Background(), "existing", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "changeme", "hash", 4)
 
-	err := database.UpdateUserProfile(context.Background(), id2, "existing", nil)
+	err := database.UpdateUserProfile(context.Background(), id2, "existing", nil, nil, nil)
 	if err == nil {
 		t.Error("UpdateUserProfile with duplicate username should return error")
 	}
@@ -61,7 +61,7 @@ func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 
 func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
 	database := newTestDB(t)
-	err := database.UpdateUserProfile(context.Background(), 99999, "ghost", nil)
+	err := database.UpdateUserProfile(context.Background(), 99999, "ghost", nil, nil, nil)
 	if err == nil {
 		t.Error("UpdateUserProfile for non-existent user should return error")
 	}

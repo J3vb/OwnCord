@@ -80,7 +80,8 @@ type Store interface {
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error)
-	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar *string) error
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
+	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
@@ -117,6 +118,13 @@ type Store interface {
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)
 
+	// ── Emoji ──
+	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
+	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
+	GetEmojiByShortcode(ctx context.Context, shortcode string) (*db.Emoji, error)
+	CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*db.Emoji, error)
+	DeleteEmoji(ctx context.Context, id int64) (bool, error)
+
 	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
@@ -151,6 +159,12 @@ type Store interface {
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
+	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
+	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
+	CountDMParticipants(ctx context.Context, channelID int64) (int, error)
+	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
+	SetDMChannelName(ctx context.Context, channelID int64, name string) error
+	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error

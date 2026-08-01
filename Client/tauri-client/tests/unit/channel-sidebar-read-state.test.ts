@@ -174,6 +174,9 @@ describe("ChannelSidebar — mark all as read", () => {
         {
           channelId: 50,
           recipient: { id: 9, username: "alice", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
           lastMessageId: null,
           lastMessage: "",
           lastMessageAt: "",

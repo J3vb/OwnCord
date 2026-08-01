@@ -745,7 +745,7 @@ func TestBuildMemberJoin_NoIdentityKey_Omitted(t *testing.T) {
 
 func TestBuildUserUpdate_IncludesIdentityKey(t *testing.T) {
 	key := "dXBkYXRlZGtleQ=="
-	msg := buildUserUpdate(9, "rotator", nil, &key)
+	msg := buildUserUpdate(UserUpdate{UserID: 9, Username: "rotator", IdentityPublicKey: &key})
 	var env struct {
 		Type    string `json:"type"`
 		Payload struct {

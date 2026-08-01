@@ -305,6 +305,7 @@ const I={
   shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   arrowUp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
   arrowDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+  smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
 };
 
 /* ═══ State ═══ */
@@ -672,6 +673,7 @@ const NAV=[
   {id:'users',label:'Users',icon:I.users},
   {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
   {id:'roles',label:'Roles',icon:I.shield,allowed:()=>can(PERM.MANAGE_ROLES)},
+  {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
   {sep:true},
   {section:'Configuration'},
   {id:'audit',label:'Audit Log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
@@ -743,7 +745,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -1705,6 +1707,98 @@ function confirmRevokeToken(id,label){
 }
 async function revokeToken(id){
   try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Emoji ═══ */
+/* Custom emoji live on the ordinary member API (/api/v1/emoji) rather than
+   under /admin/api: the desktop client reads the same list, and MANAGE_SERVER
+   is enforced by the route itself. The panel's session token authenticates
+   there unchanged, so this needs its own fetch helper — like pluginApi. */
+async function emojiApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined)init.body=opts.body;
+  const res=await fetch('/api/v1/emoji'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return null;
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
+  return data;
+}
+
+/* The image route needs the Authorization header, which <img src> cannot send.
+   Each thumbnail is therefore fetched with the token and swapped in as a blob:
+   URL once the section has been written into the DOM. */
+async function loadEmojiThumbnails(){
+  const imgs=document.querySelectorAll('img[data-emoji-url]');
+  for(const img of imgs){
+    try{
+      const res=await fetch(img.getAttribute('data-emoji-url'),{headers:{'Authorization':'Bearer '+state.token}});
+      if(!res.ok)continue;
+      const blob=await res.blob();
+      img.src=URL.createObjectURL(blob);
+      img.addEventListener('load',()=>URL.revokeObjectURL(img.src),{once:true});
+    }catch(e){/* a thumbnail that will not load is not worth an error toast */}
+  }
+}
+
+async function renderEmoji(){
+  let list;
+  try{list=await emojiApi('GET','/')}catch(e){return'<div class="page-title">Emoji</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  if(!Array.isArray(list))list=[];
+
+  let html='<div class="page-title">Emoji</div><div class="page-desc">Server-wide custom emoji, usable as <span style="font-family:var(--font-mono)">:shortcode:</span> in messages and reactions</div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Upload</h3></div><div class="section-card-body">';
+  html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+  html+='<input type="text" id="emojiShortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
+  html+='<input type="file" id="emojiFile" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
+  html+='<button class="btn btn-accent" onclick="uploadEmoji()">'+I.upload+' Upload</button>';
+  html+='</div></div></div>';
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Installed ('+list.length+')</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
+  html+='<table class="tbl"><thead><tr><th style="width:60px">Preview</th><th>Shortcode</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:24px">No custom emoji yet</td></tr>';
+  else list.forEach(function(e){
+    html+='<tr><td><img alt="'+esc(e.shortcode)+'" data-emoji-url="'+esc(e.url)+'" style="width:32px;height:32px;object-fit:contain"></td>';
+    html+='<td style="font-family:var(--font-mono)">:'+esc(e.shortcode)+':</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" onclick="confirmDeleteEmoji('+e.id+',\''+jsq(e.shortcode)+'\')">'+I.trash+'</button></div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  setTimeout(loadEmojiThumbnails,0);
+  return html;
+}
+
+async function uploadEmoji(){
+  const codeInput=document.getElementById('emojiShortcode');
+  const fileInput=document.getElementById('emojiFile');
+  const shortcode=(codeInput&&codeInput.value||'').trim();
+  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  if(!shortcode){showToast('Enter a shortcode first','error');return}
+  if(!file){showToast('Choose an image first','error');return}
+  const fd=new FormData();
+  fd.append('shortcode',shortcode);
+  fd.append('file',file);
+  try{
+    /* No explicit Content-Type: the browser must set the multipart boundary. */
+    await emojiApi('POST','/',{body:fd});
+    showToast('Added :'+shortcode.toLowerCase()+':');
+    renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+function confirmDeleteEmoji(id,shortcode){
+  openModal('<div class="modal-header"><h3>Delete Emoji</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:white">:'+esc(shortcode)+':</strong>? Messages and reactions that use it will show the plain text instead. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteEmoji('+id+')">Delete</button></div>');
+}
+
+async function deleteEmoji(id){
+  try{
+    await emojiApi('DELETE','/'+id);
+    closeModal();
+    showToast('Emoji deleted');
+    renderContent();
+  }catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Plugins ═══ */

@@ -105,7 +105,9 @@ func TestGetReactionUsers_RejectsBadInput(t *testing.T) {
 		{"zero message id", 0, "👍", ErrBadRequest},
 		{"negative message id", -5, "👍", ErrBadRequest},
 		{"empty emoji", msgID, "", ErrBadRequest},
-		{"overlong emoji", msgID, strings.Repeat("a", 33), ErrBadRequest},
+		// The cap is derived from MaxShortcodeLen + 2, so a bare ":wave:"-shaped
+		// string at that exact length must pass and one rune more must not.
+		{"overlong emoji", msgID, strings.Repeat("a", MaxShortcodeLen+3), ErrBadRequest},
 		{"control character", msgID, "a\x01b", ErrBadRequest},
 		{"unknown message", 999999, "👍", ErrNotFound},
 	}
@@ -150,5 +152,32 @@ func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
 	}
 	if len(users) != 1 || users[0].Username != "carol" {
 		t.Errorf("users = %+v, want [carol]", users)
+	}
+}
+
+// A custom emoji is reacted with as its ":shortcode:" literal, so the longest
+// shortcode the emoji service will accept has to fit inside the reaction length
+// cap. Before the cap was derived from MaxShortcodeLen, a 31- or 32-character
+// shortcode produced an emoji that rendered in messages but was silently
+// refused as a reaction.
+func TestReaction_AcceptsLongestCustomShortcode(t *testing.T) {
+	svc, database := newTestMessageService(t)
+	msgID, err := database.CreateMessage(context.Background(), 10, 1, "react to me", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	longest := ":" + strings.Repeat("a", MaxShortcodeLen) + ":"
+	if _, vErr := ValidateShortcode(longest); vErr != nil {
+		t.Fatalf("the emoji service would refuse %q: %v", longest, vErr)
+	}
+	if _, rErr := svc.AddReaction(context.Background(), 1, msgID, longest); rErr != nil {
+		t.Fatalf("AddReaction(longest shortcode): %v", rErr)
+	}
+
+	// One rune past it is still refused.
+	tooLong := ":" + strings.Repeat("a", MaxShortcodeLen+1) + ":"
+	if _, rErr := svc.AddReaction(context.Background(), 1, msgID, tooLong); !errors.Is(rErr, ErrBadRequest) {
+		t.Fatalf("AddReaction(one past the cap) = %v, want ErrBadRequest", rErr)
 	}
 }

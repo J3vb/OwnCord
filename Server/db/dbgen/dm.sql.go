@@ -23,6 +23,17 @@ func (q *Queries) CloseDM(ctx context.Context, arg CloseDMParams) error {
 	return err
 }
 
+const countDMParticipants = `-- name: CountDMParticipants :one
+SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?
+`
+
+func (q *Queries) CountDMParticipants(ctx context.Context, channelID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDMParticipants, channelID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getDMParticipantIDs = `-- name: GetDMParticipantIDs :many
 SELECT user_id FROM dm_participants WHERE channel_id = ?
 `
@@ -40,6 +51,113 @@ func (q *Queries) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]i
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDMParticipants = `-- name: GetDMParticipants :many
+SELECT
+    u.id                                      AS id,
+    u.username                                AS username,
+    COALESCE(u.display_name, '')              AS display_name,
+    COALESCE(u.avatar, '')                    AS avatar,
+    u.status                                  AS status
+FROM dm_participants dp
+JOIN users u ON u.id = dp.user_id
+WHERE dp.channel_id = ?
+ORDER BY u.id ASC
+`
+
+type GetDMParticipantsRow struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Avatar      string `json:"avatar"`
+	Status      string `json:"status"`
+}
+
+func (q *Queries) GetDMParticipants(ctx context.Context, channelID int64) ([]GetDMParticipantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDMParticipants, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetDMParticipantsRow{}
+	for rows.Next() {
+		var i GetDMParticipantsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.Avatar,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDMParticipantsForUser = `-- name: GetDMParticipantsForUser :many
+SELECT
+    dp.channel_id                                 AS channel_id,
+    u.id                                          AS id,
+    u.username                                    AS username,
+    COALESCE(u.display_name, '')                  AS display_name,
+    COALESCE(u.avatar, '')                        AS avatar,
+    u.status                                      AS status
+FROM dm_open_state dos
+JOIN dm_participants dp ON dp.channel_id = dos.channel_id
+JOIN users u            ON u.id = dp.user_id
+WHERE dos.user_id = ?
+ORDER BY dp.channel_id ASC, u.id ASC
+`
+
+type GetDMParticipantsForUserRow struct {
+	ChannelID   int64  `json:"channelId"`
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Avatar      string `json:"avatar"`
+	Status      string `json:"status"`
+}
+
+// Every participant of every DM the user has open, in one pass. Includes the
+// user themselves so a caller can tell "group of three" from "group of three
+// others"; the Go layer filters when it needs the others.
+func (q *Queries) GetDMParticipantsForUser(ctx context.Context, userID int64) ([]GetDMParticipantsForUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDMParticipantsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetDMParticipantsForUserRow{}
+	for rows.Next() {
+		var i GetDMParticipantsForUserRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.Avatar,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -80,10 +198,8 @@ func (q *Queries) GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int6
 const getUserDMChannels = `-- name: GetUserDMChannels :many
 SELECT
     c.id                                          AS channel_id,
-    u.id                                          AS recipient_id,
-    u.username                                    AS recipient_username,
-    COALESCE(u.avatar, '')                        AS recipient_avatar,
-    u.status                                      AS recipient_status,
+    c.name                                        AS name,
+    c.is_group                                    AS is_group,
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
@@ -94,8 +210,6 @@ SELECT
     ) AS unread_count
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
-JOIN dm_participants dp  ON dp.channel_id = c.id AND dp.user_id != ?
-JOIN users u             ON u.id = dp.user_id
 LEFT JOIN messages lm    ON lm.id = (
     SELECT MAX(id) FROM messages WHERE channel_id = c.id AND deleted = 0
 )
@@ -103,25 +217,22 @@ WHERE dos.user_id = ?
 ORDER BY COALESCE(lm.timestamp, dos.opened_at) DESC
 `
 
-type GetUserDMChannelsParams struct {
-	UserID   int64 `json:"userId"`
-	UserID_2 int64 `json:"userId2"`
-}
-
 type GetUserDMChannelsRow struct {
-	ChannelID         int64  `json:"channelId"`
-	RecipientID       int64  `json:"recipientId"`
-	RecipientUsername string `json:"recipientUsername"`
-	RecipientAvatar   string `json:"recipientAvatar"`
-	RecipientStatus   string `json:"recipientStatus"`
-	LastMessageID     *int64 `json:"lastMessageId"`
-	LastMessage       string `json:"lastMessage"`
-	LastMessageAt     string `json:"lastMessageAt"`
-	UnreadCount       int64  `json:"unreadCount"`
+	ChannelID     int64  `json:"channelId"`
+	Name          string `json:"name"`
+	IsGroup       int64  `json:"isGroup"`
+	LastMessageID *int64 `json:"lastMessageId"`
+	LastMessage   string `json:"lastMessage"`
+	LastMessageAt string `json:"lastMessageAt"`
+	UnreadCount   int64  `json:"unreadCount"`
 }
 
-func (q *Queries) GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsParams) ([]GetUserDMChannelsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getUserDMChannels, arg.UserID, arg.UserID_2)
+// A DM row carries no recipient any more: dm_participants holds N users, so
+// "the other one" is only well defined for a two-person DM. The participant
+// set comes from GetDMParticipantsForUser below, one extra query for the whole
+// list rather than one per channel, and the Go layer stitches them together.
+func (q *Queries) GetUserDMChannels(ctx context.Context, userID int64) ([]GetUserDMChannelsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUserDMChannels, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +242,8 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsPa
 		var i GetUserDMChannelsRow
 		if err := rows.Scan(
 			&i.ChannelID,
-			&i.RecipientID,
-			&i.RecipientUsername,
-			&i.RecipientAvatar,
-			&i.RecipientStatus,
+			&i.Name,
+			&i.IsGroup,
 			&i.LastMessageID,
 			&i.LastMessage,
 			&i.LastMessageAt,
@@ -169,6 +278,17 @@ func (q *Queries) IsDMParticipant(ctx context.Context, arg IsDMParticipantParams
 	return user_id, err
 }
 
+const isGroupDM = `-- name: IsGroupDM :one
+SELECT is_group FROM channels WHERE id = ? AND type = 'dm'
+`
+
+func (q *Queries) IsGroupDM(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isGroupDM, id)
+	var is_group int64
+	err := row.Scan(&is_group)
+	return is_group, err
+}
+
 const openDM = `-- name: OpenDM :exec
 INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)
 `
@@ -180,5 +300,33 @@ type OpenDMParams struct {
 
 func (q *Queries) OpenDM(ctx context.Context, arg OpenDMParams) error {
 	_, err := q.db.ExecContext(ctx, openDM, arg.UserID, arg.ChannelID)
+	return err
+}
+
+const removeDMParticipant = `-- name: RemoveDMParticipant :exec
+DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?
+`
+
+type RemoveDMParticipantParams struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) RemoveDMParticipant(ctx context.Context, arg RemoveDMParticipantParams) error {
+	_, err := q.db.ExecContext(ctx, removeDMParticipant, arg.ChannelID, arg.UserID)
+	return err
+}
+
+const setDMChannelName = `-- name: SetDMChannelName :exec
+UPDATE channels SET name = ? WHERE id = ? AND type = 'dm'
+`
+
+type SetDMChannelNameParams struct {
+	Name string `json:"name"`
+	ID   int64  `json:"id"`
+}
+
+func (q *Queries) SetDMChannelName(ctx context.Context, arg SetDMChannelNameParams) error {
+	_, err := q.db.ExecContext(ctx, setDMChannelName, arg.Name, arg.ID)
 	return err
 }

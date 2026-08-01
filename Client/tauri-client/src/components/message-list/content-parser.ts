@@ -22,6 +22,7 @@ import {
   type MentionInfo,
 } from "@lib/mentions";
 import { isSafeUrl } from "./attachments";
+import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
 import {
   parseInline,
   parseBlocks,
@@ -319,6 +320,17 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     if (node !== null) matches.push({ start, end: start + name.length + 1, node });
   }
 
+  // `:shortcode:` custom emoji. This runs on prose segments only — code spans
+  // never reach here (appendInline renders them verbatim) and fenced blocks are
+  // split off before any of this, so a shortcode inside code stays code.
+  for (const match of text.matchAll(EMOJI_TOKEN_REGEX)) {
+    const idx = match.index;
+    const shortcode = match[1];
+    if (idx === undefined || shortcode === undefined) continue;
+    const node = buildCustomEmojiNode(shortcode);
+    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
+  }
+
   const fragment = document.createDocumentFragment();
   matches.sort((a, b) => a.start - b.start);
   let lastIndex = 0;
@@ -489,6 +501,12 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
 export function renderMessageContent(content: string, info?: MentionInfo): DocumentFragment {
   const fragment = document.createDocumentFragment();
 
+  // A message that is nothing but emoji renders them large, the way Discord
+  // does. Decided once over the whole content — the class is what sizes both
+  // the unicode glyphs and the custom-emoji images, so nothing downstream has
+  // to be told about it.
+  const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
+
   for (const segment of splitCodeFences(content)) {
     if (segment.kind === "code") {
       fragment.appendChild(renderCodeBlock(segment.text, segment.lang));
@@ -497,7 +515,7 @@ export function renderMessageContent(content: string, info?: MentionInfo): Docum
     // Blank lines hugging a fence are formatting, not content.
     const prose = segment.text.replace(/^\n+/, "").replace(/\n+$/, "");
     if (prose.trim().length === 0) continue;
-    const text = createElement("div", { class: "msg-text" });
+    const text = createElement("div", { class: jumboClass });
     appendBlocks(text, prose, info);
     fragment.appendChild(text);
   }

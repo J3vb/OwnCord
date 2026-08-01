@@ -28,6 +28,8 @@ export interface ChatAreaOptions {
   readonly getToast: () => ToastContainer | null;
   readonly getChannelCtrl: () => ChannelController | null;
   readonly onToggleDmProfile?: () => void;
+  /** Start a call in the current DM (join its voice channel + ring). */
+  readonly onStartCall?: () => void;
 }
 
 export interface ChatAreaResult {
@@ -113,6 +115,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       searchCtrl.open();
     },
     onToggleDmProfile: opts.onToggleDmProfile,
+    onStartCall: opts.onStartCall,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
 

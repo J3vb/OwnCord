@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
 
 // envelope is the common wrapper for all WebSocket messages.
@@ -29,6 +30,11 @@ type wsMsg struct {
 type presencePayload struct {
 	UserID int64  `json:"user_id"`
 	Status string `json:"status"`
+	// CustomStatus is the user's free-text status line. Always present (null
+	// when unset) rather than omitempty: a client has to be able to tell
+	// "cleared it" from "this event does not mention it", and every presence
+	// broadcast carries the current value.
+	CustomStatus *string `json:"custom_status"`
 }
 
 type memberUserPayload struct {
@@ -36,6 +42,10 @@ type memberUserPayload struct {
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
 	Role     string  `json:"role"`
+	// DisplayName is the nickname to render instead of Username. Omitted when
+	// unset; clients fall back to Username. Username stays on the wire because
+	// it is still the unique handle mentions resolve against.
+	DisplayName *string `json:"display_name,omitempty"`
 	// IdentityPublicKey is the user's long-term E2EE identity public key
 	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
 	// user has not published one (legacy client) and in payloads that do not
@@ -73,6 +83,11 @@ type userUpdatePayload struct {
 	UserID   int64   `json:"user_id"`
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
+	// DisplayName and About are always present (null = cleared) so a profile
+	// edit that removes either one is distinguishable from one that leaves it
+	// alone — user_update replaces the client's copy wholesale.
+	DisplayName *string `json:"display_name"`
+	About       *string `json:"about"`
 	// IdentityPublicKey mirrors memberUserPayload — carried so peers can
 	// detect an identity-key change (TOFU mismatch) as it happens.
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
@@ -89,6 +104,24 @@ type memberBanPayload struct {
 // deleted role on screen.
 type rolesUpdatePayload struct {
 	Roles []db.Role `json:"roles"`
+}
+
+// emojiInfo is the client-facing shape of one custom emoji: enough to render
+// it and to spell it. The storage id and mime type stay server-side -- the
+// image route is the only thing that needs them.
+type emojiInfo struct {
+	ID        int64  `json:"id"`
+	Shortcode string `json:"shortcode"`
+	URL       string `json:"url"`
+}
+
+// emojiUpdatePayload carries the whole emoji set, for the same reason
+// rolesUpdatePayload carries the whole role list: the client's emoji state is a
+// flat map keyed by shortcode that message rendering, the picker and reaction
+// pills all read, and a wholesale replace cannot leave a deleted emoji on
+// screen after a dropped event.
+type emojiUpdatePayload struct {
+	Emoji []emojiInfo `json:"emoji"`
 }
 
 type chatSendOKPayload struct {
@@ -251,18 +284,13 @@ type serverRestartPayload struct {
 	DelaySeconds int    `json:"delay_seconds"`
 }
 
-// dmChannelOpenPayload is sent when a DM is opened/reopened for a user.
-type dmChannelOpenPayload struct {
-	ChannelID int64         `json:"channel_id"`
-	Recipient dmUserPayload `json:"recipient"`
-}
-
-// dmUserPayload is the public-facing shape for a DM participant in WS events.
-type dmUserPayload struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Avatar   string `json:"avatar"`
-	Status   string `json:"status"`
+// callSignalPayload carries an ephemeral DM call signal (call_incoming /
+// call_declined). There is no call id: the "call" is presence in the DM's
+// voice channel, so channel_id plus who is signalling is the whole state.
+type callSignalPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	FromUser  int64  `json:"from_user"`
+	Username  string `json:"username"`
 }
 
 // ---------------------------------------------------------------------------
@@ -325,10 +353,15 @@ func buildAuthError(message string) []byte {
 // ---------------------------------------------------------------------------
 
 // buildPresenceMsg constructs a presence broadcast payload.
-func buildPresenceMsg(userID int64, status string) []byte {
+//
+// status is taken verbatim: callers decide whose eyes the payload is for and
+// pass db.BroadcastStatus(status) for everyone but the owner. Keeping the
+// mapping out of the builder is deliberate — a builder that always collapsed
+// invisible could never produce the owner's own true-state message.
+func buildPresenceMsg(userID int64, status string, customStatus *string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
-		Payload: presencePayload{UserID: userID, Status: status},
+		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus},
 	})
 }
 
@@ -342,6 +375,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 				Username:          user.Username,
 				Avatar:            user.Avatar,
 				Role:              roleName,
+				DisplayName:       user.DisplayName,
 				IdentityPublicKey: user.IdentityPublicKey,
 			},
 		},
@@ -356,6 +390,7 @@ type chatMessageArgs struct {
 	UserID           int64
 	Username         string
 	Avatar           *string
+	DisplayName      *string
 	RoleName         string
 	Content          string
 	Timestamp        string
@@ -382,10 +417,11 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			ID:        a.MsgID,
 			ChannelID: a.ChannelID,
 			User: memberUserPayload{
-				ID:       a.UserID,
-				Username: a.Username,
-				Avatar:   a.Avatar,
-				Role:     a.RoleName,
+				ID:          a.UserID,
+				Username:    a.Username,
+				Avatar:      a.Avatar,
+				Role:        a.RoleName,
+				DisplayName: a.DisplayName,
 			},
 			Content:          a.Content,
 			ReplyTo:          a.ReplyTo,
@@ -407,16 +443,23 @@ func buildMemberUpdate(userID int64, roleName string) []byte {
 	})
 }
 
+// UserUpdate is the profile snapshot a user_update broadcast carries. It is a
+// struct rather than five positional arguments because every field is a
+// nullable string and a swapped pair would compile.
+type UserUpdate struct {
+	UserID            int64
+	Username          string
+	Avatar            *string
+	DisplayName       *string
+	About             *string
+	IdentityPublicKey *string
+}
+
 // buildUserUpdate constructs a user_update broadcast for profile changes.
-func buildUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) []byte {
+func buildUserUpdate(u UserUpdate) []byte {
 	return buildJSON(wsMsg{
-		Type: MsgTypeUserUpdate,
-		Payload: userUpdatePayload{
-			UserID:            userID,
-			Username:          username,
-			Avatar:            avatar,
-			IdentityPublicKey: identityPublicKey,
-		},
+		Type:    MsgTypeUserUpdate,
+		Payload: userUpdatePayload(u),
 	})
 }
 
@@ -440,6 +483,26 @@ func buildRolesUpdate(roles []*db.Role) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeRolesUpdate,
 		Payload: rolesUpdatePayload{Roles: flat},
+	})
+}
+
+// buildEmojiUpdate constructs an emoji_update broadcast carrying the full
+// custom-emoji set, ordered the way the server listed it.
+func buildEmojiUpdate(list []*db.Emoji) []byte {
+	flat := make([]emojiInfo, 0, len(list))
+	for _, e := range list {
+		if e == nil {
+			continue
+		}
+		flat = append(flat, emojiInfo{
+			ID:        e.ID,
+			Shortcode: e.Shortcode,
+			URL:       service.EmojiImageURL(e.ID),
+		})
+	}
+	return buildJSON(wsMsg{
+		Type:    MsgTypeEmojiUpdate,
+		Payload: emojiUpdatePayload{Emoji: flat},
 	})
 }
 
@@ -643,27 +706,57 @@ func buildChannelDelete(channelID int64) []byte {
 	})
 }
 
-// buildDMChannelOpen constructs a dm_channel_open event sent to a user.
-// Returns nil if recipient is nil to avoid a panic on dereferencing.
-func buildDMChannelOpen(channelID int64, recipient *db.User) []byte {
+// buildDMChannelOpen constructs a dm_channel_open event for one viewer.
+//
+// The payload is a db.DMChannelInfo, the same shape the REST list and the
+// ready payload carry, so a client has exactly one DM shape to parse. It is
+// built per viewer rather than once per channel because `recipient` and
+// `recipients` are both defined relative to who is reading them.
+func buildDMChannelOpen(info db.DMChannelInfo) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeDMChannelOpen,
+		Payload: info,
+	})
+}
+
+// buildDMChannelOpenFor constructs a dm_channel_open event announcing a 1:1 DM
+// to the user on the other end of it. Returns nil if recipient is nil to avoid
+// a panic on dereferencing.
+func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) []byte {
 	if recipient == nil {
-		slog.Warn("buildDMChannelOpen called with nil recipient", "channel_id", channelID)
+		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
 		return nil
 	}
 	avatarStr := ""
 	if recipient.Avatar != nil {
 		avatarStr = *recipient.Avatar
 	}
+	displayName := ""
+	if recipient.DisplayName != nil {
+		displayName = *recipient.DisplayName
+	}
+	other := db.DMUser{
+		ID:          recipient.ID,
+		Username:    recipient.Username,
+		Avatar:      avatarStr,
+		Status:      db.StatusForViewer(recipient.Status, recipient.ID, viewerID),
+		DisplayName: displayName,
+	}
+	return buildDMChannelOpen(db.DMChannelInfo{
+		ChannelID:  channelID,
+		Recipient:  other,
+		Recipients: []db.DMUser{other},
+	})
+}
+
+// buildCallSignal constructs a call_incoming or call_declined frame.
+func buildCallSignal(msgType string, channelID, fromUserID int64, username string) []byte {
 	return buildJSON(wsMsg{
-		Type: MsgTypeDMChannelOpen,
-		Payload: dmChannelOpenPayload{
+		Type: msgType,
+		Payload: callSignalPayload{
 			ChannelID: channelID,
-			Recipient: dmUserPayload{
-				ID:       recipient.ID,
-				Username: recipient.Username,
-				Avatar:   avatarStr,
-				Status:   recipient.Status,
-			},
+			FromUser:  fromUserID,
+			Username:  username,
 		},
 	})
 }

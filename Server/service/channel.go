@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -148,30 +149,64 @@ func (s *ChannelService) GetDMParticipantIDs(ctx context.Context, channelID int6
 	return s.st.GetDMParticipantIDs(ctx, channelID)
 }
 
-// HandlePresenceUpdate validates and persists a presence status change.
-func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, limiter interface {
+// HandlePresenceUpdate validates and persists a presence status change, and
+// (when customStatus is non-nil) the custom status line that came with it.
+//
+// The status is stored as chosen, invisible included; collapsing invisible to
+// offline is a broadcast-time concern (db.BroadcastStatus), not a storage one —
+// the server has to be able to tell "chose to look offline" from "is gone" on
+// the next connect. Returns the sanitized custom status the caller should put
+// on the wire, so the broadcast and the row can never disagree.
+func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, customStatus *string, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
-) error {
+) (*string, error) {
 	// Rate limit.
 	ratKey := auth.Key("presence", userID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 10*time.Second) {
-		return ErrRateLimited
+		return nil, ErrRateLimited
 	}
 
-	validStatuses := map[string]bool{
-		"online": true, "idle": true, "dnd": true, "offline": true,
+	if !db.ValidStatuses[status] {
+		return nil, fmt.Errorf("%w: invalid status", ErrBadRequest)
 	}
-	if !validStatuses[status] {
-		return fmt.Errorf("%w: invalid status", ErrBadRequest)
+
+	var cleaned *string
+	if customStatus != nil {
+		text := cleanText(*customStatus)
+		if utf8.RuneCountInString(text) > MaxCustomStatusLen {
+			return nil, fmt.Errorf("%w: custom_status must be at most %d characters", ErrBadRequest, MaxCustomStatusLen)
+		}
+		cleaned = nullable(text)
 	}
 
 	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
-		return fmt.Errorf("%w: failed to update status", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
+	}
+	if customStatus != nil {
+		if err := s.st.UpdateUserCustomStatus(ctx, userID, cleaned); err != nil {
+			slog.Error("ChannelService.HandlePresenceUpdate custom status", "err", err, "user_id", userID)
+			return nil, fmt.Errorf("%w: failed to update custom status", ErrInternal)
+		}
+		return cleaned, nil
 	}
 
-	return nil
+	// The command carried no custom_status field, so the stored one stands and
+	// still has to ride along on the broadcast — otherwise a plain
+	// online -> idle flip would blank everyone else's copy of the text.
+	//
+	// A read failure here is deliberately swallowed rather than returned: the
+	// status is already committed and is about to be broadcast, so reporting
+	// an error would tell the caller a presence update failed that in fact
+	// succeeded. The only cost is that this one broadcast omits the text.
+	user, readErr := s.st.GetUserByID(ctx, userID)
+	if readErr != nil || user == nil {
+		slog.Warn("HandlePresenceUpdate: could not read stored custom status",
+			"err", readErr, "user_id", userID)
+		return nil, nil //nolint:nilerr,nilnil // status committed; see comment above
+	}
+	return user.CustomStatus, nil
 }
 
 // HandleChannelFocus processes a channel focus event and updates read state.

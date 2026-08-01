@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -1363,7 +1364,9 @@ func TestReaction_EmptyEmoji_ReturnsBadRequest(t *testing.T) {
 }
 
 // TestReaction_TooLongEmoji_ReturnsBadRequest verifies that an emoji string
-// exceeding 32 bytes is rejected.
+// past the reaction length cap is rejected. The cap is derived from the custom
+// emoji shortcode limit (32) plus its two colons, so a reaction has to clear 34
+// runes to be refused.
 func TestReaction_TooLongEmoji_ReturnsBadRequest(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "react-owner5")
@@ -1375,8 +1378,8 @@ func TestReaction_TooLongEmoji_ReturnsBadRequest(t *testing.T) {
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
-	// 33-character emoji string — exceeds the 32-byte limit.
-	longEmoji := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 33 chars
+	// 35 runes — one past the ":" + 32-rune shortcode + ":" ceiling.
+	longEmoji := strings.Repeat("a", 35)
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, longEmoji))
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
@@ -1746,7 +1749,7 @@ func TestPresence_InvalidStatus_ReturnsBadRequest(t *testing.T) {
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
-	hub.HandleMessageForTest(c, presenceUpdateMsg("invisible"))
+	hub.HandleMessageForTest(c, presenceUpdateMsg("afk"))
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {

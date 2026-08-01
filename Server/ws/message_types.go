@@ -32,6 +32,8 @@ const (
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
+	MsgTypeCallRing          = "call_ring"
+	MsgTypeCallDecline       = "call_decline"
 )
 
 // Server → Client message types (sent in broadcasts/responses).
@@ -63,11 +65,14 @@ const (
 	MsgTypeUserUpdate          = "user_update"
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"
+	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
 	MsgTypeDMChannelClose      = "dm_channel_close"
+	MsgTypeCallIncoming        = "call_incoming"
+	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 )

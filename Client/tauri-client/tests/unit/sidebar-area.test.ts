@@ -262,6 +262,9 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
     channelId: 100,
     recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+    participants: [{ id: 10, username: "Alice", avatar: "", status: "online" }],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",
@@ -860,7 +863,10 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("re-renders DM sidebar when activeDmUserId changes in DMs mode", () => {
+    // Keyed on the active CHANNEL, not activeDmUserId: a group DM leaves the
+    // latter null, so a subscription on it would stop redrawing the list the
+    // moment a group became the active conversation.
+    it("re-renders DM sidebar when the active channel changes in DMs mode", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
@@ -868,8 +874,8 @@ describe("SidebarArea", () => {
 
       const initialCallCount = (createDmSidebar as MockedFn).mock.calls.length;
 
-      setActiveDmUser(42);
-      uiStore.flush();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 4242 }));
+      channelsStore.flush?.();
 
       const newCallCount = (createDmSidebar as MockedFn).mock.calls.length;
       expect(newCallCount).toBeGreaterThan(initialCallCount);
@@ -977,8 +983,13 @@ describe("SidebarArea", () => {
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
 
+      // The picker is multi-select since group DMs: a click selects, and the
+      // confirm button (labelled for the selection size) commits.
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
+      const confirm = document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement;
+      expect(confirm.textContent).toBe("Create DM");
+      confirm.click();
 
       expect(document.querySelector(".modal-overlay")).toBeNull();
 
@@ -1410,7 +1421,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(10);
+      lastCall.onCloseDm(100);
 
       expect(opts.api.closeDm).toHaveBeenCalledWith(100);
 
@@ -1452,7 +1463,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(10);
+      lastCall.onCloseDm(100);
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
 
@@ -1474,7 +1485,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onSelectConversation(10);
+      lastCall.onSelectConversation(100);
 
       expect(uiStore.getState().activeDmUserId).toBe(10);
       expect(channelsStore.getState().activeChannelId).toBe(100);
@@ -1868,12 +1879,12 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("does not overwrite existing channel with non-empty name", () => {
+    it("does not rewrite an existing channel whose name already matches", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(100, {
           id: 100,
-          name: "ExistingName",
+          name: "Alice",
           type: "dm",
           category: null,
           position: 0,
@@ -1899,7 +1910,7 @@ describe("SidebarArea", () => {
       entry.click();
 
       const ch = channelsStore.getState().channels.get(100);
-      expect(ch!.name).toBe("ExistingName");
+      expect(ch!.name).toBe("Alice");
 
       cleanup(result);
     });
@@ -2195,6 +2206,7 @@ describe("SidebarArea", () => {
       addBtn.click();
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
+      (document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement).click();
 
       await vi.waitFor(() => {
         expect(mockShow).toHaveBeenCalledWith("Server error", "error");

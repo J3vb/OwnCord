@@ -8,8 +8,15 @@
 // Common / Shared Types
 // -----------------------------------------------------------------------------
 
-/** Status values allowed by the protocol. */
-export type UserStatus = "online" | "idle" | "dnd" | "offline";
+/**
+ * Status values allowed by the protocol.
+ *
+ * "invisible" is a real, settable status since phase 6: the server stores it
+ * as chosen and maps it to "offline" for every OTHER user, so the owner keeps
+ * seeing their own true state. "offline" is what the server broadcasts for a
+ * user with no live session — it is no longer something a user picks.
+ */
+export type UserStatus = "online" | "idle" | "dnd" | "invisible" | "offline";
 
 /** Channel types supported by the server. */
 export type ChannelType = "text" | "voice" | "announcement" | "dm";
@@ -71,12 +78,21 @@ export interface MessageUser {
   readonly id: number;
   readonly username: string;
   readonly avatar: string | null;
+  /** Nickname to render instead of `username`. Absent/null = use `username`.
+   *  Mentions still resolve against `username`, which is the unique handle. */
+  readonly display_name?: string | null;
 }
 
 /** User object with role, used in auth_ok and member_join. */
 export interface UserWithRole extends MessageUser {
   readonly role: string;
   readonly totp_enabled?: boolean;
+  /** The signed-in user's own profile text. Null = unset. */
+  readonly about?: string | null;
+  readonly custom_status?: string | null;
+  /** The signed-in user's OWN true status, "invisible" included. Only ever
+   *  present on their own auth_ok / REST me payload. */
+  readonly status?: UserStatus;
   /** Long-term E2EE identity public key (base64), pinned by peers on first
    *  sight (F3 TOFU). Omitted/null when the user has not published one. */
   readonly identity_public_key?: string | null;
@@ -156,6 +172,10 @@ export interface ReadyMember {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Nickname to render instead of `username`. Null = unset. */
+  readonly display_name?: string | null;
+  /** Free-text status line shown under the name. Null = unset. */
+  readonly custom_status?: string | null;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
   readonly identity_public_key?: string | null;
 }
@@ -312,6 +332,10 @@ export interface TypingPayload {
 export interface PresencePayload {
   readonly user_id: number;
   readonly status: UserStatus;
+  /** The user's current custom status line. Always present on the wire
+   *  (null = none), so a cleared text is distinguishable from an event that
+   *  simply does not mention it. */
+  readonly custom_status?: string | null;
 }
 
 export interface ChannelCreatePayload {
@@ -444,6 +468,16 @@ export interface RolesUpdatePayload {
   readonly roles: readonly ReadyRole[];
 }
 
+/**
+ * `emoji_update` — the server's whole custom-emoji set after an upload or a
+ * delete. Whole-set for the same reason roles_update is: the client replaces
+ * its map rather than patching it, so a dropped event cannot leave a deleted
+ * emoji rendering.
+ */
+export interface EmojiUpdatePayload {
+  readonly emoji: readonly EmojiResponse[];
+}
+
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
@@ -453,6 +487,10 @@ export interface UserUpdatePayload {
   readonly user_id: number;
   readonly username: string;
   readonly avatar: string | null;
+  /** Always present (null = cleared): user_update replaces the client's copy
+   *  of the profile wholesale. */
+  readonly display_name?: string | null;
+  readonly about?: string | null;
   /** Updated E2EE identity public key (base64) — lets peers detect an
    *  identity-key change (TOFU mismatch) as it happens (F3). */
   readonly identity_public_key?: string | null;
@@ -472,12 +510,28 @@ export interface DmRecipient {
   readonly username: string;
   readonly avatar: string;
   readonly status: string;
+  /** Chosen nickname, "" when unset. Absent from pre-phase-6 servers. */
+  readonly display_name?: string;
 }
 
 /** DM channel object in ready payload and dm_channel_open event. */
 export interface DmChannelPayload {
   readonly channel_id: number;
+  /**
+   * The other participant of a 1:1 DM. Retained for backward compatibility;
+   * for a group it carries the first of `recipients` so an older payload
+   * shape still renders something. Prefer `recipients`.
+   */
   readonly recipient: DmRecipient;
+  /**
+   * Every participant except the current user. Absent from pre-group servers,
+   * where `recipient` is the whole membership.
+   */
+  readonly recipients?: readonly DmRecipient[];
+  /** Optional group name. "" (or absent) for a 1:1 DM. */
+  readonly name?: string;
+  /** True for a group DM. Absent from pre-group servers, which had none. */
+  readonly is_group?: boolean;
   readonly last_message_id: number | null;
   readonly last_message: string;
   readonly last_message_at: string;
@@ -489,13 +543,20 @@ export interface DmChannelPayload {
   readonly mention_count?: number;
 }
 
-export interface DmChannelOpenPayload {
+/** dm_channel_open carries the same shape as a ready-payload DM entry. */
+export type DmChannelOpenPayload = DmChannelPayload;
+
+/** call_incoming / call_declined. Ephemeral: there is no call id because a
+ *  call is presence in the DM's voice channel, not a server-side record. */
+export interface CallSignalPayload {
   readonly channel_id: number;
-  readonly recipient: DmRecipient;
-  readonly last_message_id: number | null;
-  readonly last_message: string;
-  readonly last_message_at: string;
-  readonly unread_count: number;
+  readonly from_user: number;
+  readonly username: string;
+}
+
+/** call_ring / call_decline (client → server). */
+export interface CallSignalRequestPayload {
+  readonly channel_id: number;
 }
 
 export interface DmChannelClosePayload {
@@ -566,6 +627,9 @@ export interface MarkReadPayload {
 
 export interface PresenceUpdatePayload {
   readonly status: UserStatus;
+  /** Omitted = leave the stored text alone (what the auto-idle timer sends);
+   *  "" = clear it. */
+  readonly custom_status?: string;
 }
 
 export interface VoiceJoinPayload {
@@ -648,8 +712,11 @@ export type ServerMessage =
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
+  | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
+  | (WsEnvelope<CallSignalPayload> & { readonly type: "call_incoming" })
+  | (WsEnvelope<CallSignalPayload> & { readonly type: "call_declined" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
   | (WsEnvelope<ErrorPayload> & { readonly type: "error" });
 
@@ -684,7 +751,9 @@ export type ClientMessage =
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
-    });
+    })
+  | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_ring" })
+  | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_decline" });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types
@@ -789,6 +858,9 @@ export interface MemberResponse {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  readonly display_name?: string | null;
+  readonly about?: string | null;
+  readonly custom_status?: string | null;
 }
 
 /** Search result item. */
@@ -812,13 +884,17 @@ export interface ApiError {
   readonly message: string;
 }
 
-/** Single emoji object from GET /api/emoji. */
+/**
+ * Single custom emoji from GET/POST /api/v1/emoji.
+ *
+ * `url` is server-relative and behind the session token — it is fetched the
+ * same authenticated, cert-pinned way attachments are, never assigned straight
+ * to an <img src>.
+ */
 export interface EmojiResponse {
   readonly id: number;
   readonly shortcode: string;
-  readonly filename: string;
-  readonly uploaded_by: number;
-  readonly created_at: string;
+  readonly url: string;
 }
 
 /** Single sound object from GET /api/sounds. */
@@ -892,6 +968,10 @@ export interface CreateDmResponse {
   readonly recipient: DmRecipient;
   readonly created: boolean;
 }
+
+/** POST /api/v1/dms/group and PATCH /api/v1/dms/{id} both answer with the
+ *  same DM summary shape the list and the ready payload use. */
+export type GroupDmResponse = DmChannelPayload;
 
 /** GET /api/v1/blocks response. */
 export interface BlockedUsersResponse {

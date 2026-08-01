@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/telemetry"
@@ -21,9 +23,71 @@ func NewUserService(st Store) *UserService {
 	return &UserService{st: st}
 }
 
-// UpdateProfile updates a user's username and/or avatar.
-// Returns the updated user for response building.
-func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username string, avatar *string) (*db.User, error) {
+// AvatarFileURL is the server-relative path an uploaded avatar is served from.
+// It is the ordinary attachment route: the upload handler writes an attachment
+// row and points users.avatar here, and handleServeFile admits an unlinked
+// attachment that some user's avatar names. Defined once because three places
+// have to agree on the spelling — the upload response, the stored column, and
+// the file route's authorization probe, which matches the column *by string*.
+func AvatarFileURL(fileID string) string {
+	return "/api/v1/files/" + fileID
+}
+
+// ─── Profile field bounds ───────────────────────────────────────────────────
+
+const (
+	// MaxDisplayNameLen bounds users.display_name. 32 matches the username
+	// cap: a nickname that could not fit where a username fits would render
+	// clipped in exactly the places the fallback puts the username.
+	MaxDisplayNameLen = 32
+	// MaxAboutLen bounds users.about — long enough for a paragraph, short
+	// enough that the popup's two-line section stays a section.
+	MaxAboutLen = 300
+	// MaxCustomStatusLen bounds users.custom_status: one line under a name.
+	MaxCustomStatusLen = 128
+)
+
+// ProfilePatch is a partial update to a user's profile. A nil field means
+// "leave unchanged"; a non-nil pointer to the empty string clears the nullable
+// fields (display name, about). The free-text fields are sanitized and
+// length-checked *here* rather than in the handler, so every transport that
+// can reach a profile gets the same rules.
+type ProfilePatch struct {
+	Username    string
+	Avatar      *string
+	DisplayName *string
+	About       *string
+}
+
+// nullable turns a sanitized, trimmed patch value into the column value:
+// empty string clears the column, anything else is stored as-is.
+func nullable(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// cleanText strips HTML and trims a free-text profile field. Both the profile
+// PATCH and the presence path run values through it before any bound check, so
+// a payload cannot buy length with markup that is about to be stripped anyway.
+func cleanText(v string) string {
+	return strings.TrimSpace(sanitizer.Sanitize(v))
+}
+
+// resolveOptional picks the column value for one nullable text field: the
+// sanitized patch when it was supplied, the existing row otherwise.
+func resolveOptional(patch *string, existing *string) *string {
+	if patch == nil {
+		return existing
+	}
+	return nullable(cleanText(*patch))
+}
+
+// UpdateProfile applies a ProfilePatch: username and avatar as before, plus
+// the nullable display name and about text. Returns the updated user for
+// response building.
+func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch ProfilePatch) (*db.User, error) {
 	ctx, span := telemetry.GlobalTracer("service/user").Start(ctx, "UserService.UpdateProfile",
 		telemetry.Int64("user_id", userID),
 	)
@@ -34,7 +98,28 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 		span.End()
 	}()
 
-	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar); err != nil {
+	if patch.DisplayName != nil && utf8.RuneCountInString(cleanText(*patch.DisplayName)) > MaxDisplayNameLen {
+		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
+	}
+	if patch.About != nil && utf8.RuneCountInString(cleanText(*patch.About)) > MaxAboutLen {
+		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	}
+
+	// The update writes every column, so a partial patch has to be merged
+	// against the current row first — otherwise setting only a display name
+	// would silently clear the about text.
+	current, err := s.st.GetUserByID(ctx, userID)
+	if err != nil || current == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	avatar := current.Avatar
+	if patch.Avatar != nil {
+		avatar = nullable(*patch.Avatar)
+	}
+	displayName := resolveOptional(patch.DisplayName, current.DisplayName)
+	about := resolveOptional(patch.About, current.About)
+
+	if err := s.st.UpdateUserProfile(ctx, userID, patch.Username, avatar, displayName, about); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
@@ -46,9 +131,34 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", username))
-	slog.Info("profile updated", "user_id", userID, "username", username)
+		fmt.Sprintf("username=%s", patch.Username))
+	slog.Info("profile updated", "user_id", userID, "username", patch.Username)
 	return user, nil
+}
+
+// SetCustomStatus stores (or clears, with an empty string) the user's custom
+// status line. It is the presence path's counterpart to UpdateProfile: the
+// value persists across reconnects and is cleared explicitly on logout, which
+// is why it is stored rather than held on the connection.
+func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
+	cleaned := cleanText(text)
+	if utf8.RuneCountInString(cleaned) > MaxCustomStatusLen {
+		return fmt.Errorf("%w: custom_status must be at most %d characters", ErrBadRequest, MaxCustomStatusLen)
+	}
+	if err := s.st.UpdateUserCustomStatus(ctx, userID, nullable(cleaned)); err != nil {
+		return fmt.Errorf("%w: failed to update custom status: %v", ErrInternal, err)
+	}
+	return nil
+}
+
+// ClearCustomStatus wipes the custom status line. Called on logout: the text
+// is a "what I am doing right now" note, and leaving it standing after the
+// user signed out states something about them that is no longer true.
+func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error {
+	if err := s.st.UpdateUserCustomStatus(ctx, userID, nil); err != nil {
+		return fmt.Errorf("%w: failed to clear custom status: %v", ErrInternal, err)
+	}
+	return nil
 }
 
 // UpdateIdentityKey publishes the user's long-term E2EE identity public key

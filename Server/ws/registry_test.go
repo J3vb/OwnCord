@@ -18,6 +18,7 @@ func fullV2Registry() *HandlerRegistry {
 	registerReactionHandlers(r, ReactionDeps{})
 	r.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{})
 	registerVoiceControlsV2(r, VoiceDeps{})
+	registerCallHandlers(r, CallDeps{})
 	return r
 }
 
@@ -131,6 +132,8 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"voice_e2ee_announce",
 		"voice_e2ee_offer",
 		"voice_token_refresh",
+		"call_ring",
+		"call_decline",
 	}
 
 	registered := r.RegisteredV2Types()
@@ -200,6 +203,8 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeVoiceE2EEAnnounce: VoiceE2EEAnnounceCmd{userID: 1},
 		MsgTypeVoiceE2EEOffer:    VoiceE2EEOfferCmd{userID: 1},
 		MsgTypeVoiceTokenRefresh: VoiceTokenRefreshCmd{userID: 1},
+		MsgTypeCallRing:          CallRingCmd{userID: 1, channelID: 1},
+		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, channelID: 1},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {

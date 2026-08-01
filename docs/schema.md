@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `022_message_mentions.sql` | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles |
 | `023_role_management.sql` | Adds `idx_roles_name_nocase` — role names become unique case-insensitively, matching how they are looked up |
 | `024_channel_user_overrides.sql` | Adds `channel_user_overrides` — per-member channel permission overrides, the last layer of the resolution order |
+| `025_channel_nsfw.sql` | Adds `channels.nsfw` — the age-gate flag the server stores and broadcasts but imposes no behaviour of its own on |
+| `026_emoji_mime.sql` | Adds `emoji.mime_type` — the sniffed image type, so the emoji image route can send a Content-Type without re-reading the file |
+| `027_user_profile_fields.sql` | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe |
+| `028_group_dms.sql` | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving |
 
 ---
 
@@ -142,15 +146,47 @@ CREATE TABLE users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name  TEXT,
+    about         TEXT,
+    custom_status TEXT
 );
+
+CREATE INDEX idx_users_avatar ON users(avatar) WHERE avatar IS NOT NULL;
 ```
 
-Valid status values: `online`, `idle`, `dnd`, `offline`. All statuses are reset to `offline` on server startup.
+Valid status values: `online`, `idle`, `dnd`, `invisible`, `offline`.
+
+`status` holds the status the user **chose**, `invisible` included — it is
+deliberately not collapsed to `offline` at the write, because the server has to
+be able to tell "chose to appear offline" from "is not connected" on the next
+connect. The collapse happens at read time instead (`db.BroadcastStatus` /
+`StatusForViewer`): every payload another user can see maps `invisible` to
+`offline`, while the owner's own payloads keep the true value.
+
+A chosen `idle`/`dnd`/`invisible` therefore survives a disconnect (only
+`online` is cleared, by `MarkUserDisconnected`) and survives a server restart
+(`ResetAllUserStatuses` clears only `online`). It cannot render as "present" in
+the meantime because the ready payload treats a member with no live connection
+as `offline` regardless of the column.
 
 `identity_public_key` (added in migration 017) is the user's long-term E2EE
 identity public key (base64 ECDSA P-256) used for TOFU pinning of voice E2EE
 announces; `NULL` = not published (legacy client).
+
+`display_name`, `about` and `custom_status` (migration 027) are the profile
+fields, all `NULL` when unset. Bounds — 32, 300 and 128 characters
+respectively — are enforced in the service layer, where the HTML sanitizer runs
+and a violation can answer `400` instead of a constraint error. `display_name`
+is display only: `@mentions` resolve against `username`, which is the unique,
+case-insensitive key.
+
+`idx_users_avatar` covers the file route's authorization probe. An avatar
+uploaded through `POST /api/v1/users/me/avatar` is an attachment with no
+channel — private to its uploader by default — and `GET /api/v1/files/{id}`
+additionally admits one that some user's `avatar` currently equals, so an
+avatar is readable by every authenticated user for exactly as long as it is in
+use.
 
 ---
 
@@ -214,7 +250,8 @@ CREATE TABLE channels (
     voice_quality    TEXT,
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 25,
-    nsfw             INTEGER NOT NULL DEFAULT 0
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 ```
 
@@ -237,6 +274,22 @@ in the sidebar.
 columns that *are* enforced by the server, on voice join and on video publish
 respectively (`CHANNEL_FULL` / `VIDEO_LIMIT`). They exist on every row but are
 meaningless on a non-voice channel.
+
+`is_group` (migration 028) marks a `dm` channel as a group DM. It is decided
+once at creation and **never recomputed from the live participant count**,
+because that count changes underneath you:
+
+- A group of three that two people leave has two participants, and the 1:1
+  lookup — "the dm channel both of these users are in" — would then match it.
+  "Message Bob" would silently deliver into the remnants of a group, in front of
+  whoever else is still there.
+- Leaving is destructive for a group (removal from `dm_participants`) and
+  non-destructive for a 1:1 (hide only). Deriving which one to run from the live
+  count means the third-from-last leaver runs a different operation than the
+  second-from-last, for no reason the user can see.
+
+`name` carries the optional group name; it is `''` for every 1:1 DM (a
+two-person DM is named by who is in it) and for an unnamed group.
 
 `PATCH /admin/api/channels/{id}` (`MANAGE_CHANNELS`) is the write path for
 `slow_mode` (0…21600), `nsfw` and both voice limits (0…99 each); values outside
@@ -430,7 +483,9 @@ CREATE TABLE read_states (
 `mention_count` is incremented on message insert for every mentioned user who
 can read the channel, except the author and except users who have blocked the
 author. `@everyone` counts every reader; `@here` counts only readers whose
-`users.status` is not `offline`. Edits never increment it — a badge is only
+*broadcast* status is not `offline` — the column stores the status the user
+chose, so a reader who picked `invisible` is collapsed to `offline` here and is
+skipped, exactly as they appear to everyone else. Edits never increment it — a badge is only
 raised by the original send, so an edit cannot double-count a mention. The
 `channel_focus` read-state upsert resets it to 0, and the `ready` payload ships
 it per channel.
@@ -489,6 +544,15 @@ CREATE TABLE dm_participants (
 );
 ```
 
+N rows per channel: two for a 1:1 DM, three to ten for a group
+(`db.MaxGroupDMParticipants`). Every DM authorization check is a lookup on
+`(user_id, channel_id)`, which is why group DMs needed no new authorization
+path — only `channels.is_group` to tell the two kinds apart.
+
+A group leave deletes the row. When the last one goes, the `channels` row is
+deleted with it: a DM nobody is in is reachable by nobody, and its messages and
+attachments cascade off the channel.
+
 ---
 
 ### dm_open_state
@@ -537,7 +601,7 @@ CREATE TABLE settings (
 
 ### emoji
 
-Custom emoji metadata.
+Server-wide custom emoji: one row per `:shortcode:`.
 
 ```sql
 CREATE TABLE emoji (
@@ -545,9 +609,29 @@ CREATE TABLE emoji (
     shortcode   TEXT    NOT NULL UNIQUE,
     filename    TEXT    NOT NULL,
     uploaded_by INTEGER NOT NULL REFERENCES users(id),
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mime_type   TEXT    NOT NULL DEFAULT 'image/png'   -- migration 026
 );
 ```
+
+`filename` holds the **storage UUID** the image bytes were written under (the
+same convention as `attachments.stored_as`); the column name is inherited from
+the initial schema. It is never derived from anything the uploader sent and is
+never shown to a user.
+
+`shortcode` is always lowercase — `[a-z0-9_]{2,32}` is the only spelling the
+validator admits — which is what makes the plain `UNIQUE` index a
+case-insensitive one without a `COLLATE NOCASE` change.
+
+`mime_type` (migration 026) is the type **sniffed from the file's own bytes** at
+upload, restricted to `image/png`, `image/jpeg`, `image/gif` and `image/webp`.
+It exists so `GET /api/v1/emoji/{id}/image` can set a Content-Type without
+opening and re-sniffing the file on every request. The `DEFAULT` is only there
+to make the `ALTER` legal; nothing had ever written to this table before
+migration 026, because the table shipped in 001 with no server code at all.
+
+Writes are gated on `MANAGE_SERVER` (see api.md for why no new permission bit
+was added), and every mutation broadcasts the whole set as `emoji_update`.
 
 ---
 

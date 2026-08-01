@@ -21,6 +21,7 @@ type Services struct {
 	Blocks      *BlockService
 	Moderation  *ModerationService
 	Roles       *RoleService
+	Emoji       *EmojiService
 }
 
 // New creates all domain services wired together.
@@ -37,5 +38,6 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Blocks:      NewBlockService(st),
 		Moderation:  NewModerationService(st, permSvc),
 		Roles:       NewRoleService(st, permSvc),
+		Emoji:       NewEmojiService(st, permSvc),
 	}
 }

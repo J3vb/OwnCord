@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_quality   TEXT,
     mixing_threshold INTEGER,
     voice_max_video INTEGER NOT NULL DEFAULT 10,
-    nsfw            INTEGER NOT NULL DEFAULT 0
+    nsfw            INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 `)
 

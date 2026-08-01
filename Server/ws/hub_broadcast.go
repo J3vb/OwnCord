@@ -317,6 +317,16 @@ func (h *Hub) BroadcastRolesUpdate(roles []*db.Role) {
 	h.BroadcastToAll(buildRolesUpdate(roles))
 }
 
+// BroadcastEmojiUpdate sends the full custom-emoji set to every connected
+// client so a newly uploaded (or deleted) emoji renders in messages, the
+// picker and reaction pills without a reconnect.
+//
+// Unfiltered, like BroadcastRolesUpdate: emoji are server-wide with no channel
+// scope, and every client may already GET the same list.
+func (h *Hub) BroadcastEmojiUpdate(list []*db.Emoji) {
+	h.BroadcastToAll(buildEmojiUpdate(list))
+}
+
 // BroadcastChatBulkDeleted sends one chat_bulk_deleted message carrying every
 // purged message id to the subscribers of channelID, replacing the N separate
 // chat_deleted broadcasts a loop of single deletes would produce. Fan-out goes
@@ -348,9 +358,24 @@ func (h *Hub) DisconnectUser(userID int64) {
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
-// when a user changes their profile (username, avatar, identity key).
-func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) {
-	h.BroadcastToAll(buildUserUpdate(userID, username, avatar, identityPublicKey))
+// when a user changes their profile (username, avatar, display name, about,
+// identity key).
+func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
+	h.BroadcastToAll(buildUserUpdate(u))
+}
+
+// BroadcastPresence fans a presence change out with the invisible mapping
+// applied: everyone else sees db.BroadcastStatus(status), the user themselves
+// sees the truth. It is the non-handler counterpart of presenceEvents, used by
+// the connect and disconnect paths which write to the hub directly.
+func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *string) {
+	public := db.BroadcastStatus(status)
+	if public == status {
+		h.BroadcastToAll(buildPresenceMsg(userID, status, customStatus))
+		return
+	}
+	h.broadcastExcludeLow(0, userID, buildPresenceMsg(userID, public, customStatus))
+	h.SendToUser(userID, buildPresenceMsg(userID, status, customStatus))
 }
 
 // BroadcastMemberUpdate sends a member_update message to all connected clients

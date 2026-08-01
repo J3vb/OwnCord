@@ -138,3 +138,97 @@ export function createModal(
     destroy: handleClose,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Prompt modal
+// ---------------------------------------------------------------------------
+
+export interface PromptModalOptions {
+  readonly title: string;
+  readonly label?: string;
+  readonly initialValue?: string;
+  readonly placeholder?: string;
+  readonly maxLength?: number;
+  readonly confirmLabel?: string;
+  /** Called with the trimmed value. Not called when the user cancels. */
+  readonly onSubmit: (value: string) => void;
+  readonly onClose?: () => void;
+  readonly testId?: string;
+}
+
+/**
+ * A one-field prompt: title, text input, confirm/cancel.
+ *
+ * Exists because `window.prompt` is unavailable in the Tauri webview and
+ * because a hand-rolled overlay per caller is three chances to forget Escape
+ * handling. An empty value is a legitimate submission — clearing a group DM's
+ * name is exactly how you say "go back to listing the members".
+ */
+export function createPromptModal(
+  options: PromptModalOptions,
+  container: Element = document.body,
+): ModalInstance {
+  const content = createElement("div", { style: "padding:20px;min-width:280px;" });
+  const heading = createElement("h3", {}, options.title);
+  content.appendChild(heading);
+
+  if (options.label !== undefined) {
+    content.appendChild(
+      createElement(
+        "p",
+        { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
+        options.label,
+      ),
+    );
+  }
+
+  const input = createElement("input", {
+    type: "text",
+    class: "modal-prompt-input",
+    placeholder: options.placeholder ?? "",
+    maxlength: String(options.maxLength ?? 100),
+    "data-testid": options.testId ?? "prompt-input",
+    style: "width:100%;",
+  });
+  input.value = options.initialValue ?? "";
+  content.appendChild(input);
+
+  const row = createElement("div", {
+    style: "display:flex;gap:8px;margin-top:12px;",
+  });
+  const confirm = createElement(
+    "button",
+    { class: "btn btn-primary", style: "flex:1;", "data-testid": "prompt-confirm" },
+    options.confirmLabel ?? "Save",
+  );
+  const cancel = createElement(
+    "button",
+    { class: "btn btn-secondary", style: "flex:1;", "data-testid": "prompt-cancel" },
+    "Cancel",
+  );
+  row.appendChild(confirm);
+  row.appendChild(cancel);
+  content.appendChild(row);
+
+  const instance = createModal(
+    { content, onClose: options.onClose, className: "modal-prompt" },
+    container,
+  );
+
+  const submit = (): void => {
+    const value = input.value.trim();
+    instance.close();
+    options.onSubmit(value);
+  };
+  confirm.addEventListener("click", submit);
+  cancel.addEventListener("click", () => instance.close());
+  input.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submit();
+    }
+  });
+  input.focus();
+
+  return instance;
+}

@@ -3,6 +3,7 @@ import { createDmSidebar } from "../../src/components/DmSidebar";
 import type { DmConversation } from "../../src/components/DmSidebar";
 
 const makeConvo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
+  channelId: 100,
   userId: 1,
   username: "Alice",
   avatar: null,
@@ -40,7 +41,10 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("renders Friends nav item", () => {
+  // The Friends nav item was removed in phase 6: it was a dead entry whose
+  // callback was never wired, and the plan's stated option was to delete it
+  // rather than build a friends list. This pins the deletion.
+  it("does not render a Friends nav item", () => {
     const sidebar = createDmSidebar({
       conversations: [],
       onSelectConversation: vi.fn(),
@@ -48,24 +52,8 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const friendsNav = container.querySelector(".dm-nav-item");
-    expect(friendsNav).not.toBeNull();
-    expect(friendsNav!.textContent).toBe("Friends");
-
-    sidebar.destroy?.();
-  });
-
-  it("marks Friends nav as active when friendsActive is true", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      friendsActive: true,
-    });
-    sidebar.mount(container);
-
-    const friendsNav = container.querySelector(".dm-nav-item");
-    expect(friendsNav!.classList.contains("active")).toBe(true);
+    expect(container.querySelector(".dm-nav-item")).toBeNull();
+    expect(container.textContent).not.toContain("Friends");
 
     sidebar.destroy?.();
   });
@@ -127,7 +115,7 @@ describe("DmSidebar", () => {
   it("calls onSelectConversation when a DM item is clicked", () => {
     const onSelectConversation = vi.fn();
     const sidebar = createDmSidebar({
-      conversations: [makeConvo({ userId: 42 })],
+      conversations: [makeConvo({ channelId: 42, userId: 42 })],
       onSelectConversation,
       onNewDm: vi.fn(),
     });
@@ -143,7 +131,7 @@ describe("DmSidebar", () => {
   it("calls onCloseDm when close button is clicked", () => {
     const onCloseDm = vi.fn();
     const sidebar = createDmSidebar({
-      conversations: [makeConvo({ userId: 42 })],
+      conversations: [makeConvo({ channelId: 42, userId: 42 })],
       onSelectConversation: vi.fn(),
       onNewDm: vi.fn(),
       onCloseDm,
@@ -280,23 +268,6 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("calls onFriendsClick when Friends nav item is clicked", () => {
-    const onFriendsClick = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onFriendsClick,
-    });
-    sidebar.mount(container);
-
-    const friendsNav = container.querySelector(".dm-nav-item") as HTMLDivElement;
-    friendsNav.click();
-    expect(onFriendsClick).toHaveBeenCalledOnce();
-
-    sidebar.destroy?.();
-  });
-
   it("applies correct status color to DM status dot", () => {
     const sidebar = createDmSidebar({
       conversations: [
@@ -325,7 +296,7 @@ describe("DmSidebar", () => {
     const onSelectConversation = vi.fn();
     const onCloseDm = vi.fn();
     const sidebar = createDmSidebar({
-      conversations: [makeConvo({ userId: 42 })],
+      conversations: [makeConvo({ channelId: 42, userId: 42 })],
       onSelectConversation,
       onNewDm: vi.fn(),
       onCloseDm,
@@ -466,7 +437,7 @@ describe("DmSidebar — unread and mention badges", () => {
   }
 
   it("renders the unread count, not a bare dot", () => {
-    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 4 }));
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 4 }));
 
     const badge = container.querySelector('[data-testid="dm-unread-7"]');
     expect(badge?.textContent).toBe("4");
@@ -474,28 +445,32 @@ describe("DmSidebar — unread and mention badges", () => {
   });
 
   it("renders a mention badge instead of the unread badge", () => {
-    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }));
+    mountWith(
+      makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }),
+    );
 
     expect(container.querySelector('[data-testid="dm-mentions-7"]')?.textContent).toBe("2");
     expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
   });
 
   it("pluralises the badge tooltips", () => {
-    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 1 }));
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 1 }));
     expect((container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement).title).toBe(
       "1 unread message",
     );
   });
 
   it("falls back to the dot when the payload carries no counts", () => {
-    mountWith(makeConvo({ userId: 7, unread: true }));
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true }));
 
     expect(container.querySelector(".dm-unread")).not.toBeNull();
     expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
   });
 
   it("renders no badge and no dot for a read conversation", () => {
-    mountWith(makeConvo({ userId: 7, unread: false, unreadCount: 0, mentionCount: 0 }));
+    mountWith(
+      makeConvo({ channelId: 7, userId: 7, unread: false, unreadCount: 0, mentionCount: 0 }),
+    );
 
     expect(container.querySelector(".dm-unread")).toBeNull();
     expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();

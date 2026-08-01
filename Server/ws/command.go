@@ -91,11 +91,18 @@ func (c TypingStartCmd) ChannelID() int64 { return c.channelID }
 type PresenceUpdateCmd struct {
 	userID int64
 	status string
+	// customStatus is nil when the payload carried no custom_status field at
+	// all, which means "leave the stored text alone". A present-but-empty
+	// string clears it. The distinction matters because the auto-idle timer
+	// sends a bare status flip several times an hour and must not wipe the
+	// text the user typed.
+	customStatus *string
 }
 
-func (c PresenceUpdateCmd) Type() string   { return MsgTypePresenceUpdate }
-func (c PresenceUpdateCmd) UserID() int64  { return c.userID }
-func (c PresenceUpdateCmd) Status() string { return c.status }
+func (c PresenceUpdateCmd) Type() string          { return MsgTypePresenceUpdate }
+func (c PresenceUpdateCmd) UserID() int64         { return c.userID }
+func (c PresenceUpdateCmd) Status() string        { return c.status }
+func (c PresenceUpdateCmd) CustomStatus() *string { return c.customStatus }
 
 // ChannelFocusCmd represents a channel_focus message.
 type ChannelFocusCmd struct {
@@ -315,6 +322,29 @@ func (c VoiceE2EEOfferCmd) TargetUserID() int64  { return c.targetUserID }
 func (c VoiceE2EEOfferCmd) EncryptedKey() string { return c.encryptedKey }
 func (c VoiceE2EEOfferCmd) IV() string           { return c.iv }
 
+// CallRingCmd represents a call_ring message: "start ringing the other people
+// in this DM". It carries only the channel — who is calling is the
+// authenticated sender, and there is no call id because there is no call
+// record (see registerCallHandlers).
+type CallRingCmd struct {
+	userID    int64
+	channelID int64
+}
+
+func (c CallRingCmd) Type() string     { return MsgTypeCallRing }
+func (c CallRingCmd) UserID() int64    { return c.userID }
+func (c CallRingCmd) ChannelID() int64 { return c.channelID }
+
+// CallDeclineCmd represents a call_decline message.
+type CallDeclineCmd struct {
+	userID    int64
+	channelID int64
+}
+
+func (c CallDeclineCmd) Type() string     { return MsgTypeCallDecline }
+func (c CallDeclineCmd) UserID() int64    { return c.userID }
+func (c CallDeclineCmd) ChannelID() int64 { return c.channelID }
+
 // ── Command constructors ────────────────────────────────────────────────────
 
 // parseModTarget parses the (channel, target user) pair every voice moderation
@@ -337,6 +367,26 @@ func parseModTarget(channelID, userID json.Number) (int64, int64, error) {
 		return 0, 0, fmt.Errorf("user_id must be positive")
 	}
 	return chID, targetID, nil
+}
+
+// parseCallChannelID parses the lone channel_id both call signalling payloads
+// carry. Shared so call_ring and call_decline cannot drift on what counts as a
+// valid channel reference.
+func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
+	var p struct {
+		ChannelID json.Number `json:"channel_id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return 0, fmt.Errorf("invalid %s payload: %w", msgType, err)
+	}
+	chID, err := p.ChannelID.Int64()
+	if err != nil {
+		return 0, fmt.Errorf("channel_id must be integer: %w", err)
+	}
+	if chID <= 0 {
+		return 0, fmt.Errorf("channel_id must be positive")
+	}
+	return chID, nil
 }
 
 // commandConstructors maps message types to functions that parse payloads
@@ -441,12 +491,13 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 
 	MsgTypePresenceUpdate: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		var p struct {
-			Status string `json:"status"`
+			Status       string  `json:"status"`
+			CustomStatus *string `json:"custom_status"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid presence_update payload: %w", err)
 		}
-		return PresenceUpdateCmd{userID: userID, status: p.Status}, nil
+		return PresenceUpdateCmd{userID: userID, status: p.Status, customStatus: p.CustomStatus}, nil
 	},
 
 	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
@@ -481,6 +532,22 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			return nil, fmt.Errorf("channel_id must be positive")
 		}
 		return MarkReadCmd{userID: userID, channelID: chID}, nil
+	},
+
+	MsgTypeCallRing: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		chID, err := parseCallChannelID(MsgTypeCallRing, raw)
+		if err != nil {
+			return nil, err
+		}
+		return CallRingCmd{userID: userID, channelID: chID}, nil
+	},
+
+	MsgTypeCallDecline: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		chID, err := parseCallChannelID(MsgTypeCallDecline, raw)
+		if err != nil {
+			return nil, err
+		}
+		return CallDeclineCmd{userID: userID, channelID: chID}, nil
 	},
 
 	MsgTypeReactionAdd: func(userID int64, _ string, raw json.RawMessage) (Command, error) {

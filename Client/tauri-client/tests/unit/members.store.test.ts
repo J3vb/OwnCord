@@ -76,6 +76,8 @@ describe("members store", () => {
         avatar: "alice.png",
         role: "admin",
         status: "online",
+        displayName: null,
+        customStatus: null,
         identityPublicKey: null,
       });
     });
@@ -110,6 +112,8 @@ describe("members store", () => {
         avatar: null,
         role: "member",
         status: "online",
+        displayName: null,
+        customStatus: null,
         identityPublicKey: null,
       });
     });

@@ -53,9 +53,11 @@ import {
   removeDmChannel,
   updateDmLastMessage,
   updateDmLastMessagePreview,
+  dmDisplayName,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
+import { setCustomEmoji } from "@stores/emoji.store";
 import type { DmChannelPayload } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
@@ -75,16 +77,29 @@ function livekitSession(): Promise<typeof import("@lib/livekitSession")> {
   return import("@lib/livekitSession");
 }
 
+/** Map one DM participant from the wire shape to the store's. */
+function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
+  return {
+    id: u.id,
+    username: u.username,
+    avatar: u.avatar,
+    status: u.status,
+    displayName: u.display_name ?? "",
+  };
+}
+
 /** Map a server DM channel payload to the client DmChannel type. */
 function mapDmPayload(p: DmChannelPayload): DmChannel {
+  // A pre-group server sends only `recipient`, which for it *is* the whole
+  // membership — so the fallback is a one-element list rather than an empty
+  // one, and every group-aware call site keeps working against an old server.
+  const participants = (p.recipients ?? [p.recipient]).map(mapDmUser);
   return {
     channelId: p.channel_id,
-    recipient: {
-      id: p.recipient.id,
-      username: p.recipient.username,
-      avatar: p.recipient.avatar,
-      status: p.recipient.status,
-    },
+    recipient: participants[0] ?? mapDmUser(p.recipient),
+    participants,
+    name: p.name ?? "",
+    isGroup: p.is_group ?? false,
     lastMessageId: p.last_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
@@ -115,7 +130,8 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
  */
 export function wireDispatcher(
   ws: WsClient,
-  api?: Pick<ApiClient, "listBlocks"> & Partial<Pick<ApiClient, "updateProfile" | "getConfig">>,
+  api?: Pick<ApiClient, "listBlocks"> &
+    Partial<Pick<ApiClient, "updateProfile" | "getConfig" | "listEmoji">>,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
 
@@ -206,6 +222,17 @@ export function wireDispatcher(
           .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
       }
 
+      // Custom emoji are not in the ready payload (they are server-wide and
+      // change rarely, so they do not belong in the per-session dump). Load
+      // them once here; `emoji_update` keeps them fresh from then on. A
+      // failure is non-fatal — unresolved shortcodes stay plain text.
+      if (api?.listEmoji !== undefined) {
+        api
+          .listEmoji()
+          .then((list) => setCustomEmoji(list))
+          .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
+      }
+
       log.info("Ready payload applied", {
         channels: payload.channels.length,
         members: payload.members.length,
@@ -220,7 +247,21 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.DM_CHANNEL_OPEN, (payload) => {
       log.info("DM channel opened", { channelId: payload.channel_id });
-      addDmChannel(mapDmPayload(payload));
+      const dm = mapDmPayload(payload);
+      addDmChannel(dm);
+
+      // A DM's channels-store row is synthesised from the DM store, and this
+      // event is also how a *membership* change arrives (group renamed, member
+      // left). Without this the chat header would keep the name the DM had
+      // when it was first opened, until the user navigated away and back.
+      channelsStore.setState((prev) => {
+        const existing = prev.channels.get(dm.channelId);
+        const name = dmDisplayName(dm);
+        if (existing === undefined || existing.name === name) return prev;
+        const next = new Map(prev.channels);
+        next.set(dm.channelId, { ...existing, name });
+        return { ...prev, channels: next };
+      });
     }),
   );
 
@@ -340,7 +381,10 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.PRESENCE, (payload) => {
-      updatePresence(payload.user_id, payload.status);
+      // custom_status is passed through verbatim, undefined included: the
+      // store treats "field absent" as "leave the text alone", which is what
+      // an older server's presence event means.
+      updatePresence(payload.user_id, payload.status, payload.custom_status);
     }),
   );
 
@@ -416,22 +460,38 @@ export function wireDispatcher(
     }),
   );
 
+  // Custom emoji changed server-side (uploaded or deleted). Whole set, like
+  // roles_update: the store is replaced so a deleted emoji stops rendering in
+  // messages, pickers and reaction pills without a reconnect.
+  unsubs.push(
+    ws.on(S.EMOJI_UPDATE, (payload) => {
+      log.info("Custom emoji updated", { count: payload.emoji?.length ?? 0 });
+      setCustomEmoji(payload.emoji ?? []);
+    }),
+  );
+
   unsubs.push(
     ws.on(S.USER_UPDATE, (payload) => {
       log.info("User profile updated", { userId: payload.user_id, username: payload.username });
-      updateMemberProfile(
-        payload.user_id,
-        payload.username,
-        payload.avatar,
-        payload.identity_public_key,
-      );
+      updateMemberProfile(payload.user_id, {
+        username: payload.username,
+        avatar: payload.avatar,
+        displayName: payload.display_name,
+        identityPublicKey: payload.identity_public_key,
+      });
 
       // Update auth store if the current user changed their own profile.
       const currentUser = authStore.getState().user;
       if (currentUser && payload.user_id === currentUser.id) {
         setAuth(
           authStore.getState().token ?? "",
-          { ...currentUser, username: payload.username, avatar: payload.avatar },
+          {
+            ...currentUser,
+            username: payload.username,
+            avatar: payload.avatar,
+            display_name: payload.display_name,
+            about: payload.about,
+          },
           authStore.getState().serverName ?? "",
           authStore.getState().motd ?? "",
         );

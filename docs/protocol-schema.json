@@ -30,7 +30,9 @@
       "go_trailing_comment": "//nolint:gosec // G101: false positive — message type constant, not a credential"
     },
     { "wire": "voice_e2ee_announce", "go": "MsgTypeVoiceE2EEAnnounce", "ts": "VOICE_E2EE_ANNOUNCE" },
-    { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" }
+    { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
+    { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
+    { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" }
   ],
   "server_to_client": [
     { "wire": "auth_ok", "go": "MsgTypeAuthOK", "ts": "AUTH_OK" },
@@ -65,11 +67,14 @@
     { "wire": "user_update", "go": "MsgTypeUserUpdate", "ts": "USER_UPDATE" },
     { "wire": "member_ban", "go": "MsgTypeMemberBan", "ts": "MEMBER_BAN" },
     { "wire": "roles_update", "go": "MsgTypeRolesUpdate", "ts": "ROLES_UPDATE" },
+    { "wire": "emoji_update", "go": "MsgTypeEmojiUpdate", "ts": "EMOJI_UPDATE" },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     { "wire": "error", "go": "MsgTypeError", "ts": "ERROR" },
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },
     { "wire": "dm_channel_close", "go": "MsgTypeDMChannelClose", "ts": "DM_CHANNEL_CLOSE" },
+    { "wire": "call_incoming", "go": "MsgTypeCallIncoming", "ts": "CALL_INCOMING" },
+    { "wire": "call_declined", "go": "MsgTypeCallDeclined", "ts": "CALL_DECLINED" },
     {
       "wire": "voice_e2ee_announce",
       "go": "MsgTypeVoiceE2EEAnnounceBC",

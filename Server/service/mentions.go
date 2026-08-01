@@ -166,7 +166,12 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, auth
 	recipients := make(map[int64]struct{}, len(readers))
 	if set.Everyone {
 		for _, r := range readers {
-			if set.HereOnly && r.Status == "offline" {
+			// db.BroadcastStatus, not a bare == "offline": the column stores the
+			// status the user *chose*, so an invisible reader holds "invisible"
+			// here and a literal comparison would ping them with @here — the one
+			// thing "appear offline" is meant to stop. Collapsing first makes
+			// @here agree with what everyone else can see of that reader.
+			if set.HereOnly && db.BroadcastStatus(r.Status) == db.StatusOffline {
 				continue
 			}
 			recipients[r.UserID] = struct{}{}

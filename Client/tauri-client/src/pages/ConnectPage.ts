@@ -228,6 +228,7 @@ export function createConnectPage(
         onClose: () => closeSettings(),
         onChangePassword: () => Promise.resolve(),
         onUpdateProfile: () => Promise.resolve(),
+        onUploadAvatar: () => Promise.reject(new Error("Not authenticated")),
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},

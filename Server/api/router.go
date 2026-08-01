@@ -208,7 +208,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	MountProfileRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	// A storage failure leaves store unusable, so the avatar-upload route is
+	// simply not registered; the rest of the profile surface is unaffected.
+	profileStore := store
+	if storeErr != nil {
+		profileStore = nil
+	}
+	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
@@ -217,6 +223,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Channel and message REST routes — mounted after hub creation so a
 	// message purge can broadcast chat_bulk_deleted to the channel.
 	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+
+	// Custom emoji REST routes — mounted after hub creation so an upload or a
+	// delete can fan the new set out as an emoji_update. Requires the same file
+	// storage the attachment routes use; without it the emoji endpoints are not
+	// mounted at all (a 404 the client reads as "this server has no emoji").
+	if storeErr == nil {
+		MountEmojiRoutes(r, database, svc, store, limiter, hub)
+	}
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.

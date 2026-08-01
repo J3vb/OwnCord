@@ -1532,3 +1532,95 @@ describe("renderers", () => {
     });
   });
 });
+
+// ─── Phase 6: display names and avatars on message rows ──────────────────────
+
+describe("message row author identity", () => {
+  beforeEach(() => {
+    resetStores();
+  });
+
+  afterEach(() => {
+    resetStores();
+  });
+
+  it("renders the display name from the member store, keeping the username as a title", () => {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName: "Alice A.",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+
+    const el = renderMessage(
+      makeMessage({ user: { id: 10, username: "alice", avatar: null } }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    const author = el.querySelector(".msg-author");
+    expect(author?.textContent).toBe("Alice A.");
+    // The handle you would @mention is one hover away.
+    expect(author?.getAttribute("title")).toBe("alice");
+    // And the letter follows the rendered name.
+    expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("A");
+  });
+
+  it("prefers the live member store over the identity frozen into the payload", () => {
+    // A rename arrives as a user_update and patches the member store; the
+    // messages already on screen still carry the old name in their payload.
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "renamed",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+
+    const el = renderMessage(
+      makeMessage({ user: { id: 10, username: "old-name", avatar: null } }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    expect(el.querySelector(".msg-author")?.textContent).toBe("renamed");
+  });
+
+  it("falls back to the payload for an author who is not in the member list", () => {
+    const el = renderMessage(
+      makeMessage({
+        user: { id: 99, username: "ghost", avatar: null, display_name: "Ghosty" },
+      }),
+      false,
+      [],
+      makeOpts(),
+      new AbortController().signal,
+    );
+
+    expect(el.querySelector(".msg-author")?.textContent).toBe("Ghosty");
+    expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("G");
+  });
+});

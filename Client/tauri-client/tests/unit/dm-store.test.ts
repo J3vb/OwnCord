@@ -14,6 +14,9 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
     channelId: 100,
     recipient: { id: 1, username: "alice", avatar: "", status: "online" },
+    participants: [{ id: 1, username: "alice", avatar: "", status: "online" }],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",

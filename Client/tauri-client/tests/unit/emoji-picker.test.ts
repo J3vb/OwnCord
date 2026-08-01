@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
+import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 
 describe("EmojiPicker", () => {
   let container: HTMLDivElement;
@@ -9,6 +10,8 @@ describe("EmojiPicker", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     localStorage.clear();
+    clearCustomEmoji();
+    emojiStore.flush();
   });
 
   afterEach(() => {
@@ -116,14 +119,67 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
-  it("renders custom emoji when provided", () => {
+  it("renders custom emoji under a Server category", () => {
     const { picker } = makePicker({
-      customEmoji: [{ shortcode: "test_emoji", url: "https://example.com/emoji.png" }],
+      customEmoji: [{ shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }],
     });
 
     const labels = picker.element.querySelectorAll(".ep-category-label");
     const labelTexts = Array.from(labels).map((l) => l.textContent);
-    expect(labelTexts).toContain("Custom");
+    expect(labelTexts).toContain("Server");
+    picker.destroy();
+  });
+
+  it("shows no Server category when the server has no custom emoji", () => {
+    const { picker } = makePicker();
+    const labelTexts = Array.from(picker.element.querySelectorAll(".ep-category-label")).map(
+      (l) => l.textContent,
+    );
+    expect(labelTexts).not.toContain("Server");
+    picker.destroy();
+  });
+
+  it("renders a resolvable custom emoji as an image, not as its token text", () => {
+    setCustomEmoji([{ id: 1, shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }]);
+    emojiStore.flush();
+    const { picker } = makePicker({
+      customEmoji: [{ shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }],
+    });
+
+    const cell = picker.element.querySelector(".ep-emoji-custom");
+    expect(cell).not.toBeNull();
+    expect(cell?.querySelector("img.custom-emoji")?.getAttribute("data-shortcode")).toBe(
+      "test_emoji",
+    );
+    expect(cell?.textContent).toBe("");
+    picker.destroy();
+  });
+
+  it("selecting a custom emoji inserts its :shortcode: token", () => {
+    setCustomEmoji([{ id: 1, shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }]);
+    emojiStore.flush();
+    const onSelect = vi.fn();
+    const { picker } = makePicker({
+      onSelect,
+      customEmoji: [{ shortcode: "test_emoji", url: "/api/v1/emoji/1/image" }],
+    });
+
+    (picker.element.querySelector(".ep-emoji-custom") as HTMLElement).click();
+    expect(onSelect).toHaveBeenCalledWith(":test_emoji:");
+    picker.destroy();
+  });
+
+  it("falls back to the token text when the shortcode does not resolve", () => {
+    clearCustomEmoji();
+    emojiStore.flush();
+    const { picker } = makePicker({
+      customEmoji: [{ shortcode: "ghost_emoji", url: "/api/v1/emoji/9/image" }],
+    });
+
+    const cells = Array.from(picker.element.querySelectorAll(".ep-emoji"));
+    const ghost = cells.find((c) => c.textContent === ":ghost_emoji:");
+    expect(ghost).toBeDefined();
+    expect(ghost?.querySelector("img")).toBeNull();
     picker.destroy();
   });
 

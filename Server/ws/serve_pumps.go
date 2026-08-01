@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/owncord/server/db"
 )
 
 // writePump drains the client's send channels and writes to the WebSocket.
@@ -122,8 +124,17 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			slog.Info("websocket disconnected", attrs...)
 
 			if !replaced {
-				_ = hub.db.UpdateUserStatus(cleanupCtx, c.userID, "offline")
-				hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
+				// A real disconnect is offline for everyone, the user
+				// included, so this path needs no invisible mapping. The row,
+				// however, keeps a *chosen* status (idle/dnd/invisible)
+				// standing — that is what the next connect reads to avoid
+				// stamping the user back online. MarkUserDisconnected clears
+				// only the non-choice "online" and refreshes last_seen; the
+				// stale-choice problem it would otherwise create is handled at
+				// read time, where a member with no live connection renders
+				// offline no matter what the column says.
+				_ = hub.db.MarkUserDisconnected(cleanupCtx, c.userID)
+				hub.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, c.user.CustomStatus))
 			}
 		}
 	}()

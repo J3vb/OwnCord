@@ -54,10 +54,19 @@ func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID
 	return users, nil
 }
 
+// maxReactionRunes bounds a reaction string. Reactions are free-form text, so
+// the ceiling has to clear the longest thing a client can legitimately react
+// with: a custom emoji is stored as its ":shortcode:" literal, which is
+// MaxShortcodeLen plus the two colons. Deriving it keeps the two from drifting
+// into an emoji that renders in a message but is silently refused as a
+// reaction. Unicode emoji, even long ZWJ sequences, sit far below this.
+const maxReactionRunes = MaxShortcodeLen + 2
+
 // validateEmoji applies the shared shape rules for a reaction emoji: non-empty,
-// at most 32 runes, no control characters, and unchanged by the sanitizer.
+// at most maxReactionRunes runes, no control characters, and unchanged by the
+// sanitizer.
 func validateEmoji(emoji string) error {
-	if emoji == "" || len([]rune(emoji)) > 32 {
+	if emoji == "" || len([]rune(emoji)) > maxReactionRunes {
 		return fmt.Errorf("%w: invalid emoji", ErrBadRequest)
 	}
 	for _, r := range emoji {

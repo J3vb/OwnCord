@@ -15,7 +15,11 @@ import type { Channel } from "@stores/channels.store";
 import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { markChannelRead, hasUnread } from "@lib/read-state";
+import { isChannelMuted, toggleChannelMute } from "@lib/channel-mutes";
 import { appendPurgeSection } from "@components/purge-prompt";
+
+/** Bubbles from a channel row when its mute is toggled. */
+export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
 
 /** Attach a right-click context menu to a channel element for edit/delete/purge. */
 export function attachChannelContextMenu(
@@ -40,7 +44,9 @@ export function attachChannelContextMenu(
   // Mark as Read touches only the caller's own read state, so it needs no
   // permission — but a voice channel holds no messages to read.
   const showMarkRead = channel.type !== "voice";
-  if (!showMarkRead && !showEdit && !showDelete && !canPurge) {
+  // Muting silences notifications, which a voice channel does not produce.
+  const showMute = channel.type !== "voice";
+  if (!showMarkRead && !showMute && !showEdit && !showDelete && !canPurge) {
     return;
   }
 
@@ -83,9 +89,41 @@ export function attachChannelContextMenu(
           );
         }
         menu.appendChild(markItem);
-        if (showEdit || showDelete || canPurge) {
-          menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-        }
+      }
+
+      if (showMute) {
+        // "Until turned off": there is no timed mute, because a timed one needs
+        // a stored expiry the client would have to sweep, and the affordance it
+        // buys ("quiet for 8 hours") is one the user can reproduce by unmuting.
+        const muted = isChannelMuted(channel.id);
+        const muteItem = createElement(
+          "div",
+          { class: "context-menu-item", "data-testid": "ctx-mute-channel" },
+          muted ? "Unmute Channel" : "Mute Channel",
+        );
+        muteItem.addEventListener(
+          "click",
+          () => {
+            closeMenu();
+            toggleChannelMute(channel.id);
+            // Mute state lives in localStorage, so there is no store change to
+            // subscribe to. A bubbling DOM event lets the sidebar redraw the
+            // row without threading a callback through four layers of
+            // positional render arguments.
+            el.dispatchEvent(
+              new CustomEvent(CHANNEL_MUTE_CHANGED, {
+                bubbles: true,
+                detail: { channelId: channel.id },
+              }),
+            );
+          },
+          { signal },
+        );
+        menu.appendChild(muteItem);
+      }
+
+      if ((showMarkRead || showMute) && (showEdit || showDelete || canPurge)) {
+        menu.appendChild(createElement("div", { class: "context-menu-sep" }));
       }
 
       if (showEdit && onEdit !== undefined) {

@@ -53,6 +53,18 @@ type SendMessageResult struct {
 	ParticipantIDs []int64
 	SenderUser     *db.User // for dm_channel_open events
 	OpenedDMFor    []int64  // participant IDs that had their DM opened
+	// DMParticipants is the full participant list of the DM, viewer-neutral:
+	// it is read with viewerID 0, which matches nobody, so every status is
+	// already broadcast-collapsed (an invisible participant reads as offline).
+	// That is what makes it safe to reuse for every addressee — the ws layer
+	// turns it into a per-recipient dm_channel_open payload without re-deriving
+	// visibility. Nil when the participant read failed, in which case the
+	// caller falls back to the sender-only 1:1 shape.
+	DMParticipants []db.DMUser
+	// DMIsGroup mirrors channels.is_group for this DM. Carried alongside the
+	// participants because a group that people have left can have two members
+	// and must still render as a group.
+	DMIsGroup bool
 
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo

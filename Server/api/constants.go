@@ -106,6 +106,11 @@ const (
 
 	// uploadRateLimitPerMinute is the maximum file uploads per user per minute.
 	uploadRateLimitPerMinute = 10
+
+	// emojiUploadRateLimitPerMinute is the maximum custom-emoji uploads per
+	// MANAGE_SERVER holder per minute. Lower than the attachment limit: every
+	// accepted upload fans an emoji_update out to every connected session.
+	emojiUploadRateLimitPerMinute = 10
 )
 
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
@@ -147,6 +152,50 @@ const (
 
 	// maxAvatarURLLen is the maximum length of a user avatar URL.
 	maxAvatarURLLen = 512
+
+	// maxEmojiFileBytes is the largest custom-emoji image accepted (512 KiB).
+	// An emoji renders at 22px inline and 48px jumbo, so anything approaching
+	// this is already far more data than the pixels can use.
+	maxEmojiFileBytes = 512 << 10
+
+	// maxEmojiDimension caps an emoji's width and height in pixels. Discord
+	// normalizes to 128px; matching it means an emoji uploaded for OwnCord
+	// looks the same as the one it was copied from, jumbo included.
+	maxEmojiDimension = 128
+
+	// emojiMaxBodySize bounds the whole multipart request. The image cap plus
+	// the form's own framing (boundaries, headers, the shortcode field) —
+	// generous enough that a legitimate 512 KiB upload never trips it.
+	emojiMaxBodySize = 1 << 20
+
+	// emojiMultipartMemoryLimit is the in-memory limit for parsing an emoji
+	// upload. Above maxEmojiFileBytes, so a valid emoji never spills to disk.
+	emojiMultipartMemoryLimit = 1 << 20
+
+	// maxAvatarFileBytes is the largest avatar image accepted (1 MiB). An
+	// avatar renders at 40px in a message row and 64px in the profile popup,
+	// so this is already generous; the client downscales before uploading and
+	// the cap is what stops it being used as free file hosting.
+	maxAvatarFileBytes = 1 << 20
+
+	// maxAvatarDimension caps an avatar's stored width and height. Bigger than
+	// any surface renders it, so a retina display still has pixels to spare
+	// while a 6000px camera JPEG is refused rather than shipped to every
+	// client that sees the user post.
+	maxAvatarDimension = 1024
+
+	// avatarMaxBodySize bounds the whole multipart avatar request: the image
+	// cap plus room for the form's boundaries and headers.
+	avatarMaxBodySize = 2 << 20
+
+	// avatarMultipartMemoryLimit is the in-memory limit for parsing an avatar
+	// upload. Above maxAvatarFileBytes, so a valid avatar never spills to disk.
+	avatarMultipartMemoryLimit = 2 << 20
+
+	// avatarUploadRateLimitPerMinute is the maximum avatar uploads per user per
+	// minute. Lower than the attachment limit: every accepted upload fans a
+	// user_update out to every connected session and orphans the previous file.
+	avatarUploadRateLimitPerMinute = 5
 
 	// maxRequestIDLen bounds a client-supplied X-Request-Id. chi's
 	// middleware.RequestID adopts that header verbatim, and the value then

@@ -20,6 +20,28 @@ type User struct {
 	// ECDSA P-256) used for TOFU pinning of voice E2EE announces. Nil = not
 	// published (legacy client).
 	IdentityPublicKey *string
+	// DisplayName is the optional nickname shown instead of Username. Nil =
+	// unset, and every renderer falls back to Username. Mentions still resolve
+	// against Username alone — it is the unique key.
+	DisplayName *string
+	// About is the optional profile bio shown in the profile popup. Nil = unset.
+	About *string
+	// CustomStatus is the optional free-text status line shown under the name.
+	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
+	CustomStatus *string
+}
+
+// EffectiveDisplayName returns the name to render for the user: the display
+// name when set and non-empty, the username otherwise. Every payload builder
+// goes through this so the fallback cannot be spelled three different ways.
+func (u *User) EffectiveDisplayName() string {
+	if u == nil {
+		return ""
+	}
+	if u.DisplayName != nil && *u.DisplayName != "" {
+		return *u.DisplayName
+	}
+	return u.Username
 }
 
 // Session represents a row in the sessions table.
@@ -259,6 +281,22 @@ type AuditEntry struct {
 	TargetType string `json:"target_type"`
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// Emoji represents a row in the emoji table: one server-wide custom emoji.
+//
+// StoredAs is the storage-layer UUID the image bytes live under (the table's
+// legacy column name is `filename`); it is never shown to a user and never
+// derived from anything the uploader sent. Shortcode is always lowercase --
+// the only spelling the validator admits -- which is what makes the table's
+// plain UNIQUE index a case-insensitive one.
+type Emoji struct {
+	ID         int64  `json:"id"`
+	Shortcode  string `json:"shortcode"`
+	StoredAs   string `json:"-"`
+	MimeType   string `json:"-"`
+	UploadedBy int64  `json:"uploaded_by"`
 	CreatedAt  string `json:"created_at"`
 }
 

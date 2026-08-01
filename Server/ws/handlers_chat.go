@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
 )
 
@@ -52,6 +53,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		UserID:           info.UserID,
 		Username:         info.Username,
 		Avatar:           info.Avatar,
+		DisplayName:      info.DisplayName,
 		RoleName:         info.RoleName,
 		Content:          result.Content,
 		Timestamp:        result.Timestamp,
@@ -70,11 +72,25 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 
 	// DM path: build dm_channel_open events + sequenced message.
 	var events []Event
-	if result.SenderUser != nil && len(result.OpenedDMFor) > 0 {
-		// The payload is identical for every recipient, so marshal it once
-		// outside the loop (delivery wraps it per-send without mutating it).
-		openPayload := buildDMChannelOpen(sendCmd.ChannelID(), result.SenderUser)
+	if len(result.OpenedDMFor) > 0 {
+		// One payload per recipient, not one for all of them: `recipient` and
+		// `recipients` are defined relative to who is reading, so a shared
+		// payload would list a group member as their own DM partner.
+		chName := ""
+		if result.Channel != nil {
+			chName = result.Channel.Name
+		}
 		for _, pid := range result.OpenedDMFor {
+			var openPayload []byte
+			if len(result.DMParticipants) > 0 {
+				openPayload = buildDMChannelOpen(
+					db.NewDMChannelInfo(sendCmd.ChannelID(), chName, result.DMIsGroup, result.DMParticipants, pid))
+			} else {
+				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID(), result.SenderUser, pid)
+			}
+			if openPayload == nil {
+				continue
+			}
 			events = append(events, DMChannelOpenEvent{
 				targetUserID: pid,
 				payload:      openPayload,

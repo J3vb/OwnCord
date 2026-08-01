@@ -47,7 +47,7 @@ function resetStores(): void {
 // ---------------------------------------------------------------------------
 
 function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
-  return {
+  const base: DmChannel = {
     channelId: 100,
     recipient: {
       id: 10,
@@ -55,6 +55,9 @@ function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
       avatar: "",
       status: "online",
     },
+    participants: [],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",
@@ -62,6 +65,9 @@ function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
     mentionCount: 0,
     ...overrides,
   };
+  // A 1:1 DM's participant list IS its recipient, so a fixture that overrides
+  // only `recipient` should not silently keep the default's participants.
+  return base.participants.length > 0 ? base : { ...base, participants: [base.recipient] };
 }
 
 function makeDeps(overrides: Partial<DmHelperDeps> = {}): DmHelperDeps {
@@ -107,13 +113,13 @@ describe("SidebarDmHelpers", () => {
       expect(ch!.unreadCount).toBe(3);
     });
 
-    it("does not overwrite an existing channel with a non-empty name", () => {
-      // Pre-populate with a channel that already has a name
+    it("does not rewrite an existing channel whose name already matches", () => {
+      // Pre-populate with a channel that already carries the DM's display name
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(100, {
           id: 100,
-          name: "ExistingName",
+          name: "Alice",
           type: "dm",
           category: null,
           position: 0,
@@ -135,7 +141,7 @@ describe("SidebarDmHelpers", () => {
 
       // Name should remain unchanged
       const ch = channelsStore.getState().channels.get(100);
-      expect(ch!.name).toBe("ExistingName");
+      expect(ch!.name).toBe("Alice");
     });
 
     it("overwrites an existing channel with an empty name", () => {
@@ -412,10 +418,13 @@ describe("SidebarDmHelpers", () => {
       const result = buildDmConversations(null);
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({
+        channelId: 100,
         userId: 10,
         username: "Alice",
         avatar: "alice.png",
         status: "online",
+        isGroup: false,
+        participants: [{ id: 10, username: "Alice", avatar: "alice.png" }],
         lastMessage: "Hello!",
         timestamp: "2025-01-01T00:00:00Z",
         unread: true,
@@ -423,11 +432,14 @@ describe("SidebarDmHelpers", () => {
         // than a bare dot, and so DM mentions survive a reconnect.
         unreadCount: 3,
         mentionCount: 1,
+        muted: false,
         active: false,
       });
     });
 
-    it("marks conversation as active when userId matches activeDmUserId", () => {
+    // Active is keyed on the CHANNEL, not the recipient: a group DM has no
+    // single recipient, and the same person can be in both a 1:1 and a group.
+    it("marks conversation as active when the channel is the active one", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
@@ -435,11 +447,11 @@ describe("SidebarDmHelpers", () => {
         }),
       );
 
-      const result = buildDmConversations(10);
+      const result = buildDmConversations(100);
       expect(result[0]!.active).toBe(true);
     });
 
-    it("does not mark conversation as active when userId does not match", () => {
+    it("does not mark conversation as active when the channel does not match", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
@@ -518,7 +530,7 @@ describe("SidebarDmHelpers", () => {
         }),
       );
 
-      const result = buildDmConversations(11);
+      const result = buildDmConversations(101);
       expect(result).toHaveLength(2);
       // Bob was added second so goes first (addDmChannel prepends)
       const bob = result.find((c) => c.username === "Bob");

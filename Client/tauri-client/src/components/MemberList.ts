@@ -7,7 +7,12 @@
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
-import { membersStore, type Member, type MembersState } from "@stores/members.store";
+import {
+  membersStore,
+  memberDisplayName,
+  type Member,
+  type MembersState,
+} from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
@@ -18,6 +23,7 @@ import {
 } from "@components/UserProfilePopup";
 import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
+import { createAvatarElement } from "@lib/avatar";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -125,6 +131,10 @@ function statusPriority(status: UserStatus): number {
       return 1;
     case "dnd":
       return 2;
+    // "invisible" only ever describes the signed-in user (the server shows
+    // everyone else offline), and it sorts with offline because that is where
+    // they appear to everybody — including, in this list, to themselves.
+    case "invisible":
     case "offline":
       return 3;
     default:
@@ -140,11 +150,17 @@ function statusColor(status: UserStatus): string {
       return "var(--yellow)";
     case "dnd":
       return "var(--red)";
+    case "invisible":
     case "offline":
       return "var(--text-micro)";
     default:
       return "#747f8d";
   }
+}
+
+/** True for the statuses that render a member as "not here". */
+function isAwayStatus(status: UserStatus): boolean {
+  return status === "offline" || status === "invisible";
 }
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
@@ -178,15 +194,13 @@ function createMemberItem(
   signal: AbortSignal,
 ): HTMLDivElement {
   const item = createElement("div", {
-    class: member.status === "offline" ? "member-item offline" : "member-item",
+    class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
   });
 
-  const initial = member.username.charAt(0).toUpperCase() || "?";
-  const avatar = createElement(
-    "div",
-    { class: "mi-avatar", style: `background: ${colorVar}` },
-    initial,
+  const avatar = createAvatarElement(
+    { username: member.username, displayName: member.displayName, avatar: member.avatar },
+    { className: "mi-avatar", background: colorVar },
   );
 
   const statusDot = createElement("div", {
@@ -197,10 +211,23 @@ function createMemberItem(
   });
   avatar.appendChild(statusDot);
 
+  // Name + custom status stack. The custom status is only rendered when there
+  // is one, so a member without it keeps the single-line row it always had.
+  const nameWrap = createElement("div", { class: "mi-text" });
   const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
-  setText(name, member.username);
+  setText(name, memberDisplayName(member));
+  nameWrap.appendChild(name);
+  const custom = member.customStatus;
+  if (typeof custom === "string" && custom.length > 0) {
+    const customEl = createElement("span", {
+      class: "mi-custom-status",
+      "data-testid": `member-custom-status-${member.id}`,
+    });
+    setText(customEl, custom);
+    nameWrap.appendChild(customEl);
+  }
 
-  appendChildren(item, avatar, name);
+  appendChildren(item, avatar, nameWrap);
 
   // Left-click opens the profile popup (previously dead code — built and
   // tested but never mounted from anywhere).
@@ -219,6 +246,8 @@ function createMemberItem(
           avatar: member.avatar,
           role: member.role,
           status: member.status,
+          displayName: member.displayName,
+          customStatus: member.customStatus,
         },
         anchorX: e.clientX,
         anchorY: e.clientY,
@@ -382,6 +411,10 @@ function isPresenceOnlyChange(
       before.username !== member.username ||
       before.role !== member.role ||
       before.avatar !== member.avatar ||
+      before.displayName !== member.displayName ||
+      // A custom status is rendered as its own line, so a change to it is a
+      // structural change, not a dot recolor.
+      before.customStatus !== member.customStatus ||
       before.identityPublicKey !== member.identityPublicKey
     ) {
       return false;
@@ -404,7 +437,7 @@ function patchPresence(
     if (before === undefined || before.status === member.status) continue;
     const row = rowsByUserId.get(id);
     if (row === undefined) continue;
-    row.classList.toggle("offline", member.status === "offline");
+    row.classList.toggle("offline", isAwayStatus(member.status));
     const dot = row.querySelector<HTMLDivElement>(".mi-status");
     if (dot !== null) {
       dot.style.background = statusColor(member.status);

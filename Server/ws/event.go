@@ -1,5 +1,7 @@
 package ws
 
+import "github.com/owncord/server/db"
+
 // ClientError represents an error to send back to the requesting client.
 // It implements the error interface so it can be used as Result.Error.
 type ClientError struct {
@@ -240,6 +242,57 @@ type PresenceEvent struct {
 func (e PresenceEvent) EventType() string { return MsgTypePresence }
 func (e PresenceEvent) Payload() []byte   { return e.payload }
 
+// PresenceOthersEvent is the public half of an invisible user's presence: the
+// mapped ("offline") payload, broadcast to everyone except the user it
+// describes. Satisfies ExcludeSenderEvent with a channel id of 0, which
+// broadcastExcludeLow routes as a global publish minus one subscriber.
+type PresenceOthersEvent struct {
+	excludeUserID int64
+	payload       []byte
+}
+
+func (e PresenceOthersEvent) EventType() string    { return MsgTypePresence }
+func (e PresenceOthersEvent) ChannelID() int64     { return 0 }
+func (e PresenceOthersEvent) ExcludeUserID() int64 { return e.excludeUserID }
+func (e PresenceOthersEvent) Payload() []byte      { return e.payload }
+
+// PresenceSelfEvent is the private half: the owner's own true status, sent
+// only to them. Without it a user who went invisible would be told they are
+// offline by the very broadcast that hid them, and would re-announce online on
+// the next reconnect.
+type PresenceSelfEvent struct {
+	targetUserID int64
+	payload      []byte
+}
+
+func (e PresenceSelfEvent) EventType() string   { return MsgTypePresence }
+func (e PresenceSelfEvent) TargetUserID() int64 { return e.targetUserID }
+func (e PresenceSelfEvent) Payload() []byte     { return e.payload }
+
+// presenceEvents builds the events one presence change needs.
+//
+// The common case is one global broadcast. Invisible is the exception and the
+// reason this helper exists: what others see and what the owner sees differ,
+// so the broadcast excludes the owner and a second, targeted event carries
+// their real status. Every presence emitter goes through here, so no new call
+// site can leak an invisible user by forgetting the mapping.
+func presenceEvents(userID int64, status string, customStatus *string) []Event {
+	public := db.BroadcastStatus(status)
+	if public == status {
+		return []Event{PresenceEvent{payload: buildPresenceMsg(userID, status, customStatus)}}
+	}
+	return []Event{
+		PresenceOthersEvent{
+			excludeUserID: userID,
+			payload:       buildPresenceMsg(userID, public, customStatus),
+		},
+		PresenceSelfEvent{
+			targetUserID: userID,
+			payload:      buildPresenceMsg(userID, status, customStatus),
+		},
+	}
+}
+
 // ReactionChannelEvent is a reaction update broadcast to a non-DM channel.
 type ReactionChannelEvent struct {
 	channelID int64
@@ -324,3 +377,17 @@ type DMChannelOpenEvent struct {
 func (e DMChannelOpenEvent) EventType() string   { return MsgTypeDMChannelOpen }
 func (e DMChannelOpenEvent) TargetUserID() int64 { return e.targetUserID }
 func (e DMChannelOpenEvent) Payload() []byte     { return e.payload }
+
+// CallSignalEvent delivers a DM call signal (call_incoming / call_declined) to
+// one participant. Satisfies UserTargetedEvent, so an offline addressee is a
+// no-op — which is the correct behaviour for ringing: a ring that arrives
+// after the fact is worse than no ring.
+type CallSignalEvent struct {
+	eventType    string
+	targetUserID int64
+	payload      []byte
+}
+
+func (e CallSignalEvent) EventType() string   { return e.eventType }
+func (e CallSignalEvent) TargetUserID() int64 { return e.targetUserID }
+func (e CallSignalEvent) Payload() []byte     { return e.payload }

@@ -5,9 +5,10 @@
  */
 
 import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
-import { dmStore } from "@stores/dm.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
+import { isChannelMuted } from "@lib/channel-mutes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,12 +73,16 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const dmChannels = dmStore.getState().channels;
     const displayChannels = dmChannels.slice(0, 3);
     for (const dm of displayChannels) {
+      const muted = isChannelMuted(dm.channelId);
       const dmItem = createElement("div", {
-        class: "channel-item",
+        class: muted ? "channel-item muted" : "channel-item",
         "data-testid": "dm-entry",
       });
-      const statusColor =
-        dm.recipient.status === "online"
+      // A group has no presence of its own, so it gets a neutral marker rather
+      // than the first member's dot dressed up as the conversation's state.
+      const statusColor = dm.isGroup
+        ? "var(--text-micro)"
+        : dm.recipient.status === "online"
           ? "var(--green)"
           : dm.recipient.status === "idle"
             ? "var(--yellow)"
@@ -85,17 +90,18 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
               ? "var(--red)"
               : "var(--text-micro)";
       const statusDot = createElement("span", {
-        style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;`,
+        style: `display:inline-block;width:8px;height:8px;border-radius:${dm.isGroup ? "2px" : "50%"};background:${statusColor};flex-shrink:0;`,
       });
-      const name = createElement("span", { class: "ch-name" }, dm.recipient.username);
+      const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
       const parts: Element[] = [statusDot, name];
       if (dm.unreadCount > 0) {
+        // Muted: the count still increments (it is a fact about the channel),
+        // it just stops shouting. Only the colour changes.
         const badge = createElement(
           "span",
           {
-            class: "dm-unread-badge",
-            style:
-              "margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;",
+            class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
+            style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--red)"};color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
           },
           String(dm.unreadCount),
         );
@@ -116,8 +122,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       viewAllBtn.style.display = "none";
     }
 
-    // Update total unread badge on the DM header
-    const totalUnread = dmChannels.reduce((sum, c) => sum + c.unreadCount, 0);
+    // Update total unread badge on the DM header. Muted conversations are
+    // excluded: the header badge is an interrupt, and a muted DM asked not to
+    // be one. Its own row still shows its dimmed count.
+    const totalUnread = dmChannels.reduce(
+      (sum, c) => sum + (isChannelMuted(c.channelId) ? 0 : c.unreadCount),
+      0,
+    );
     if (totalUnread > 0) {
       setText(dmUnreadBadge, String(totalUnread));
       dmUnreadBadge.style.display = "";

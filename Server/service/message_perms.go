@@ -107,7 +107,19 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 // A GetDMRecipient lookup failure or a DM with no other participant is treated
 // as "not blocked", carrying over the posture the send path has always had
 // rather than newly failing closed on all five sinks at once.
+//
+// Group DMs are exempt, which is Discord's rule and the only coherent one for
+// a shared room: there is no single "the other party" to be blocked by, and
+// dropping one member's messages for one other member would leave the two of
+// them reading different conversations under the same name. Blocks are instead
+// enforced when the group is *created* (DMService.CreateGroupDM), where the
+// question "may these two be in a room together" still has one answer.
 func requireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+	isGroup, gErr := st.IsGroupDM(ctx, channelID)
+	if gErr == nil && isGroup {
+		return nil
+	}
+
 	recipient, err := st.GetDMRecipient(ctx, channelID, userID)
 	if err != nil || recipient == nil {
 		return nil //nolint:nilerr // carries over checkSendPermission's posture: a lookup failure or a DM with no other participant is not a block

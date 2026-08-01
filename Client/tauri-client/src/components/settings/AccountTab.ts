@@ -8,7 +8,18 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
+import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
+import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+
+/** Mirrors the server's caps so the form can bound itself instead of learning
+ *  about the limits from a rejected request. */
+const MAX_DISPLAY_NAME_LEN = 32;
+const MAX_ABOUT_LEN = 300;
+/** Mirrors maxAvatarFileBytes / maxAvatarDimension on the server. */
+const MAX_AVATAR_BYTES = 1024 * 1024;
+const MAX_AVATAR_DIMENSION = 1024;
+const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,13 +31,15 @@ interface ProfileCardResult {
   readonly usernameValue: HTMLDivElement;
   readonly editUserProfileBtn: HTMLButtonElement;
   readonly editUsernameBtn: HTMLButtonElement;
+  /** The big avatar; the uploader swaps its contents on success. */
+  readonly avatarLarge: HTMLDivElement;
 }
 
 // ---------------------------------------------------------------------------
 // Profile card builder
 // ---------------------------------------------------------------------------
 
-function buildProfileCard(username: string): ProfileCardResult {
+function buildProfileCard(displayName: string, username: string): ProfileCardResult {
   const card = createElement("div", { class: "account-card" });
   const banner = createElement("div", { class: "account-banner" });
 
@@ -34,15 +47,15 @@ function buildProfileCard(username: string): ProfileCardResult {
   const avatarWrap = createElement("div", { class: "account-avatar-wrap" });
   const avatarLarge = createElement(
     "div",
-    { class: "account-avatar-large" },
-    username.charAt(0).toUpperCase(),
+    { class: "account-avatar-large", "data-testid": "account-avatar" },
+    avatarInitial({ username, displayName }),
   );
   const statusDot = createElement("div", { class: "account-status-dot" });
   appendChildren(avatarWrap, avatarLarge, statusDot);
 
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
-  const headerName = createElement("div", { class: "account-header-name" }, username);
+  const headerName = createElement("div", { class: "account-header-name" }, displayName);
   const editUserProfileBtn = createElement("button", { class: "ac-btn" }, "Edit User Profile");
   appendChildren(accountHeader, headerName, editUserProfileBtn);
 
@@ -59,7 +72,247 @@ function buildProfileCard(username: string): ProfileCardResult {
 
   appendChildren(card, banner, avatarWrap, accountHeader, fieldsContainer);
 
-  return { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn };
+  return { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge };
+}
+
+// ---------------------------------------------------------------------------
+// Avatar preview + uploader
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw `url` into the big avatar, replacing the letter. Falls back to the
+ * letter when there is nothing to draw or the fetch fails, because the file
+ * route is authenticated and `<img src>` cannot carry the session token.
+ */
+function paintAvatar(
+  target: HTMLDivElement,
+  url: string | null,
+  alt: string,
+  initial: string,
+): void {
+  const showInitial = (): void => {
+    target.replaceChildren(document.createTextNode(initial));
+    target.style.background = "";
+  };
+  if (url === null) {
+    showInitial();
+    return;
+  }
+  void fetchImageAsDataUrl(url).then((dataUrl) => {
+    if (dataUrl === null || !target.isConnected) return;
+    const img = createElement("img", { class: "avatar-img", src: dataUrl, alt });
+    target.replaceChildren(img);
+    target.style.background = "transparent";
+  });
+}
+
+/**
+ * Read a File into an object URL and measure it, so an image the server would
+ * refuse is caught before a megabyte goes over the wire — and so the preview
+ * shows what was actually picked rather than a spinner that ends in a 400.
+ */
+function measureImage(file: File): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.addEventListener(
+      "load",
+      () => {
+        URL.revokeObjectURL(url);
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      },
+      { once: true },
+    );
+    img.addEventListener(
+      "error",
+      () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      },
+      { once: true },
+    );
+    img.src = url;
+  });
+}
+
+/** Local validation mirroring the server's rules. Returns an error message. */
+export function validateAvatarFile(
+  file: { size: number; type: string },
+  dimensions: { width: number; height: number } | null,
+): string | null {
+  if (!ACCEPTED_AVATAR_TYPES.split(",").includes(file.type)) {
+    return "Avatar must be a PNG, JPEG or WebP image.";
+  }
+  if (file.size > MAX_AVATAR_BYTES) {
+    return `Avatar must be at most ${MAX_AVATAR_BYTES / 1024} KB.`;
+  }
+  if (dimensions === null) {
+    return "That file could not be read as an image.";
+  }
+  if (dimensions.width > MAX_AVATAR_DIMENSION || dimensions.height > MAX_AVATAR_DIMENSION) {
+    return `Avatar must be at most ${MAX_AVATAR_DIMENSION}x${MAX_AVATAR_DIMENSION} pixels.`;
+  }
+  return null;
+}
+
+function buildAvatarUploader(
+  options: SettingsOverlayOptions,
+  avatarLarge: HTMLDivElement,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", { class: "account-avatar-upload" });
+  const input = createElement("input", {
+    type: "file",
+    accept: ACCEPTED_AVATAR_TYPES,
+    style: "display:none",
+    "data-testid": "avatar-file-input",
+  });
+  const uploadBtn = createElement(
+    "button",
+    { class: "ac-btn", "data-testid": "avatar-upload-btn" },
+    "Change Avatar",
+  );
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-top:6px",
+    "data-testid": "avatar-error",
+  });
+
+  uploadBtn.addEventListener("click", () => input.click(), { signal });
+
+  input.addEventListener(
+    "change",
+    () => {
+      const file = input.files?.[0];
+      if (file === undefined) return;
+      setText(errorEl, "");
+      void (async () => {
+        const dimensions = await measureImage(file);
+        const problem = validateAvatarFile(file, dimensions);
+        if (problem !== null) {
+          setText(errorEl, problem);
+          input.value = "";
+          return;
+        }
+        uploadBtn.disabled = true;
+        setText(uploadBtn, "Uploading...");
+        try {
+          const url = await options.onUploadAvatar(file);
+          const user = authStore.getState().user;
+          paintAvatar(
+            avatarLarge,
+            resolveServerUrl(url),
+            user?.username ?? "avatar",
+            avatarInitial({
+              username: user?.username ?? "?",
+              displayName: user?.display_name ?? null,
+            }),
+          );
+        } catch (err) {
+          setText(errorEl, err instanceof Error ? err.message : "Failed to upload avatar.");
+        } finally {
+          input.value = "";
+          uploadBtn.disabled = false;
+          setText(uploadBtn, "Change Avatar");
+        }
+      })();
+    },
+    { signal },
+  );
+
+  appendChildren(wrapper, input, uploadBtn, errorEl);
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Display name + about
+// ---------------------------------------------------------------------------
+
+function buildProfileFields(
+  options: SettingsOverlayOptions,
+  onSaved: (displayName: string) => void,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", {});
+  const separator = createElement("div", { class: "settings-separator" });
+  const header = createElement("div", { class: "settings-section-title" }, "Profile");
+
+  const user = authStore.getState().user;
+
+  const nameLabel = createElement("div", { class: "account-field-label" }, "Display Name");
+  const nameInput = createElement("input", {
+    class: "form-input",
+    type: "text",
+    placeholder: "Shown instead of your username",
+    maxlength: String(MAX_DISPLAY_NAME_LEN),
+    style: "margin-bottom:12px",
+    "data-testid": "display-name-input",
+  });
+  nameInput.value = user?.display_name ?? "";
+
+  const aboutLabel = createElement("div", { class: "account-field-label" }, "About Me");
+  const aboutInput = createElement("textarea", {
+    class: "form-input",
+    rows: "3",
+    placeholder: "A little about you",
+    maxlength: String(MAX_ABOUT_LEN),
+    style: "margin-bottom:8px;resize:vertical",
+    "data-testid": "about-input",
+  });
+  aboutInput.value = user?.about ?? "";
+
+  const statusEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "profile-error",
+  });
+  const saveBtn = createElement(
+    "button",
+    { class: "ac-btn", "data-testid": "profile-save-btn" },
+    "Save Profile",
+  );
+
+  saveBtn.addEventListener(
+    "click",
+    () => {
+      const displayName = nameInput.value.trim();
+      const about = aboutInput.value.trim();
+      // Both are sent unconditionally, empty string included: "" is how the
+      // API says "clear it", and omitting a field means "leave it alone".
+      statusEl.style.color = "var(--red)";
+      setText(statusEl, "");
+      saveBtn.disabled = true;
+      setText(saveBtn, "Saving...");
+      void options
+        .onUpdateProfile({ display_name: displayName, about })
+        .then(() => {
+          statusEl.style.color = "var(--green)";
+          setText(statusEl, "Profile saved.");
+          onSaved(
+            displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
+          );
+        })
+        .catch((err: unknown) => {
+          setText(statusEl, err instanceof Error ? err.message : "Failed to save profile.");
+        })
+        .finally(() => {
+          saveBtn.disabled = false;
+          setText(saveBtn, "Save Profile");
+        });
+    },
+    { signal },
+  );
+
+  appendChildren(
+    wrapper,
+    separator,
+    header,
+    nameLabel,
+    nameInput,
+    aboutLabel,
+    aboutInput,
+    statusEl,
+    saveBtn,
+  );
+  return wrapper;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,8 +833,10 @@ const STATUS_OPTIONS: readonly StatusOption[] = [
     color: "#ed4245",
   },
   {
-    value: "offline",
-    label: "Offline",
+    // Its own status now, not "offline" relabeled: the server stores it as
+    // chosen, shows everyone else offline, and honours it across reconnects.
+    value: "invisible",
+    label: "Invisible",
     description: "You will appear offline but still have full access",
     color: "#747f8d",
   },
@@ -804,11 +1059,37 @@ export function buildAccountTab(
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
   const username = user?.username ?? "Unknown";
+  const displayName = resolveDisplayName({
+    username,
+    displayName: user?.display_name ?? null,
+  });
 
   // Profile card
-  const { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn } =
-    buildProfileCard(username);
+  const { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge } =
+    buildProfileCard(displayName, username);
   section.appendChild(card);
+
+  // Existing avatar, if any — the letter is only a fallback now.
+  if (isRenderableAvatar(user?.avatar)) {
+    paintAvatar(
+      avatarLarge,
+      resolveServerUrl(user.avatar),
+      username,
+      avatarInitial({ username, displayName: user?.display_name ?? null }),
+    );
+  }
+  section.appendChild(buildAvatarUploader(options, avatarLarge, signal));
+
+  // Display name + about
+  section.appendChild(
+    buildProfileFields(
+      options,
+      (name) => {
+        setText(headerName, name);
+      },
+      signal,
+    ),
+  );
 
   // Status selector
   section.appendChild(buildStatusSelector(options, signal));
@@ -822,6 +1103,7 @@ export function buildAccountTab(
     class: "form-input",
     type: "text",
     placeholder: "New username",
+    "data-testid": "username-edit-input",
   });
   const saveBtn = createElement("button", { class: "ac-btn" }, "Save");
   const cancelBtn = createElement(
@@ -864,7 +1146,7 @@ export function buildAccountTab(
       }
       setText(usernameError, "");
       void options
-        .onUpdateProfile(newName)
+        .onUpdateProfile({ username: newName })
         .then(() => {
           setText(headerName, newName);
           setText(usernameValue, newName);

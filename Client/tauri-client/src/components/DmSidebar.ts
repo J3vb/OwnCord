@@ -4,21 +4,41 @@
  *
  * Uses the `channel-sidebar` container class (shared with channel sidebar)
  * and DM-specific classes from app.css: dm-sidebar-header, dm-search,
- * dm-nav-item, dm-section-label, dm-add, dm-item, dm-avatar, dm-status,
+ * dm-section-label, dm-add, dm-item, dm-avatar, dm-status,
  * dm-name, dm-close, dm-unread.
+ *
+ * Rows are keyed on the DM *channel*, not on a recipient user: a group DM has
+ * no single recipient, and the same person can be in both a 1:1 and a group
+ * with you, so a user id no longer identifies a conversation.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isSafeUrl } from "./message-list/attachments";
 
+/** One member of a group DM, as far as the sidebar needs to draw them. */
+export interface DmParticipant {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string | null;
+}
+
 export interface DmConversation {
+  /** The DM channel. The row's identity — see the module comment. */
+  readonly channelId: number;
+  /** The other party of a 1:1 DM; for a group, the first participant. */
   readonly userId: number;
+  /** What the row is labelled: a group's name or joined members, else a user. */
   readonly username: string;
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
+  /** True for a group DM: draws stacked avatars and a participant count. */
+  readonly isGroup?: boolean;
+  /** Everyone but the current user. Drives the stack and the count. */
+  readonly participants?: readonly DmParticipant[];
   readonly lastMessage: string;
   readonly timestamp: string;
   readonly unread: boolean;
@@ -28,16 +48,21 @@ export interface DmConversation {
   /** Unread messages here that mention the current user. Outranks the unread
    *  badge, exactly as it does in the channel list. */
   readonly mentionCount?: number;
+  /** Muted: the unread badge renders dimmed. The mention badge does not —
+   *  a mute silences chatter, never something addressed to you. */
+  readonly muted?: boolean;
   readonly active?: boolean;
 }
 
 export interface DmSidebarOptions {
   readonly conversations: readonly DmConversation[];
-  readonly onSelectConversation: (userId: number) => void;
+  readonly onSelectConversation: (channelId: number) => void;
   readonly onNewDm: () => void;
-  readonly onCloseDm?: (userId: number) => void;
-  readonly onFriendsClick?: () => void;
-  readonly friendsActive?: boolean;
+  /** Close a 1:1 DM / leave a group. The component does not distinguish —
+   *  which one it is is the server's call, and the label says so. */
+  readonly onCloseDm?: (channelId: number) => void;
+  readonly onToggleMute?: (channelId: number) => void;
+  readonly onRenameGroup?: (channelId: number) => void;
   readonly onBack?: () => void;
   readonly serverName?: string;
 }
@@ -49,73 +74,121 @@ const STATUS_COLORS: Record<string, string> = {
   offline: "var(--text-micro)",
 };
 
+/** Fill one avatar circle: the picture if it is safe to load, else the letter. */
+function paintAvatar(el: HTMLElement, avatar: string | null, label: string): void {
+  if (avatar !== null && isSafeUrl(avatar)) {
+    const img = createElement("img", { src: avatar, alt: label });
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.borderRadius = "50%";
+    el.appendChild(img);
+    return;
+  }
+  setText(el, label.charAt(0).toUpperCase());
+}
+
+/**
+ * The avatar block for a row: one circle for a 1:1 DM with a presence dot, or
+ * two overlapping circles for a group.
+ *
+ * A group deliberately gets no presence dot — "is this group online" has no
+ * answer, and showing the first member's would be a fact about one person
+ * presented as a fact about the conversation.
+ */
+function buildAvatar(convo: DmConversation): HTMLDivElement {
+  const avatarBg = convo.avatarColor ?? "#5865F2";
+
+  if (convo.isGroup === true) {
+    const stack = createElement("div", {
+      class: "dm-avatar dm-avatar-stack",
+      "data-testid": `dm-avatar-stack-${convo.channelId}`,
+    });
+    const shown = (convo.participants ?? []).slice(0, 2);
+    // An empty group (every other member has left) still needs a mark, so fall
+    // back to the row's own label rather than rendering an empty circle.
+    const faces = shown.length > 0 ? shown : [{ id: 0, username: convo.username, avatar: null }];
+    faces.forEach((p, i) => {
+      const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
+      face.style.background = avatarBg;
+      paintAvatar(face, p.avatar, p.username);
+      stack.appendChild(face);
+    });
+    return stack;
+  }
+
+  const avatar = createElement("div", { class: "dm-avatar" });
+  avatar.style.background = avatarBg;
+  paintAvatar(avatar, convo.avatar, convo.username);
+
+  const statusKey = convo.status ?? "offline";
+  const statusDot = createElement("span", { class: "dm-status" });
+  statusDot.style.background = STATUS_COLORS[statusKey] ?? "var(--text-micro)";
+  avatar.appendChild(statusDot);
+  return avatar;
+}
+
 function renderDmItem(
   convo: DmConversation,
-  onSelect: (userId: number) => void,
-  onClose: ((userId: number) => void) | undefined,
+  options: DmSidebarOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
   const item = createElement("div", { class: "dm-item" });
   if (convo.active === true) {
     item.classList.add("active");
   }
+  if (convo.muted === true) {
+    item.classList.add("muted");
+  }
+  item.dataset.channelId = String(convo.channelId);
   item.dataset.userId = String(convo.userId);
 
-  // Avatar with status dot
-  const avatarBg = convo.avatarColor ?? "#5865F2";
-  const avatar = createElement("div", { class: "dm-avatar" });
-  avatar.style.background = avatarBg;
+  const avatar = buildAvatar(convo);
 
-  if (convo.avatar !== null && isSafeUrl(convo.avatar)) {
-    const img = createElement("img", {
-      src: convo.avatar,
-      alt: convo.username,
-    });
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.borderRadius = "50%";
-    avatar.appendChild(img);
-  } else {
-    setText(avatar, convo.username.charAt(0).toUpperCase());
-  }
-
-  // Status indicator dot
-  const statusKey = convo.status ?? "offline";
-  const statusDot = createElement("span", { class: "dm-status" });
-  statusDot.style.background = STATUS_COLORS[statusKey] ?? "var(--text-micro)";
-  avatar.appendChild(statusDot);
-
-  // Username
   const name = createElement("span", { class: "dm-name" }, convo.username);
 
-  // Close button (hidden by default, shown on hover via CSS)
+  appendChildren(item, avatar, name);
+
+  // Participant count, groups only: the label may be a name that says nothing
+  // about size, and "who else is in here" is the first thing you want to know.
+  if (convo.isGroup === true) {
+    const count = (convo.participants ?? []).length + 1;
+    const countEl = createElement(
+      "span",
+      { class: "dm-member-count", "data-testid": `dm-members-${convo.channelId}` },
+      String(count),
+    );
+    countEl.title = `${count} members`;
+    item.appendChild(countEl);
+  }
+
+  // Close / leave button (hidden by default, shown on hover via CSS)
   const closeBtn = createElement("button", {
     class: "dm-close",
-    title: "Close DM",
+    title: convo.isGroup === true ? "Leave group" : "Close DM",
   });
-  closeBtn.textContent = "";
   closeBtn.appendChild(createIcon("x", 14));
   closeBtn.addEventListener(
     "click",
     (e: Event) => {
       e.stopPropagation();
-      if (onClose !== undefined) {
-        onClose(convo.userId);
-      }
+      options.onCloseDm?.(convo.channelId);
     },
     { signal },
   );
-
-  appendChildren(item, avatar, name, closeBtn);
+  item.appendChild(closeBtn);
 
   // A mention badge outranks the unread badge, which in turn outranks the bare
   // dot — the dot is only what is left when the payload carries no counts.
+  //
+  // A muted conversation dims the unread badge but NOT the mention badge: the
+  // whole point of Discord's mute is that things addressed to you still get
+  // through, so dimming both would make a mute unsafe to use.
   const mentionCount = convo.mentionCount ?? 0;
   const unreadCount = convo.unreadCount ?? 0;
   if (mentionCount > 0) {
     const badge = createElement(
       "span",
-      { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.userId}` },
+      { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.channelId}` },
       String(mentionCount),
     );
     badge.title = `${mentionCount} mention${mentionCount === 1 ? "" : "s"}`;
@@ -123,7 +196,10 @@ function renderDmItem(
   } else if (unreadCount > 0) {
     const badge = createElement(
       "span",
-      { class: "dm-unread-badge", "data-testid": `dm-unread-${convo.userId}` },
+      {
+        class: convo.muted === true ? "dm-unread-badge muted" : "dm-unread-badge",
+        "data-testid": `dm-unread-${convo.channelId}`,
+      },
       String(unreadCount),
     );
     badge.title = `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`;
@@ -143,7 +219,43 @@ function renderDmItem(
         }
       }
       item.classList.add("active");
-      onSelect(convo.userId);
+      options.onSelectConversation(convo.channelId);
+    },
+    { signal },
+  );
+
+  item.addEventListener(
+    "contextmenu",
+    (e: MouseEvent) => {
+      e.preventDefault();
+      const items = [];
+      if (options.onToggleMute !== undefined) {
+        const toggle = options.onToggleMute;
+        items.push({
+          label: convo.muted === true ? "Unmute Conversation" : "Mute Conversation",
+          testId: `dm-mute-${convo.channelId}`,
+          onClick: () => toggle(convo.channelId),
+        });
+      }
+      if (convo.isGroup === true && options.onRenameGroup !== undefined) {
+        const rename = options.onRenameGroup;
+        items.push({
+          label: "Rename Group",
+          testId: `dm-rename-${convo.channelId}`,
+          onClick: () => rename(convo.channelId),
+        });
+      }
+      if (options.onCloseDm !== undefined) {
+        const close = options.onCloseDm;
+        items.push({
+          label: convo.isGroup === true ? "Leave Group" : "Close DM",
+          danger: true,
+          testId: `dm-close-${convo.channelId}`,
+          onClick: () => close(convo.channelId),
+        });
+      }
+      if (items.length === 0) return;
+      showContextMenu({ x: e.clientX, y: e.clientY, items, signal, className: "dm-context-menu" });
     },
     { signal },
   );
@@ -166,7 +278,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
         class: "dm-back-header",
         "data-testid": "dm-back-header",
       });
-      const arrow = createElement("span", { class: "dm-back-arrow" }, "\u2190");
+      const arrow = createElement("span", { class: "dm-back-arrow" }, "←");
       const backInfo = createElement("div", { class: "dm-back-info" });
       const backTitle = createElement(
         "div",
@@ -188,22 +300,6 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
     });
     header.appendChild(searchInput);
 
-    // Friends nav item
-    const friendsNav = createElement("div", { class: "dm-nav-item" });
-    if (options.friendsActive === true) {
-      friendsNav.classList.add("active");
-    }
-    setText(friendsNav, "Friends");
-    friendsNav.addEventListener(
-      "click",
-      () => {
-        if (options.onFriendsClick !== undefined) {
-          options.onFriendsClick();
-        }
-      },
-      { signal: ac.signal },
-    );
-
     // Section label with + button
     const sectionLabel = createElement("div", { class: "dm-section-label" });
     setText(sectionLabel, "Direct Messages");
@@ -220,11 +316,9 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
       (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
     );
 
-    const items = sorted.map((convo) =>
-      renderDmItem(convo, options.onSelectConversation, options.onCloseDm, ac.signal),
-    );
+    const items = sorted.map((convo) => renderDmItem(convo, options, ac.signal));
 
-    appendChildren(root, header, friendsNav, sectionLabel, ...items);
+    appendChildren(root, header, sectionLabel, ...items);
     container.appendChild(root);
   }
 

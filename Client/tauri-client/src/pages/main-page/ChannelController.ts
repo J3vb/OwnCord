@@ -33,7 +33,7 @@ import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
-import { dmStore } from "@stores/dm.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
@@ -345,10 +345,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // composer disables (with a reason) when the socket is down or the user
     // may not post here, instead of accepting a click and failing. For DM
     // channels the reason also covers block state (channels-members-dms.md §3.2).
-    const dmRecipientId =
+    // Block gating is a 1:1 rule (Discord semantics, mirrored by the server's
+    // requireDMNotBlocked): a group DM is a shared room, and gating one
+    // member's composer over a block with one other member would leave the
+    // group reading a conversation that person cannot join.
+    const gatedDm =
       channelType === "dm"
-        ? (dmStore.getState().channels.find((c) => c.channelId === channelId)?.recipient.id ?? null)
-        : null;
+        ? dmStore.getState().channels.find((c) => c.channelId === channelId)
+        : undefined;
+    const dmRecipientId = gatedDm !== undefined && !gatedDm.isGroup ? gatedDm.recipient.id : null;
     // Slow mode as affordance: after an accepted send the composer disables
     // itself for the channel's cooldown with a live countdown, instead of
     // taking a message the server will bounce with SLOW_MODE (UX spec §5,
@@ -495,15 +500,21 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
-      // Look up the recipient's actual status from DM store or members store
       const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      let recipientStatus = "Offline";
-      if (dmChannel !== undefined) {
+      // A group has no single presence to show, so the subtitle lists who is
+      // in it instead — that is the fact a group header is asked for, and a
+      // first member's status presented as the group's would be a lie.
+      let subtitle = "Offline";
+      if (dmChannel !== undefined && dmChannel.isGroup) {
+        const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
+        subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
+      } else if (dmChannel !== undefined) {
         const member = membersStore.getState().members.get(dmChannel.recipient.id);
-        recipientStatus = member?.status ?? dmChannel.recipient.status ?? "Offline";
+        const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
+        subtitle = status.charAt(0).toUpperCase() + status.slice(1);
       }
-      const displayStatus = recipientStatus.charAt(0).toUpperCase() + recipientStatus.slice(1);
-      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: displayStatus });
+      const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
+      updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
       if (chatHeaderName !== null) {

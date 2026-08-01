@@ -12,6 +12,12 @@ import {
   createMentionAutocomplete,
   type MentionAutocompleteComponent,
 } from "@components/MentionAutocomplete";
+import {
+  createEmojiAutocomplete,
+  MIN_EMOJI_QUERY,
+  type EmojiAutocompleteComponent,
+} from "@components/EmojiAutocomplete";
+import { listCustomEmoji } from "@stores/emoji.store";
 import type { GifApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
@@ -154,6 +160,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let mentionPopup: MentionAutocompleteComponent | null = null;
   /** Index of the "@" the open popup is completing; -1 when closed. */
   let mentionStart = -1;
+  let emojiPopup: EmojiAutocompleteComponent | null = null;
+  /** Index of the ":" the open emoji popup is completing; -1 when closed. */
+  let emojiStart = -1;
 
   /** Pending attachment IDs to send with the next message. */
   const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] =
@@ -206,6 +215,70 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.focus();
   }
 
+  /**
+   * The `:token` immediately before the caret, or null. The leading boundary
+   * keeps the popup out of ordinary prose: a colon that follows a word ("see
+   * this:thing", a "10:30" clock, an "http://" scheme) is punctuation, not the
+   * start of a shortcode. A completed `:token:` is skipped too — it is already
+   * an emoji, and re-offering completions over it would fight the user.
+   */
+  function activeEmojiToken(): { query: string; start: number } | null {
+    if (textarea === null) return null;
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, caret);
+    const match = /(?:^|\s):([A-Za-z0-9_]{0,32})$/.exec(before);
+    if (match === null) return null;
+    const query = match[1] ?? "";
+    if (query.length < MIN_EMOJI_QUERY) return null;
+    return { query, start: caret - query.length - 1 };
+  }
+
+  function closeEmojiPopup(): void {
+    if (emojiPopup === null) return;
+    emojiPopup.destroy();
+    emojiPopup = null;
+    emojiStart = -1;
+  }
+
+  /** Replace the `:token` under the caret with the chosen emoji, plus a space. */
+  function insertEmoji(insert: string): void {
+    if (textarea === null || emojiStart < 0) {
+      closeEmojiPopup();
+      return;
+    }
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, emojiStart);
+    const after = textarea.value.slice(caret);
+    const inserted = `${insert} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    closeEmojiPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  /** Open, refilter, or close the emoji popup for whatever is under the caret. */
+  function syncEmojiPopup(): void {
+    const active = disabledReason === null ? activeEmojiToken() : null;
+    if (active === null) {
+      closeEmojiPopup();
+      return;
+    }
+    if (emojiPopup === null) {
+      emojiPopup = createEmojiAutocomplete({
+        onSelect: insertEmoji,
+        onClose: closeEmojiPopup,
+      });
+      root?.appendChild(emojiPopup.element);
+    }
+    emojiStart = active.start;
+    if (!emojiPopup.setQuery(active.query)) {
+      closeEmojiPopup();
+    }
+  }
+
   /** Apply a formatting marker to the current textarea selection. */
   function applyFormatting(marker: string): void {
     if (textarea === null || disabledReason !== null) return;
@@ -240,6 +313,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (!mentionPopup.setQuery(active.query)) {
       closeMentionPopup();
     }
+  }
+
+  /**
+   * Drive both completion popups from one caret position. Only one can be open:
+   * the caret sits in exactly one token, and two stacked popups over the same
+   * textarea would race for the arrow keys.
+   */
+  function syncAutocomplete(): void {
+    syncMentionPopup();
+    if (mentionPopup !== null) {
+      closeEmojiPopup();
+      return;
+    }
+    syncEmojiPopup();
   }
 
   function showReplyBar(username: string): void {
@@ -616,16 +703,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       () => {
         autoResize();
         maybeEmitTyping();
-        syncMentionPopup();
+        syncAutocomplete();
       },
       { signal },
     );
     textarea.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        // The popup owns navigation keys while it is open, so Enter completes
-        // the mention instead of sending a half-typed message.
+        // Whichever popup is open owns navigation keys, so Enter completes the
+        // token instead of sending a half-typed message.
         if (mentionPopup?.handleKeydown(e) === true) return;
+        if (emojiPopup?.handleKeydown(e) === true) return;
 
         // Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in markdown markers.
         // The composer owns Ctrl+U while it has focus, so the propagation stop
@@ -677,8 +765,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     );
 
     // Caret moves that aren't typing (click, blur) also decide the popup's fate.
-    textarea.addEventListener("click", syncMentionPopup, { signal });
-    textarea.addEventListener("blur", closeMentionPopup, { signal });
+    textarea.addEventListener("click", syncAutocomplete, { signal });
+    textarea.addEventListener(
+      "blur",
+      () => {
+        closeMentionPopup();
+        closeEmojiPopup();
+      },
+      { signal },
+    );
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
@@ -718,6 +813,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         return;
       }
       emojiPicker = createEmojiPicker({
+        // Read the set at open time, not at mount: an emoji_update while the
+        // composer is alive must be in the next picker the user opens.
+        customEmoji: listCustomEmoji(),
         onSelect: (emoji: string) => {
           if (textarea !== null) {
             const start = textarea.selectionStart;
@@ -810,6 +908,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closeEmojiPicker();
       closeGifPicker();
       closeMentionPopup();
+      closeEmojiPopup();
     };
 
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);

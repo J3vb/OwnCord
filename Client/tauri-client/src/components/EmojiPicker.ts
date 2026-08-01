@@ -2,6 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -13,10 +14,18 @@ export interface CustomEmoji {
 }
 
 export interface EmojiPickerOptions {
+  /**
+   * The server's custom emoji, shown as a "Server" category above the unicode
+   * ones. Selecting one inserts its `:shortcode:` — the composer sends text,
+   * and the renderer turns that text back into the image.
+   */
   readonly customEmoji?: readonly CustomEmoji[];
   readonly onSelect: (emoji: string) => void;
   readonly onClose: () => void;
 }
+
+/** The category label the server's own emoji appear under. */
+export const SERVER_CATEGORY = "Server";
 
 // ---------------------------------------------------------------------------
 // Built-in emoji data (common subset by category)
@@ -274,8 +283,14 @@ const CATEGORIES: readonly EmojiCategory[] = [
   },
 ];
 
-/** Emoji name lookup for search. Maps emoji character → searchable keywords. */
-const EMOJI_NAMES: Readonly<Record<string, string>> = {
+/**
+ * Emoji name lookup for search. Maps emoji character → searchable keywords.
+ *
+ * Exported because the composer's `:` autocomplete searches the same list the
+ * picker does — two independently-maintained name tables would mean typing
+ * `:fire` and searching "fire" disagreeing about what exists.
+ */
+export const EMOJI_NAMES: Readonly<Record<string, string>> = {
   "😀": "grinning face happy smile",
   "😃": "smiley face happy smile",
   "😄": "smile happy grin",
@@ -555,10 +570,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     const recent = getRecentEmoji();
     const cats: EmojiCategory[] = [{ name: "Recent", emoji: recent }];
 
-    // Custom server emoji
+    // The server's own emoji, as the `:shortcode:` tokens a message carries.
     if (options.customEmoji && options.customEmoji.length > 0) {
       cats.push({
-        name: "Custom",
+        name: SERVER_CATEGORY,
         emoji: options.customEmoji.map((e) => `:${e.shortcode}:`),
       });
     }
@@ -582,7 +597,16 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       class: "ep-emoji",
       title: emoji,
     });
-    setText(span, emoji);
+    // A `:shortcode:` entry shows its image; everything else is the character
+    // itself. An unresolvable shortcode falls back to the text, which is what
+    // it would render as in a message anyway.
+    const image = buildCustomEmojiNode(emoji);
+    if (image !== null) {
+      span.classList.add("ep-emoji-custom");
+      span.appendChild(image);
+    } else {
+      setText(span, emoji);
+    }
     span.addEventListener("click", () => handleEmojiClick(emoji), { signal });
     return span;
   }

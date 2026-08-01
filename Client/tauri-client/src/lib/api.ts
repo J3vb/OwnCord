@@ -25,6 +25,7 @@ import type {
   MemberResponse,
   DmChannelsResponse,
   CreateDmResponse,
+  GroupDmResponse,
   BlockedUsersResponse,
   GifSearchResponse,
 } from "./types";
@@ -279,10 +280,50 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     updateProfile(
-      data: { username?: string; avatar?: string; identity_public_key?: string },
+      data: {
+        username?: string;
+        avatar?: string;
+        identity_public_key?: string;
+        /** Omit to leave unchanged; "" clears the field. */
+        display_name?: string;
+        about?: string;
+      },
       signal?: AbortSignal,
     ): Promise<MemberResponse> {
       return request<MemberResponse>("PATCH", "/users/me", data, signal);
+    },
+
+    /**
+     * Upload an avatar image (PNG/JPEG/WebP, max 1 MB, max 1024x1024).
+     *
+     * Multipart rather than JSON for the same reason attachments are, and it
+     * shares uploadFile's shape: no Content-Type header (the browser has to
+     * set the multipart boundary) and the bearer token attached by hand.
+     * On success the server has already pointed the user's avatar at the
+     * served file and broadcast a user_update.
+     */
+    async uploadAvatar(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const url = `${await baseUrl()}/users/me/avatar`;
+      const h: Record<string, string> = {};
+      if (config.token) {
+        h["Authorization"] = `Bearer ${config.token}`;
+      }
+
+      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
+
+      if (res.status === 401) {
+        onUnauthorized?.();
+        const err = await parseError(res);
+        throw new ApiClientError(401, err.error, err.message);
+      }
+      if (!res.ok) {
+        const err = await parseError(res);
+        throw new ApiClientError(res.status, err.error, err.message);
+      }
+      return res.json() as Promise<UploadResponse>;
     },
 
     changePassword(
@@ -503,10 +544,45 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("DELETE", `/invites/${code}`, undefined, signal);
     },
 
-    // ── Emoji ─────────────────────────────────────────────
+    // ── Custom emoji ──────────────────────────────────────
+    //
+    // Reading is open to any member; upload and delete require MANAGE_SERVER
+    // and are refused server-side with 403 regardless of what the UI offers.
 
-    getEmoji(signal?: AbortSignal): Promise<EmojiResponse[]> {
+    /** The server's whole custom-emoji set. */
+    listEmoji(signal?: AbortSignal): Promise<EmojiResponse[]> {
       return request<EmojiResponse[]>("GET", "/emoji", undefined, signal);
+    },
+
+    /**
+     * Upload one custom emoji. The image is validated server-side (PNG/JPEG/
+     * GIF/WebP, at most 512 KB and 128x128), so the only thing this promises
+     * is to send it; a rejection arrives as an ApiClientError with the reason.
+     */
+    async uploadEmoji(shortcode: string, file: File, signal?: AbortSignal): Promise<EmojiResponse> {
+      const formData = new FormData();
+      formData.append("shortcode", shortcode);
+      formData.append("file", file);
+
+      const url = `${await baseUrl()}/emoji`;
+      const h: Record<string, string> = {};
+      if (config.token) {
+        h["Authorization"] = `Bearer ${config.token}`;
+      }
+      // Don't set Content-Type — browser sets multipart boundary
+
+      const res = await fetch(url, { method: "POST", headers: h, body: formData, signal });
+
+      if (res.status === 401) {
+        onUnauthorized?.();
+        const err = await parseError(res);
+        throw new ApiClientError(401, err.error, err.message);
+      }
+      if (!res.ok) {
+        const err = await parseError(res);
+        throw new ApiClientError(res.status, err.error, err.message);
+      }
+      return res.json() as Promise<EmojiResponse>;
     },
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
@@ -535,7 +611,30 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<CreateDmResponse>("POST", "/dms", { recipient_id: recipientId }, signal);
     },
 
-    /** Close a DM (hide from sidebar). */
+    /** Create a group DM with 2..8 other users (3..10 total). */
+    createGroupDm(
+      recipientIds: readonly number[],
+      name?: string,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse> {
+      return request<GroupDmResponse>(
+        "POST",
+        "/dms/group",
+        { recipient_ids: [...recipientIds], name: name ?? "" },
+        signal,
+      );
+    },
+
+    /** Set or clear a group DM's name. Any participant may; 1:1 DMs refuse. */
+    renameGroupDm(channelId: number, name: string, signal?: AbortSignal): Promise<GroupDmResponse> {
+      return request<GroupDmResponse>("PATCH", `/dms/${channelId}`, { name }, signal);
+    },
+
+    /**
+     * Remove a DM from the sidebar. For a 1:1 this only hides it — the next
+     * message from either side brings it back. For a group it is a *leave*:
+     * the caller comes out of the participant list and cannot return unaided.
+     */
     closeDm(channelId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/dms/${channelId}`, undefined, signal);
     },

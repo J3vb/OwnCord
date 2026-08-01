@@ -69,15 +69,12 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	userID := info.UserID
 	status := presenceCmd.Status()
 
-	if err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, d.Limiter); err != nil {
+	customStatus, err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, presenceCmd.CustomStatus(), d.Limiter)
+	if err != nil {
 		return serviceErrorToResult(err)
 	}
 
-	return Result{
-		Events: []Event{
-			PresenceEvent{payload: buildPresenceMsg(userID, status)},
-		},
-	}
+	return Result{Events: presenceEvents(userID, status, customStatus)}
 }
 
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.

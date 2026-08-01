@@ -1,0 +1,228 @@
+/**
+ * EmojiAutocomplete — inline emoji picker the composer opens on ":".
+ *
+ * Deliberately the same shape as MentionAutocomplete (setQuery / handleKeydown
+ * / destroy, mousedown-to-choose, arrow-key navigation): the composer drives
+ * both through one code path, and a user who has learned one has learned the
+ * other.
+ *
+ * Two sources in one list: the server's custom emoji, which insert their
+ * `:shortcode:` text, and the built-in unicode set, which inserts the character
+ * itself. Custom emoji come first — they are the ones a shortcode is really
+ * for, and there are far fewer of them.
+ *
+ * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
+ */
+
+import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
+import { EMOJI_NAMES } from "@components/EmojiPicker";
+import { buildCustomEmojiImage } from "@components/message-list/custom-emoji";
+import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
+
+/** Maximum rows shown at once — the popup is a shortcut, not the picker. */
+export const MAX_EMOJI_SUGGESTIONS = 10;
+
+/**
+ * The shortest query that opens the popup. One character after the colon would
+ * match most of the unicode set and fire on ordinary prose ("note: a thing").
+ */
+export const MIN_EMOJI_QUERY = 2;
+
+export interface EmojiSuggestion {
+  /** Row label — the shortcode, or the unicode emoji's primary name. */
+  readonly label: string;
+  /** Text inserted into the composer, replacing the `:query` under the caret. */
+  readonly insert: string;
+  /** Secondary line: the remaining keywords, or the literal token for custom. */
+  readonly detail: string;
+  readonly kind: "custom" | "unicode";
+  /** The character to show as the preview, or null for a custom emoji image. */
+  readonly char: string | null;
+  /** The custom emoji this row stands for, or null for a unicode one. */
+  readonly emoji: CustomEmoji | null;
+}
+
+export interface EmojiAutocompleteOptions {
+  /** Called with the text to insert (`:wave:` or a unicode character). */
+  readonly onSelect: (insert: string) => void;
+  readonly onClose: () => void;
+}
+
+export interface EmojiAutocompleteComponent {
+  readonly element: HTMLDivElement;
+  /**
+   * Re-filter for `query` (the text typed after ":"). Returns false when
+   * nothing matches, which the composer treats as "close the popup".
+   */
+  setQuery(query: string): boolean;
+  /** Handle a composer keydown. Returns true when the key was consumed. */
+  handleKeydown(e: KeyboardEvent): boolean;
+  destroy(): void;
+}
+
+function byLabel(a: EmojiSuggestion, b: EmojiSuggestion): number {
+  return a.label.localeCompare(b.label);
+}
+
+/** The preview cell for one row: the custom emoji's image, or the character. */
+function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
+  const preview = createElement("span", { class: "ea-preview" });
+  if (s.emoji !== null) preview.appendChild(buildCustomEmojiImage(s.emoji));
+  else setText(preview, s.char ?? "");
+  return preview;
+}
+
+/**
+ * Suggestions for `query`, in the order the popup lists them: custom emoji
+ * first (prefix matches before substring), then unicode, alphabetical within
+ * each group.
+ *
+ * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
+ * never opens a popup over a lone colon.
+ */
+export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
+  const q = query.toLowerCase();
+  if (q.length < MIN_EMOJI_QUERY) return [];
+
+  const customPrefix: EmojiSuggestion[] = [];
+  const customSubstring: EmojiSuggestion[] = [];
+  for (const emoji of listCustomEmoji()) {
+    const name = emoji.shortcode;
+    if (!name.includes(q)) continue;
+    const entry: EmojiSuggestion = {
+      label: name,
+      insert: `:${name}:`,
+      detail: "Server emoji",
+      kind: "custom",
+      char: null,
+      emoji,
+    };
+    if (name.startsWith(q)) customPrefix.push(entry);
+    else customSubstring.push(entry);
+  }
+
+  const unicodePrefix: EmojiSuggestion[] = [];
+  const unicodeSubstring: EmojiSuggestion[] = [];
+  for (const [char, keywords] of Object.entries(EMOJI_NAMES)) {
+    if (!keywords.includes(q)) continue;
+    const words = keywords.split(" ");
+    const primary = words[0] ?? keywords;
+    const entry: EmojiSuggestion = {
+      label: primary,
+      insert: char,
+      detail: words.slice(1).join(" "),
+      kind: "unicode",
+      char,
+      emoji: null,
+    };
+    // "Prefix" means some whole keyword starts with the query, not just the
+    // primary one — typing ":fire" should rank 🔥 ("fire hot flame lit") above
+    // an emoji that merely contains "fire" mid-word.
+    if (words.some((w) => w.startsWith(q))) unicodePrefix.push(entry);
+    else unicodeSubstring.push(entry);
+  }
+
+  customPrefix.sort(byLabel);
+  customSubstring.sort(byLabel);
+  unicodePrefix.sort(byLabel);
+  unicodeSubstring.sort(byLabel);
+
+  return [...customPrefix, ...customSubstring, ...unicodePrefix, ...unicodeSubstring].slice(
+    0,
+    MAX_EMOJI_SUGGESTIONS,
+  );
+}
+
+export function createEmojiAutocomplete(
+  options: EmojiAutocompleteOptions,
+): EmojiAutocompleteComponent {
+  const ac = new AbortController();
+  const signal = ac.signal;
+
+  let suggestions: EmojiSuggestion[] = [];
+  let activeIndex = 0;
+
+  const root = createElement("div", {
+    class: "mention-autocomplete emoji-autocomplete",
+    role: "listbox",
+    "data-testid": "emoji-autocomplete",
+  });
+  const list = createElement("div", { class: "ma-list" });
+  root.appendChild(list);
+
+  function choose(index: number): void {
+    const picked = suggestions[index];
+    if (picked === undefined) return;
+    options.onSelect(picked.insert);
+  }
+
+  function render(): void {
+    clearChildren(list);
+    for (let i = 0; i < suggestions.length; i++) {
+      const s = suggestions[i]!;
+      const row = createElement("div", {
+        class: i === activeIndex ? "ma-item ma-item--active" : "ma-item",
+        role: "option",
+        "aria-selected": i === activeIndex ? "true" : "false",
+        "data-testid": `emoji-option-${s.label}`,
+      });
+      const name = createElement("span", { class: "ma-name" });
+      setText(name, s.kind === "custom" ? `:${s.label}:` : s.label);
+      const detail = createElement("span", { class: "ma-detail" });
+      setText(detail, s.detail);
+      appendChildren(row, buildPreview(s), name, detail);
+      // mousedown, not click: the textarea must not lose focus before the
+      // insertion runs.
+      row.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+          e.preventDefault();
+          choose(i);
+        },
+        { signal },
+      );
+      list.appendChild(row);
+    }
+  }
+
+  function setQuery(query: string): boolean {
+    suggestions = filterEmojiSuggestions(query);
+    activeIndex = 0;
+    render();
+    return suggestions.length > 0;
+  }
+
+  function handleKeydown(e: KeyboardEvent): boolean {
+    if (suggestions.length === 0) return false;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        activeIndex = (activeIndex + 1) % suggestions.length;
+        render();
+        return true;
+      case "ArrowUp":
+        e.preventDefault();
+        activeIndex = (activeIndex - 1 + suggestions.length) % suggestions.length;
+        render();
+        return true;
+      case "Enter":
+      case "Tab":
+        e.preventDefault();
+        choose(activeIndex);
+        return true;
+      case "Escape":
+        e.preventDefault();
+        options.onClose();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function destroy(): void {
+    ac.abort();
+    root.remove();
+  }
+
+  return { element: root, setQuery, handleKeydown, destroy };
+}

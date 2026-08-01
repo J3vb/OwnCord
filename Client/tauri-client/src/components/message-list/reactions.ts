@@ -6,6 +6,7 @@ import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { attachReactionTooltip } from "./reaction-tooltip";
+import { buildCustomEmojiNode } from "./custom-emoji";
 
 // -- Reaction rendering -------------------------------------------------------
 
@@ -22,7 +23,12 @@ export function renderReactions(
       tabindex: "0",
       "data-emoji": reaction.emoji,
     });
-    const emoji = document.createTextNode(reaction.emoji);
+    // Reaction strings are free-form, so a custom reaction is stored as the
+    // literal ":shortcode:" text. Render the image when that resolves; when it
+    // does not (the emoji was deleted, or the reaction predates it) the plain
+    // text is exactly what the reaction is, and toggling it still works.
+    const emoji: Node =
+      buildCustomEmojiNode(reaction.emoji) ?? document.createTextNode(reaction.emoji);
     const count = createElement("span", { class: "rc-count" }, String(reaction.count));
     chip.appendChild(emoji);
     chip.appendChild(count);

@@ -10,6 +10,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore, getChannelsByCategory } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { markAllRead, unreadChannelIds } from "@lib/read-state";
+import { isChannelMuted } from "@lib/channel-mutes";
 import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
@@ -20,7 +21,7 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
-import { attachChannelContextMenu } from "./channel-sidebar/context-menu";
+import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
@@ -255,6 +256,15 @@ function renderTextChannelItem(
     item.appendChild(nsfwIndicator(channel.id));
   }
 
+  // A muted channel still counts its unreads — it has not stopped existing,
+  // it has stopped shouting — so the badge dims rather than disappearing. The
+  // mention badge is deliberately left alone: a mute silences chatter, never
+  // something addressed to the reader.
+  const muted = isChannelMuted(channel.id);
+  if (muted) {
+    item.classList.add("muted");
+  }
+
   // A mention badge outranks the plain unread badge: only one is shown, and
   // it counts the mentions, not the messages.
   if (channel.mentionCount > 0) {
@@ -266,7 +276,11 @@ function renderTextChannelItem(
     badge.title = `${channel.mentionCount} mention${channel.mentionCount === 1 ? "" : "s"}`;
     item.appendChild(badge);
   } else if (channel.unreadCount > 0) {
-    const badge = createElement("span", { class: "unread-badge" }, String(channel.unreadCount));
+    const badge = createElement(
+      "span",
+      { class: muted ? "unread-badge muted" : "unread-badge" },
+      String(channel.unreadCount),
+    );
     item.appendChild(badge);
   }
 
@@ -766,8 +780,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     rebuildVoiceRowCache();
   }
 
+  /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */
+  function handleMuteChanged(): void {
+    renderChannels();
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
+    root.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: ac.signal });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });

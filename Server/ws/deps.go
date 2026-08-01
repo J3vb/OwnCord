@@ -15,9 +15,13 @@ import (
 // Handlers receive this instead of a mutable *Client pointer, making them
 // easier to test and reason about.
 type ClientInfo struct {
-	UserID         int64
-	Username       string
-	Avatar         *string
+	UserID   int64
+	Username string
+	Avatar   *string
+	// DisplayName is the connection's nickname, nil when unset. Carried
+	// alongside Username rather than replacing it: renderers fall back to the
+	// username, and mentions still resolve against it.
+	DisplayName    *string
 	RoleName       string
 	ReqID          string
 	VoiceChannelID int64  // 0 if not in a voice channel
