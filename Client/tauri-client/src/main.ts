@@ -26,6 +26,7 @@ import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { initDeepLinks } from "@lib/deep-link";
+import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
@@ -664,7 +665,14 @@ function handleInviteDeepLink(code: string, host?: string): void {
     pendingInviteLink = null;
   }
 }
-void initDeepLinks(handleInviteDeepLink);
+// Route owncord://message/<channelId>/<messageId> permalinks to the main
+// page's jumper. Before the main page mounts (or when the channel isn't
+// visible to this user) the jump is a logged no-op — a link into a server the
+// user is not signed into has nothing to open.
+function handleMessageDeepLink(channelId: number, messageId: number): void {
+  jumpToMessage(channelId, messageId);
+}
+void initDeepLinks(handleInviteDeepLink, handleMessageDeepLink);
 
 // Initialize log persistence to disk (fire-and-forget)
 void initLogPersistence();

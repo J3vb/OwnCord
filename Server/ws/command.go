@@ -107,6 +107,19 @@ func (c ChannelFocusCmd) Type() string     { return MsgTypeChannelFocus }
 func (c ChannelFocusCmd) UserID() int64    { return c.userID }
 func (c ChannelFocusCmd) ChannelID() int64 { return c.channelID }
 
+// MarkReadCmd represents a mark_read message: advance the caller's read state
+// for a channel without making it their focused channel. channel_focus already
+// marks read, but it also rebinds the connection's focused channel, so it is
+// the wrong tool for "mark that other channel read from its context menu".
+type MarkReadCmd struct {
+	userID    int64
+	channelID int64
+}
+
+func (c MarkReadCmd) Type() string     { return MsgTypeMarkRead }
+func (c MarkReadCmd) UserID() int64    { return c.userID }
+func (c MarkReadCmd) ChannelID() int64 { return c.channelID }
+
 // ReactionAddCmd represents a reaction_add message.
 type ReactionAddCmd struct {
 	userID    int64
@@ -451,6 +464,23 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			return nil, fmt.Errorf("channel_id must be positive")
 		}
 		return ChannelFocusCmd{userID: userID, channelID: chID}, nil
+	},
+
+	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		var p struct {
+			ChannelID json.Number `json:"channel_id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("invalid mark_read payload: %w", err)
+		}
+		chID, err := p.ChannelID.Int64()
+		if err != nil {
+			return nil, fmt.Errorf("channel_id must be integer: %w", err)
+		}
+		if chID <= 0 {
+			return nil, fmt.Errorf("channel_id must be positive")
+		}
+		return MarkReadCmd{userID: userID, channelID: chID}, nil
 	},
 
 	MsgTypeReactionAdd: func(userID int64, _ string, raw json.RawMessage) (Command, error) {

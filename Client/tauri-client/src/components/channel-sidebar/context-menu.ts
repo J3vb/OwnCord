@@ -1,7 +1,8 @@
 /**
- * Channel context menu — right-click on a channel for Edit/Delete/Purge.
- * Edit and Delete are admin/owner-only; Purge follows the server's gate and
- * appears for any role holding MANAGE_MESSAGES.
+ * Channel context menu — right-click on a channel for Mark as Read/Edit/Delete/
+ * Purge. Mark as Read is offered to everyone (it only touches the caller's own
+ * read state); Edit and Delete are admin/owner-only; Purge follows the server's
+ * gate and appears for any role holding MANAGE_MESSAGES.
  */
 
 import { createElement } from "@lib/dom";
@@ -9,6 +10,7 @@ import type { Channel } from "@stores/channels.store";
 import { getCurrentUser } from "@stores/auth.store";
 import { hasPermission, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
+import { markChannelRead, hasUnread } from "@lib/read-state";
 import { appendPurgeSection } from "@components/purge-prompt";
 
 /** Attach a right-click context menu to a channel element for edit/delete/purge. */
@@ -33,7 +35,10 @@ export function attachChannelContextMenu(
 
   const showEdit = isChannelAdmin && onEdit !== undefined;
   const showDelete = isChannelAdmin && onDelete !== undefined;
-  if (!showEdit && !showDelete && !canPurge) {
+  // Mark as Read touches only the caller's own read state, so it needs no
+  // permission — but a voice channel holds no messages to read.
+  const showMarkRead = channel.type !== "voice";
+  if (!showMarkRead && !showEdit && !showDelete && !canPurge) {
     return;
   }
 
@@ -52,6 +57,34 @@ export function attachChannelContextMenu(
       });
       menu.style.left = `${e.clientX}px`;
       menu.style.top = `${e.clientY}px`;
+
+      if (showMarkRead) {
+        // Disabled rather than hidden: a menu whose entries move between
+        // right-clicks is harder to use than one with a greyed-out row.
+        const unread = hasUnread(channel.id);
+        const markItem = createElement(
+          "div",
+          {
+            class: unread ? "context-menu-item" : "context-menu-item disabled",
+            "data-testid": "ctx-mark-read",
+          },
+          "Mark as Read",
+        );
+        if (unread) {
+          markItem.addEventListener(
+            "click",
+            () => {
+              closeMenu();
+              markChannelRead(channel.id);
+            },
+            { signal },
+          );
+        }
+        menu.appendChild(markItem);
+        if (showEdit || showDelete || canPurge) {
+          menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+        }
+      }
 
       if (showEdit && onEdit !== undefined) {
         const editItem = createElement(

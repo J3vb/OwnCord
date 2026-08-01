@@ -9,6 +9,8 @@ import type {
   RegisterResponse,
   HealthResponse,
   MessagesResponse,
+  MessagesAroundResponse,
+  ReactionUsersResponse,
   PurgeResponse,
   SearchResponse,
   ApiError,
@@ -339,6 +341,29 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
+     * The window of history centred on `messageId`, for jumping to a message
+     * outside the loaded page. Messages come back oldest-first (already in
+     * render order) — see MessagesAroundResponse. 404 when the message does
+     * not live in this channel or has been deleted.
+     */
+    getMessagesAround(
+      channelId: number,
+      messageId: number,
+      options?: { limit?: number },
+      signal?: AbortSignal,
+    ): Promise<MessagesAroundResponse> {
+      const params = new URLSearchParams();
+      if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      const qs = params.toString();
+      return request<MessagesAroundResponse>(
+        "GET",
+        `/channels/${channelId}/messages/around/${messageId}${qs ? `?${qs}` : ""}`,
+        undefined,
+        signal,
+      );
+    },
+
+    /**
      * Bulk-delete the newest `limit` messages in a channel (1-100). Requires
      * MANAGE_MESSAGES; the server broadcasts one chat_bulk_deleted event, so
      * the local store is updated by the dispatcher rather than here.
@@ -353,6 +378,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         "POST",
         `/channels/${channelId}/messages/purge`,
         { limit, ...(options?.before !== undefined ? { before: options.before } : {}) },
+        signal,
+      );
+    },
+
+    /**
+     * The users who reacted to a message with one emoji, for the who-reacted
+     * tooltip. Oldest reaction first, capped at 100 server-side. The emoji is a
+     * path segment, so it must be percent-encoded.
+     */
+    getReactionUsers(
+      channelId: number,
+      messageId: number,
+      emoji: string,
+      signal?: AbortSignal,
+    ): Promise<ReactionUsersResponse> {
+      return request<ReactionUsersResponse>(
+        "GET",
+        `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/users`,
+        undefined,
         signal,
       );
     },

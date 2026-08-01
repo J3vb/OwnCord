@@ -40,6 +40,7 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
     lastMessage: "",
     lastMessageAt: "",
     unreadCount: 0,
+    mentionCount: 0,
     ...overrides,
   };
 }

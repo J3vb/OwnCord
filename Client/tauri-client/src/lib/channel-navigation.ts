@@ -20,6 +20,17 @@ export function navigateToChannel(channelId: number): void {
 }
 
 /**
+ * Resolve a visible channel by id, for affordances that carry an id rather
+ * than a name (message permalinks). Returns null when the channel is not in
+ * this user's channel list — a permalink to somewhere they cannot see must
+ * degrade quietly, not render a chip that goes nowhere.
+ */
+export function findChannelById(channelId: number): { id: number; name: string } | null {
+  const ch = channelsStore.getState().channels.get(channelId);
+  return ch === undefined ? null : { id: ch.id, name: ch.name };
+}
+
+/**
  * Resolve a channel by name (case-insensitive), as written in a `#name` token.
  * DM channels are excluded — they are addressed through the DM sidebar and
  * have no user-visible `#name`.

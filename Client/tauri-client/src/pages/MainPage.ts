@@ -33,6 +33,11 @@ import {
   setOnError as setVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
+import {
+  setReactionUsersFetcher,
+  clearReactionUsersCache,
+} from "@components/message-list/reaction-tooltip";
+import { setMarkReadSender } from "@lib/read-state";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -78,6 +83,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setServerHost(apiConfig.host);
     setLiveKitServerHost(apiConfig.host);
   }
+
+  // "Mark as Read" affordances need the socket but are reached from deep inside
+  // the sidebar; register the sender once instead of threading ws through.
+  setMarkReadSender((channelId) => {
+    ws.send({ type: "mark_read", payload: { channel_id: channelId } });
+  });
+
+  // The who-reacted tooltip fetches on hover; give it the live REST client the
+  // same way the attachment renderer is given the server host.
+  clearReactionUsersCache();
+  setReactionUsersFetcher(async (channelId, messageId, emoji) => {
+    const res = await api.getReactionUsers(channelId, messageId, emoji);
+    return res.users;
+  });
 
   const limiters = createRateLimiterSet();
 

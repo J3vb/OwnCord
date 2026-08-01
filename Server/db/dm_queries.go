@@ -19,6 +19,10 @@ type DMChannelInfo struct {
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
 	UnreadCount   int    `json:"unread_count"`
+	// MentionCount is read_states.mention_count for this DM. It is not part of
+	// the GetUserDMChannels query — buildReady fills it from the unread map so
+	// a DM mention badge survives a reconnect.
+	MentionCount int `json:"mention_count"`
 }
 
 // DMUser is the public-facing shape for a DM participant.

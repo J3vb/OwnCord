@@ -24,6 +24,7 @@ type Store interface {
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
 	PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error)
@@ -34,6 +35,7 @@ type Store interface {
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
+	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
 	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 

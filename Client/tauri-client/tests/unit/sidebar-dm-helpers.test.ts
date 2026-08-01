@@ -59,6 +59,7 @@ function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
     lastMessage: "",
     lastMessageAt: "",
     unreadCount: 0,
+    mentionCount: 0,
     ...overrides,
   };
 }
@@ -392,6 +393,7 @@ describe("SidebarDmHelpers", () => {
           lastMessage: "Hello!",
           lastMessageAt: "2025-01-01T00:00:00Z",
           unreadCount: 3,
+          mentionCount: 1,
         }),
       );
 
@@ -405,6 +407,10 @@ describe("SidebarDmHelpers", () => {
         lastMessage: "Hello!",
         timestamp: "2025-01-01T00:00:00Z",
         unread: true,
+        // The real counts ride along so the sidebar can render badges rather
+        // than a bare dot, and so DM mentions survive a reconnect.
+        unreadCount: 3,
+        mentionCount: 1,
         active: false,
       });
     });

@@ -87,11 +87,14 @@ SELECT c.id,
                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 FROM channels c
 WHERE c.type IN ('text', 'announcement')
+   OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
+                                  WHERE dp.channel_id = c.id AND dp.user_id = ?))
 `
 
 type GetChannelUnreadCountsParams struct {
 	UserID   int64 `json:"userId"`
 	UserID_2 int64 `json:"userId2"`
+	UserID_3 int64 `json:"userId3"`
 }
 
 type GetChannelUnreadCountsRow struct {
@@ -102,7 +105,7 @@ type GetChannelUnreadCountsRow struct {
 }
 
 func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, arg.UserID, arg.UserID_2)
+	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, arg.UserID, arg.UserID_2, arg.UserID_3)
 	if err != nil {
 		return nil, err
 	}

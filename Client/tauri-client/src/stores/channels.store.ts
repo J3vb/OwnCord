@@ -48,8 +48,28 @@ const INITIAL_STATE: ChannelsState = {
 
 export const channelsStore = createStore<ChannelsState>(INITIAL_STATE);
 
+/**
+ * How many unread messages each channel had at the moment it was last opened.
+ *
+ * Opening a channel clears its badge immediately, which destroys the only
+ * record of where the reader had got to — so the value is snapshotted here
+ * first. MessageList reads it to place the "NEW" divider above the first
+ * message the reader has not seen. Kept outside the store state because it is
+ * not reactive: it is read once when the list mounts, and a subscriber firing
+ * on it would just re-render the list for no visible change.
+ */
+const unreadOnOpen = new Map<number, number>();
+
+/** Unread count this channel had when it was last opened (0 = nothing new). */
+export function getUnreadOnOpen(channelId: number): number {
+  return unreadOnOpen.get(channelId) ?? 0;
+}
+
 /** Bulk set channels from the ready payload. Converts ReadyChannel[] to Map. */
 export function setChannels(channels: readonly ReadyChannel[]): void {
+  // A fresh ready payload restates unread from the server; any snapshot from
+  // the previous connection describes a read position that no longer applies.
+  unreadOnOpen.clear();
   const map = new Map<number, Channel>();
   for (const ch of channels) {
     map.set(ch.id, {
@@ -162,6 +182,12 @@ export function removeChannel(id: number): void {
  * the same server-side, so the badges must not survive the visit locally.
  */
 export function setActiveChannel(id: number | null): void {
+  // Snapshot before clearing — this is the last moment the reader's position is
+  // knowable (see unreadOnOpen). Done outside setState so the updater stays a
+  // pure function of previous state.
+  if (id !== null) {
+    unreadOnOpen.set(id, channelsStore.getState().channels.get(id)?.unreadCount ?? 0);
+  }
   channelsStore.setState((prev) => {
     if (id === null) {
       return { ...prev, activeChannelId: null };

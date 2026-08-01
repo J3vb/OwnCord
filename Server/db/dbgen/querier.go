@@ -79,6 +79,9 @@ type Querier interface {
 	// highest-position role first, so that first row is the owner.
 	GetOwnerUser(ctx context.Context) (User, error)
 	GetReactionCounts(ctx context.Context, messageID int64) ([]GetReactionCountsRow, error)
+	// Reactors for one (message, emoji) pair, oldest reaction first. The reactions
+	// table has no timestamp column, so the autoincrement id carries the order.
+	GetReactionUsers(ctx context.Context, arg GetReactionUsersParams) ([]GetReactionUsersRow, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	GetRoleChannelPermissions(ctx context.Context, roleID int64) ([]GetRoleChannelPermissionsRow, error)
 	GetRoleForUser(ctx context.Context, id int64) (Role, error)

@@ -62,6 +62,7 @@ export const ClientMessageType = {
   REACTION_REMOVE: "reaction_remove",
   TYPING_START: "typing_start",
   CHANNEL_FOCUS: "channel_focus",
+  MARK_READ: "mark_read",
   PRESENCE_UPDATE: "presence_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",

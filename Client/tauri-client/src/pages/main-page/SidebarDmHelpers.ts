@@ -71,7 +71,9 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     category: null,
     position: 0,
     unreadCount: dmChannel.unreadCount,
-    mentionCount: 0,
+    // The DM's own mention count, not a hardcoded 0: the ready payload now
+    // carries it, so a DM mention badge survives a reconnect.
+    mentionCount: dmChannel.mentionCount,
     lastMessageId: dmChannel.lastMessageId,
     // Channel-level permission is always true for DMs; block state is layered on
     // top by the composer via blocks.store (see ChannelController), not canSend.
@@ -108,6 +110,7 @@ export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): P
       lastMessage: "",
       lastMessageAt: "",
       unreadCount: 0,
+      mentionCount: 0,
     };
 
     addDmChannel(dmChannel);
@@ -132,7 +135,9 @@ export function buildDmConversations(activeDmUserId: number | null): readonly Dm
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
     lastMessage: dm.lastMessage || "No messages yet",
     timestamp: dm.lastMessageAt,
-    unread: dm.unreadCount > 0,
+    unread: dm.unreadCount > 0 || dm.mentionCount > 0,
+    unreadCount: dm.unreadCount,
+    mentionCount: dm.mentionCount,
     active: dm.recipient.id === activeDmUserId,
   }));
 }

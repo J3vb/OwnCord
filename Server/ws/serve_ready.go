@@ -193,6 +193,14 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		slog.Warn("buildReady GetUserDMChannels", "err", err)
 		dmChannels = []db.DMChannelInfo{}
 	}
+	// GetUserDMChannels computes unread from read_states but carries no mention
+	// count, so a DM mention badge used to vanish on every reconnect. The
+	// unread map now includes the user's DM rows — pull mention_count from it.
+	for i := range dmChannels {
+		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
+			dmChannels[i].MentionCount = u.MentionCount
+		}
+	}
 
 	serverName, motd := h.getCachedSettings(ctx)
 

@@ -54,6 +54,59 @@ export type MessageInputComponent = MountableComponent & {
   openFilePicker(): void;
 };
 
+/** Ctrl/Cmd shortcut → markdown marker it wraps the selection in. */
+const FORMAT_MARKERS: Readonly<Record<string, string>> = {
+  b: "**",
+  i: "*",
+  u: "__",
+};
+
+export interface WrapResult {
+  readonly value: string;
+  readonly selectionStart: number;
+  readonly selectionEnd: number;
+}
+
+/**
+ * Wrap (or unwrap) `[start, end)` of `value` in `marker`, returning the new
+ * value and where the selection should land. With an empty selection the
+ * markers are inserted around the caret so typing continues inside them.
+ *
+ * Pure so the behaviour can be tested without a DOM selection.
+ */
+export function wrapWithMarker(
+  value: string,
+  start: number,
+  end: number,
+  marker: string,
+): WrapResult {
+  const selected = value.slice(start, end);
+  const len = marker.length;
+
+  // Already wrapped — pressing the shortcut again takes the markers back off.
+  if (selected.length > 2 * len && selected.startsWith(marker) && selected.endsWith(marker)) {
+    const inner = selected.slice(len, selected.length - len);
+    return {
+      value: value.slice(0, start) + inner + value.slice(end),
+      selectionStart: start,
+      selectionEnd: start + inner.length,
+    };
+  }
+  if (value.slice(start - len, start) === marker && value.slice(end, end + len) === marker) {
+    return {
+      value: value.slice(0, start - len) + selected + value.slice(end + len),
+      selectionStart: start - len,
+      selectionEnd: start - len + selected.length,
+    };
+  }
+
+  return {
+    value: value.slice(0, start) + marker + selected + marker + value.slice(end),
+    selectionStart: start + len,
+    selectionEnd: start + len + selected.length,
+  };
+}
+
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
 const SEND_DEBOUNCE_MS = 200;
@@ -151,6 +204,22 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     closeMentionPopup();
     autoResize();
     textarea.focus();
+  }
+
+  /** Apply a formatting marker to the current textarea selection. */
+  function applyFormatting(marker: string): void {
+    if (textarea === null || disabledReason !== null) return;
+    const result = wrapWithMarker(
+      textarea.value,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+      marker,
+    );
+    textarea.value = result.value;
+    textarea.selectionStart = result.selectionStart;
+    textarea.selectionEnd = result.selectionEnd;
+    autoResize();
+    maybeEmitTyping();
   }
 
   /** Open, refilter, or close the popup for whatever is under the caret. */
@@ -557,6 +626,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         // The popup owns navigation keys while it is open, so Enter completes
         // the mention instead of sending a half-typed message.
         if (mentionPopup?.handleKeydown(e) === true) return;
+
+        // Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in markdown markers.
+        // The composer owns Ctrl+U while it has focus, so the propagation stop
+        // is load-bearing: without it the global upload shortcut would fire on
+        // top of the underline.
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+          const marker = FORMAT_MARKERS[e.key.toLowerCase()];
+          if (marker !== undefined) {
+            e.preventDefault();
+            e.stopPropagation();
+            applyFormatting(marker);
+            return;
+          }
+        }
+
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           handleSend();

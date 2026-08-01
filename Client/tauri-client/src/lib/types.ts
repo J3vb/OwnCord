@@ -433,6 +433,11 @@ export interface DmChannelPayload {
   readonly last_message: string;
   readonly last_message_at: string;
   readonly unread_count: number;
+  /**
+   * Unread messages in this DM that mention the current user. Absent from
+   * older servers, which shipped no DM mention state at all — treat as 0.
+   */
+  readonly mention_count?: number;
 }
 
 export interface DmChannelOpenPayload {
@@ -498,6 +503,15 @@ export interface TypingStartPayload {
 }
 
 export interface ChannelFocusPayload {
+  readonly channel_id: number;
+}
+
+/**
+ * mark_read — advance the read state for a channel the user is *not* viewing.
+ * Same shape as channel_focus, deliberately a different message: focus also
+ * rebinds the connection's focused channel, which would be wrong here.
+ */
+export interface MarkReadPayload {
   readonly channel_id: number;
 }
 
@@ -602,6 +616,7 @@ export type ClientMessage =
   | (WsEnvelope<ReactionRemovePayload> & { readonly type: "reaction_remove" })
   | (WsEnvelope<TypingStartPayload> & { readonly type: "typing_start" })
   | (WsEnvelope<ChannelFocusPayload> & { readonly type: "channel_focus" })
+  | (WsEnvelope<MarkReadPayload> & { readonly type: "mark_read" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
@@ -678,6 +693,36 @@ export interface MessageResponse {
 export interface MessagesResponse {
   readonly messages: readonly MessageResponse[];
   readonly has_more: boolean;
+}
+
+/**
+ * A window of history centred on one message, from
+ * `GET /channels/{id}/messages/around/{messageId}`.
+ *
+ * Unlike {@link MessagesResponse}, `messages` is **oldest-first** — it is
+ * already in render order and must not be reversed. `has_more_after` true
+ * means the window is detached from the live tail.
+ */
+export interface MessagesAroundResponse {
+  readonly messages: readonly MessageResponse[];
+  readonly has_more_before: boolean;
+  readonly has_more_after: boolean;
+}
+
+/** One reactor in the who-reacted list. `avatar` is `""` when unset. */
+export interface ReactionUser {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string;
+}
+
+/**
+ * Who reacted to a message with one emoji, from
+ * `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`.
+ * Ordered oldest reaction first and capped at 100 by the server.
+ */
+export interface ReactionUsersResponse {
+  readonly users: readonly ReactionUser[];
 }
 
 /** Result of a channel purge — the ids actually soft-deleted, newest-first. */

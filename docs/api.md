@@ -558,6 +558,61 @@ When `has_more` is `false`, you have reached the beginning of the channel histor
 
 ---
 
+### GET /api/v1/channels/{id}/messages/around/{messageId}
+
+The window of channel history centred on one message, for jumping to a message
+that is not in the client's loaded page — a search hit, a pinned entry, a reply
+reference, or an `owncord://message/{channelId}/{messageId}` permalink.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (or DM participant membership) — the same gate as `GET /messages`
+
+#### Query Parameters
+
+| Param | Type | Default | Range | Description |
+| ----- | ---- | ------- | ----- | ----------- |
+| `limit` | int | 50 | 1-100 | Total window size, centre included |
+
+Half the window sits before the centre and the remainder after it: `limit=50`
+returns up to 25 older messages, the centre, and up to 24 newer ones. Near the
+start or end of a channel the window is simply shorter — it is not re-balanced
+toward the other side.
+
+#### Response 200 OK
+
+```json
+{
+  "messages": [],
+  "has_more_before": true,
+  "has_more_after": true
+}
+```
+
+`messages` holds the same message objects as `GET /messages` (user, attachments,
+reactions with the `me` flag, `mentions`, `mentions_everyone`), but is ordered
+**oldest-first**, not newest-first like the paginated history endpoint.
+
+`has_more_before` / `has_more_after` report whether the channel holds further
+live history on each side of the returned window. A client that renders an
+around-window is *detached* from the live tail while `has_more_after` is true:
+newly broadcast messages belong below the window and are not part of it, so the
+client should offer a "jump to present" affordance that refetches the normal
+`GET /messages` tail.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | `id` or `messageId` is not a positive integer, or `limit` is not a positive integer |
+| 403 | `FORBIDDEN` | The channel exists but `READ_MESSAGES` is denied |
+| 404 | `NOT_FOUND` | The channel does not exist, the caller is not a participant of the DM, or the message does not live in this channel |
+
+Soft-deleted messages are 404 here, not an empty window: history omits deleted
+rows, so there is no row to centre on. Deleted messages are also excluded from
+the window itself, exactly as in `GET /messages`.
+
+---
+
 ### POST /api/v1/channels/{id}/messages/purge
 
 Bulk soft-delete the newest messages in a channel.
@@ -600,6 +655,46 @@ WebSocket event is broadcast to the channel (not one `chat_deleted` per
 message), and one `message_purge` audit entry is written.
 
 Rate limited to 5/sec per user.
+
+---
+
+### GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users
+
+List the users who reacted to a message with a specific emoji — the "who
+reacted" tooltip behind a reaction pill.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (DM: participant)
+
+The reactor list is a separate endpoint rather than `user_ids` inline on every
+reaction summary, so message payloads stay small: a busy channel carries dozens
+of pills per page and almost none of them are ever hovered.
+
+`{emoji}` is a path segment and must be percent-encoded (`👍` → `%F0%9F%91%8D`).
+The message must belong to `{id}`; a message in another channel is a 404, so the
+channel in the URL is always the one the permission check ran against.
+
+#### Response 200 OK
+
+```json
+{
+  "users": [
+    { "id": 3, "username": "alice", "avatar": "" },
+    { "id": 7, "username": "bob", "avatar": "/api/v1/files/abc123" }
+  ]
+}
+```
+
+Ordered oldest reaction first and capped at **100** reactors — the list is for a
+tooltip, not an audit. `users` is always an array (`[]` when nobody used that
+emoji, which is also the answer for an emoji that does not exist). `avatar` is
+`""` when the user has none.
+
+| Status | Error | When |
+|--------|-------|------|
+| 400 | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji |
+| 403 | `FORBIDDEN` | No `READ_MESSAGES` on the channel |
+| 404 | `NOT_FOUND` | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
 
 ---
 

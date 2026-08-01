@@ -14,6 +14,7 @@ import {
   incrementUnread,
   incrementMention,
   clearUnread,
+  getUnreadOnOpen,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
 
@@ -578,6 +579,63 @@ describe("channels store", () => {
     it("sets activeChannelId even for a channel not in the map", () => {
       setActiveChannel(999);
       expect(channelsStore.getState().activeChannelId).toBe(999);
+    });
+  });
+
+  // The badge is cleared the moment a channel is opened, which destroys the
+  // only record of where the reader had got to. MessageList needs that number
+  // to place the "NEW" divider, so setActiveChannel snapshots it first.
+  describe("getUnreadOnOpen", () => {
+    it("is 0 for a channel that was never opened", () => {
+      setChannels(readyChannels);
+      expect(getUnreadOnOpen(1)).toBe(0);
+    });
+
+    it("captures the unread count as it was before the visit cleared it", () => {
+      setChannels(readyChannels); // channel 1 starts at 3 unread
+      incrementUnread(1);
+      incrementUnread(1);
+
+      setActiveChannel(1);
+
+      expect(getUnreadOnOpen(1)).toBe(5);
+      // …and the badge itself is gone.
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
+    });
+
+    it("resets to 0 on the next visit, which is what clears the divider", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(3);
+
+      setActiveChannel(null);
+      setActiveChannel(1);
+
+      expect(getUnreadOnOpen(1)).toBe(0);
+    });
+
+    it("is per channel", () => {
+      setChannels(readyChannels);
+      incrementUnread(3);
+      incrementUnread(3);
+
+      setActiveChannel(1);
+      setActiveChannel(3);
+
+      expect(getUnreadOnOpen(1)).toBe(3);
+      expect(getUnreadOnOpen(3)).toBe(2);
+    });
+
+    // A fresh ready payload restates unread from the server; a snapshot from
+    // the previous connection describes a read position that no longer applies.
+    it("is dropped by a new ready payload", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(3);
+
+      setChannels(readyChannels);
+
+      expect(getUnreadOnOpen(1)).toBe(0);
     });
   });
 

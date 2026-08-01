@@ -21,7 +21,7 @@ All client-server real-time communication happens over a single WebSocket connec
 9. [Reactions](#reactions)
 10. [Typing Indicators](#typing-indicators)
 11. [Presence](#presence)
-12. [Channel Focus](#channel-focus)
+12. [Channel Focus and Read State](#channel-focus-and-read-state)
 13. [Channel Updates](#channel-updates)
 14. [Member Updates](#member-updates)
 15. [Voice Signaling](#voice-signaling)
@@ -248,9 +248,13 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
 raised by the send that mentions them (never by an edit) and reset to 0 by
-`channel_focus`.
+`channel_focus` or `mark_read`.
 
-**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`
+**dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`
+
+A DM's `mention_count` is the same `read_states.mention_count` the channel list
+carries. It used to be absent here, so a DM mention badge silently reset to 0 on
+every reconnect; the ready payload now ships the stored value.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
@@ -511,7 +515,7 @@ Valid values: `"online"`, `"idle"`, `"dnd"`, `"offline"`. Rate limited: 1 per 10
 
 ---
 
-## Channel Focus
+## Channel Focus and Read State
 
 ### channel_focus (Client -> Server)
 
@@ -520,6 +524,25 @@ Valid values: `"online"`, `"idle"`, `"dnd"`, `"offline"`. Rate limited: 1 per 10
 ```
 
 Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
+
+### mark_read (Client -> Server)
+
+```json
+{ "type": "mark_read", "payload": { "channel_id": 5 } }
+```
+
+Advances the caller's read state for `channel_id` to that channel's latest
+message and resets its `mention_count` to 0 — exactly what `channel_focus` does
+to unread state — **without** changing which channel the connection is focused
+on. This is what backs "Mark as Read" in the channel context menu and "Mark All
+as Read": marking a channel the user is *not* looking at must not rebind the
+connection's focused channel, which would misroute unread bookkeeping for the
+channel actually on screen.
+
+Same access check as `channel_focus`: `READ_MESSAGES` on the channel, or DM
+participation. A denied channel answers `FORBIDDEN`; a non-positive
+`channel_id` answers `BAD_REQUEST`. There is no response on success — the client
+clears its local badge optimistically and the next `ready` confirms.
 
 ---
 
@@ -1001,7 +1024,7 @@ Sent when a DM is opened, created, or auto-reopened by an incoming message.
 
 ### DM Authorization
 
-All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`.
+All handlers that touch a channel check the channel type and branch to participant-based authorization for DMs instead of role-based permissions. This applies to: `chat_send`, `chat_edit`, `chat_delete`, `reaction_add`/`remove`, `typing_start`, `channel_focus`, `mark_read`.
 
 ---
 
@@ -1089,7 +1112,7 @@ from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
-### Client -> Server (23 types)
+### Client -> Server (24 types)
 
 | Type | Rate Limit | Notes |
 |------|-----------|-------|
@@ -1101,6 +1124,7 @@ tables below add per-type behavioral notes.
 | `reaction_remove` | 5/sec | |
 | `typing_start` | 1/3sec/channel | Silently dropped |
 | `channel_focus` | None | Updates read state |
+| `mark_read` | None | Updates read state without moving focus |
 | `presence_update` | 1/10sec | |
 | `voice_join` | None | |
 | `voice_leave` | None | Empty payload |

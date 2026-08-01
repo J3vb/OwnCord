@@ -21,6 +21,10 @@ import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
+import {
+  clearReactionUsersCache,
+  setReactionUsersFetcher,
+} from "../../src/components/message-list/reaction-tooltip";
 
 function resetStores(): void {
   membersStore.setState(() => ({
@@ -423,6 +427,52 @@ describe("renderers", () => {
       expect(reactionChips.length).toBe(2);
 
       ac.abort();
+    });
+
+    // The who-reacted tooltip hangs off the pill, so the pill has to carry its
+    // emoji and be focusable for a keyboard user to reach the tooltip at all.
+    it("makes reaction pills focusable and tags them with their emoji", () => {
+      const msg = makeMessage({
+        reactions: [{ emoji: "\uD83D\uDC4D", count: 3, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const chip = container.querySelector(
+        ".reaction-chip:not(.add-reaction)",
+      ) as HTMLElement | null;
+      expect(chip?.dataset.emoji).toBe("\uD83D\uDC4D");
+      expect(chip?.getAttribute("tabindex")).toBe("0");
+
+      ac.abort();
+    });
+
+    it("shows the who-reacted tooltip after hovering a pill", async () => {
+      setReactionUsersFetcher(() =>
+        Promise.resolve([
+          { id: 1, username: "alice", avatar: "" },
+          { id: 2, username: "bob", avatar: "" },
+        ]),
+      );
+      clearReactionUsersCache();
+
+      const msg = makeMessage({
+        reactions: [{ emoji: "\uD83D\uDC4D", count: 2, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const chip = container.querySelector(".reaction-chip:not(.add-reaction)") as HTMLElement;
+      chip.dispatchEvent(new Event("mouseenter"));
+
+      await vi.waitFor(() => {
+        expect(chip.querySelector(".reaction-tooltip-names")?.textContent).toBe("alice and bob");
+      });
+
+      ac.abort();
+      setReactionUsersFetcher(null);
     });
 
     it("renders attachments for image types", () => {

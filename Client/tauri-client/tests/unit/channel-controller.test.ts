@@ -104,12 +104,22 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
 
+const { mockReattachToPresent, mockJumpToMessage } = vi.hoisted(() => ({
+  mockReattachToPresent: vi.fn(),
+  mockJumpToMessage: vi.fn(),
+}));
+
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
   addOptimisticMessage: mockAddOptimistic,
   markSendFailed: mockMarkSendFailed,
   removeOptimistic: mockRemoveOptimistic,
+  reattachToPresent: mockReattachToPresent,
+}));
+
+vi.mock("@lib/message-navigation", () => ({
+  jumpToMessage: mockJumpToMessage,
 }));
 
 vi.mock("@stores/auth.store", () => ({
@@ -416,6 +426,34 @@ describe("createChannelController", () => {
       capturedMessageListOpts.onRetryLoad();
 
       expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+    });
+
+    it("onJumpToMessage routes a reply-bar jump through the shared jumper", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts.onJumpToMessage(1234);
+
+      // Scoped to the mounted channel: a reply always points inside it.
+      expect(mockJumpToMessage).toHaveBeenCalledWith(42, 1234);
+    });
+
+    it("onJumpToPresent reattaches the channel and refetches the live tail", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
+
+      capturedMessageListOpts.onJumpToPresent();
+
+      // Reattaching first is what makes the refetch actually happen —
+      // loadMessages short-circuits while the channel is still "loaded".
+      expect(mockReattachToPresent).toHaveBeenCalledWith(42);
+      expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+      expect(mockReattachToPresent.mock.invocationCallOrder[0]).toBeLessThan(
+        (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+      );
     });
 
     it("onRetry re-sends the failed draft with a fresh correlation id", () => {

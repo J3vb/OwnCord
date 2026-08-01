@@ -438,3 +438,67 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 });
+
+// ── Unread / mention badges ────────────────────────────────────────────────
+//
+// A DM used to show only a dot, which said "something happened" but not how
+// much — and never distinguished a mention from ordinary traffic.
+
+describe("DmSidebar — unread and mention badges", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  function mountWith(convo: DmConversation): void {
+    const sidebar = createDmSidebar({
+      conversations: [convo],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+  }
+
+  it("renders the unread count, not a bare dot", () => {
+    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 4 }));
+
+    const badge = container.querySelector('[data-testid="dm-unread-7"]');
+    expect(badge?.textContent).toBe("4");
+    expect(container.querySelector(".dm-unread")).toBeNull();
+  });
+
+  it("renders a mention badge instead of the unread badge", () => {
+    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }));
+
+    expect(container.querySelector('[data-testid="dm-mentions-7"]')?.textContent).toBe("2");
+    expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
+  });
+
+  it("pluralises the badge tooltips", () => {
+    mountWith(makeConvo({ userId: 7, unread: true, unreadCount: 1 }));
+    expect((container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement).title).toBe(
+      "1 unread message",
+    );
+  });
+
+  it("falls back to the dot when the payload carries no counts", () => {
+    mountWith(makeConvo({ userId: 7, unread: true }));
+
+    expect(container.querySelector(".dm-unread")).not.toBeNull();
+    expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
+  });
+
+  it("renders no badge and no dot for a read conversation", () => {
+    mountWith(makeConvo({ userId: 7, unread: false, unreadCount: 0, mentionCount: 0 }));
+
+    expect(container.querySelector(".dm-unread")).toBeNull();
+    expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dm-mentions-7"]')).toBeNull();
+  });
+});

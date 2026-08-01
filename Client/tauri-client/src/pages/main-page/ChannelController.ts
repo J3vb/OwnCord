@@ -21,7 +21,9 @@ import {
   addOptimisticMessage,
   markSendFailed,
   removeOptimistic,
+  reattachToPresent,
 } from "@stores/messages.store";
+import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
@@ -214,6 +216,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       },
       onRetryLoad: () => {
+        if (channelAbort !== null) {
+          void msgCtrl.loadMessages(channelId, channelAbort.signal);
+        }
+      },
+      // A reply bar (and any other in-row jump) goes through the same jumper
+      // as search hits and permalinks, so an out-of-window target fetches its
+      // around-window instead of silently doing nothing.
+      onJumpToMessage: (msgId: number) => {
+        jumpToMessage(channelId, msgId);
+      },
+      onJumpToPresent: () => {
+        // Dropping the detached flag also clears "loaded", so loadMessages
+        // refetches the live tail instead of short-circuiting.
+        reattachToPresent(channelId);
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }

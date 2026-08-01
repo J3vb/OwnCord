@@ -58,6 +58,7 @@ import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
 import type { DmChannelPayload } from "./types";
 import type { ApiClient } from "./api";
+import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { notifyIncomingMessage } from "./notifications";
 import { highlightsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
@@ -88,6 +89,7 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
+    mentionCount: p.mention_count ?? 0,
   };
 }
 
@@ -320,6 +322,9 @@ export function wireDispatcher(
     ws.on(S.REACTION_UPDATE, (payload) => {
       const userId = authStore.getState().user?.id ?? 0;
       updateReaction(payload, userId);
+      // The who-reacted tooltip caches the reactor list per message+emoji; any
+      // add/remove on this message makes those lists stale.
+      invalidateReactionUsers(payload.message_id);
     }),
   );
 

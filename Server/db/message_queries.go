@@ -291,6 +291,32 @@ func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount
 	return counts, nil
 }
 
+// MaxReactionUsers bounds the who-reacted list. A reaction pill can carry
+// thousands of reactors; the tooltip only ever names a handful, so the query is
+// capped rather than paginated.
+const MaxReactionUsers = 100
+
+// GetReactionUsers returns up to limit reactors for one (message, emoji) pair,
+// oldest reaction first. limit is clamped to MaxReactionUsers.
+func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]ReactionUser, error) {
+	if limit <= 0 || limit > MaxReactionUsers {
+		limit = MaxReactionUsers
+	}
+	rows, err := d.q.GetReactionUsers(ctx, dbgen.GetReactionUsersParams{
+		MessageID: messageID,
+		Emoji:     emoji,
+		Limit:     int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetReactionUsers: %w", err)
+	}
+	users := make([]ReactionUser, 0, len(rows))
+	for _, r := range rows {
+		users = append(users, ReactionUser{ID: r.ID, Username: r.Username, Avatar: r.Avatar})
+	}
+	return users, nil
+}
+
 // SearchMessages performs a full-text search against the messages_fts virtual table.
 // When channelID is non-nil the search is scoped to that channel.
 // Deleted messages are excluded from results.
@@ -434,6 +460,53 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
 }
 
+// GetMessagesAroundForAPI returns a window of messages centred on centerID in
+// the API response shape, ordered oldest-first: up to beforeCount messages
+// older than the centre, the centre itself, and up to afterCount newer ones.
+//
+// Callers that need to know whether the channel holds more history on either
+// side pass one extra on each count and inspect the returned slice — this
+// query does no probing of its own.
+func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]MessageAPIResponse, error) {
+	if beforeCount < 0 {
+		beforeCount = 0
+	}
+	if afterCount < 0 {
+		afterCount = 0
+	}
+	// SQLite forbids ORDER BY/LIMIT on a compound-SELECT operand, so each half
+	// of the window is a nested subquery. The older half includes the centre
+	// row itself, hence beforeCount+1.
+	rows, err := d.reader.QueryContext(ctx,
+		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+		        m.mentions_everyone
+		 FROM messages m JOIN users u ON m.user_id = u.id
+		 WHERE m.id IN (
+		     SELECT id FROM (
+		         SELECT id FROM messages
+		          WHERE channel_id = ? AND deleted = 0 AND id <= ?
+		          ORDER BY id DESC LIMIT ?
+		     )
+		     UNION ALL
+		     SELECT id FROM (
+		         SELECT id FROM messages
+		          WHERE channel_id = ? AND deleted = 0 AND id > ?
+		          ORDER BY id ASC LIMIT ?
+		     )
+		 )
+		 ORDER BY m.id ASC`,
+		channelID, centerID, beforeCount+1,
+		channelID, centerID, afterCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetMessagesAroundForAPI: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+}
+
 // getReactionsBatch returns aggregated reactions for multiple messages.
 func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUserID int64) (map[int64][]ReactionInfo, error) {
 	if len(msgIDs) == 0 {
@@ -501,9 +574,12 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
 // for a given user. Text and announcement channels are included, with 0,0 for
-// channels that have no messages. Correlated subqueries range-scan
-// idx_messages_channel per channel instead of the old LEFT JOIN fan-out that
-// touched every message row on every WS connect.
+// channels that have no messages. DM channels are included too, but only the
+// ones this user participates in — without them the ready payload carried no
+// mention_count for DMs, so a DM mention badge silently reset on every
+// reconnect. Correlated subqueries range-scan idx_messages_channel per channel
+// instead of the old LEFT JOIN fan-out that touched every message row on every
+// WS connect; the DM predicate hits idx_dm_participants_user.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id,
@@ -516,8 +592,10 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 		        COALESCE((SELECT rs.mention_count FROM read_states rs
 		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 		 FROM channels c
-		 WHERE c.type IN ('text', 'announcement')`,
-		userID, userID,
+		 WHERE c.type IN ('text', 'announcement')
+		    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
+		                                   WHERE dp.channel_id = c.id AND dp.user_id = ?))`,
+		userID, userID, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)

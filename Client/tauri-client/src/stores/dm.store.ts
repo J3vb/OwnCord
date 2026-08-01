@@ -19,6 +19,12 @@ export interface DmChannel {
   readonly lastMessage: string;
   readonly lastMessageAt: string;
   readonly unreadCount: number;
+  /**
+   * Unread messages in this DM that mention the current user. Kept independent
+   * of unreadCount so the red mention badge can outrank the plain one, exactly
+   * as it does for channels.
+   */
+  readonly mentionCount: number;
 }
 
 export interface DmState {
@@ -98,9 +104,22 @@ export function updateDmLastMessagePreview(
   });
 }
 
-/** Clear unread count for a DM channel. */
+/** Clear the unread and mention counts for a DM channel — they clear together,
+ *  matching channels.store.clearUnread and the server's read-state advance. */
 export function clearDmUnread(channelId: number): void {
   dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) => (c.channelId === channelId ? { ...c, unreadCount: 0 } : c)),
+    channels: prev.channels.map((c) =>
+      c.channelId === channelId ? { ...c, unreadCount: 0, mentionCount: 0 } : c,
+    ),
+  }));
+}
+
+/** Increment a DM's mention count. Callers also call updateDmLastMessage — a
+ *  mention is always an unread too. */
+export function incrementDmMention(channelId: number): void {
+  dmStore.setState((prev) => ({
+    channels: prev.channels.map((c) =>
+      c.channelId === channelId ? { ...c, mentionCount: c.mentionCount + 1 } : c,
+    ),
   }));
 }

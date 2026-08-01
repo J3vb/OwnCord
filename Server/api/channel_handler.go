@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,9 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListChannels(svc))
 		r.Get("/{id}/messages", handleGetMessages(svc))
+		r.Get("/{id}/messages/around/{messageId}", handleGetMessagesAround(svc))
 		r.Post("/{id}/messages/purge", handlePurgeMessages(svc, broadcaster))
+		r.Get("/{id}/messages/{messageId}/reactions/{emoji}/users", handleGetReactionUsers(svc))
 		r.Get("/{id}/pins", handleGetPins(svc))
 		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, true))
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, false))
@@ -127,19 +130,9 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			before = v
 		}
 
-		limit := defaultMessageLimit
-		if raw := r.URL.Query().Get("limit"); raw != "" {
-			v, parseErr := strconv.Atoi(raw)
-			if parseErr != nil || v < 1 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "limit must be a positive integer",
-				})
-				return
-			}
-			if v > maxMessageLimit {
-				v = maxMessageLimit
-			}
-			limit = v
+		limit, ok := parseLimitParam(w, r)
+		if !ok {
+			return
 		}
 
 		msgs, hasMore, err := svc.Messages.GetMessages(r.Context(), user.ID, channelID, before, limit)
@@ -153,6 +146,83 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			HasMore  bool                    `json:"has_more"`
 		}
 		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: hasMore})
+	}
+}
+
+// handleGetMessagesAround returns the window of messages centred on a message,
+// oldest-first. Used to jump to a message (search hit, pinned entry, reply
+// reference, permalink) that is not in the client's loaded history.
+func handleGetMessagesAround(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		messageID, ok := parseIDParam(w, r, "messageId")
+		if !ok {
+			return
+		}
+
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "authentication required",
+			})
+			return
+		}
+
+		limit, ok := parseLimitParam(w, r)
+		if !ok {
+			return
+		}
+
+		window, err := svc.Messages.GetMessagesAround(r.Context(), user.ID, channelID, messageID, limit)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, window)
+	}
+}
+
+// handleGetReactionUsers returns the users who reacted to a message with a
+// given emoji, capped server-side at 100. The emoji arrives percent-encoded in
+// the path; chi routes on RawPath when it differs from Path, so the param must
+// be unescaped here rather than taken verbatim.
+func handleGetReactionUsers(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		messageID, ok := parseIDParam(w, r, "messageId")
+		if !ok {
+			return
+		}
+
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "authentication required",
+			})
+			return
+		}
+
+		emoji := chi.URLParam(r, "emoji")
+		if decoded, decErr := url.PathUnescape(emoji); decErr == nil {
+			emoji = decoded
+		}
+
+		users, err := svc.Messages.GetReactionUsers(r.Context(), user.ID, channelID, messageID, emoji)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+
+		type response struct {
+			Users []db.ReactionUser `json:"users"`
+		}
+		writeJSON(w, http.StatusOK, response{Users: users})
 	}
 }
 
@@ -247,19 +317,9 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 			channelID = &v
 		}
 
-		limit := defaultMessageLimit
-		if raw := r.URL.Query().Get("limit"); raw != "" {
-			v, parseErr := strconv.Atoi(raw)
-			if parseErr != nil || v < 1 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "BAD_REQUEST", Message: "limit must be a positive integer",
-				})
-				return
-			}
-			if v > maxMessageLimit {
-				v = maxMessageLimit
-			}
-			limit = v
+		limit, ok := parseLimitParam(w, r)
+		if !ok {
+			return
 		}
 
 		results, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, limit)
@@ -364,6 +424,24 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 		slog.ErrorContext(ctx, "service error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})
 	}
+}
+
+// parseLimitParam reads the shared `limit` query parameter, defaulting to
+// defaultMessageLimit and clamping at maxMessageLimit. Writes a 400 response
+// and returns false when the value is present but not a positive integer.
+func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return defaultMessageLimit, true
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "limit must be a positive integer",
+		})
+		return 0, false
+	}
+	return min(v, maxMessageLimit), true
 }
 
 // parseIDParam extracts and validates a chi URL param as int64.

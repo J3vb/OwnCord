@@ -13,6 +13,12 @@ import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore } from "../../src/stores/blocks.store";
 import { uiStore } from "../../src/stores/ui.store";
+import {
+  clearReactionUsersCache,
+  getCachedReactionUsers,
+  loadReactionUsers,
+  setReactionUsersFetcher,
+} from "../../src/components/message-list/reaction-tooltip";
 import type { WsClient, WsListener } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 
@@ -126,6 +132,7 @@ describe("WS Dispatcher", () => {
       loadedChannels: new Set(),
       hasMore: new Map(),
       historyLoadState: new Map(),
+      detachedChannels: new Set(),
     }));
     membersStore.setState(() => ({
       members: new Map(),
@@ -638,6 +645,31 @@ describe("WS Dispatcher", () => {
     expect(msgs).toBeDefined();
   });
 
+  // The who-reacted tooltip caches reactor lists per message+emoji; a
+  // reaction_update on that message makes every one of them stale.
+  it("invalidates the who-reacted cache for the message a reaction_update names", async () => {
+    const fetcher = vi.fn().mockResolvedValue([{ id: 1, username: "alice", avatar: "" }]);
+    setReactionUsersFetcher(fetcher as never);
+    clearReactionUsersCache();
+
+    await loadReactionUsers(1, 200, "👍");
+    await loadReactionUsers(1, 201, "👍");
+    expect(getCachedReactionUsers(200, "👍")).toHaveLength(1);
+
+    mock.dispatch("reaction_update", {
+      message_id: 200,
+      channel_id: 1,
+      emoji: "👍",
+      user_id: 2,
+      action: "add",
+    });
+
+    expect(getCachedReactionUsers(200, "👍")).toBeUndefined();
+    // Other messages' caches are untouched.
+    expect(getCachedReactionUsers(201, "👍")).toHaveLength(1);
+    setReactionUsersFetcher(null);
+  });
+
   it("wires channel_update to channels store", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -1082,6 +1114,7 @@ describe("WS Dispatcher", () => {
       loadedChannels: new Set(),
       hasMore: new Map(),
       historyLoadState: new Map(),
+      detachedChannels: new Set(),
     }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 

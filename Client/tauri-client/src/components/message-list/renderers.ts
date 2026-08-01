@@ -10,6 +10,7 @@ import { createIcon } from "@lib/icons";
 import { loadPref } from "@lib/preferences";
 import { canManageMessages } from "@lib/permissions";
 import { showToast } from "@lib/toast";
+import { formatMessageLink } from "@lib/deep-link";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -67,9 +68,58 @@ export function renderDayDivider(iso: string): HTMLDivElement {
   return divider;
 }
 
-function renderReplyRef(replyToId: number, allMessages: readonly Message[]): HTMLDivElement {
+/**
+ * The "NEW" line above the first message the reader has not seen. Built exactly
+ * like the day divider — same rule/label/rule shape — so the two read as one
+ * family; only the accent colour distinguishes them.
+ */
+export function renderNewDivider(): HTMLDivElement {
+  const divider = createElement("div", {
+    class: "msg-new-divider",
+    role: "separator",
+    "data-testid": "new-messages-divider",
+  });
+  appendChildren(
+    divider,
+    createElement("span", { class: "line" }),
+    createElement("span", { class: "label" }, "NEW"),
+    createElement("span", { class: "line" }),
+  );
+  return divider;
+}
+
+/**
+ * The quoted bar above a reply. Clicking it jumps to the replied-to message —
+ * including when that message is outside the loaded window, which is why the
+ * bar stays clickable even in the "unknown message" case: the id is known, and
+ * the jump path can fetch the window around it.
+ */
+function renderReplyRef(
+  replyToId: number,
+  allMessages: readonly Message[],
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
-  const bar = createElement("div", { class: "msg-reply-ref" });
+  const bar = createElement("div", {
+    class: "msg-reply-ref",
+    role: "button",
+    tabindex: "0",
+    "data-reply-to": String(replyToId),
+    title: "Jump to the replied-to message",
+  });
+  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  bar.addEventListener("click", jump, { signal });
+  bar.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jump();
+      }
+    },
+    { signal },
+  );
   if (ref) {
     const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
     const role = getUserRole(ref.user.id);
@@ -171,7 +221,7 @@ export function renderMessage(
   }
 
   if (msg.replyTo !== null) {
-    el.appendChild(renderReplyRef(msg.replyTo, allMessages));
+    el.appendChild(renderReplyRef(msg.replyTo, allMessages, opts, signal));
   }
 
   const header = createElement("div", { class: "msg-header" });
@@ -297,6 +347,26 @@ export function renderMessage(
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);
     }
+
+    const copyLinkBtn = createElement("button", {
+      "data-testid": `msg-copy-link-${msg.id}`,
+      "aria-label": "Copy Message Link",
+    });
+    copyLinkBtn.appendChild(createIcon("link", 16));
+    copyLinkBtn.title = "Copy Message Link";
+    copyLinkBtn.addEventListener(
+      "click",
+      () => {
+        // No silent success: a copy with no feedback is indistinguishable
+        // from a clipboard that refused.
+        void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
+          () => showToast("Message link copied", "success"),
+          () => showToast("Couldn't copy the message link", "error"),
+        );
+      },
+      { signal },
+    );
+    actionsBar.appendChild(copyLinkBtn);
 
     if (developerModeEnabled) {
       const copyIdBtn = createElement("button", {

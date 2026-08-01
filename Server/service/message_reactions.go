@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
@@ -20,6 +21,56 @@ func (s *MessageService) RemoveReaction(ctx context.Context, userID, msgID int64
 	return s.handleReaction(ctx, userID, msgID, emoji, false)
 }
 
+// GetReactionUsers returns the users who reacted to msgID with emoji, capped at
+// db.MaxReactionUsers. Gated by the same read check as fetching the channel's
+// history, so a reaction pill never leaks membership of a channel the caller
+// cannot read. The message must live in channelID — the URL's channel is what
+// the permission check ran against, so a mismatch is a not-found, not a
+// silently-broader lookup.
+func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID, msgID int64, emoji string) ([]db.ReactionUser, error) {
+	if msgID <= 0 {
+		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
+	}
+	if err := validateEmoji(emoji); err != nil {
+		return nil, err
+	}
+	if err := s.requireChannelRead(ctx, userID, channelID); err != nil {
+		return nil, err
+	}
+
+	msg, err := s.st.GetMessage(ctx, msgID)
+	if err != nil || msg == nil || msg.ChannelID != channelID {
+		return nil, fmt.Errorf("%w: message not found", ErrNotFound)
+	}
+
+	users, err := s.st.GetReactionUsers(ctx, msgID, emoji, db.MaxReactionUsers)
+	if err != nil {
+		slog.Error("MessageService.GetReactionUsers", "err", err, "msg_id", msgID)
+		return nil, fmt.Errorf("%w: failed to fetch reaction users", ErrInternal)
+	}
+	if users == nil {
+		users = []db.ReactionUser{}
+	}
+	return users, nil
+}
+
+// validateEmoji applies the shared shape rules for a reaction emoji: non-empty,
+// at most 32 runes, no control characters, and unchanged by the sanitizer.
+func validateEmoji(emoji string) error {
+	if emoji == "" || len([]rune(emoji)) > 32 {
+		return fmt.Errorf("%w: invalid emoji", ErrBadRequest)
+	}
+	for _, r := range emoji {
+		if r <= 0x1F || r == 0x7F {
+			return fmt.Errorf("%w: emoji contains control characters", ErrBadRequest)
+		}
+	}
+	if sanitizer.Sanitize(emoji) != emoji {
+		return fmt.Errorf("%w: emoji contains unsafe content", ErrBadRequest)
+	}
+	return nil
+}
+
 func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64, emoji string, add bool) (*ReactionResult, error) {
 	// Rate limit.
 	ratKey := auth.Key("reaction", userID)
@@ -30,18 +81,8 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	if msgID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
 	}
-	if emoji == "" || len([]rune(emoji)) > 32 {
-		return nil, fmt.Errorf("%w: invalid emoji", ErrBadRequest)
-	}
-	// Reject control characters.
-	for _, r := range emoji {
-		if r <= 0x1F || r == 0x7F {
-			return nil, fmt.Errorf("%w: emoji contains control characters", ErrBadRequest)
-		}
-	}
-	// Sanitize check.
-	if sanitizer.Sanitize(emoji) != emoji {
-		return nil, fmt.Errorf("%w: emoji contains unsafe content", ErrBadRequest)
+	if err := validateEmoji(emoji); err != nil {
+		return nil, err
 	}
 
 	msg, err := s.st.GetMessage(ctx, msgID)

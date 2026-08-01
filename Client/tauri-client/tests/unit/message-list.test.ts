@@ -28,6 +28,7 @@ function resetStores(): void {
     loadedChannels: new Set(),
     hasMore: new Map(),
     historyLoadState: new Map(),
+    detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -225,6 +226,30 @@ describe("MessageList", () => {
 
     const result = msgList.scrollToMessage(999);
     expect(result).toBe(false);
+  });
+
+  it("scrollToMessage flashes the target row so the eye can find it", () => {
+    setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 }), makeMessage({ id: 3 })]);
+    msgList.mount(container);
+
+    msgList.scrollToMessage(2);
+
+    // A scroll with no visual marker leaves the reader hunting; the row the
+    // jump landed on must be the one that flashes.
+    const flashed = container.querySelector(".highlight-flash");
+    expect(flashed).not.toBeNull();
+    expect(flashed!.getAttribute("data-testid")).toBe("message-2");
+  });
+
+  it("scrollToMessage renders a target that was outside the rendered window", () => {
+    // A long channel: without forcing a rebuild the target stays unrendered
+    // and there is nothing to scroll to or flash.
+    const many = Array.from({ length: 200 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, many);
+    msgList.mount(container);
+
+    expect(msgList.scrollToMessage(150)).toBe(true);
+    expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
   it("renders day dividers between messages on different days", () => {

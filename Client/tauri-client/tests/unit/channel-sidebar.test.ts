@@ -920,7 +920,9 @@ describe("ChannelSidebar", () => {
     expect(onDeleteChannel.mock.calls[0]![0].id).toBe(1);
   });
 
-  it("does not show context menu for non-admin users", () => {
+  // Mark as Read is offered to everyone (it touches only the caller's own read
+  // state), so a non-admin now gets a menu — just without the admin entries.
+  it("shows only Mark as Read in the context menu for non-admin users", () => {
     const onEditChannel = vi.fn();
     sidebar.destroy?.();
     // Set a regular member (not admin/owner)
@@ -949,9 +951,12 @@ describe("ChannelSidebar", () => {
       }),
     );
 
-    // No context menu should appear for non-admin
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
-    expect(ctxMenu).toBeNull();
+    expect(ctxMenu).not.toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-mark-read"]')).not.toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-edit-channel"]')).toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-delete-channel"]')).toBeNull();
+    expect(onEditChannel).not.toHaveBeenCalled();
   });
 
   // ── Purge messages context-menu item ──

@@ -187,6 +187,16 @@ type ReactionInfo struct {
 	Me    bool   `json:"me"`
 }
 
+// ReactionUser is one reactor in the who-reacted list returned by
+// GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users. Avatar is a
+// plain string ("" = none) rather than UserPublic's pointer: the tooltip that
+// consumes this never distinguishes null from empty.
+type ReactionUser struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+}
+
 // VoiceState represents a row in the voice_states table.
 // It tracks which voice channel a user is in and their current audio state.
 //

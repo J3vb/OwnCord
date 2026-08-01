@@ -16,6 +16,7 @@ const (
 	MsgTypeReactionRemove    = "reaction_remove"
 	MsgTypeTypingStart       = "typing_start"
 	MsgTypeChannelFocus      = "channel_focus"
+	MsgTypeMarkRead          = "mark_read"
 	MsgTypePresenceUpdate    = "presence_update"
 	MsgTypeVoiceJoin         = "voice_join"
 	MsgTypeVoiceLeave        = "voice_leave"

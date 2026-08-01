@@ -242,6 +242,50 @@ describe("API Client", () => {
       await api.getMessages(3);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/3/messages");
     });
+
+    it("getMessagesAround hits the around route with the message id in the path", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: false, has_more_after: false }),
+      );
+      await api.getMessagesAround(5, 4242);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/5/messages/around/4242");
+    });
+
+    it("getMessagesAround passes the limit", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: false, has_more_after: false }),
+      );
+      await api.getMessagesAround(5, 42, { limit: 30 });
+      expect(fetchCallUrl()).toContain("limit=30");
+    });
+
+    it("getMessagesAround returns the has-more flags for both sides", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: true, has_more_after: false }),
+      );
+      const resp = await api.getMessagesAround(5, 42);
+      expect(resp.has_more_before).toBe(true);
+      expect(resp.has_more_after).toBe(false);
+    });
+
+    // The emoji is a path segment: unescaped it would either break the route or
+    // resolve to a different emoji than the one on the pill.
+    it("getReactionUsers percent-encodes the emoji in the path", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ users: [] }));
+      await api.getReactionUsers(5, 42, "👍");
+      expect(fetchCallUrl()).toBe(
+        "https://localhost:8443/api/v1/channels/5/messages/42/reactions/%F0%9F%91%8D/users",
+      );
+    });
+
+    it("getReactionUsers returns the reactor list", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ users: [{ id: 1, username: "alice", avatar: "" }] }),
+      );
+      const resp = await api.getReactionUsers(5, 42, "👍");
+      expect(resp.users).toHaveLength(1);
+      expect(resp.users[0]?.username).toBe("alice");
+    });
   });
 
   describe("config management", () => {

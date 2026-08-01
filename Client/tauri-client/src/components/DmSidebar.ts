@@ -22,6 +22,12 @@ export interface DmConversation {
   readonly lastMessage: string;
   readonly timestamp: string;
   readonly unread: boolean;
+  /** Unread message count. Drives the numeric badge; a conversation marked
+   *  `unread` with no count still shows the plain dot (older payloads). */
+  readonly unreadCount?: number;
+  /** Unread messages here that mention the current user. Outranks the unread
+   *  badge, exactly as it does in the channel list. */
+  readonly mentionCount?: number;
   readonly active?: boolean;
 }
 
@@ -102,8 +108,27 @@ function renderDmItem(
 
   appendChildren(item, avatar, name, closeBtn);
 
-  // Unread dot
-  if (convo.unread) {
+  // A mention badge outranks the unread badge, which in turn outranks the bare
+  // dot — the dot is only what is left when the payload carries no counts.
+  const mentionCount = convo.mentionCount ?? 0;
+  const unreadCount = convo.unreadCount ?? 0;
+  if (mentionCount > 0) {
+    const badge = createElement(
+      "span",
+      { class: "dm-mention-badge", "data-testid": `dm-mentions-${convo.userId}` },
+      String(mentionCount),
+    );
+    badge.title = `${mentionCount} mention${mentionCount === 1 ? "" : "s"}`;
+    item.appendChild(badge);
+  } else if (unreadCount > 0) {
+    const badge = createElement(
+      "span",
+      { class: "dm-unread-badge", "data-testid": `dm-unread-${convo.userId}` },
+      String(unreadCount),
+    );
+    badge.title = `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`;
+    item.appendChild(badge);
+  } else if (convo.unread) {
     const unreadDot = createElement("span", { class: "dm-unread" });
     item.appendChild(unreadDot);
   }

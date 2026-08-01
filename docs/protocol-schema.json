@@ -10,6 +10,7 @@
     { "wire": "reaction_remove", "go": "MsgTypeReactionRemove", "ts": "REACTION_REMOVE" },
     { "wire": "typing_start", "go": "MsgTypeTypingStart", "ts": "TYPING_START" },
     { "wire": "channel_focus", "go": "MsgTypeChannelFocus", "ts": "CHANNEL_FOCUS" },
+    { "wire": "mark_read", "go": "MsgTypeMarkRead", "ts": "MARK_READ" },
     { "wire": "presence_update", "go": "MsgTypePresenceUpdate", "ts": "PRESENCE_UPDATE" },
     { "wire": "voice_join", "go": "MsgTypeVoiceJoin", "ts": "VOICE_JOIN" },
     { "wire": "voice_leave", "go": "MsgTypeVoiceLeave", "ts": "VOICE_LEAVE" },

@@ -151,6 +151,12 @@ func ClientUserIDForTest(c *Client) int64 {
 	return c.userID
 }
 
+// ClientChannelIDForTest returns the client's currently focused channel for
+// external tests.
+func ClientChannelIDForTest(c *Client) int64 {
+	return c.getChannelID()
+}
+
 // TouchForTest exposes Client.touch for external tests.
 func TouchForTest(c *Client) {
 	c.touch()
