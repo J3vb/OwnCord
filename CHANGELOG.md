@@ -186,6 +186,26 @@ claimed behaviour — no product code changed and no assertion weakened.
 
 ### Behavioural changes operators must know about
 
+- **Voice now works out of the box for clients that are not on the server
+  machine.** The LiveKit proxy's origin gate rejected two legitimate
+  client shapes with `/livekit/rtc/v1` 403s — chat worked, voice didn't:
+  the desktop client's fixed webview origins
+  (`http(s)://tauri.localhost`, `tauri://localhost`) and any UI served
+  from the server's own origin, whose WebSocket handshakes always carry
+  that origin even though same-origin fetches omit it. Both are now
+  recognized: first-party webview origins are always allowed, and an
+  `Origin` whose host equals the request's `Host` is treated as
+  same-origin — mirroring the default policy the chat WebSocket already
+  applied, with no change to the CSRF posture (a foreign origin still
+  needs an explicit `allowed_origins` entry). Rejected origins are now
+  logged (`livekit proxy: origin rejected`) so the next such failure is
+  diagnosable from the server log.
+- **API tokens can use the admin log stream.** `POST
+  /admin/api/logs/ticket` required a browser login session, so headless
+  clients (the `mcp-introspect` dev tool, bots) could reach every other
+  `/admin/api/*` route but not `server_logs`. Tickets are now bound to
+  whichever credential authenticated the request; revoking a token cuts
+  an in-flight stream, exactly as session revocation always has.
 - **The desktop client now actually uses the OS credential store.** The
   `keyring` crate declares no `default` feature, so the previous
   `keyring = "3"` dependency compiled its in-memory *mock* store on
