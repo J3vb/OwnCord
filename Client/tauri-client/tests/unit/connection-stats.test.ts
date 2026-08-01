@@ -110,11 +110,14 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("start is idempotent — calling start twice does not create double intervals", () => {
-    poller = createConnectionStatsPoller(() => null);
+    const getRoom = vi.fn().mockReturnValue(null);
+    poller = createConnectionStatsPoller(getRoom);
     poller.start();
     poller.start();
-    // If double interval were created, stopping would leave one running — we just check no throw
-    poller.stop();
+    getRoom.mockClear();
+    vi.advanceTimersByTime(2000);
+    // A second interval would cause the poll callback to fire twice per tick.
+    expect(getRoom).toHaveBeenCalledTimes(1);
   });
 
   it("stop is idempotent — calling stop without start does not throw", () => {

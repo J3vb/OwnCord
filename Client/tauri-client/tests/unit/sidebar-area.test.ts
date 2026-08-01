@@ -1084,6 +1084,22 @@ describe("SidebarArea", () => {
     it("does not save DM channel as channelBeforeDm", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
+        next.set(1, {
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
         next.set(50, {
           id: 50,
           name: "DmCh",
@@ -1110,9 +1126,21 @@ describe("SidebarArea", () => {
 
       const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
       entry.click();
+      uiStore.flush();
 
-      // DM was active but type was dm, so channelBeforeDm should be null
-      // We can verify by going to DMs mode and clicking back
+      // DM was active but type was dm, so channelBeforeDm should be null:
+      // going to DMs mode and clicking back should NOT restore the DM
+      // channel (50) — it should fall back to the first text channel (1).
+      expect(uiStore.getState().sidebarMode).toBe("dms");
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onBack();
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      expect(channelsStore.getState().activeChannelId).not.toBe(50);
+
       cleanup(result);
     });
   });

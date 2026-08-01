@@ -1128,13 +1128,35 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_speakers to voice store", () => {
+    voiceStore.setState((prev) => {
+      const users = new Map(
+        [1, 2, 4].map((userId) => [
+          userId,
+          {
+            userId,
+            username: `user${userId}`,
+            muted: false,
+            deafened: false,
+            speaking: false,
+            camera: false,
+            screenshare: false,
+          },
+        ]),
+      );
+      const voiceUsers = new Map(prev.voiceUsers);
+      voiceUsers.set(3, users);
+      return { ...prev, voiceUsers };
+    });
+
     mock.dispatch("voice_speakers", {
       channel_id: 3,
       speakers: [1, 2, 3],
     });
 
-    // Verify it runs without error
-    expect(true).toBe(true);
+    const users = voiceStore.getState().voiceUsers.get(3);
+    expect(users?.get(1)?.speaking).toBe(true);
+    expect(users?.get(2)?.speaking).toBe(true);
+    expect(users?.get(4)?.speaking).toBe(false);
   });
 
   it("wires voice_token to handleVoiceToken", async () => {

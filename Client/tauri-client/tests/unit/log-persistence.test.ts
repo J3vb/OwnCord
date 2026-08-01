@@ -14,6 +14,8 @@ const {
   mockReadTextFile,
   mockAddLogListener,
   mockGetLogBuffer,
+  mockLoggerError,
+  mockLoggerWarn,
 } = vi.hoisted(() => ({
   mockAppLogDir: vi.fn().mockResolvedValue("/mock/logs"),
   mockJoin: vi.fn((...parts: string[]) => parts.join("/")),
@@ -25,6 +27,10 @@ const {
   mockReadTextFile: vi.fn().mockResolvedValue(""),
   mockAddLogListener: vi.fn(),
   mockGetLogBuffer: vi.fn(() => [] as unknown[]),
+  // Shared across freshImport() calls so tests can spy on the errors/warnings
+  // the module's internal logger reports, not just its side effects.
+  mockLoggerError: vi.fn(),
+  mockLoggerWarn: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -47,8 +53,8 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
+    warn: mockLoggerWarn,
+    error: mockLoggerError,
   }),
 }));
 
@@ -106,6 +112,8 @@ describe("log persistence", () => {
     mockReadTextFile.mockReset().mockResolvedValue("");
     mockAddLogListener.mockReset();
     mockGetLogBuffer.mockReset().mockReturnValue([]);
+    mockLoggerError.mockReset();
+    mockLoggerWarn.mockReset();
   });
 
   afterEach(() => {
@@ -642,15 +650,42 @@ describe("log persistence", () => {
 
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
 
-      // After flush completes, activeFlush should be null.
-      // clearPendingPersistedLogs should resolve immediately.
-      await clearPendingPersistedLogs();
-      // No hanging — test completes
+      // If activeFlush still referenced the first (already-settled) flush,
+      // a brand-new in-flight flush would never be tracked and
+      // clearPendingPersistedLogs would resolve too early instead of
+      // waiting on it. Force a second, slow flush and confirm it's the one
+      // actually awaited — proving activeFlush was cleared after the first
+      // flush and re-armed for the second.
+      let resolveSecondWrite: (() => void) | null = null;
+      mockWriteTextFile.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSecondWrite = resolve;
+          }),
+      );
+
+      getListener()!(makeEntry({ message: "second" }));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
+
+      let settled = false;
+      const clearPromise = clearPendingPersistedLogs().then(() => {
+        settled = true;
+      });
+
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      resolveSecondWrite!();
+      await clearPromise;
+      expect(settled).toBe(true);
     });
 
     it("clears activeFlush after failed flush", async () => {
-      mockWriteTextFile.mockRejectedValueOnce(new Error("write error"));
+      const firstError = new Error("write error");
+      mockWriteTextFile.mockRejectedValueOnce(firstError);
       const { getListener } = captureListener();
       const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
@@ -658,8 +693,33 @@ describe("log persistence", () => {
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
 
-      // Even after failure, activeFlush should be cleared
-      await clearPendingPersistedLogs();
+      // The failure was caught and logged internally, not left dangling.
+      expect(mockLoggerError).toHaveBeenCalledWith("flush failed", firstError);
+
+      // Same proof as the success case: a fresh in-flight flush must be
+      // tracked (not swallowed by a stale reference to the failed one).
+      let resolveSecondWrite: (() => void) | null = null;
+      mockWriteTextFile.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSecondWrite = resolve;
+          }),
+      );
+
+      getListener()!(makeEntry({ message: "second" }));
+      await vi.advanceTimersByTimeAsync(2000);
+
+      let settled = false;
+      const clearPromise = clearPendingPersistedLogs().then(() => {
+        settled = true;
+      });
+
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      resolveSecondWrite!();
+      await clearPromise;
+      expect(settled).toBe(true);
     });
   });
 
@@ -743,13 +803,18 @@ describe("log persistence", () => {
 
       // Add an entry, then make writeTextFile fail
       getListener()!(makeEntry());
-      mockWriteTextFile.mockRejectedValueOnce(new Error("final write failed"));
+      const forcedError = new Error("final write failed");
+      mockWriteTextFile.mockRejectedValueOnce(forcedError);
 
       // Cleanup should not throw even if flushBuffer fails
       cleanup();
 
       // Let any pending microtasks settle
       await vi.advanceTimersByTimeAsync(0);
+
+      // The forced write failure must have been caught and logged, not
+      // swallowed silently or left to crash the app during teardown.
+      expect(mockLoggerError).toHaveBeenCalledWith("flush failed", forcedError);
     });
   });
 });
