@@ -81,12 +81,12 @@ func FuzzValidateDisplayName(f *testing.F) {
 		"name\x00null",
 		"name\ttab",
 		"name\nnewline",
-		"zero​width", // ZERO WIDTH SPACE
-		"bidi‮override",
-		"‮reversed‬",
+		"zero\u200bwidth", // ZERO WIDTH SPACE
+		"bidi\u202eoverride",
+		"\u202ereversed\u202c",
 		strings.Repeat("a", 1000),
-		"​name​",
-		"‮evil‬",
+		"\u200bname\u200b",
+		"\u202eevil\u202c",
 	}
 	for _, s := range seeds {
 		f.Add(s)

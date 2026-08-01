@@ -64,7 +64,7 @@ func FuzzValidateRelativePath(f *testing.F) {
 		if p == "." {
 			t.Fatalf("validateRelativePath(%q) = nil but path is the current directory", p)
 		}
-		for _, seg := range strings.Split(p, "/") {
+		for seg := range strings.SplitSeq(p, "/") {
 			if seg == ".." {
 				t.Fatalf("validateRelativePath(%q) = nil but path contains a %q traversal segment", p, "..")
 			}

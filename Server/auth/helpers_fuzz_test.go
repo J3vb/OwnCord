@@ -30,8 +30,8 @@ func FuzzValidateUsername(f *testing.F) {
 		"user\x00name",
 		"user\tname",
 		"user\nname",
-		"zero​width",    // ZERO WIDTH SPACE (Cf)
-		"bidi‮override", // RIGHT-TO-LEFT OVERRIDE (Cf)
+		"zero\u200bwidth",    // ZERO WIDTH SPACE (Cf)
+		"bidi\u202eoverride", // RIGHT-TO-LEFT OVERRIDE (Cf)
 		"emoji😀name",
 		"日本語ユーザー",
 		" nbsp ",
