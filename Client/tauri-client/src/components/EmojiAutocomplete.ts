@@ -14,10 +14,14 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
-import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
+import { createElement, setText } from "@lib/dom";
 import { EMOJI_NAMES } from "@components/EmojiPicker";
 import { buildCustomEmojiImage } from "@components/message-list/custom-emoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
+import {
+  createInlineAutocomplete,
+  type InlineAutocompleteComponent,
+} from "@components/inline-autocomplete";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the picker. */
 export const MAX_EMOJI_SUGGESTIONS = 10;
@@ -48,17 +52,8 @@ export interface EmojiAutocompleteOptions {
   readonly onClose: () => void;
 }
 
-export interface EmojiAutocompleteComponent {
-  readonly element: HTMLDivElement;
-  /**
-   * Re-filter for `query` (the text typed after ":"). Returns false when
-   * nothing matches, which the composer treats as "close the popup".
-   */
-  setQuery(query: string): boolean;
-  /** Handle a composer keydown. Returns true when the key was consumed. */
-  handleKeydown(e: KeyboardEvent): boolean;
-  destroy(): void;
-}
+/** Same shape as the shared inline-autocomplete widget. */
+export type EmojiAutocompleteComponent = InlineAutocompleteComponent;
 
 function byLabel(a: EmojiSuggestion, b: EmojiSuggestion): number {
   return a.label.localeCompare(b.label);
@@ -133,96 +128,30 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
   );
 }
 
+/** One emoji row: preview cell, `:label:`/name, and a keyword detail line. */
+function renderEmojiRow(s: EmojiSuggestion): HTMLElement[] {
+  const name = createElement("span", { class: "ma-name" });
+  setText(name, s.kind === "custom" ? `:${s.label}:` : s.label);
+  const detail = createElement("span", { class: "ma-detail" });
+  setText(detail, s.detail);
+  return [buildPreview(s), name, detail];
+}
+
 export function createEmojiAutocomplete(
   options: EmojiAutocompleteOptions,
 ): EmojiAutocompleteComponent {
-  const ac = new AbortController();
-  const signal = ac.signal;
-
-  let suggestions: EmojiSuggestion[] = [];
-  let activeIndex = 0;
-
-  const root = createElement("div", {
-    class: "mention-autocomplete emoji-autocomplete",
-    role: "listbox",
-    "data-testid": "emoji-autocomplete",
+  return createInlineAutocomplete<EmojiSuggestion>({
+    // Shares the base class deliberately (the composer test selects
+    // `.mention-autocomplete:not(.emoji-autocomplete)` to distinguish them).
+    rootClass: "mention-autocomplete emoji-autocomplete",
+    rootTestId: "emoji-autocomplete",
+    filter: filterEmojiSuggestions,
+    valueOf: (s) => s.insert,
+    rowTestId: (s) => `emoji-option-${s.label}`,
+    renderRow: renderEmojiRow,
+    // Unlike mentions, emoji stay empty until the composer types past
+    // MIN_EMOJI_QUERY, so there is nothing to prime on create.
+    onSelect: options.onSelect,
+    onClose: options.onClose,
   });
-  const list = createElement("div", { class: "ma-list" });
-  root.appendChild(list);
-
-  function choose(index: number): void {
-    const picked = suggestions[index];
-    if (picked === undefined) return;
-    options.onSelect(picked.insert);
-  }
-
-  function render(): void {
-    clearChildren(list);
-    for (let i = 0; i < suggestions.length; i++) {
-      const s = suggestions[i]!;
-      const row = createElement("div", {
-        class: i === activeIndex ? "ma-item ma-item--active" : "ma-item",
-        role: "option",
-        "aria-selected": i === activeIndex ? "true" : "false",
-        "data-testid": `emoji-option-${s.label}`,
-      });
-      const name = createElement("span", { class: "ma-name" });
-      setText(name, s.kind === "custom" ? `:${s.label}:` : s.label);
-      const detail = createElement("span", { class: "ma-detail" });
-      setText(detail, s.detail);
-      appendChildren(row, buildPreview(s), name, detail);
-      // mousedown, not click: the textarea must not lose focus before the
-      // insertion runs.
-      row.addEventListener(
-        "mousedown",
-        (e: MouseEvent) => {
-          e.preventDefault();
-          choose(i);
-        },
-        { signal },
-      );
-      list.appendChild(row);
-    }
-  }
-
-  function setQuery(query: string): boolean {
-    suggestions = filterEmojiSuggestions(query);
-    activeIndex = 0;
-    render();
-    return suggestions.length > 0;
-  }
-
-  function handleKeydown(e: KeyboardEvent): boolean {
-    if (suggestions.length === 0) return false;
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        activeIndex = (activeIndex + 1) % suggestions.length;
-        render();
-        return true;
-      case "ArrowUp":
-        e.preventDefault();
-        activeIndex = (activeIndex - 1 + suggestions.length) % suggestions.length;
-        render();
-        return true;
-      case "Enter":
-      case "Tab":
-        e.preventDefault();
-        choose(activeIndex);
-        return true;
-      case "Escape":
-        e.preventDefault();
-        options.onClose();
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  function destroy(): void {
-    ac.abort();
-    root.remove();
-  }
-
-  return { element: root, setQuery, handleKeydown, destroy };
 }
