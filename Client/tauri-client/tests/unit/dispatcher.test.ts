@@ -428,11 +428,32 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
   });
 
-  it("wires member_join to members store", () => {
+  it("wires member_join to members store, using the payload's status", () => {
     mock.dispatch("member_join", {
       user: { id: 99, username: "newuser", avatar: null, role: "member" },
+      status: "online",
     });
-    expect(membersStore.getState().members.has(99)).toBe(true);
+    expect(membersStore.getState().members.get(99)).toMatchObject({ status: "online" });
+  });
+
+  it("renders an invisible member_join as offline, not online", () => {
+    // The server broadcasts an invisible connector's join as "offline" (the
+    // viewer-safe collapse) — the client must render exactly that, not
+    // assume a join always means online.
+    mock.dispatch("member_join", {
+      user: { id: 100, username: "ghost", avatar: null, role: "member" },
+      status: "offline",
+    });
+    expect(membersStore.getState().members.get(100)).toMatchObject({ status: "offline" });
+  });
+
+  it("defaults a member_join with no status field to offline, not online", () => {
+    // An older server that has not shipped the status field yet must fail
+    // safe — omission must never be read as "online".
+    mock.dispatch("member_join", {
+      user: { id: 101, username: "legacy-server-user", avatar: null, role: "member" },
+    });
+    expect(membersStore.getState().members.get(101)).toMatchObject({ status: "offline" });
   });
 
   it("wires chat_send_ok to confirmSend in messages store", () => {

@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -141,6 +142,50 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 	}
 	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 1 {
 		t.Errorf("user 3 mention_count = %d, want 1", n)
+	}
+}
+
+// TestIncrementMentionCounts_BatchesAcrossChunkBoundary exercises the
+// multi-row upsert with a recipient count that spans more than one exec
+// chunk (mentionCountChunkSize=500), pinning that every recipient still gets
+// exactly one increment (or a freshly seeded row) regardless of which chunk
+// it landed in — the batching must not drop or double-count a row at the
+// boundary.
+func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
+	database := newMigratedTestDB(t)
+	ctx := context.Background()
+	if _, err := database.CreateChannel(ctx, "everyone-chan", "text", "", "", 0); err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	const n = 520 // > one 500-row chunk, so the run crosses a chunk boundary.
+	ids := make([]int64, 0, n)
+	for i := range n {
+		uid, err := database.CreateUser(ctx, "batchuser"+strconv.Itoa(i), "hash", 4)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		ids = append(ids, uid)
+	}
+
+	if err := database.IncrementMentionCounts(ctx, 1, ids); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
+		if got, err := database.GetMentionCount(ctx, uid, 1); err != nil || got != 1 {
+			t.Errorf("user %d mention_count = %d (err=%v), want 1", uid, got, err)
+		}
+	}
+
+	// A second pass bumps every one of them again, chunk boundary included.
+	if err := database.IncrementMentionCounts(ctx, 1, ids); err != nil {
+		t.Fatalf("IncrementMentionCounts (second pass): %v", err)
+	}
+	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
+		if got, err := database.GetMentionCount(ctx, uid, 1); err != nil || got != 2 {
+			t.Errorf("user %d mention_count after second pass = %d (err=%v), want 2", uid, got, err)
+		}
 	}
 }
 

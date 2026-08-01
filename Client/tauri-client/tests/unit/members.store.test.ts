@@ -100,9 +100,10 @@ describe("members store", () => {
   });
 
   describe("addMember", () => {
-    it("adds a new member from member_join payload", () => {
+    it("adds a new member from member_join payload, using the payload's status", () => {
       const payload: MemberJoinPayload = {
         user: { id: 10, username: "newuser", avatar: null, role: "member" },
+        status: "online",
       };
       addMember(payload);
       const member = membersStore.getState().members.get(10);
@@ -118,10 +119,31 @@ describe("members store", () => {
       });
     });
 
+    it("renders an invisible join as offline", () => {
+      // The server collapses an invisible connector's status to "offline"
+      // before broadcasting member_join; the store must pass that through
+      // rather than assuming a join always means online.
+      addMember({
+        user: { id: 11, username: "ghost", avatar: null, role: "member" },
+        status: "offline",
+      });
+      expect(membersStore.getState().members.get(11)?.status).toBe("offline");
+    });
+
+    it("defaults to offline when the payload omits status (older server)", () => {
+      // Fail safe: a server that has not shipped the status field yet must
+      // not cause a hidden user to render as online.
+      addMember({
+        user: { id: 12, username: "legacy-server-user", avatar: null, role: "member" },
+      });
+      expect(membersStore.getState().members.get(12)?.status).toBe("offline");
+    });
+
     it("does not remove existing members", () => {
       setMembers([MEMBER_ALICE]);
       addMember({
         user: { id: 10, username: "newuser", avatar: null, role: "member" },
+        status: "online",
       });
       expect(membersStore.getState().members.size).toBe(2);
       expect(membersStore.getState().members.has(1)).toBe(true);

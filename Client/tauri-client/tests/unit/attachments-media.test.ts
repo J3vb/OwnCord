@@ -35,6 +35,7 @@ vi.mock("@stores/auth.store", () => ({ getToken: () => "session-token" }));
 
 import {
   clearAttachmentCaches,
+  fetchMediaAsObjectUrl,
   isAudioMime,
   isVideoMime,
   renderAttachment,
@@ -183,6 +184,41 @@ describe("renderAttachment — video", () => {
 
     clearAttachmentCaches();
     expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock-1");
+  });
+
+  it("evicts the oldest blob (FIFO) once the media cache cap is exceeded", async () => {
+    let nextBlobId = 0;
+    createObjectURLMock.mockImplementation(() => `blob:mock-${++nextBlobId}`);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: { get: () => "video/mp4" },
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+    });
+
+    // One more than the cap (20) — the first URL fetched must be evicted (and
+    // its blob revoked) to make room for the last one, without ever growing
+    // past the cap.
+    const urls = Array.from(
+      { length: 21 },
+      (_, i) => `https://myserver.local:8443/api/v1/files/clip-${i}`,
+    );
+    for (const url of urls) {
+      await fetchMediaAsObjectUrl(url);
+    }
+
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock-1");
+    expect(revokeObjectURLMock).toHaveBeenCalledTimes(1);
+
+    // The evicted URL is gone from the cache — fetching it again re-downloads
+    // rather than reusing a stale entry.
+    fetchMock.mockClear();
+    await fetchMediaAsObjectUrl(urls[0]!);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The most recently fetched entry is still cached (no refetch).
+    fetchMock.mockClear();
+    await fetchMediaAsObjectUrl(urls[urls.length - 1]!);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

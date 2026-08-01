@@ -36,6 +36,7 @@ import {
   setOnError as setVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
+import { clearAttachmentCaches } from "@components/message-list/attachments";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -714,6 +715,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // is module-global, so without this a switch to another server would keep
       // rendering the previous one's shortcodes until its own list arrived.
       clearCustomEmoji();
+      // Image/video/audio caches are module-global too — without this every
+      // clip viewed this session stays pinned (as a blob: URL or a cached
+      // data: URI) past logout.
+      clearAttachmentCaches();
       autoIdle?.destroy();
       autoIdle = null;
       channelCtrl?.destroyChannel();

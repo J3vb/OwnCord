@@ -84,6 +84,29 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 	if state == nil {
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	}
+
+	// MUTE_MEMBERS authorizes moderating server voice channels, not a private
+	// DM call the actor happens not to be part of — voice_mod_kick and friends
+	// carry no channel id from the client, so without this a moderator could
+	// reach into any two users' DM call by targeting a user id alone. Refused
+	// with the exact same shape as "target not in voice" so the actor learns
+	// nothing about a DM call they are not in.
+	ch, err := d.DB.GetChannel(ctx, state.ChannelID)
+	if err != nil {
+		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", state.ChannelID)
+		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read channel"}}
+	}
+	if ch != nil && ch.Type == "dm" {
+		participant, err := d.DB.IsDMParticipant(ctx, actorID, state.ChannelID)
+		if err != nil {
+			slog.Error("ws voiceModTarget IsDMParticipant", "err", err, "channel_id", state.ChannelID)
+			return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify DM membership"}}
+		}
+		if !participant {
+			return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+		}
+	}
+
 	return state, nil
 }
 
@@ -172,17 +195,20 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 	}
 	// A server deafen implies a server mute at the SFU: a deafened user must
-	// not keep talking into a room they cannot hear.
-	if c.Deafened() {
-		if err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), true); err != nil {
-			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
-			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
-		}
-		if d.Mod != nil {
-			if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, true); err != nil {
-				slog.Warn("ws handleVoiceModDeafenV2 MuteParticipant failed",
-					"err", err, "target_id", c.TargetID(), "channel_id", state.ChannelID)
-			}
+	// not keep talking into a room they cannot hear. Lifting the deafen must
+	// lift that implied mute too, or the target stays SFU-muted and refused
+	// their own unmute even after the deafen is gone. server_muted is a
+	// single bool with no way to tell "explicit" from "deafen-implied" apart,
+	// so an explicit-mute-then-deafen sequence has both lifted together by an
+	// undeafen — accepted as the simplest correct behavior given the schema.
+	if err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), c.Deafened()); err != nil {
+		slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
+	}
+	if d.Mod != nil {
+		if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, c.Deafened()); err != nil {
+			slog.Warn("ws handleVoiceModDeafenV2 MuteParticipant failed",
+				"err", err, "target_id", c.TargetID(), "channel_id", state.ChannelID)
 		}
 	}
 

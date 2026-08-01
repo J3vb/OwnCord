@@ -152,10 +152,23 @@ func (d *DB) GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[i
 	return result, nil
 }
 
+// mentionCountChunkSize bounds how many recipients IncrementMentionCounts
+// upserts in a single multi-row INSERT, keeping the per-exec bound-parameter
+// count (2 per row) far below SQLite's limit. Mirrors the IN-list chunking in
+// GetSessionsWithBanStatusBatch.
+const mentionCountChunkSize = 500
+
 // IncrementMentionCounts bumps read_states.mention_count by one for each user
 // in a channel, creating the read-state row when the user has none yet.
 // last_message_id stays 0 for a created row: the user has read nothing, and the
 // mention they were just given is unread by definition.
+//
+// Batched into one multi-row INSERT per chunk of mentionCountChunkSize
+// recipients instead of one exec per recipient: an @everyone mention fans out
+// to every reader of a channel, and the writer txn used to pay one round trip
+// per reader for that. The caller has already excluded the author, so
+// semantics are unchanged — each listed user id still gets exactly one
+// increment (or a fresh row seeded at 1).
 func (d *DB) IncrementMentionCounts(ctx context.Context, channelID int64, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return nil
@@ -166,14 +179,24 @@ func (d *DB) IncrementMentionCounts(ctx context.Context, channelID int64, userID
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	for _, uid := range userIDs {
-		if _, err := tx.ExecContext(ctx,
+	for start := 0; start < len(userIDs); start += mentionCountChunkSize {
+		chunk := userIDs[start:min(start+mentionCountChunkSize, len(userIDs))]
+
+		rowPlaceholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)*2)
+		for i, uid := range chunk {
+			rowPlaceholders[i] = "(?, ?, 0, 1)"
+			args = append(args, uid, channelID)
+		}
+
+		query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 			`INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
-			 VALUES (?, ?, 0, 1)
+			 VALUES %s
 			 ON CONFLICT(user_id, channel_id) DO UPDATE SET
 			     mention_count = mention_count + 1`,
-			uid, channelID,
-		); err != nil {
+			strings.Join(rowPlaceholders, ","),
+		)
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("IncrementMentionCounts: %w", err)
 		}
 	}

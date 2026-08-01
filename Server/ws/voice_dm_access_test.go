@@ -172,6 +172,50 @@ func TestVoiceJoin_GroupDMParticipant_Joins(t *testing.T) {
 	}
 }
 
+// channelReadAudience used to resolve a DM's audience via the role scan (DMs
+// carry no channel_overrides), so any connected user whose base role held
+// READ_MESSAGES received the DM call's voice_state/voice_leave events —
+// leaking who is in a private call and their mute/camera state to the whole
+// server. The audience must be the DM's participants, not a role-wide scan.
+func TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "dmleak-alice")
+	bob := seedMemberUser(t, database, "dmleak-bob")
+	mallory := seedMemberUser(t, database, "dmleak-mallory") // connected, has READ_MESSAGES, NOT a participant
+	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	aliceSend := make(chan []byte, 32)
+	bobSend := make(chan []byte, 32)
+	mallorySend := make(chan []byte, 32)
+	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
+	bobClient := ws.NewTestClientWithUser(hub, bob, 0, bobSend)
+	malloryClient := ws.NewTestClientWithUser(hub, mallory, 0, mallorySend)
+	hub.Register(aliceClient)
+	hub.Register(bobClient)
+	hub.Register(malloryClient)
+	waitRegistered(t, hub, malloryClient)
+
+	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
+
+	bobMsgs := drainChanTimeout(bobSend, 300*time.Millisecond)
+	foundVoiceState := false
+	for _, m := range bobMsgs {
+		if extractType(t, m) == "voice_state" {
+			foundVoiceState = true
+		}
+	}
+	if !foundVoiceState {
+		t.Error("a DM participant must still receive voice_state for their own DM call")
+	}
+
+	malloryMsgs := drainChanTimeout(mallorySend, 300*time.Millisecond)
+	for _, m := range malloryMsgs {
+		if extractType(t, m) == "voice_state" {
+			t.Fatal("voice_state for a DM call leaked to a connected non-participant")
+		}
+	}
+}
+
 func TestVoiceJoin_GroupDMNonParticipant_Refused(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	alice := seedMemberUser(t, database, "grpvoice-x-alice")

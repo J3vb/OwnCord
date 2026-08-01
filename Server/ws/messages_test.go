@@ -289,6 +289,44 @@ func TestBuildMemberJoin_NonNilAvatar(t *testing.T) {
 	}
 }
 
+// An invisible connector's member_join must carry the collapsed "offline"
+// status, not their true chosen status — member_join goes out via
+// BroadcastToAll to every connected client, so it must never leak "invisible"
+// the way the channel-scoped presence path already avoids.
+func TestBuildMemberJoin_StatusField_InvisibleCollapsesToOffline(t *testing.T) {
+	user := &db.User{ID: 1, Username: "ghost", Status: db.StatusInvisible}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			Status string `json:"status"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.Status != db.StatusOffline {
+		t.Errorf("status = %q, want %q", env.Payload.Status, db.StatusOffline)
+	}
+}
+
+// A non-invisible status (already ConnectStatus-mapped by the caller) passes
+// through unchanged.
+func TestBuildMemberJoin_StatusField_PassesThroughNonInvisible(t *testing.T) {
+	user := &db.User{ID: 1, Username: "idler", Status: db.StatusIdle}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			Status string `json:"status"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.Status != db.StatusIdle {
+		t.Errorf("status = %q, want %q", env.Payload.Status, db.StatusIdle)
+	}
+}
+
 // ─── buildMemberUpdate ────────────────────────────────────────────────────────
 
 func TestBuildMemberUpdate_Type(t *testing.T) {

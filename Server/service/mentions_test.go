@@ -342,6 +342,30 @@ func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
 	}
 }
 
+// A single message mentioning several users at once must resolve each one
+// independently against the reader set: readers get counted, a non-reader
+// (denied READ_MESSAGES via a per-user override) does not — the case the
+// mentioned-uid x reader lookup has to get right regardless of how it is
+// implemented internally (loop or map).
+func TestSendMessage_MultipleDirectMentionsResolveIndependently(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	if err := database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride carol: %v", err)
+	}
+
+	sendAs(t, svc, 1, "@bob @carol @mod hi")
+
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob (reader) mention_count = %d, want 1", got)
+	}
+	if got := mentionCount(t, database, 3); got != 0 {
+		t.Errorf("carol (denied read) mention_count = %d, want 0", got)
+	}
+	if got := mentionCount(t, database, 4); got != 1 {
+		t.Errorf("mod (reader) mention_count = %d, want 1", got)
+	}
+}
+
 // ─── mention counts ──────────────────────────────────────────────────────────
 
 func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
