@@ -95,6 +95,28 @@ pre-release security and performance review.
   bracket matching is amortized-linear; video/audio attachment blobs are
   LRU-capped and revoked, and cleared on logout.
 
+### Test hardening (pre-release)
+
+The hostile-input surface is now covered by Go native fuzzers and
+client-side property tests (mention/emoji parsing, FTS query sanitizing,
+permission resolution, markdown tokenizing, filename/path sanitizing,
+content sanitizing, credential validation, avatar URLs, LiveKit webhook
+identities), which found and fixed two real bugs:
+
+- **Zero-dimension images are rejected.** A GIF decoding to height 0, and a
+  VP8 keyframe with an all-zero size field, both passed the image size guard
+  as "small". `imageDimensions` now rejects non-positive dimensions centrally.
+- **Upload filenames stay safe basenames.** `/` survived sanitizing verbatim
+  (`filepath.Base("/")` is `"/"`), and over-length names were truncated
+  mid-rune into invalid UTF-8. Both are fixed at the sanitizer.
+
+Also added: a full migration-chain and pre-parity (019) upgrade round-trip
+test, a protocol-schema/generated-constant drift test, a 200-client hub
+load/soak test with `goleak` verification, and a blocking `@parity`
+Playwright job covering the new parity features. Separately, a test-quality
+audit rewired tests that asserted nothing (or a tautology) to assert their
+claimed behaviour — no product code changed and no assertion weakened.
+
 ### Phase B — Acceleration
 
 - **Event persistence layer (Step 7).** A new `events` table backs the
