@@ -412,9 +412,14 @@ func TestCreateAttachment_Success(t *testing.T) {
 func TestCreateAttachment_WithDimensions(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "att-dim-uploader")
+	chID := seedChannel(t, database, "att-dim-chan")
+	msgID, err := database.CreateMessage(context.Background(), chID, userID, "with dims", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
 
 	w, h := 1920, 1080
-	err := database.CreateAttachment(context.Background(), "att-dim", userID, "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
+	err = database.CreateAttachment(context.Background(), "att-dim", userID, "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
 	if err != nil {
 		t.Fatalf("CreateAttachment with dims: %v", err)
 	}
@@ -422,6 +427,25 @@ func TestCreateAttachment_WithDimensions(t *testing.T) {
 	att, _ := database.GetAttachmentByID(context.Background(), "att-dim")
 	if att == nil {
 		t.Fatal("expected attachment")
+	}
+
+	if n, linkErr := database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"att-dim"}); linkErr != nil || n != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, linkErr)
+	}
+
+	byMsg, err := database.GetAttachmentsByMessageIDs(context.Background(), []int64{msgID})
+	if err != nil {
+		t.Fatalf("GetAttachmentsByMessageIDs: %v", err)
+	}
+	infos := byMsg[msgID]
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 attachment for message, got %d", len(infos))
+	}
+	if infos[0].Width == nil || *infos[0].Width != w {
+		t.Errorf("Width = %v, want %d", infos[0].Width, w)
+	}
+	if infos[0].Height == nil || *infos[0].Height != h {
+		t.Errorf("Height = %v, want %d", infos[0].Height, h)
 	}
 }
 

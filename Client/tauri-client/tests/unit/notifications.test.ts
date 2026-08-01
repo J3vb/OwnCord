@@ -140,87 +140,151 @@ describe("notifyIncomingMessage", () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
   });
 
-  it("does not notify for own messages", () => {
+  it("does not notify for own messages", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     const payload = makePayload({ user: { id: 1, username: "Me", avatar: null } });
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("does not notify when window is focused and message is in active channel", () => {
+  it("does not notify when window is focused and message is in active channel", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
     const payload = makePayload({ channel_id: 1 });
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("notifies when window is focused but message is in a different channel", () => {
+  it("notifies when window is focused but message is in a different channel", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
     const payload = makePayload({ channel_id: 1 });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+    });
   });
 
-  it("suppresses @everyone when toggle is enabled", () => {
+  it("suppresses @everyone when toggle is enabled", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({
       content: "Hey @everyone check this out",
       mentions_everyone: true,
     });
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("does not suppress @everyone when toggle is disabled", () => {
+  it("does not suppress @everyone when toggle is disabled", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("suppressEveryone", false);
     const payload = makePayload({ content: "Hey @everyone check this out" });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+    });
   });
 
-  it("handles long messages by truncating", () => {
+  it("handles long messages by truncating", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     const longContent = "A".repeat(200);
     const payload = makePayload({ content: longContent });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ body: "A".repeat(100) + "..." }),
+      );
+    });
   });
 
-  it("handles @here the same as @everyone", () => {
+  it("handles @here the same as @everyone", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({ content: "Hey @here important update", mentions_everyone: true });
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("skips desktop notification when toggle is off", () => {
+  it("skips desktop notification when toggle is off", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("desktopNotifications", false);
     const payload = makePayload();
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("skips taskbar flash when toggle is off", () => {
+  it("skips taskbar flash when toggle is off", async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("flashTaskbar", false);
     const payload = makePayload();
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(win.requestUserAttention).not.toHaveBeenCalled();
   });
 
   it("skips notification sound when toggle is off", () => {
+    mockOscillator.start.mockClear();
     testPrefs.set("notificationSounds", false);
     const payload = makePayload();
     notifyIncomingMessage(payload);
+    expect(mockOscillator.start).not.toHaveBeenCalled();
   });
 
-  it("falls back to channel ID string when channel is not in store", () => {
+  it("falls back to channel ID string when channel is not in store", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     // Set channels store to have no channels
     channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
     const payload = makePayload({ channel_id: 999 });
     // Should not throw; uses fallback "Channel 999"
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ title: expect.stringContaining("Channel 999") }),
+      );
+    });
   });
 
-  it("notifies when window is not focused, even for active channel", () => {
+  it("notifies when window is not focused, even for active channel", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
     const payload = makePayload({ channel_id: 1 });
     // Should proceed to notification since window is not focused
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+    });
   });
 
-  it("does not notify when current user is null", () => {
+  // NOTE: original title was "does not notify when current user is null" but
+  // the code (see the guard clause in notifyIncomingMessage: `currentUser !==
+  // null && payload.user.id === currentUser.id`) and the original inline
+  // comment both make clear a null/logged-out user is NOT treated as a match
+  // and the notification proceeds. Renamed to match actual, intended
+  // behavior (also covered by "proceeds when current user is null" below).
+  it("notifies when current user is null (not logged in)", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     authStore.setState(() => ({
       token: null,
       user: null,
@@ -231,40 +295,82 @@ describe("notifyIncomingMessage", () => {
     // payload.user.id = 2 (different from null user), should proceed
     const payload = makePayload();
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+    });
   });
 
-  it("fires all notification types when all enabled", () => {
-    // All defaults are true, so just fire and confirm no error
+  it("fires all notification types when all enabled", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+    mockOscillator.start.mockClear();
+
+    // All defaults are true, so just fire and confirm all three channels fired
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", true);
     testPrefs.set("notificationSounds", true);
     const payload = makePayload();
     notifyIncomingMessage(payload);
+
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+      expect(win.requestUserAttention).toHaveBeenCalled();
+    });
+    expect(mockOscillator.start).toHaveBeenCalled();
   });
 
-  it("handles short content without truncation", () => {
+  it("handles short content without truncation", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     const payload = makePayload({ content: "Hi" });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(expect.objectContaining({ body: "Hi" }));
+    });
   });
 
-  it("handles content exactly at 100 char boundary", () => {
+  it("handles content exactly at 100 char boundary", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     const payload = makePayload({ content: "A".repeat(100) });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ body: "A".repeat(100) }),
+      );
+    });
   });
 
-  it("handles content just over 100 chars (101)", () => {
+  it("handles content just over 100 chars (101)", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     const payload = makePayload({ content: "A".repeat(101) });
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ body: "A".repeat(100) + "..." }),
+      );
+    });
   });
 
-  it("does not suppress normal message when suppressEveryone is enabled", () => {
+  it("does not suppress normal message when suppressEveryone is enabled", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({ content: "Normal message without at-mentions" });
     // Should proceed to notification (not suppressed)
     notifyIncomingMessage(payload);
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalled();
+    });
   });
 
-  it("suppresses @everyone regardless of other toggles", () => {
+  it("suppresses @everyone regardless of other toggles", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("suppressEveryone", true);
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", true);
@@ -272,6 +378,8 @@ describe("notifyIncomingMessage", () => {
     const payload = makePayload({ content: "Hey @everyone look!", mentions_everyone: true });
     // Should be suppressed before any notification fires
     notifyIncomingMessage(payload);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
   it("fires desktop notification via Tauri plugin when permission granted", async () => {
@@ -335,6 +443,8 @@ describe("notifyIncomingMessage", () => {
       throw new Error("Window not available");
     });
 
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
     testPrefs.set("flashTaskbar", true);
     // Disable other notification types to isolate
     testPrefs.set("desktopNotifications", false);
@@ -345,7 +455,15 @@ describe("notifyIncomingMessage", () => {
 
     // Give async time to resolve
     await new Promise((r) => setTimeout(r, 50));
-    // Should not throw, just log debug
+    // Should not throw, and the catch path should have logged via the
+    // notifications logger (console.debug is its underlying sink).
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[notifications]"),
+      "Taskbar flash not available",
+      "",
+    );
+
+    debugSpy.mockRestore();
   });
 
   it("handles playNotificationSound error gracefully (catch path)", () => {
@@ -355,6 +473,8 @@ describe("notifyIncomingMessage", () => {
       throw new Error("Oscillator error");
     });
 
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
     testPrefs.set("notificationSounds", true);
     testPrefs.set("desktopNotifications", false);
     testPrefs.set("flashTaskbar", false);
@@ -363,6 +483,14 @@ describe("notifyIncomingMessage", () => {
     // Should not throw
     notifyIncomingMessage(payload);
 
+    // The catch block logs via the notifications logger before returning.
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[notifications]"),
+      "Notification sound not available",
+      "",
+    );
+
+    debugSpy.mockRestore();
     // Restore the mock
     mockOscillator.start.mockImplementation(() => {});
   });
@@ -457,6 +585,8 @@ describe("notifyIncomingMessage", () => {
       configurable: true,
     });
 
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);
     testPrefs.set("notificationSounds", false);
@@ -465,8 +595,15 @@ describe("notifyIncomingMessage", () => {
     notifyIncomingMessage(payload);
 
     await new Promise((r) => setTimeout(r, 50));
-    // Should not throw — just logs debug
+    // Should not throw — and the inner catch should have logged via the
+    // notifications logger.
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[notifications]"),
+      "Notifications not available",
+      "",
+    );
 
+    debugSpy.mockRestore();
     shouldTauriNotifThrow.value = false;
     Object.defineProperty(globalThis, "Notification", {
       value: originalNotification,

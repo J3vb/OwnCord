@@ -191,6 +191,9 @@ describe("ProfileManager", () => {
       const m = mgr();
       // Should not throw
       m.setLastConnected("missing");
+
+      expect(m.getAll()).toHaveLength(0);
+      expect(m.getById("missing")).toBeNull();
     });
 
     it("only updates lastConnected on the matching profile, not others", () => {

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -48,7 +49,8 @@ func sanitizeUploadFilename(name string) string {
 	if i := strings.LastIndexByte(name, '\\'); i >= 0 {
 		name = name[i+1:]
 	}
-	// Remove control characters and invisible formatting characters.
+	// Remove control characters, invisible formatting characters, and any
+	// residual forward slash.
 	var sb strings.Builder
 	for _, r := range name {
 		// unicode.Cf covers the bidi overrides (U+202A–U+202E, U+2066–U+2069):
@@ -57,15 +59,26 @@ func sanitizeUploadFilename(name string) string {
 		// member of the channel while really being an executable script — and
 		// the same string is what the native save dialog pre-fills. This is the
 		// rule auth.ValidateUsername already applies to usernames.
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+		//
+		// A forward slash is dropped too: filepath.Base("/") returns "/" (root
+		// is its own basename), so an upload literally named "/" would otherwise
+		// slip through the reserved-name check below with a path separator
+		// intact. Any residual '/' is unsafe as a basename, so strip it here.
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) || r == '/' {
 			continue
 		}
 		sb.WriteRune(r)
 	}
 	name = strings.TrimSpace(sb.String())
-	// Truncate to 255 characters (filesystem limit).
+	// Truncate to the filesystem limit. Slicing by byte offset can land in the
+	// middle of a multibyte rune, so trim back to the last full rune to keep the
+	// result valid UTF-8 (an invalid name misbehaves in JSON encoding, on disk,
+	// and in the client's download-name handling).
 	if len(name) > maxUploadFilenameLength {
 		name = name[:maxUploadFilenameLength]
+		for len(name) > 0 && !utf8.ValidString(name) {
+			name = name[:len(name)-1]
+		}
 	}
 	if name == "" || name == "." || name == ".." {
 		name = "unnamed"
