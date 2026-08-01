@@ -214,14 +214,39 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 		return nil, fmt.Errorf("%w: server already has the maximum of %d roles", ErrBadRequest, maxRoles)
 	}
 
-	// Default placement is directly below the actor, which is both the highest
-	// legal spot and the one a manager creating a deputy role expects.
+	// Positions must stay unique: every hierarchy comparison uses >=/<=, so two
+	// roles sharing a position read as equal rank and can never manage each
+	// other's members. Track the slots already taken.
+	taken := make(map[int]bool, len(existing))
+	for _, rl := range existing {
+		taken[rl.Position] = true
+	}
+
+	// Default placement is the highest free slot below the actor — directly
+	// below when that is free, which is what a manager creating a deputy role
+	// expects, but stepping past any occupied position so a second create does
+	// not collide with the first.
 	position := actor.Position - 1
 	if in.Position != nil {
 		position = *in.Position
-	}
-	if err := validatePosition(actor, position); err != nil {
-		return nil, err
+		// Rank first: an at/above-rank position is a hierarchy violation
+		// (ErrForbidden) regardless of whether it also happens to be occupied.
+		if err := validatePosition(actor, position); err != nil {
+			return nil, err
+		}
+		if taken[position] {
+			return nil, fmt.Errorf("%w: position %d is already used by another role", ErrBadRequest, position)
+		}
+	} else {
+		for position > 0 && taken[position] {
+			position--
+		}
+		if position <= 0 {
+			return nil, fmt.Errorf("%w: no free position below your rank — reorder existing roles first", ErrBadRequest)
+		}
+		if err := validatePosition(actor, position); err != nil {
+			return nil, err
+		}
 	}
 
 	role, err := s.st.CreateRole(ctx, name, color, perms, position)
