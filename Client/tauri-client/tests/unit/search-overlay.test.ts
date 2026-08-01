@@ -555,4 +555,30 @@ describe("createSearchOverlay", () => {
 
     overlay.destroy?.();
   });
+
+  it("reschedules a rate-limited search instead of dropping it", async () => {
+    const onSearch = vi.fn().mockResolvedValue([]);
+    const opts = makeOptions({ onSearch });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+
+    // First query fires after debounce, stamping the rate-limit clock.
+    input.value = "he";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(onSearch).toHaveBeenLastCalledWith("he", undefined, expect.any(AbortSignal));
+
+    // The user keeps typing; the next debounced search lands only ~300ms after
+    // the first, inside the 500ms rate-limit window. It must be rescheduled,
+    // not silently dropped (which would leave the "he" results on screen).
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    // Debounce (300ms) then the remaining rate-limit window (~200ms) elapse.
+    await vi.advanceTimersByTimeAsync(300 + 500);
+    expect(onSearch).toHaveBeenLastCalledWith("hello", undefined, expect.any(AbortSignal));
+
+    overlay.destroy?.();
+  });
 });

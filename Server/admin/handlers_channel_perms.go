@@ -242,6 +242,29 @@ func getPermUser(database *db.DB, w http.ResponseWriter, r *http.Request) *db.Us
 	return user
 }
 
+// requireManageableUser refuses a per-user channel override that targets a
+// member whose role sits at or above the actor's own rank, mirroring the
+// hierarchy guard the role-layer handler applies (handlePutChannelPermission).
+// Without it a MANAGE_CHANNELS holder could deny a higher-ranked member access
+// to a channel via the per-user layer, which is last in the resolution order
+// and therefore beats that member's role allow. ADMINISTRATOR bypasses. Writes
+// the error response and returns false when the action must be refused.
+func requireManageableUser(database *db.DB, w http.ResponseWriter, r *http.Request, target *db.User, actorRole *db.Role) bool {
+	if permissions.HasAdmin(actorRole.Permissions) {
+		return true
+	}
+	targetRole, err := database.GetRoleByID(r.Context(), target.RoleID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch target role")
+		return false
+	}
+	if targetRole != nil && targetRole.Position >= actorRole.Position {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "cannot manage a user ranked at or above your own")
+		return false
+	}
+	return true
+}
+
 func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ch := getPermChannel(database, w, r)
@@ -271,6 +294,10 @@ func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInv
 		// cannot grant bits their own role lacks via a per-user override.
 		if err := requireGrantableOverride(actorRole, allow, deny); err != nil {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
+		// Hierarchy guard: cannot override a member ranked at or above you.
+		if !requireManageableUser(database, w, r, user, actorRole) {
 			return
 		}
 
@@ -311,6 +338,16 @@ func handleDeleteChannelUserPermission(database *db.DB, hub HubBroadcaster, perm
 		}
 		user := getPermUser(database, w, r)
 		if user == nil {
+			return
+		}
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Hierarchy guard: clearing a higher-ranked member's override is the
+		// same authority as writing one, so gate it identically.
+		if !requireManageableUser(database, w, r, user, actorRole) {
 			return
 		}
 

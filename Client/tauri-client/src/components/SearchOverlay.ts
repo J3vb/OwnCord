@@ -113,7 +113,16 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
   function doSearch(): void {
     const now = Date.now();
-    if (now - lastSearchTime < MIN_SEARCH_INTERVAL_MS) return;
+    const sinceLast = now - lastSearchTime;
+    if (sinceLast < MIN_SEARCH_INTERVAL_MS) {
+      // Too soon after the previous search. Don't drop this query — that would
+      // leave the earlier query's results on screen for what the user is now
+      // typing. Reschedule for when the rate-limit window opens, reusing the
+      // debounce timer so destroy() still tears it down.
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(doSearch, MIN_SEARCH_INTERVAL_MS - sinceLast);
+      return;
+    }
     lastSearchTime = now;
 
     const query = input.value.trim();

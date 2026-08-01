@@ -256,6 +256,46 @@ func TestPutChannelUserPermission_ModeratorCannotEscalate(t *testing.T) {
 	}
 }
 
+// A non-admin MANAGE_CHANNELS holder cannot write (or clear) a per-user
+// override against a member whose role outranks their own, even for a bit they
+// legitimately hold — the per-user layer is last in the resolution order, so
+// without this guard a Moderator could deny a higher-ranked member channel
+// access their role grants.
+func TestPutChannelUserPermission_CannotTargetHigherRankedUser(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	// Actor: Moderator at position 60 holding MANAGE_CHANNELS + READ_MESSAGES.
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "mod-hier")
+	// Target holds a role ranked ABOVE the actor.
+	seniorID, _ := createRoleUser(t, database, 11, "Senior", permissions.ReadMessages, 80, "senior-hier")
+
+	chID, err := database.CreateChannel(context.Background(), "hier", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	// deny READ_MESSAGES — a bit the Moderator holds, so the escalation guard
+	// passes and only the hierarchy guard can stop this.
+	put := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(seniorID), modToken,
+		map[string]any{"allow": 0, "deny": permissions.ReadMessages})
+	if put.Code != http.StatusForbidden {
+		t.Fatalf("PUT status = %d, want 403; body: %s", put.Code, put.Body.String())
+	}
+	del := doRequest(t, handler, http.MethodDelete,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(seniorID), modToken, nil)
+	if del.Code != http.StatusForbidden {
+		t.Fatalf("DELETE status = %d, want 403; body: %s", del.Code, del.Body.String())
+	}
+	allow, deny, err := database.GetUserChannelPermissions(context.Background(), chID, seniorID)
+	if err != nil {
+		t.Fatalf("GetUserChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != 0 {
+		t.Errorf("override persisted despite hierarchy guard: (%#x, %#x)", allow, deny)
+	}
+}
+
 // An ADMINISTRATOR-holding actor can still grant any bit through a per-user
 // override, since ADMINISTRATOR bypasses the escalation guard.
 func TestPutChannelUserPermission_AdministratorCanGrantAnyBit(t *testing.T) {

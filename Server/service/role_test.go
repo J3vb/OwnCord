@@ -101,6 +101,43 @@ func TestCreateRole_DefaultsToJustBelowActor(t *testing.T) {
 	}
 }
 
+// Two roles created back-to-back without an explicit position must not collide:
+// tied positions read as equal rank in every hierarchy check, so the second
+// default placement steps past the first.
+func TestCreateRole_DefaultPlacementAvoidsCollision(t *testing.T) {
+	svc, _ := newRoleCRUDService(t)
+
+	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
+	if err != nil {
+		t.Fatalf("CreateRole first: %v", err)
+	}
+	second, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy2")})
+	if err != nil {
+		t.Fatalf("CreateRole second: %v", err)
+	}
+	if first.Position == second.Position {
+		t.Fatalf("two default-placed roles collided at position %d", first.Position)
+	}
+	if second.Position != first.Position-1 {
+		t.Errorf("second position = %d, want %d (the next free slot below the first)", second.Position, first.Position-1)
+	}
+}
+
+// An explicit position already held by another role is refused rather than
+// silently duplicated.
+func TestCreateRole_RejectsExplicitPositionCollision(t *testing.T) {
+	svc, _ := newRoleCRUDService(t)
+
+	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
+	if err != nil {
+		t.Fatalf("CreateRole first: %v", err)
+	}
+	_, err = svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Clash"), Position: &first.Position})
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("explicit-collision err = %v, want ErrBadRequest", err)
+	}
+}
+
 func TestCreateRole_NameUniquenessIsCaseInsensitive(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 
