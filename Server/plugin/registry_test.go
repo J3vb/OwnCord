@@ -1,4 +1,12 @@
+//go:build !wazero
+
 // Registry lifecycle tests for the default (non-wazero) build.
+//
+// The build constraint above is load-bearing, not decorative: these tests
+// assert activation fails with ErrRuntimeUnavailable, which is only true
+// when no runtime is linked in. Under -tags wazero a real runtime exists
+// and two of them failed. The file always intended to be default-only (see
+// the paragraph below); it just never carried the tag.
 //
 // registry.go is the largest source file in the plugin package and its
 // lifecycle half — Sink, activate, EnablePlugin, DisablePlugin,
