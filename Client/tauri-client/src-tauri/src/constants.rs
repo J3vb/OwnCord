@@ -15,4 +15,9 @@ pub const CREDENTIAL_FALLBACK_STORE: &str = "credential_fallback.json";
 
 /// Per-install key that seals the non-Windows credential fallback entries
 /// (see `fallback_crypto`). Written once, owner-only (0600).
+///
+/// Gated to match its only consumer: `fallback_crypto` is `cfg(not(windows))`
+/// because Windows seals fallback entries with DPAPI instead, so on Windows
+/// this constant would be dead code and `-D warnings` fails the build.
+#[cfg(not(windows))]
 pub const CREDENTIAL_FALLBACK_KEY_FILE: &str = "credential_fallback.key";
