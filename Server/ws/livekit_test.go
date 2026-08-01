@@ -629,6 +629,56 @@ func TestGenerateConfig_UnsafeCredentialChars(t *testing.T) {
 	}
 }
 
+// The rejection error is wrapped by Start() and logged by the caller, so it
+// must never echo any part of the credential it rejected — quoting even the
+// single offending byte writes a piece of a secret to the server log in clear
+// text (CodeQL go/clear-text-logging). It must still name the field at fault.
+func TestGenerateConfig_UnsafeCredentialErrorDoesNotLeakCredential(t *testing.T) {
+	t.Parallel()
+
+	const (
+		key    = "sup3rsecret:apikey"
+		secret = "sup3rsecret{apisecret"
+	)
+
+	for _, tt := range []struct {
+		name  string
+		key   string
+		sec   string
+		field string
+		leak  string
+	}{
+		{"key", key, "safesecret", "voice.livekit_api_key", key},
+		{"secret", "safekey", secret, "voice.livekit_api_secret", secret},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			proc := ws.NewLiveKitProcess(&config.VoiceConfig{
+				LiveKitAPIKey:    tt.key,
+				LiveKitAPISecret: tt.sec,
+				LiveKitURL:       "ws://localhost:7880",
+			}, &config.TLSConfig{}, t.TempDir())
+
+			_, err := proc.GenerateConfigForTest()
+			if err == nil {
+				t.Fatal("expected an error for the unsafe credential, got nil")
+			}
+			msg := err.Error()
+			if strings.Contains(msg, tt.leak) {
+				t.Errorf("error leaks the credential verbatim: %q", msg)
+			}
+			// The distinctive prefix must not appear even partially quoted.
+			if strings.Contains(msg, "sup3rsecret") {
+				t.Errorf("error leaks part of the credential: %q", msg)
+			}
+			if !strings.Contains(msg, tt.field) {
+				t.Errorf("error should name the offending field %q, got %q", tt.field, msg)
+			}
+		})
+	}
+}
+
 func TestGenerateConfig_UnsafeNodeIPChars(t *testing.T) {
 	t.Parallel()
 
