@@ -324,13 +324,29 @@ func handleServeEmojiImage(svc *service.Services, store *storage.Storage) http.H
 // about the same four formats.
 func imageDimensions(raw []byte, mimeType string) (width, height int, err error) {
 	if mimeType == "image/webp" {
-		return webpDimensions(raw)
+		width, height, err = webpDimensions(raw)
+	} else {
+		var cfg image.Config
+		cfg, _, err = image.DecodeConfig(bytes.NewReader(raw))
+		if err != nil {
+			return 0, 0, fmt.Errorf("decoding image config: %w", err)
+		}
+		width, height = cfg.Width, cfg.Height
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return 0, 0, fmt.Errorf("decoding image config: %w", err)
+		return 0, 0, err
 	}
-	return cfg.Width, cfg.Height, nil
+	// Both callers treat a non-error return as trustworthy enough to compare
+	// straight against their pixel cap. A width or height of zero is not a
+	// "small" image, it is a decoder -- Go's own GIF DecodeConfig happily
+	// reports height=0 for a malformed logical screen descriptor -- accepting
+	// a degenerate header as valid. Rejecting it here means the invariant
+	// holds even for a caller that forgets to re-check, instead of relying on
+	// every call site getting its own bounds check right.
+	if width <= 0 || height <= 0 {
+		return 0, 0, fmt.Errorf("decoding image config: non-positive dimensions %dx%d", width, height)
+	}
+	return width, height, nil
 }
 
 // errBadWebP is returned for any WebP whose header does not parse; the caller
@@ -357,6 +373,14 @@ func webpDimensions(raw []byte) (width, height int, err error) {
 		}
 		w := int(binary.LittleEndian.Uint16(raw[26:28]) & 0x3FFF)
 		h := int(binary.LittleEndian.Uint16(raw[28:30]) & 0x3FFF)
+		// Unlike VP8L/VP8X (which store size-1, so they can never encode
+		// zero), the VP8 keyframe stores the size directly: an all-zero
+		// dimension field is a validly-shaped but degenerate header, not a
+		// real 0x0 canvas. Reject it here rather than reporting "success"
+		// with a size no image actually has.
+		if w == 0 || h == 0 {
+			return 0, 0, errBadWebP
+		}
 		return w, h, nil
 	case "VP8L":
 		// Payload starts at 20 with a 0x2F signature byte, then a packed
