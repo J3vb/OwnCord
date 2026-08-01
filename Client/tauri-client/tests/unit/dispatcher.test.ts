@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { channelsStore } from "../../src/stores/channels.store";
+import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
   messagesStore,
   addOptimisticMessage,
@@ -12,7 +12,20 @@ import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore } from "../../src/stores/blocks.store";
+import {
+  emojiStore,
+  setCustomEmoji,
+  clearCustomEmoji,
+  listCustomEmoji,
+  resolveEmoji,
+} from "../../src/stores/emoji.store";
 import { uiStore } from "../../src/stores/ui.store";
+import {
+  clearReactionUsersCache,
+  getCachedReactionUsers,
+  loadReactionUsers,
+  setReactionUsersFetcher,
+} from "../../src/components/message-list/reaction-tooltip";
 import type { WsClient, WsListener } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 
@@ -29,15 +42,24 @@ vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceConnected: vi.fn(() => false),
+  setMuted: vi.fn(),
+  setDeafened: vi.fn(),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
+const mockShowToast = vi.fn();
+vi.mock("@lib/toast", () => ({
+  showToast: (...args: unknown[]) => mockShowToast(...args),
+}));
+
 vi.mock("@lib/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
+
+import { setMuted as mockSetMuted, setDeafened as mockSetDeafened } from "@lib/livekitSession";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -122,6 +144,7 @@ describe("WS Dispatcher", () => {
       loadedChannels: new Set(),
       hasMore: new Map(),
       historyLoadState: new Map(),
+      detachedChannels: new Set(),
     }));
     membersStore.setState(() => ({
       members: new Map(),
@@ -142,6 +165,8 @@ describe("WS Dispatcher", () => {
     dmStore.setState(() => ({ channels: [] }));
     blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
+    clearCustomEmoji();
+    emojiStore.flush();
 
     mock = createMockWs();
     cleanup = wireDispatcher(mock.ws);
@@ -213,10 +238,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
     });
@@ -235,6 +264,76 @@ describe("WS Dispatcher", () => {
     expect(ch?.unreadCount).toBe(1);
   });
 
+  describe("mention counts", () => {
+    function seedChannel(): void {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(5, {
+          id: 5,
+          name: "off-topic",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: ch, activeChannelId: 1 };
+      });
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+      }));
+    }
+
+    function incoming(extra: Record<string, unknown>): void {
+      mock.dispatch("chat_message", {
+        id: 200,
+        channel_id: 5,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "ping",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+        ...extra,
+      });
+    }
+
+    it("increments when the message names the current user", () => {
+      seedChannel();
+      incoming({ content: "ping @alex", mentions: [1] });
+      const ch = channelsStore.getState().channels.get(5);
+      expect(ch?.mentionCount).toBe(1);
+      expect(ch?.unreadCount).toBe(1);
+    });
+
+    it("increments for an honoured @everyone", () => {
+      seedChannel();
+      incoming({ content: "@everyone", mentions_everyone: true });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+    });
+
+    it("does not increment for someone else's mention", () => {
+      seedChannel();
+      incoming({ content: "ping @bob", mentions: [2] });
+      const ch = channelsStore.getState().channels.get(5);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(1);
+    });
+
+    it("does not increment for an @everyone the sender could not send", () => {
+      seedChannel();
+      incoming({ content: "@everyone", mentions_everyone: false });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+  });
+
   it("wires presence to members store", () => {
     // Add a member first
     membersStore.setState((prev) => {
@@ -245,6 +344,44 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("presence", { user_id: 1, status: "idle" });
     expect(membersStore.getState().members.get(1)?.status).toBe("idle");
+  });
+
+  it("carries a custom status on presence, and leaves it alone when omitted", () => {
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("presence", { user_id: 1, status: "idle", custom_status: "afk" });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("afk");
+
+    // A bare status flip (what the auto-idle timer sends) must not blank it.
+    mock.dispatch("presence", { user_id: 1, status: "online" });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("afk");
+
+    // An explicit null clears it.
+    mock.dispatch("presence", { user_id: 1, status: "online", custom_status: null });
+    expect(membersStore.getState().members.get(1)?.customStatus).toBeNull();
+  });
+
+  it("wires user_update display_name into the member store", () => {
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("user_update", {
+      user_id: 1,
+      username: "alex",
+      avatar: "/api/v1/files/abc",
+      display_name: "Alex A.",
+      about: "hi",
+    });
+    const member = membersStore.getState().members.get(1);
+    expect(member?.displayName).toBe("Alex A.");
+    expect(member?.avatar).toBe("/api/v1/files/abc");
   });
 
   it("wires typing to members store", () => {
@@ -275,10 +412,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -483,6 +624,51 @@ describe("WS Dispatcher", () => {
     expect(found?.deleted).toBe(true);
   });
 
+  it("wires chat_bulk_deleted to messages store", () => {
+    for (const id of [100, 101, 102]) {
+      mock.dispatch("chat_message", {
+        id,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: `spam ${id}`,
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+    }
+
+    mock.dispatch("chat_bulk_deleted", { channel_id: 1, ids: [102, 101] });
+
+    const msgs = messagesStore.getState().messagesByChannel.get(1);
+    expect(msgs?.find((m) => m.id === 102)?.deleted).toBe(true);
+    expect(msgs?.find((m) => m.id === 101)?.deleted).toBe(true);
+    // Tombstones, not removals: the rows and their content survive.
+    expect(msgs).toHaveLength(3);
+    expect(msgs?.find((m) => m.id === 102)?.content).toBe("spam 102");
+    // An id outside the purge is untouched.
+    expect(msgs?.find((m) => m.id === 100)?.deleted).toBe(false);
+  });
+
+  it("ignores chat_bulk_deleted for an unloaded channel and an empty id list", () => {
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "keep",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    const before = messagesStore.getState().messagesByChannel;
+
+    mock.dispatch("chat_bulk_deleted", { channel_id: 99, ids: [1, 2, 3] });
+    mock.dispatch("chat_bulk_deleted", { channel_id: 1, ids: [] });
+
+    // No-op dispatches must not churn the map identity (re-render trigger).
+    expect(messagesStore.getState().messagesByChannel).toBe(before);
+    expect(messagesStore.getState().messagesByChannel.get(1)?.[0]?.deleted).toBe(false);
+  });
+
   it("wires chat_send_ok without id does not crash", () => {
     expect(() => {
       mock.dispatch("chat_send_ok", { message_id: 500, timestamp: "2026-03-15T10:00:00Z" });
@@ -520,6 +706,31 @@ describe("WS Dispatcher", () => {
     expect(msgs).toBeDefined();
   });
 
+  // The who-reacted tooltip caches reactor lists per message+emoji; a
+  // reaction_update on that message makes every one of them stale.
+  it("invalidates the who-reacted cache for the message a reaction_update names", async () => {
+    const fetcher = vi.fn().mockResolvedValue([{ id: 1, username: "alice", avatar: "" }]);
+    setReactionUsersFetcher(fetcher as never);
+    clearReactionUsersCache();
+
+    await loadReactionUsers(1, 200, "👍");
+    await loadReactionUsers(1, 201, "👍");
+    expect(getCachedReactionUsers(200, "👍")).toHaveLength(1);
+
+    mock.dispatch("reaction_update", {
+      message_id: 200,
+      channel_id: 1,
+      emoji: "👍",
+      user_id: 2,
+      action: "add",
+    });
+
+    expect(getCachedReactionUsers(200, "👍")).toBeUndefined();
+    // Other messages' caches are untouched.
+    expect(getCachedReactionUsers(201, "👍")).toHaveLength(1);
+    setReactionUsersFetcher(null);
+  });
+
   it("wires channel_update to channels store", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -530,10 +741,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -560,10 +775,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       ch.set(20, {
         id: 20,
@@ -572,10 +791,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 1,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -596,10 +819,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -624,6 +851,90 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
     expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+  });
+
+  it("wires roles_update to replace the role list", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      roles: [
+        { id: 1, name: "Owner", color: "#E74C3C", permissions: 0x40000000, position: 100 },
+        { id: 9, name: "Contractor", color: "#123456", permissions: 0x3, position: 30 },
+      ],
+    }));
+
+    // A role was deleted and another recolored server-side. Replacing rather
+    // than merging is the point: the deleted role must not survive.
+    mock.dispatch("roles_update", {
+      roles: [
+        { id: 1, name: "Owner", color: "#FF0000", permissions: 0x40000000, position: 100 },
+        { id: 4, name: "Member", color: null, permissions: 0x3, position: 40, is_default: true },
+      ],
+    });
+
+    const roles = channelsStore.getState().roles;
+    expect(roles.map((r) => r.id)).toEqual([1, 4]);
+    expect(roles[0]?.color).toBe("#FF0000");
+    expect(roles.some((r) => r.name === "Contractor")).toBe(false);
+  });
+
+  it("makes a role created by roles_update immediately assignable", () => {
+    // The Change Role menu resolves a role by name, so a role created in the
+    // admin panel has to be resolvable from the broadcast alone — without this
+    // assigning a freshly created role needed a reconnect.
+    setRoles([{ id: 4, name: "Member", color: null, permissions: 0x3, position: 40 }]);
+    expect(getRoleIdByName("contractor")).toBeUndefined();
+
+    mock.dispatch("roles_update", {
+      roles: [
+        { id: 4, name: "Member", color: null, permissions: 0x3, position: 40, is_default: true },
+        { id: 9, name: "Contractor", color: "#123456", permissions: 0x3, position: 30 },
+      ],
+    });
+
+    expect(getRoleIdByName("contractor")).toBe(9);
+  });
+
+  it("treats a roles_update with no roles field as an empty list", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      roles: [{ id: 1, name: "Owner", color: null, permissions: 0 }],
+    }));
+
+    mock.dispatch("roles_update", {} as { roles: [] });
+
+    expect(channelsStore.getState().roles).toEqual([]);
+  });
+
+  it("wires emoji_update to replace the custom-emoji set", () => {
+    setCustomEmoji([
+      { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
+      { id: 2, shortcode: "gone", url: "/api/v1/emoji/2/image" },
+    ]);
+    emojiStore.flush();
+
+    // The deleted emoji must not survive the replace — the whole point of
+    // sending the set rather than a delta.
+    mock.dispatch("emoji_update", {
+      emoji: [
+        { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
+        { id: 3, shortcode: "party", url: "/api/v1/emoji/3/image" },
+      ],
+    });
+    emojiStore.flush();
+
+    expect(listCustomEmoji().map((e) => e.shortcode)).toEqual(["wave", "party"]);
+    expect(resolveEmoji("gone")).toBeNull();
+    expect(resolveEmoji("party")?.id).toBe(3);
+  });
+
+  it("treats an emoji_update with no emoji field as an empty set", () => {
+    setCustomEmoji([{ id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" }]);
+    emojiStore.flush();
+
+    mock.dispatch("emoji_update", {} as { emoji: [] });
+    emojiStore.flush();
+
+    expect(listCustomEmoji()).toEqual([]);
   });
 
   it("wires voice_state and auto-joins if current user", () => {
@@ -703,6 +1014,86 @@ describe("WS Dispatcher", () => {
     });
 
     expect(voiceStore.getState().currentChannelId).toBe(3);
+  });
+
+  it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 5,
+      username: "me",
+      muted: true,
+      deafened: true,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+      server_deafened: true,
+    });
+
+    const state = voiceStore.getState();
+    expect(state.localServerMuted).toBe(true);
+    expect(state.localServerDeafened).toBe(true);
+
+    // Deafen is client-enforced: the session must stop playing remote audio.
+    await vi.runAllTimersAsync();
+    expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(true);
+    expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(true);
+  });
+
+  it("does not set the local moderator flags from another user's voice_state", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 99,
+      username: "other",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+    });
+
+    expect(voiceStore.getState().localServerMuted).not.toBe(true);
+    expect(voiceStore.getState().voiceUsers.get(3)?.get(99)?.serverMuted).toBe(true);
+  });
+
+  it("wires voice_moved to a leave + re-join of the destination channel", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+
+    mock.dispatch("voice_moved", { to_channel_id: 7 });
+    await vi.runAllTimersAsync();
+
+    expect(voiceStore.getState().currentChannelId).toBe(7);
+    expect(mock.ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_join", payload: { channel_id: 7 } }),
+    );
+  });
+
+  it("wires voice_disconnected to clearing the local voice session", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+
+    mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
+    await vi.runAllTimersAsync();
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
   it("wires voice_config to voice store", () => {
@@ -880,6 +1271,7 @@ describe("WS Dispatcher", () => {
       loadedChannels: new Set(),
       hasMore: new Map(),
       historyLoadState: new Map(),
+      detachedChannels: new Set(),
     }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
@@ -908,10 +1300,14 @@ describe("WS Dispatcher", () => {
         {
           channelId: 7,
           recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
           lastMessageId: null,
           lastMessage: "",
           lastMessageAt: "",
           unreadCount: 0,
+          mentionCount: 0,
         },
       ],
     }));
@@ -996,6 +1392,36 @@ describe("WS Dispatcher", () => {
     expect(updateProfile).toHaveBeenCalledWith({ identity_public_key: "k" });
   });
 
+  it("on ready loads the custom-emoji set from the REST list", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listEmoji = vi
+      .fn()
+      .mockResolvedValue([{ id: 4, shortcode: "wave", url: "/api/v1/emoji/4/image" }]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+
+    expect(listEmoji).toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
+    emojiStore.flush();
+    expect(resolveEmoji("wave")?.id).toBe(4);
+  });
+
+  it("survives a failed emoji load — shortcodes just stay plain text", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listEmoji = vi.fn().mockRejectedValue(new Error("offline"));
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+    emojiStore.flush();
+    expect(listCustomEmoji()).toEqual([]);
+  });
+
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
     cleanup(); // tear down the no-api dispatcher wired in beforeEach
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [11, 22] });
@@ -1059,10 +1485,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -1092,10 +1522,14 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -1119,10 +1553,14 @@ describe("WS Dispatcher", () => {
     const dmChannel = {
       channelId: 50,
       recipient: { id: 10, username: "bob", avatar: "", status: "online" as const },
+      participants: [],
+      name: "",
+      isGroup: false,
       lastMessageId: null,
       lastMessage: "",
       lastMessageAt: "",
       unreadCount: 0,
+      mentionCount: 0,
     };
 
     beforeEach(() => {
@@ -1245,6 +1683,52 @@ describe("WS Dispatcher", () => {
       expect(channels[0]!.recipient.username).toBe("bob");
     });
 
+    // A pre-group server sends only `recipient`, which for it IS the whole
+    // membership — so the fallback has to be a one-element list, not an empty
+    // one, or every group-aware call site breaks against an old server.
+    it("treats a recipient-only payload as a one-person participant list", () => {
+      mock.dispatch("dm_channel_open", {
+        channel_id: 50,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const dm = dmStore.getState().channels[0]!;
+      expect(dm.participants).toHaveLength(1);
+      expect(dm.participants[0]!.id).toBe(10);
+      expect(dm.isGroup).toBe(false);
+      expect(dm.name).toBe("");
+    });
+
+    it("maps a group dm_channel_open with its full participant list", () => {
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        recipients: [
+          { id: 10, username: "bob", avatar: "", status: "online", display_name: "Bobby" },
+          { id: 11, username: "cat", avatar: "", status: "idle" },
+        ],
+        name: "Crew",
+        is_group: true,
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 51)!;
+      expect(dm.isGroup).toBe(true);
+      expect(dm.name).toBe("Crew");
+      expect(dm.participants.map((p) => p.id)).toEqual([10, 11]);
+      expect(dm.participants[0]!.displayName).toBe("Bobby");
+      // The compat recipient is the first of the list, so an older render path
+      // still shows somebody rather than nothing.
+      expect(dm.recipient.id).toBe(10);
+    });
+
     it("should call removeDmChannel on dm_channel_close", () => {
       // Seed a DM channel first
       dmStore.setState(() => ({
@@ -1252,10 +1736,14 @@ describe("WS Dispatcher", () => {
           {
             channelId: 50,
             recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
             lastMessageId: null,
             lastMessage: "",
             lastMessageAt: "",
             unreadCount: 0,
+            mentionCount: 0,
           },
         ],
       }));
@@ -1439,6 +1927,46 @@ describe("WS Dispatcher", () => {
     });
 
     expect(messagesStore.getState().messagesByChannel.get(1)).toBeUndefined();
+  });
+
+  // ─── Voice capacity refusals ────────────────────────────────────────────
+  //
+  // The server owns voice_max_users / voice_max_video and answers an over-limit
+  // join with CHANNEL_FULL (or an over-limit camera with VIDEO_LIMIT). The
+  // client deliberately does not pre-block the click — its participant list can
+  // lag, and a refusal it invented would be uncorrectable — so the only thing
+  // standing between the user and a silent no-op is this toast.
+
+  describe("voice capacity errors", () => {
+    beforeEach(() => {
+      mockShowToast.mockClear();
+    });
+
+    it("surfaces CHANNEL_FULL as a toast", () => {
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "voice channel is full" });
+      expect(mockShowToast).toHaveBeenCalledWith("voice channel is full", "error");
+    });
+
+    it("falls back to a readable message when the server sends none", () => {
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "" });
+      expect(mockShowToast).toHaveBeenCalledWith("That voice channel is full", "error");
+    });
+
+    it("surfaces VIDEO_LIMIT as a toast", () => {
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "That voice channel has reached its video limit",
+        "error",
+      );
+    });
+
+    // A capacity refusal is about the voice channel, not about the composer,
+    // so it must not also land in the login screen's transient-error slot.
+    it("does not set the transient error", () => {
+      uiStore.setState((prev) => ({ ...prev, transientError: null }));
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expect(uiStore.getState().transientError).toBeNull();
+    });
   });
 });
 

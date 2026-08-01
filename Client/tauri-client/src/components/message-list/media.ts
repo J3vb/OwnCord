@@ -11,7 +11,12 @@ import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { isSafeUrl } from "./attachments";
-import { CODE_BLOCK_REGEX, INLINE_CODE_REGEX, URL_REGEX } from "./content-parser";
+import {
+  CODE_BLOCK_REGEX,
+  INLINE_CODE_REGEX,
+  MASKED_LINK_REGEX,
+  URL_REGEX,
+} from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
 
 const log = createLogger("media");
@@ -494,8 +499,12 @@ export function openImageLightbox(src: string, alt: string): void {
 
 /** Extract all URLs from a message content string. */
 export function extractUrls(content: string): string[] {
-  // Skip URLs inside code blocks
-  const withoutCodeBlocks = content.replace(CODE_BLOCK_REGEX, "").replace(INLINE_CODE_REGEX, "");
+  // Skip URLs inside code blocks, and inside masked links: `[text](url)` is a
+  // deliberate act of hiding the address, so it gets no embed either.
+  const withoutCodeBlocks = content
+    .replace(CODE_BLOCK_REGEX, "")
+    .replace(INLINE_CODE_REGEX, "")
+    .replace(MASKED_LINK_REGEX, "");
   const matches = withoutCodeBlocks.match(URL_REGEX);
   return matches ?? [];
 }

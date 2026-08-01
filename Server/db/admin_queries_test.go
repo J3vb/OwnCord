@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -39,8 +41,15 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -410,7 +419,17 @@ func TestAdminUpdateChannel(t *testing.T) {
 		t.Fatalf("AdminCreateChannel() error: %v", err)
 	}
 
-	if err := database.AdminUpdateChannel(context.Background(), id, "new-name", "new topic", 5, 2, true); err != nil {
+	if err := database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{
+		Name:          "new-name",
+		Topic:         "new topic",
+		Category:      "Moved",
+		SlowMode:      5,
+		Position:      2,
+		Archived:      true,
+		NSFW:          true,
+		VoiceMaxUsers: 7,
+		VoiceMaxVideo: 3,
+	}); err != nil {
 		t.Fatalf("AdminUpdateChannel() error: %v", err)
 	}
 
@@ -433,13 +452,65 @@ func TestAdminUpdateChannel(t *testing.T) {
 	if !ch.Archived {
 		t.Error("Archived = false, want true")
 	}
+	if !ch.NSFW {
+		t.Error("NSFW = false, want true")
+	}
+	if ch.VoiceMaxUsers != 7 {
+		t.Errorf("VoiceMaxUsers = %d, want 7", ch.VoiceMaxUsers)
+	}
+	if ch.VoiceMaxVideo != 3 {
+		t.Errorf("VoiceMaxVideo = %d, want 3", ch.VoiceMaxVideo)
+	}
+}
+
+// TestAdminUpdateChannel_ClearsNSFW proves the flag is a real round-trip in
+// both directions: an update writes every field unconditionally, so a caller
+// that starts from the channel's current values and flips one is the only
+// thing standing between a partial PATCH and a wiped row.
+func TestAdminUpdateChannel_ClearsNSFW(t *testing.T) {
+	database := newAdminTestDB(t)
+
+	id, _ := database.AdminCreateChannel(context.Background(), "nsfw-ch", "text", "", "", 0)
+	if err := database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "nsfw-ch", NSFW: true}); err != nil {
+		t.Fatalf("AdminUpdateChannel() error: %v", err)
+	}
+	ch, _ := database.GetChannel(context.Background(), id)
+	if !ch.NSFW {
+		t.Fatal("NSFW = false after marking, want true")
+	}
+
+	if err := database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "nsfw-ch", NSFW: false}); err != nil {
+		t.Fatalf("AdminUpdateChannel() error: %v", err)
+	}
+	ch, _ = database.GetChannel(context.Background(), id)
+	if ch.NSFW {
+		t.Error("NSFW = true after unmarking, want false")
+	}
+}
+
+// A freshly created channel is not NSFW and carries no voice limits — the
+// migration's defaults, which every client relies on for an unflagged channel.
+func TestAdminCreateChannel_DefaultsNotNSFW(t *testing.T) {
+	database := newAdminTestDB(t)
+
+	id, _ := database.AdminCreateChannel(context.Background(), "plain", "text", "", "", 0)
+	ch, err := database.GetChannel(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetChannel() error: %v", err)
+	}
+	if ch.NSFW {
+		t.Error("NSFW = true on a new channel, want false")
+	}
+	if ch.VoiceMaxUsers != 0 {
+		t.Errorf("VoiceMaxUsers = %d on a new channel, want 0", ch.VoiceMaxUsers)
+	}
 }
 
 func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "arch-ch", "text", "", "", 0)
-	_ = database.AdminUpdateChannel(context.Background(), id, "arch-ch", "", 0, 0, true)
+	_ = database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "arch-ch", Archived: true})
 
 	ch, _ := database.GetChannel(context.Background(), id)
 	if !ch.Archived {
@@ -447,7 +518,7 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 	}
 
 	// Unarchive
-	_ = database.AdminUpdateChannel(context.Background(), id, "arch-ch", "", 0, 0, false)
+	_ = database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{Name: "arch-ch", Archived: false})
 	ch, _ = database.GetChannel(context.Background(), id)
 	if ch.Archived {
 		t.Error("Archived = true after unarchiving, want false")

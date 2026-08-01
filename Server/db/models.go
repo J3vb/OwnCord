@@ -20,6 +20,28 @@ type User struct {
 	// ECDSA P-256) used for TOFU pinning of voice E2EE announces. Nil = not
 	// published (legacy client).
 	IdentityPublicKey *string
+	// DisplayName is the optional nickname shown instead of Username. Nil =
+	// unset, and every renderer falls back to Username. Mentions still resolve
+	// against Username alone — it is the unique key.
+	DisplayName *string
+	// About is the optional profile bio shown in the profile popup. Nil = unset.
+	About *string
+	// CustomStatus is the optional free-text status line shown under the name.
+	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
+	CustomStatus *string
+}
+
+// EffectiveDisplayName returns the name to render for the user: the display
+// name when set and non-empty, the username otherwise. Every payload builder
+// goes through this so the fallback cannot be spelled three different ways.
+func (u *User) EffectiveDisplayName() string {
+	if u == nil {
+		return ""
+	}
+	if u.DisplayName != nil && *u.DisplayName != "" {
+		return *u.DisplayName
+	}
+	return u.Username
 }
 
 // Session represents a row in the sessions table.
@@ -98,6 +120,11 @@ type Channel struct {
 	VoiceQuality    *string `json:"voice_quality,omitempty"`
 	MixingThreshold *int    `json:"mixing_threshold,omitempty"`
 	VoiceMaxVideo   int     `json:"voice_max_video"`
+	// NSFW marks the channel as possibly carrying sensitive content. It is
+	// metadata only: the server stores, ships and audits it but imposes no
+	// content behaviour of its own (see migration 025). Clients decide what
+	// to do with it — the desktop client shows a per-session age gate.
+	NSFW bool `json:"nsfw"`
 }
 
 // Message represents a row in the messages table.
@@ -111,6 +138,10 @@ type Message struct {
 	Deleted   bool
 	Pinned    bool
 	Timestamp string
+	// MentionsEveryone is set when the message resolved an @everyone or @here
+	// token and the author held MENTION_EVERYONE. Per-user mentions live in
+	// message_mentions.
+	MentionsEveryone bool
 }
 
 // MessageWithUser joins a Message with the author's public fields.
@@ -129,12 +160,14 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID   int64      `json:"message_id"`
-	ChannelID   int64      `json:"channel_id"`
-	ChannelName string     `json:"channel_name"`
-	User        UserPublic `json:"user"`
-	Content     string     `json:"content"`
-	Timestamp   string     `json:"timestamp"`
+	MessageID        int64      `json:"message_id"`
+	ChannelID        int64      `json:"channel_id"`
+	ChannelName      string     `json:"channel_name"`
+	User             UserPublic `json:"user"`
+	Content          string     `json:"content"`
+	Timestamp        string     `json:"timestamp"`
+	Mentions         []int64    `json:"mentions"`
+	MentionsEveryone bool       `json:"mentions_everyone"`
 }
 
 // UserPublic is the public-facing user shape for API responses.
@@ -157,6 +190,10 @@ type MessageAPIResponse struct {
 	EditedAt    *string          `json:"edited_at"`
 	Deleted     bool             `json:"deleted"`
 	Timestamp   string           `json:"timestamp"`
+	// Mentions is the resolved user ids the message mentions (never nil);
+	// MentionsEveryone reports an authorized @everyone/@here.
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.
@@ -177,24 +214,45 @@ type ReactionInfo struct {
 	Me    bool   `json:"me"`
 }
 
+// ReactionUser is one reactor in the who-reacted list returned by
+// GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users. Avatar is a
+// plain string ("" = none) rather than UserPublic's pointer: the tooltip that
+// consumes this never distinguishes null from empty.
+type ReactionUser struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+}
+
 // VoiceState represents a row in the voice_states table.
 // It tracks which voice channel a user is in and their current audio state.
+//
+// ServerMuted/ServerDeafened are moderator-imposed and, unlike Muted/Deafened,
+// the user cannot clear them: while set, their own voice_mute/voice_deafen
+// unmute attempts are refused. They are scoped to the voice session — the row
+// is deleted on leave — but survive a channel switch.
 type VoiceState struct {
-	UserID      int64  `json:"user_id"`
-	ChannelID   int64  `json:"channel_id"`
-	Username    string `json:"username"`
-	Muted       bool   `json:"muted"`
-	Deafened    bool   `json:"deafened"`
-	Speaking    bool   `json:"speaking"`
-	Camera      bool   `json:"camera"`
-	Screenshare bool   `json:"screenshare"`
-	JoinedAt    string `json:"-"`
+	UserID         int64  `json:"user_id"`
+	ChannelID      int64  `json:"channel_id"`
+	Username       string `json:"username"`
+	Muted          bool   `json:"muted"`
+	Deafened       bool   `json:"deafened"`
+	Speaking       bool   `json:"speaking"`
+	Camera         bool   `json:"camera"`
+	Screenshare    bool   `json:"screenshare"`
+	ServerMuted    bool   `json:"server_muted"`
+	ServerDeafened bool   `json:"server_deafened"`
+	JoinedAt       string `json:"-"`
 }
 
 // ChannelUnread holds per-user unread data for a single channel.
 type ChannelUnread struct {
 	LastMessageID int64 `json:"last_message_id"`
 	UnreadCount   int   `json:"unread_count"`
+	// MentionCount is read_states.mention_count: unread messages that mention
+	// this user directly or via an authorized @everyone/@here. Zeroed by
+	// channel_focus, never advanced by an edit.
+	MentionCount int `json:"mention_count"`
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.
@@ -223,6 +281,22 @@ type AuditEntry struct {
 	TargetType string `json:"target_type"`
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// Emoji represents a row in the emoji table: one server-wide custom emoji.
+//
+// StoredAs is the storage-layer UUID the image bytes live under (the table's
+// legacy column name is `filename`); it is never shown to a user and never
+// derived from anything the uploader sent. Shortcode is always lowercase --
+// the only spelling the validator admits -- which is what makes the table's
+// plain UNIQUE index a case-insensitive one.
+type Emoji struct {
+	ID         int64  `json:"id"`
+	Shortcode  string `json:"shortcode"`
+	StoredAs   string `json:"-"`
+	MimeType   string `json:"-"`
+	UploadedBy int64  `json:"uploaded_by"`
 	CreatedAt  string `json:"created_at"`
 }
 

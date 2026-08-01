@@ -35,6 +35,18 @@ func newTestDB(t *testing.T) *db.DB {
 // collides with one of the migration-seeded defaults).
 func seedRole(t *testing.T, database *db.DB, r *db.Role) {
 	t.Helper()
+	// Migration 023 made role names unique case-insensitively, so a test that
+	// redefines role 3 as "member" now collides with the seeded "Member"
+	// (role 4). Free the name from whichever OTHER role holds it rather than
+	// making every test pick names that dodge the four defaults — the
+	// displaced role keeps its id, permissions and position, which is all the
+	// tests read it for.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE roles SET name = name || ' #' || id WHERE name = ? COLLATE NOCASE AND id != ?`,
+		r.Name, r.ID,
+	); err != nil {
+		t.Fatalf("seedRole(%d) freeing name %q: %v", r.ID, r.Name, err)
+	}
 	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, ?, ?, ?, ?, 0)

@@ -87,6 +87,9 @@ Create a new account using an invite code. The first user is created via `/admin
     "id": 2,
     "username": "alex",
     "avatar": "",
+    "display_name": null,
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": false,
@@ -94,6 +97,8 @@ Create a new account using an invite code. The first user is created via `/admin
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 #### Errors
 
@@ -134,7 +139,10 @@ If the account does not have TOTP enabled:
   "user": {
     "id": 1,
     "username": "alex",
-    "avatar": "uuid.png",
+    "avatar": "/api/v1/files/uuid",
+    "display_name": "Alex",
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": false,
@@ -142,6 +150,8 @@ If the account does not have TOTP enabled:
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 If the account has TOTP enabled:
 
@@ -188,7 +198,10 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
   "user": {
     "id": 1,
     "username": "alex",
-    "avatar": "uuid.png",
+    "avatar": "/api/v1/files/uuid",
+    "display_name": "Alex",
+    "about": null,
+    "custom_status": null,
     "status": "offline",
     "role_id": 4,
     "totp_enabled": true,
@@ -196,6 +209,8 @@ Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
   }
 }
 ```
+
+See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table.
 
 #### Errors
 
@@ -219,7 +234,10 @@ Get the current authenticated user's profile.
 {
   "id": 1,
   "username": "alex",
-  "avatar": "uuid.png",
+  "avatar": "/api/v1/files/uuid",
+  "display_name": "Alex",
+  "about": "A short bio.",
+  "custom_status": "building things",
   "status": "online",
   "role_id": 2,
   "totp_enabled": true,
@@ -227,12 +245,18 @@ Get the current authenticated user's profile.
 }
 ```
 
+This is the canonical **user object**, also returned as `user` by register,
+login and the TOTP challenge.
+
 | Field | Type | Description |
 | ----- | ---- | ----------- |
 | `id` | int64 | User ID |
-| `username` | string | Display name |
-| `avatar` | string | Avatar filename (UUID) or empty string |
-| `status` | string | One of: `online`, `idle`, `dnd`, `offline` |
+| `username` | string | Unique handle; the name `@mentions` resolve against |
+| `avatar` | string | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string |
+| `display_name` | string\|null | Nickname rendered instead of `username`; null when unset |
+| `about` | string\|null | Profile bio, max 300 characters; null when unset |
+| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST |
+| `status` | string | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to *anyone else* reports `offline` instead |
 | `role_id` | int64 | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member) |
 | `totp_enabled` | bool | Whether the user has a confirmed TOTP secret |
 | `created_at` | string | ISO 8601 timestamp |
@@ -348,8 +372,9 @@ Disable TOTP for the authenticated user.
 
 ### PATCH /api/v1/users/me
 
-Update the authenticated user's profile (username and/or avatar).
-Broadcasts a `user_update` WebSocket message to all clients on success.
+Update the authenticated user's profile. Broadcasts a `user_update` WebSocket
+message to all clients on success, carrying the full profile snapshot (the
+event replaces the client's copy rather than patching it).
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute
@@ -359,15 +384,82 @@ Broadcasts a `user_update` WebSocket message to all clients on success.
 ```json
 {
   "username": "newname",
-  "avatar": "upload-uuid.png"
+  "avatar": "https://example.com/pic.png",
+  "display_name": "New Name",
+  "about": "A short bio."
 }
 ```
 
-Both fields optional; `avatar` may be `null` to clear it.
+| Field          | Rules                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `username`     | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
+| `avatar`       | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
+| `display_name` | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
+| `about`        | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
+
+Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
+`display_name` and `about` are HTML-sanitized and trimmed server-side, and the
+length caps count characters, not bytes.
 
 #### Response 200 OK
 
 Returns the updated user object (same shape as `GET /api/v1/auth/me`).
+
+---
+
+### POST /api/v1/users/me/avatar
+
+Upload an avatar image and point the authenticated user's avatar at it.
+Broadcasts a `user_update` on success, exactly like the PATCH above.
+
+The bytes are stored as an ordinary attachment with no channel, and
+`users.avatar` is set to `/api/v1/files/{id}`. That URL is what makes the
+picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
+attachment only to its uploader, and additionally admits one that some user's
+avatar currently points at — so an avatar is readable by every authenticated
+user for exactly as long as it is in use, and stops being readable the moment
+it is replaced.
+
+Not registered when the server has no working storage backend.
+
+**Auth:** Required
+**Rate limit:** 5 uploads/minute per user
+
+#### Request
+
+`multipart/form-data` with a single `file` part.
+
+| Rule       | Value                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 1 MiB                                                                                                                 |
+| Dimensions | 1024x1024, measured from the sniffed image                                                                            |
+
+GIF is refused (an animated avatar renders in every message row), and so is
+SVG — it is markup with script and external-fetch capability, and an avatar is
+rendered inline by definition. The server does not re-encode or crop; the
+client is expected to downscale and square-crop before uploading.
+
+#### Response 201 Created
+
+```json
+{
+  "id": "5f2c...",
+  "filename": "me.png",
+  "size": 20481,
+  "mime": "image/png",
+  "url": "/api/v1/files/5f2c...",
+  "width": 256,
+  "height": 256
+}
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                          |
+| ------ | -------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
+| 429    | `RATE_LIMITED` | Too many uploads                                               |
 
 ---
 
@@ -461,7 +553,10 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
     "category": "Text Channels",
     "position": 0,
     "slow_mode": 0,
-    "archived": false
+    "archived": false,
+    "nsfw": false,
+    "voice_max_users": 0,
+    "voice_max_video": 0
   }
 ]
 ```
@@ -476,6 +571,21 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 | `position` | int | Sort order within category |
 | `slow_mode` | int | Slow-mode delay in seconds (0 = disabled) |
 | `archived` | bool | Whether the channel is archived |
+| `nsfw` | bool | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
+| `voice_max_users` | int | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`) |
+| `voice_max_video` | int | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`) |
+
+#### The `nsfw` flag
+
+`nsfw` is metadata and nothing else. The server stores it, ships it in `ready`
+and in the `channel_create` / `channel_update` broadcasts, and audits an
+operator flipping it — and does **not** filter content, check anyone's age, or
+restrict who may read or post in a flagged channel. Every consequence is the
+client's: the desktop client shows a one-time-per-session "may contain
+sensitive content" gate before rendering a flagged channel's messages
+(remembered in `sessionStorage`, so a new session asks again) and marks the
+channel in its sidebar. A client that ignores the field behaves exactly as it
+did before the field existed.
 
 ---
 
@@ -529,12 +639,22 @@ Paginated message history for a channel.
       "pinned": false,
       "edited_at": null,
       "deleted": false,
-      "timestamp": "2026-03-14T10:30:00Z"
+      "timestamp": "2026-03-14T10:30:00Z",
+      "mentions": [7],
+      "mentions_everyone": false
     }
   ],
   "has_more": true
 }
 ```
+
+`mentions` is the server-resolved list of mentioned user IDs (always present,
+empty when the message mentions nobody) and `mentions_everyone` reports an
+`@everyone`/`@here` that cleared the `MENTION_EVERYONE` permission. Both are
+resolved at send time and re-resolved on edit; an `@word` that matches no
+username, or an `@everyone` from a user without the bit, carries no mention
+semantics and stays plain text. The same two fields appear on pinned-message
+responses and on the WebSocket `chat_message`/`chat_edited` payloads.
 
 #### Pagination
 
@@ -545,6 +665,146 @@ GET /api/v1/channels/5/messages?before=1042&limit=50
 ```
 
 When `has_more` is `false`, you have reached the beginning of the channel history.
+
+---
+
+### GET /api/v1/channels/{id}/messages/around/{messageId}
+
+The window of channel history centred on one message, for jumping to a message
+that is not in the client's loaded page — a search hit, a pinned entry, a reply
+reference, or an `owncord://message/{channelId}/{messageId}` permalink.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (or DM participant membership) — the same gate as `GET /messages`
+
+#### Query Parameters
+
+| Param | Type | Default | Range | Description |
+| ----- | ---- | ------- | ----- | ----------- |
+| `limit` | int | 50 | 1-100 | Total window size, centre included |
+
+Half the window sits before the centre and the remainder after it: `limit=50`
+returns up to 25 older messages, the centre, and up to 24 newer ones. Near the
+start or end of a channel the window is simply shorter — it is not re-balanced
+toward the other side.
+
+#### Response 200 OK
+
+```json
+{
+  "messages": [],
+  "has_more_before": true,
+  "has_more_after": true
+}
+```
+
+`messages` holds the same message objects as `GET /messages` (user, attachments,
+reactions with the `me` flag, `mentions`, `mentions_everyone`), but is ordered
+**oldest-first**, not newest-first like the paginated history endpoint.
+
+`has_more_before` / `has_more_after` report whether the channel holds further
+live history on each side of the returned window. A client that renders an
+around-window is *detached* from the live tail while `has_more_after` is true:
+newly broadcast messages belong below the window and are not part of it, so the
+client should offer a "jump to present" affordance that refetches the normal
+`GET /messages` tail.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | `id` or `messageId` is not a positive integer, or `limit` is not a positive integer |
+| 403 | `FORBIDDEN` | The channel exists but `READ_MESSAGES` is denied |
+| 404 | `NOT_FOUND` | The channel does not exist, the caller is not a participant of the DM, or the message does not live in this channel |
+
+Soft-deleted messages are 404 here, not an empty window: history omits deleted
+rows, so there is no row to centre on. Deleted messages are also excluded from
+the window itself, exactly as in `GET /messages`.
+
+---
+
+### POST /api/v1/channels/{id}/messages/purge
+
+Bulk soft-delete the newest messages in a channel.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` **and** `MANAGE_MESSAGES` on the channel (per-channel overrides apply)
+
+Not available in DM channels — a DM has no `MANAGE_MESSAGES` gate, so those
+requests are rejected with 403.
+
+#### Request Body
+
+```json
+{
+  "limit": 50,
+  "before": 1042
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `limit` | integer | Yes | How many messages to delete, 1--100. Values above 100 are clamped; 0 or negative is a 400. |
+| `before` | integer | No | Only delete messages with an id below this one. Omit or `0` to start from the newest. |
+
+#### Response 200 OK
+
+```json
+{
+  "channel_id": 5,
+  "ids": [1042, 1041, 1040],
+  "count": 3
+}
+```
+
+`ids` is newest-first and may hold fewer than `limit` entries when the channel
+has less history; already-deleted messages are skipped. Deletion is soft: the
+rows stay as tombstones, exactly as with a single delete. A single
+[`chat_bulk_deleted`](protocol.md#chat_bulk_deleted-server---client-broadcast)
+WebSocket event is broadcast to the channel (not one `chat_deleted` per
+message), and one `message_purge` audit entry is written.
+
+Rate limited to 5/sec per user.
+
+---
+
+### GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users
+
+List the users who reacted to a message with a specific emoji — the "who
+reacted" tooltip behind a reaction pill.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (DM: participant)
+
+The reactor list is a separate endpoint rather than `user_ids` inline on every
+reaction summary, so message payloads stay small: a busy channel carries dozens
+of pills per page and almost none of them are ever hovered.
+
+`{emoji}` is a path segment and must be percent-encoded (`👍` → `%F0%9F%91%8D`).
+The message must belong to `{id}`; a message in another channel is a 404, so the
+channel in the URL is always the one the permission check ran against.
+
+#### Response 200 OK
+
+```json
+{
+  "users": [
+    { "id": 3, "username": "alice", "avatar": "" },
+    { "id": 7, "username": "bob", "avatar": "/api/v1/files/abc123" }
+  ]
+}
+```
+
+Ordered oldest reaction first and capped at **100** reactors — the list is for a
+tooltip, not an audit. `users` is always an array (`[]` when nobody used that
+emoji, which is also the answer for an emoji that does not exist). `avatar` is
+`""` when the user has none.
+
+| Status | Error | When |
+|--------|-------|------|
+| 400 | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji |
+| 403 | `FORBIDDEN` | No `READ_MESSAGES` on the channel |
+| 404 | `NOT_FOUND` | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
 
 ---
 
@@ -614,7 +874,9 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
         "username": "alex"
       },
       "content": "...matched text...",
-      "timestamp": "2026-03-14T10:30:00Z"
+      "timestamp": "2026-03-14T10:30:00Z",
+      "mentions": [7],
+      "mentions_everyone": false
     }
   ]
 }
@@ -738,12 +1000,31 @@ List all open DM channels for the authenticated user, ordered by most recent act
   "dm_channels": [
     {
       "channel_id": 100,
+      "name": "Lunch crew",
+      "is_group": true,
       "recipient": {
         "id": 2,
         "username": "jordan",
-        "avatar": "uuid.png",
+        "display_name": "Jo",
+        "avatar": "/api/v1/files/uuid",
         "status": "online"
       },
+      "recipients": [
+        {
+          "id": 2,
+          "username": "jordan",
+          "display_name": "Jo",
+          "avatar": "/api/v1/files/uuid",
+          "status": "online"
+        },
+        {
+          "id": 3,
+          "username": "sam",
+          "display_name": "",
+          "avatar": "",
+          "status": "idle"
+        }
+      ],
       "last_message_id": 5042,
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
@@ -753,15 +1034,119 @@ List all open DM channels for the authenticated user, ordered by most recent act
 }
 ```
 
+| Field        | Description                                                                                                            |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`  | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients` | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`       | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`   | True for a group DM. Stored, not derived from the live participant count.                                              |
+
+`status` is viewer-adjusted: an `invisible` participant reads as `offline`.
+
+---
+
+### POST /api/v1/dms/group
+
+Create a group DM between the caller and 2–8 other users (3–10 total).
+
+Unlike `POST /api/v1/dms` this **always creates**: the same set of people may
+reasonably want more than one group, so there is no "the group for these users"
+to look up.
+
+Blocks are enforced in both directions, per recipient — a user may neither pull
+someone they have blocked into a room with them nor use a group to reach
+someone who has blocked them. The check is creation-time only; see
+`docs/protocol.md` § DM Authorization for why sending into a group is not
+block-checked.
+
+**Auth:** Required
+
+#### Request
+
+```json
+{
+  "recipient_ids": [2, 3],
+  "name": "Lunch crew"
+}
+```
+
+| Field           | Type   | Required | Description                                                                     |
+| --------------- | ------ | -------- | ------------------------------------------------------------------------------- |
+| `recipient_ids` | int[]  | Yes      | 2–8 other users. De-duplicated; the caller is dropped if named.                 |
+| `name`          | string | No       | Group name, ≤ 100 characters. HTML-stripped. Omit or `""` for an unnamed group. |
+
+#### Response 201 Created
+
+The same DM summary shape `GET /api/v1/dms` returns, from the creator's seat.
+Every participant — the creator included — also receives a `dm_channel_open`.
+
+#### Errors
+
+| Status | Code          | Reason                                                                |
+| ------ | ------------- | --------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
+| 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 404    | `NOT_FOUND`   | A recipient does not exist                                            |
+
+---
+
+### PATCH /api/v1/dms/{channelId}
+
+Set or clear a group DM's name.
+
+Any participant may rename it. That is Discord's rule and the only one that
+works here: a group DM has no owner column and no roles, so "who may rename" has
+exactly one answer that does not require inventing an ownership model. A 1:1 DM
+refuses — its name is who is in it.
+
+**Auth:** Required (participant)
+
+#### Request
+
+```json
+{ "name": "Lunch crew" }
+```
+
+An empty name clears it, and the group falls back to listing its members.
+
+#### Response 200 OK
+
+The DM summary shape, from the caller's seat. Every participant also receives a
+`dm_channel_open` carrying the new name.
+
+#### Errors
+
+| Status | Code          | Reason                                                      |
+| ------ | ------------- | ----------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 404    | `NOT_FOUND`   | Not a participant of this DM                                |
+
 ---
 
 ### DELETE /api/v1/dms/{channelId}
 
-Close a DM channel for the authenticated user (hides it from their sidebar). The channel and messages remain in the database. If the other user sends a new message, the channel is automatically re-opened.
+Remove a DM from the caller's sidebar. What that means depends on the kind of DM,
+and the route is shared because the _gesture_ is shared:
 
-**Auth:** Required
+- **1:1 DM** — a hide. The channel and messages remain, the caller remains a
+  participant, and a new message from either side re-opens it.
+- **Group DM** — a **leave**. The caller comes out of `dm_participants`, stops
+  receiving the group's messages, and cannot return unaided. When the last
+  participant leaves, the channel row is deleted (a DM nobody is in is reachable
+  by nobody, and its messages cascade off the channel).
+
+The caller receives `dm_channel_close`; after a group leave the remaining
+participants receive a fresh `dm_channel_open` with the new membership.
+
+**Auth:** Required (participant)
 
 #### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Reason                       |
+| ------ | ----------- | ---------------------------- |
+| 404    | `NOT_FOUND` | Not a participant of this DM |
 
 ---
 
@@ -912,6 +1297,126 @@ execute under the app origin (HTML, SVG, XML, PDF) are served with
 
 ---
 
+## Custom Emoji
+
+Server-wide custom emoji, usable as `:shortcode:` in message content and as
+reaction strings.
+
+**Permission model.** Reading the set is open to any authenticated member —
+an emoji nobody can render is not an emoji, and the set is server-wide with no
+per-channel scope to leak. Adding and removing require **MANAGE_SERVER**.
+
+That is a deliberate reuse rather than a new permission bit: a bit is a
+schema-visible, forever decision, and "who may change server-wide branding" is
+exactly what MANAGE_SERVER already answers for the server name, icon and
+settings. There is no `MANAGE_EMOJI`.
+
+### GET /api/v1/emoji
+
+List every custom emoji, ordered by shortcode.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 3, "shortcode": "wave", "url": "/api/v1/emoji/3/image" },
+  { "id": 7, "shortcode": "party_blob", "url": "/api/v1/emoji/7/image" }
+]
+```
+
+`url` is server-relative and authenticated — see GET /api/v1/emoji/{id}/image.
+
+---
+
+### POST /api/v1/emoji
+
+Upload one custom emoji as multipart form data.
+
+**Auth:** Required — **MANAGE_SERVER**
+**Rate limit:** 10 requests/minute per user
+**Body size limit:** 1 MiB (the image itself is capped at 512 KiB)
+**Content-Type:** `multipart/form-data`
+
+| Field       | Type   | Notes                                                                                                                                           |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shortcode` | string | `[a-z0-9_]{2,32}`; surrounding colons are stripped and the value is lowercased before validation, so `:WAVE:` and `wave` are the same shortcode |
+| `file`      | file   | PNG, JPEG, GIF or WebP                                                                                                                          |
+
+Validation, in the order it is applied — the permission check runs before the
+multipart body is read, so a member without the bit never causes a spool to
+disk:
+
+1. MANAGE_SERVER, then the rate limit, then the shortcode format.
+2. At most **512 KiB** of image bytes.
+3. The MIME type is **sniffed from the file's own bytes**, never taken from the
+   client's part header. Only `image/png`, `image/jpeg`, `image/gif` and
+   `image/webp` are accepted. SVG is refused outright: it is markup with script
+   and external-fetch capability, and an emoji is by definition rendered inline.
+4. Dimensions are re-read from the sniffed image (WebP headers are parsed
+   directly, since the standard library has no WebP decoder) and must be at
+   most **128 x 128**.
+5. Shortcodes are unique case-insensitively; a collision is `409 CONFLICT`.
+6. A server holds at most 200 emoji.
+
+On success the full set is broadcast as `emoji_update` (see protocol.md), so
+every connected client converges without a reconnect.
+
+#### Response 201 Created
+
+```json
+{ "id": 3, "shortcode": "wave", "url": "/api/v1/emoji/3/image" }
+```
+
+#### Errors
+
+| Status | Code           | Cause                                           |
+| ------ | -------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST`  | bad shortcode, wrong format, too large, too big |
+| 403    | `FORBIDDEN`    | caller lacks MANAGE_SERVER                      |
+| 409    | `CONFLICT`     | an emoji with that shortcode already exists     |
+| 429    | `RATE_LIMITED` | upload rate limit exceeded                      |
+
+---
+
+### GET /api/v1/emoji/{id}/image
+
+Serve one emoji's image bytes.
+
+**Auth:** Required (Bearer token)
+**Caching:** `Cache-Control: private, max-age=86400, immutable`
+
+Authenticated rather than public so an emoji cannot be used as an
+unauthenticated tracking pixel hosted on someone else's server. There is no
+per-channel ACL to apply — emoji are server-wide by construction, so
+authentication is the whole check. An emoji's bytes never change for a given
+id (a replacement is a new row), which is what lets the response be cached
+hard. Unknown ids answer 404.
+
+---
+
+### DELETE /api/v1/emoji/{id}
+
+Delete one custom emoji and unlink its stored file.
+
+**Auth:** Required — **MANAGE_SERVER**
+
+Messages and reactions that used the shortcode fall back to rendering the
+literal `:shortcode:` text. Broadcasts `emoji_update` on success.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                        |
+| ------ | ------------- | ---------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
+| 404    | `NOT_FOUND`   | no emoji with that id        |
+
+---
+
 ## Health Check
 
 ### GET /health
@@ -971,10 +1476,343 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
 
 ---
 
+## Admin API Authorization
+
+The admin panel API lives under `/admin/api` (not `/api/v1`) and takes the same
+`Authorization: Bearer {token}` header — a login session or an API token, which
+inherits its owning user's role.
+
+Authorization is two-layered:
+
+1. **Perimeter.** The request is rejected with `403 FORBIDDEN` unless the
+   principal's role holds at least one bit of `permissions.AdminPerimeter`
+   (`ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_SERVER`,
+   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
+   users are rejected here even while their session is still valid.
+2. **Per-route bit.** Route groups then require the specific permission below.
+   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on role
+   *position* (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
+   substitutes for being the owner.
+
+| Route | Requires |
+| ----- | -------- |
+| `GET /admin/api/me` | perimeter only |
+| `GET /admin/api/stats` | perimeter only |
+| `GET /admin/api/users` | perimeter only |
+| `PATCH /admin/api/users/{id}` | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions` | `KICK_MEMBERS` |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS` |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`) | `MANAGE_ROLES` |
+| `GET /admin/api/audit-log` | `VIEW_AUDIT_LOG` |
+| `GET/PATCH /admin/api/settings` | `MANAGE_SERVER` |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream` | `ADMINISTRATOR` |
+| `/api/v1/admin/plugins…` | `ADMINISTRATOR` |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…` | Owner role (position 100) |
+
+Moderation routes additionally enforce the **role hierarchy**: the actor must
+strictly outrank the target (`actor.position > target.position`), and a role
+assignment may only grant a role positioned strictly below the actor's own —
+so an admin cannot promote anyone to Owner, and a moderator cannot demote an
+admin. Violations return `403 FORBIDDEN`.
+
+### GET /admin/api/me
+
+Describes the calling principal so a panel can hide what the role cannot use.
+Every route still re-checks its bit server-side.
+
+#### Response 200 OK
+
+```json
+{
+  "id": 7,
+  "username": "mod",
+  "role_id": 3,
+  "role_name": "Moderator",
+  "role_position": 60,
+  "permissions": 1048575,
+  "is_owner": false
+}
+```
+
+---
+
+## Role Management
+
+Create, edit, delete and reorder roles. The whole group requires
+`MANAGE_ROLES`; `RoleService` then enforces the hierarchy rules below, so a
+principal that clears the bit still cannot escalate through it.
+
+**Rules, all measured against the *actor's* role position:**
+
+- You may only create, edit, delete or reorder roles positioned **strictly
+  below** your own. Equal rank is refused too, so a role cannot rewrite itself.
+  Nothing sits above position 100, which makes the seeded Owner role
+  immutable and undeletable for everyone, owner included.
+- You may never **grant** a permission bit your own role lacks. Removing one is
+  allowed — de-escalation is always safe. `ADMINISTRATOR` bypasses this check
+  entirely (it is what lets the owner hand out anything).
+- The default role (`is_default = 1`) cannot be deleted: every member falls
+  back to it.
+- Deleting a role moves its members onto the default role in one `UPDATE`,
+  drops the role's `channel_overrides` rows, invalidates the moved members'
+  cached permissions, and broadcasts a `member_update` per member.
+- Names are unique **case-insensitively** (migration `023`), matching the
+  case-insensitive lookup the desktop client does. Max 32 characters.
+- Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
+  color. Anything else is `400`.
+- Unknown permission bits are masked off rather than rejected.
+- Every mutation writes an audit row (`role_create`, `role_update`,
+  `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
+  `docs/protocol.md`) carrying the full new list.
+
+### GET /admin/api/roles
+
+Roles ordered by position descending, each with its member count.
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647, "position": 100, "is_default": false, "member_count": 1 },
+  { "id": 4, "name": "Member", "color": null, "permissions": 1635, "position": 40, "is_default": true, "member_count": 12 }
+]
+```
+
+### POST /admin/api/roles
+
+#### Request
+
+```json
+{
+  "name": "Helper",
+  "color": "#5865F2",
+  "permissions": 3,
+  "position": 50
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | 1–32 characters, unique case-insensitively |
+| `color` | string | No | `#rgb`/`#rrggbb`, or `""` for none |
+| `permissions` | integer | No | Bitfield; defaults to `0` |
+| `position` | integer | No | Defaults to one below the actor's own position |
+
+#### Response 201 Created
+
+The created role (`id`, `name`, `color`, `permissions`, `position`,
+`is_default` — always `false`; the default role is seeded, never created).
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
+
+### PATCH /admin/api/roles/{id}
+
+Partial update — every field is optional and an omitted one is left alone.
+Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
+Editing a role at or above your own position is `403`.
+
+A permission change additionally invalidates the cached permissions of that
+role's members and re-syncs their channel visibility (the server sends targeted
+`channel_create`/`channel_delete`), because a role's mask is the base every
+channel's effective permission derives from.
+
+#### Response 200 OK
+
+The updated role.
+
+### DELETE /admin/api/roles/{id}
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | The role is the default role, or is the seeded Owner role |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or the role is at or above your own position |
+| 404 | `NOT_FOUND` | No such role |
+
+### PATCH /admin/api/roles/reorder
+
+#### Request
+
+```json
+{ "role_ids": [2, 9, 3, 4] }
+```
+
+`role_ids` is highest-rank-first and must name **exactly** the set of roles
+strictly below your own position — a partial list is refused rather than
+silently leaving the omitted roles at positions that now collide. Positions are
+normalized to `N…1`, so they stay unique, stay below the actor, and never
+collide with the untouched roles above.
+
+#### Response 200 OK
+
+The full role list after the reorder, position descending.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Wrong number of ids, or a duplicate id |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or an id that is unknown or not below your rank |
+
+---
+
+## Channel Management (admin)
+
+`POST /admin/api/channels` takes `{name, type, category, topic, position}`;
+`PATCH /admin/api/channels/{id}` takes `{name, topic, category, slow_mode,
+position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
+omitted field from the current row, so a partial body is safe.
+
+The numeric fields are bounds-checked before anything is written, and an
+out-of-range value is refused with `400 INVALID_INPUT` rather than clamped —
+a caller that sent `-1` meant something, and storing `0` would hide it. A
+refused body writes nothing at all:
+
+| Field | Range | Meaning |
+|-------|-------|---------|
+| `slow_mode` | 0…21600 | Cooldown in seconds; 0 = off (6-hour ceiling, as Discord) |
+| `voice_max_users` | 0…99 | Voice capacity; 0 = unlimited |
+| `voice_max_video` | 0…99 | Simultaneous cameras/screen shares; 0 = unlimited |
+
+`nsfw` is a bool and is stored, broadcast and audited only — the server applies
+no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
+audit detail names the transition: `updated #foo (marked NSFW)` /
+`(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
+
+The voice limits are stored on a channel of any type but are only meaningful on
+a voice one; the desktop client offers them for voice channels alone and omits
+the keys entirely elsewhere, so a text-channel edit cannot wipe limits the row
+happens to hold.
+
+`type` must be `text`, `voice` or `announcement` (`400 INVALID_INPUT`
+otherwise). **`category` constrains nothing.** Categories are free text and a
+channel of any type may live under any of them — a voice channel under
+"Gaming", a text channel under "Voice Channels". Grouping is a display concern:
+the desktop client groups by whatever category a channel carries and falls back
+to a synthetic "Voice" group only for voice channels with no category at all.
+(Before phase 5 the server refused any non-voice channel under a category
+literally named "Voice Channels", and any voice channel outside it.)
+
+`PATCH` accepts `category`, so moving a channel between categories is an edit
+rather than a delete-and-recreate. An empty string makes it uncategorized.
+
+---
+
+## Channel Permission Overrides
+
+Two override layers per channel, both gated on `MANAGE_CHANNELS` and both
+audit-logged. They resolve in Discord's order:
+
+```
+base role permissions -> role override -> user override
+```
+
+The later, narrower layer wins: a **user** deny beats a **role** allow, a user
+allow beats a role deny, and within one layer allow beats deny. `ADMINISTRATOR`
+bypasses both layers entirely. See `docs/schema.md` ("Permission Checking
+Logic") for the formula and `permissions.EffectiveChannelPerms` for the single
+implementation.
+
+Denying `READ_MESSAGES` hides the channel outright — from the WS `ready`
+payload, from `GET /api/v1/channels`, from reconnect replay and from live
+broadcasts. Every write below invalidates the affected permission cache entries
+and then re-syncs connected clients with targeted `channel_create` /
+`channel_delete` messages, so sidebars converge without a reconnect.
+
+DM channels have no override surface: `400 INVALID_INPUT`.
+
+### GET /admin/api/channels/{id}/permissions
+
+Both layers for one channel. `roles` lists **every** role (zero masks when it
+carries no override) so the panel can render a complete grid; `users` lists
+**only** members who actually have an override row.
+
+#### Response 200 OK
+
+```json
+{
+  "channel_id": 4,
+  "roles": [
+    { "role_id": 1, "role_name": "Owner", "position": 100, "permissions": 2147483647, "allow": 0, "deny": 0 },
+    { "role_id": 4, "role_name": "Member", "position": 40, "permissions": 1635, "allow": 0, "deny": 514 }
+  ],
+  "users": [
+    { "user_id": 12, "username": "alice", "role_id": 4, "allow": 2, "deny": 0 }
+  ]
+}
+```
+
+### PUT /admin/api/channels/{id}/permissions/{roleId}
+
+### PUT /admin/api/channels/{id}/user-permissions/{userId}
+
+Write one override row. Same body for both layers:
+
+```json
+{ "allow": 2, "deny": 1 }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `allow` | integer | Bits granted in this channel |
+| `deny` | integer | Bits refused in this channel |
+
+Bits outside `permissions.AllPerms` are masked off rather than rejected, so an
+unknown bit can never be persisted. A row with both masks `0` is meaningless —
+the admin panel sends `DELETE` for that case instead.
+
+#### Response 200 OK
+
+The stored row: `{role_id, role_name, position, permissions, allow, deny}` for
+the role layer, `{user_id, username, role_id, allow, deny}` for the user layer.
+
+#### Cache and fan-out
+
+- Role layer: `InvalidateAll` (any member of that role is affected), then
+  `RefreshChannelVisibility`.
+- User layer: `InvalidateUser(userId)` only — a per-user override cannot change
+  anyone else's verdict, and dropping the whole cache for one member would cost
+  every connected client a repopulate — then `RefreshChannelVisibility`, which
+  resolves visibility per user through the full order.
+
+#### Audit
+
+`channel_perms_update` / `channel_user_perms_update`, target `channel`.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Unparseable id or body |
+| 400 | `INVALID_INPUT` | The channel is a DM |
+| 403 | `FORBIDDEN` | Missing `MANAGE_CHANNELS` |
+| 404 | `NOT_FOUND` | Unknown channel, role or user |
+
+### DELETE /admin/api/channels/{id}/permissions/{roleId}
+
+### DELETE /admin/api/channels/{id}/user-permissions/{userId}
+
+Clear the override row, returning the target to the layer above it. `204 No
+Content`; deleting a row that does not exist is a no-op, not a `404`. Same
+cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
+`channel_user_perms_clear`.
+
+---
+
 ## Plugin Administration
 
 Manage WASM plugins. These endpoints sit behind **both** the admin IP
-restriction (allowed CIDRs) **and** admin bearer-token authentication.
+restriction (allowed CIDRs) **and** admin bearer-token authentication, and
+require the `ADMINISTRATOR` bit specifically (the widened admin perimeter does
+not open them).
 Plugin execution additionally requires a server built with `-tags wazero`
 and `plugins.enabled: true` in config.
 

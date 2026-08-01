@@ -42,8 +42,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 3 Navigation + 3 Communication + 2 Messages = 9
-    expect(rows.length).toBe(9);
+    // 1 PTT + 3 Navigation + 3 Communication + 5 Messages = 12
+    expect(rows.length).toBe(12);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -222,6 +222,15 @@ describe("KeybindsTab", () => {
     expect(labels).toContain("Search Messages");
     expect(labels).toContain("Upload File");
     expect(labels).toContain("Edit Last Message");
+  });
+
+  it("renders the composer formatting keybinds and explains the Ctrl+U overlap", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const labels = Array.from(el.querySelectorAll(".setting-label")).map((l) => l.textContent);
+    expect(labels).toContain("Bold");
+    expect(labels).toContain("Italic");
+    expect(labels).toContain("Underline");
+    expect(el.textContent).toContain("Formatting shortcuts wrap the selected text");
   });
 
   it("renders Toggle Mute, Toggle Deafen, Toggle Camera keybinds", () => {

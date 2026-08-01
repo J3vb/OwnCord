@@ -236,6 +236,58 @@ func TestHub_BroadcastToChannel_ZeroChannelSendsToAll(t *testing.T) {
 	assertReceived(t, s1, msg, "client")
 }
 
+// ─── BroadcastChatBulkDeleted ─────────────────────────────────────────────────
+
+// One chat_bulk_deleted carrying every purged id reaches the channel's
+// subscribers, and nobody else — a purge must not fan out N chat_deleted events
+// nor disclose ids to a client focused elsewhere.
+func TestHub_BroadcastChatBulkDeleted_OneEventToChannelMembers(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "purged")
+	u1 := seedTestUser(t, database, "bulk1")
+	u2 := seedTestUser(t, database, "bulk2")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	hub.Register(ws.NewTestClientWithChannel(hub, u1, chID, s1))
+	c2 := ws.NewTestClientWithChannel(hub, u2, 999, s2)
+	hub.Register(c2)
+	waitRegistered(t, hub, c2)
+
+	hub.BroadcastChatBulkDeleted(chID, []int64{7, 6, 5})
+
+	select {
+	case got := <-s1:
+		var env struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ChannelID int64   `json:"channel_id"`
+				IDs       []int64 `json:"ids"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(got, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if env.Type != "chat_bulk_deleted" {
+			t.Errorf("type = %q, want chat_bulk_deleted", env.Type)
+		}
+		if env.Payload.ChannelID != chID {
+			t.Errorf("channel_id = %d, want %d", env.Payload.ChannelID, chID)
+		}
+		if !slices.Equal(env.Payload.IDs, []int64{7, 6, 5}) {
+			t.Errorf("ids = %v, want [7 6 5]", env.Payload.IDs)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("channel member did not receive chat_bulk_deleted")
+	}
+
+	assertNotReceived(t, s1, "channel member (second event)")
+	assertNotReceived(t, s2, "client focused on another channel")
+}
+
 // ─── BUG-122: Unfocused client must NOT receive channel-scoped broadcasts ────
 
 func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
@@ -1208,7 +1260,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -1235,7 +1290,9 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS channel_overrides (
@@ -1247,6 +1304,14 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     UNIQUE(channel_id, role_id)
 );
 
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -1256,8 +1321,15 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,

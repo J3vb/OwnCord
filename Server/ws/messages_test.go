@@ -2,6 +2,8 @@ package ws
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -360,7 +362,7 @@ func TestBuildMemberBan_ValidJSON(t *testing.T) {
 // ─── buildChatEdited ──────────────────────────────────────────────────────────
 
 func TestBuildChatEdited_Type(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -373,13 +375,15 @@ func TestBuildChatEdited_Type(t *testing.T) {
 }
 
 func TestBuildChatEdited_Payload(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true)
 	var env struct {
 		Payload struct {
-			MessageID int64  `json:"message_id"`
-			ChannelID int64  `json:"channel_id"`
-			Content   string `json:"content"`
-			EditedAt  string `json:"edited_at"`
+			MessageID        int64   `json:"message_id"`
+			ChannelID        int64   `json:"channel_id"`
+			Content          string  `json:"content"`
+			EditedAt         string  `json:"edited_at"`
+			Mentions         []int64 `json:"mentions"`
+			MentionsEveryone bool    `json:"mentions_everyone"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(msg, &env); err != nil {
@@ -397,6 +401,12 @@ func TestBuildChatEdited_Payload(t *testing.T) {
 	}
 	if p.EditedAt != "2024-01-01T00:00:00Z" {
 		t.Errorf("payload.edited_at = %q, want 2024-01-01T00:00:00Z", p.EditedAt)
+	}
+	if len(p.Mentions) != 1 || p.Mentions[0] != 7 {
+		t.Errorf("payload.mentions = %v, want [7]", p.Mentions)
+	}
+	if !p.MentionsEveryone {
+		t.Error("payload.mentions_everyone = false, want true")
 	}
 }
 
@@ -437,6 +447,42 @@ func TestBuildChatDeleted_Payload(t *testing.T) {
 func TestBuildChatDeleted_ValidJSON(t *testing.T) {
 	if !json.Valid(buildChatDeleted(1, 2)) {
 		t.Error("buildChatDeleted output is not valid JSON")
+	}
+}
+
+// ─── buildChatBulkDeleted ─────────────────────────────────────────────────────
+
+func TestBuildChatBulkDeleted_TypeAndPayload(t *testing.T) {
+	msg := buildChatBulkDeleted(22, []int64{11, 10, 9})
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ChannelID int64   `json:"channel_id"`
+			IDs       []int64 `json:"ids"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "chat_bulk_deleted" {
+		t.Errorf("type = %q, want chat_bulk_deleted", env.Type)
+	}
+	if env.Payload.ChannelID != 22 {
+		t.Errorf("payload.channel_id = %d, want 22", env.Payload.ChannelID)
+	}
+	if !slices.Equal(env.Payload.IDs, []int64{11, 10, 9}) {
+		t.Errorf("payload.ids = %v, want [11 10 9]", env.Payload.IDs)
+	}
+}
+
+func TestBuildChatBulkDeleted_NilIDsEncodesAsEmptyArray(t *testing.T) {
+	msg := buildChatBulkDeleted(5, nil)
+	if !json.Valid(msg) {
+		t.Fatal("buildChatBulkDeleted output is not valid JSON")
+	}
+	// Clients iterate ids unconditionally, so null would be a crash.
+	if !strings.Contains(string(msg), `"ids":[]`) {
+		t.Errorf("nil ids encoded as %s, want an empty array", msg)
 	}
 }
 
@@ -699,7 +745,7 @@ func TestBuildMemberJoin_NoIdentityKey_Omitted(t *testing.T) {
 
 func TestBuildUserUpdate_IncludesIdentityKey(t *testing.T) {
 	key := "dXBkYXRlZGtleQ=="
-	msg := buildUserUpdate(9, "rotator", nil, &key)
+	msg := buildUserUpdate(UserUpdate{UserID: 9, Username: "rotator", IdentityPublicKey: &key})
 	var env struct {
 		Type    string `json:"type"`
 		Payload struct {
@@ -719,5 +765,92 @@ func TestBuildUserUpdate_IncludesIdentityKey(t *testing.T) {
 	}
 	if env.Payload.IdentityPublicKey != key {
 		t.Errorf("identity_public_key = %q, want %q", env.Payload.IdentityPublicKey, key)
+	}
+}
+
+// ─── channel feature flags on the wire ───────────────────────────────────────
+
+// nsfwSampleChannel is a voice channel carrying every field the phase-5 flags
+// added, so a builder that drops one is caught by an explicit assertion rather
+// than by a client behaving oddly.
+func flaggedSampleChannel() *db.Channel {
+	return &db.Channel{
+		ID:            7,
+		Name:          "lounge",
+		Type:          "voice",
+		Category:      "Hangout",
+		Position:      1,
+		SlowMode:      30,
+		NSFW:          true,
+		VoiceMaxUsers: 5,
+		VoiceMaxVideo: 2,
+	}
+}
+
+// Both builders share one payload constructor, so both are asserted: the point
+// is that channel_create and channel_update can never disagree about which
+// fields a client is told about.
+func TestBuildChannelMessages_CarryFeatureFlags(t *testing.T) {
+	ch := flaggedSampleChannel()
+	for name, msg := range map[string][]byte{
+		"channel_create": buildChannelCreate(ch),
+		"channel_update": buildChannelUpdate(ch),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var env struct {
+				Payload channelPayload `json:"payload"`
+			}
+			if err := json.Unmarshal(msg, &env); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			p := env.Payload
+			if !p.NSFW {
+				t.Error("payload.nsfw = false, want true")
+			}
+			if p.SlowMode != ch.SlowMode {
+				t.Errorf("payload.slow_mode = %d, want %d", p.SlowMode, ch.SlowMode)
+			}
+			if p.VoiceMaxUsers != ch.VoiceMaxUsers {
+				t.Errorf("payload.voice_max_users = %d, want %d", p.VoiceMaxUsers, ch.VoiceMaxUsers)
+			}
+			if p.VoiceMaxVideo != ch.VoiceMaxVideo {
+				t.Errorf("payload.voice_max_video = %d, want %d", p.VoiceMaxVideo, ch.VoiceMaxVideo)
+			}
+		})
+	}
+}
+
+// The JSON keys are the contract the client reads; a Go-side rename that kept
+// the struct field would pass the assertions above and still break every
+// client, so the wire names are pinned explicitly.
+func TestBuildChannelUpdate_FeatureFlagWireNames(t *testing.T) {
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(buildChannelUpdate(flaggedSampleChannel()), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"nsfw", "slow_mode", "voice_max_users", "voice_max_video"} {
+		if _, ok := env.Payload[key]; !ok {
+			t.Errorf("payload is missing %q; got keys %v", key, env.Payload)
+		}
+	}
+}
+
+// An unflagged channel must send the flags as their zero values rather than
+// omitting them: a client that reads `nsfw` as undefined would fall back to
+// its own default, and "absent" would then mean two different things.
+func TestBuildChannelUpdate_UnflaggedChannelSendsZeroes(t *testing.T) {
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(buildChannelUpdate(sampleChannel()), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload["nsfw"] != false {
+		t.Errorf("payload.nsfw = %v, want false", env.Payload["nsfw"])
+	}
+	if env.Payload["voice_max_users"] != float64(0) {
+		t.Errorf("payload.voice_max_users = %v, want 0", env.Payload["voice_max_users"])
 	}
 }

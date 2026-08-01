@@ -98,6 +98,11 @@ vi.mock("@components/CreateChannelModal", () => ({
   }),
 }));
 
+const mockOpenUrl = vi.fn(async (_url: string) => {});
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: (url: string) => mockOpenUrl(url),
+}));
+
 vi.mock("@components/EditChannelModal", () => ({
   createEditChannelModal: vi.fn().mockReturnValue({
     mount: vi.fn(),
@@ -124,6 +129,12 @@ vi.mock("../../src/pages/main-page/VoiceCallbacks", () => ({
     onVoiceJoin: vi.fn(),
     onVoiceLeave: vi.fn(),
   }),
+  createVoiceModerationCallbacks: vi.fn().mockReturnValue({
+    onServerMute: vi.fn(),
+    onServerDeafen: vi.fn(),
+    onMove: vi.fn(),
+    onDisconnect: vi.fn(),
+  }),
 }));
 
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
@@ -138,10 +149,11 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 // ---------------------------------------------------------------------------
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
+import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
+import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
@@ -250,10 +262,14 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
     channelId: 100,
     recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+    participants: [{ id: 10, username: "Alice", avatar: "", status: "online" }],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",
     unreadCount: 0,
+    mentionCount: 0,
     ...overrides,
   };
 }
@@ -280,6 +296,7 @@ function defaultOpts(): SidebarAreaOptions {
       adminCreateChannel: vi.fn().mockResolvedValue(undefined),
       adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
       adminDeleteChannel: vi.fn().mockResolvedValue(undefined),
+      purgeMessages: vi.fn().mockResolvedValue({ channel_id: 1, ids: [3, 2], count: 2 }),
       adminKickMember: vi.fn().mockResolvedValue(undefined),
       adminBanMember: vi.fn().mockResolvedValue(undefined),
       adminChangeRole: vi.fn().mockResolvedValue(undefined),
@@ -846,7 +863,10 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("re-renders DM sidebar when activeDmUserId changes in DMs mode", () => {
+    // Keyed on the active CHANNEL, not activeDmUserId: a group DM leaves the
+    // latter null, so a subscription on it would stop redrawing the list the
+    // moment a group became the active conversation.
+    it("re-renders DM sidebar when the active channel changes in DMs mode", () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
@@ -854,8 +874,8 @@ describe("SidebarArea", () => {
 
       const initialCallCount = (createDmSidebar as MockedFn).mock.calls.length;
 
-      setActiveDmUser(42);
-      uiStore.flush();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 4242 }));
+      channelsStore.flush?.();
 
       const newCallCount = (createDmSidebar as MockedFn).mock.calls.length;
       expect(newCallCount).toBeGreaterThan(initialCallCount);
@@ -963,8 +983,13 @@ describe("SidebarArea", () => {
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
 
+      // The picker is multi-select since group DMs: a click selects, and the
+      // confirm button (labelled for the selection size) commits.
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
+      const confirm = document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement;
+      expect(confirm.textContent).toBe("Create DM");
+      confirm.click();
 
       expect(document.querySelector(".modal-overlay")).toBeNull();
 
@@ -1031,10 +1056,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1062,10 +1091,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });
@@ -1286,10 +1319,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1325,10 +1362,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         next.set(2, {
           id: 2,
@@ -1337,10 +1378,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1376,7 +1421,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(10);
+      lastCall.onCloseDm(100);
 
       expect(opts.api.closeDm).toHaveBeenCalledWith(100);
 
@@ -1401,10 +1446,14 @@ describe("SidebarArea", () => {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
       });
@@ -1414,7 +1463,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(10);
+      lastCall.onCloseDm(100);
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
 
@@ -1436,7 +1485,7 @@ describe("SidebarArea", () => {
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onSelectConversation(10);
+      lastCall.onSelectConversation(100);
 
       expect(uiStore.getState().activeDmUserId).toBe(10);
       expect(channelsStore.getState().activeChannelId).toBe(100);
@@ -1478,6 +1527,7 @@ describe("SidebarArea", () => {
       expect(typeof callArgs.onEditChannel).toBe("function");
       expect(typeof callArgs.onDeleteChannel).toBe("function");
       expect(typeof callArgs.onReorderChannel).toBe("function");
+      expect(typeof callArgs.onPurgeChannel).toBe("function");
 
       cleanup(result);
     });
@@ -1527,6 +1577,38 @@ describe("SidebarArea", () => {
       callArgs.onDeleteChannel({ id: 1, name: "general" });
 
       expect(createDeleteChannelModal).toHaveBeenCalled();
+
+      cleanup(result);
+    });
+
+    it("onPurgeChannel calls the purge API and toasts the server's count", async () => {
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+
+      expect(opts.api.purgeMessages).toHaveBeenCalledWith(1, 50);
+      expect(toast.show).toHaveBeenCalledWith("Purged 2 messages from #general", "success");
+
+      cleanup(result);
+    });
+
+    it("onPurgeChannel surfaces a failure as an error toast", async () => {
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      (opts.api.purgeMessages as MockedFn).mockRejectedValue(new Error("forbidden"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+
+      expect(toast.show).toHaveBeenCalledWith("forbidden", "error");
 
       cleanup(result);
     });
@@ -1797,20 +1879,24 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("does not overwrite existing channel with non-empty name", () => {
+    it("does not rewrite an existing channel whose name already matches", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(100, {
           id: 100,
-          name: "ExistingName",
+          name: "Alice",
           type: "dm",
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1824,7 +1910,7 @@ describe("SidebarArea", () => {
       entry.click();
 
       const ch = channelsStore.getState().channels.get(100);
-      expect(ch!.name).toBe("ExistingName");
+      expect(ch!.name).toBe("Alice");
 
       cleanup(result);
     });
@@ -1865,7 +1951,7 @@ describe("SidebarArea", () => {
       return calls[calls.length - 1]![0];
     }
 
-    it("onKick calls API and shows success toast", async () => {
+    it("onKick (Force Logout) calls API and shows success toast", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
@@ -1877,7 +1963,7 @@ describe("SidebarArea", () => {
       await callbacks.onKick(2, "Alice");
 
       expect(opts.api.adminKickMember).toHaveBeenCalledWith(2);
-      expect(mockShow).toHaveBeenCalledWith("Kicked Alice", "success");
+      expect(mockShow).toHaveBeenCalledWith("Forced Alice to log out", "success");
 
       cleanup(result);
     });
@@ -1911,7 +1997,7 @@ describe("SidebarArea", () => {
       const callbacks = getMemberListCallbacks();
       await callbacks.onKick(2, "Alice");
 
-      expect(mockShow).toHaveBeenCalledWith("Failed to kick member", "error");
+      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
 
       cleanup(result);
     });
@@ -2120,6 +2206,7 @@ describe("SidebarArea", () => {
       addBtn.click();
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
+      (document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement).click();
 
       await vi.waitFor(() => {
         expect(mockShow).toHaveBeenCalledWith("Server error", "error");
@@ -2201,6 +2288,93 @@ describe("SidebarArea", () => {
 
       expect(contentSlot.children[0]!.classList.contains("sidebar-dm-section")).toBe(true);
 
+      cleanup(result);
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Audit log entry point
+  // -------------------------------------------------------------------------
+  //
+  // The log itself stays in the admin panel; the desktop client only owes its
+  // moderators a way in. The entry is gated on VIEW_AUDIT_LOG, and the gate has
+  // to survive `ready` landing after the header is built.
+
+  describe("audit log entry point", () => {
+    function signInAs(roleName: string, permissions: number): void {
+      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: roleName },
+        isAuthenticated: true,
+      }));
+    }
+
+    function auditBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
+      return result.sidebarWrapper.querySelector("[data-testid='audit-log-btn']");
+    }
+
+    it("is shown to a role holding VIEW_AUDIT_LOG", () => {
+      signInAs("Moderator", Permission.VIEW_AUDIT_LOG);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is hidden from a role without the bit", () => {
+      signInAs("Member", Permission.SEND_MESSAGES);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).toBe("none");
+      cleanup(result);
+    });
+
+    // `ready` can land after the header is built, and a moderator whose role
+    // only becomes known then would otherwise never see the entry.
+    it("appears when the role list arrives after mount", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: "Moderator" },
+        isAuthenticated: true,
+      }));
+      setRoles([]);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).toBe("none");
+
+      setRoles([{ id: 9, name: "Moderator", color: null, permissions: Permission.VIEW_AUDIT_LOG }]);
+      // Store notifications are batched on a microtask.
+      channelsStore.flush();
+
+      expect(auditBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("opens the admin panel's audit section in the browser", async () => {
+      mockOpenUrl.mockClear();
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const result = createSidebarArea(defaultOpts());
+
+      auditBtn(result)?.click();
+
+      await vi.waitFor(() => {
+        expect(mockOpenUrl).toHaveBeenCalledWith("https://localhost:8080/admin#audit");
+      });
+      cleanup(result);
+    });
+
+    it("toasts instead of opening a bogus URL with no host", async () => {
+      mockOpenUrl.mockClear();
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const opts = defaultOpts();
+      (opts.api.getConfig as ReturnType<typeof vi.fn>).mockReturnValue({ host: "" });
+      const show = vi.fn();
+      (opts.getToast as ReturnType<typeof vi.fn>).mockReturnValue({ show });
+      const result = createSidebarArea(opts);
+
+      auditBtn(result)?.click();
+
+      expect(mockOpenUrl).not.toHaveBeenCalled();
+      expect(show).toHaveBeenCalledWith("Not connected to a server", "error");
       cleanup(result);
     });
   });

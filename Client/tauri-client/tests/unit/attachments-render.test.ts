@@ -163,6 +163,11 @@ describe("isImageMime", () => {
     expect(isImageMime("image/gif")).toBe(true);
   });
 
+  // SVG can carry script, so it is deliberately not an inline image type.
+  it("returns false for image/svg+xml", () => {
+    expect(isImageMime("image/svg+xml")).toBe(false);
+  });
+
   it("returns false for application/pdf", () => {
     expect(isImageMime("application/pdf")).toBe(false);
   });

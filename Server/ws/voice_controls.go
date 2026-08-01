@@ -24,6 +24,14 @@ func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps a
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
+	// A moderator-imposed mute is not the user's to lift. Only the unmute
+	// direction reads the row: muting oneself is always allowed.
+	if !muteCmd.Muted() {
+		if r := refuseIfServerSilenced(ctx, d, userID, false); r != nil {
+			return *r
+		}
+	}
+
 	if err := d.DB.UpdateVoiceMute(ctx, userID, muteCmd.Muted()); err != nil {
 		slog.Error("ws handleVoiceMuteV2 UpdateVoiceMute", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update mute state"}}
@@ -46,6 +54,13 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 
 	if info.VoiceChannelID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
+	}
+
+	// See handleVoiceMuteV2: server deafen is the moderator's to lift.
+	if !deafenCmd.Deafened() {
+		if r := refuseIfServerSilenced(ctx, d, userID, true); r != nil {
+			return *r
+		}
 	}
 
 	if err := d.DB.UpdateVoiceDeafen(ctx, userID, deafenCmd.Deafened()); err != nil {
@@ -140,6 +155,34 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", ssCmd.Enabled(), "channel_id", voiceChID)
 
 	return voiceStateBroadcast(ctx, d, userID)
+}
+
+// refuseIfServerSilenced refuses a self-unmute (deafen=false) or self-undeafen
+// (deafen=true) while the corresponding moderator-imposed flag is set. A read
+// error is not a denial: it is reported as INTERNAL so an operator sees it
+// rather than the user seeing a permission-shaped refusal.
+func refuseIfServerSilenced(ctx context.Context, d VoiceDeps, userID int64, deafen bool) *Result {
+	state, err := d.DB.GetVoiceState(ctx, userID)
+	if err != nil {
+		slog.Error("ws refuseIfServerSilenced GetVoiceState", "err", err, "user_id", userID)
+		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
+	}
+	if state == nil {
+		return nil
+	}
+	if deafen && state.ServerDeafened {
+		return &Result{Error: ClientError{
+			Code:    ErrCodeServerDeafened,
+			Message: "you were deafened by a moderator",
+		}}
+	}
+	if !deafen && state.ServerMuted {
+		return &Result{Error: ClientError{
+			Code:    ErrCodeServerMuted,
+			Message: "you were muted by a moderator",
+		}}
+	}
+	return nil
 }
 
 // voiceStateBroadcast reads the current voice state from DB and returns a

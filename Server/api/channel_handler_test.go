@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -46,7 +47,10 @@ CREATE TABLE IF NOT EXISTS users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name TEXT,
+    about TEXT,
+    custom_status TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +77,9 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +88,14 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     allow      INTEGER NOT NULL DEFAULT 0,
     deny       INTEGER NOT NULL DEFAULT 0,
     UNIQUE(channel_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,8 +106,15 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -163,6 +184,16 @@ CREATE TABLE IF NOT EXISTS dm_participants (
 );
 CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id);
 
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id    INTEGER NOT NULL DEFAULT 0,
+    action      TEXT    NOT NULL,
+    target_type TEXT    NOT NULL DEFAULT '',
+    target_id   INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS dm_open_state (
     user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -192,7 +223,7 @@ func buildChannelRouter(database *db.DB) http.Handler {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil)
+	api.MountChannelRoutes(r, database, svc, limiter, nil, nil)
 	return r
 }
 
@@ -612,7 +643,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"})
+	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"}, nil)
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
 	for i := range 30 {
@@ -934,5 +965,262 @@ func TestSetPinned_Idempotent(t *testing.T) {
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {
 		t.Errorf("idempotent pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── POST /api/v1/channels/{id}/messages/purge ──────────────────────────────
+
+// recordingPurgeBroadcaster captures the chat_bulk_deleted fan-out so tests can
+// assert one event carries every purged id.
+type recordingPurgeBroadcaster struct {
+	calls []purgeBroadcast
+}
+
+type purgeBroadcast struct {
+	channelID int64
+	ids       []int64
+}
+
+func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, ids []int64) {
+	b.calls = append(b.calls, purgeBroadcast{channelID: channelID, ids: ids})
+}
+
+// buildPurgeRouter wires the channel routes with a recording broadcaster onto a
+// DB that has the DM and audit tables the purge path touches.
+func buildPurgeRouter(t *testing.T) (http.Handler, *db.DB, *recordingPurgeBroadcaster) {
+	t.Helper()
+	database := newPinTestDB(t)
+	broadcaster := &recordingPurgeBroadcaster{}
+	r := chi.NewRouter()
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	api.MountChannelRoutes(r, database, svc, limiter, nil, broadcaster)
+	return r, database, broadcaster
+}
+
+// chPurge posts a purge body and returns the recorder.
+func chPurge(t *testing.T, router http.Handler, channelID int64, token, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/v1/channels/%d/messages/purge", channelID), strings.NewReader(body))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
+// seedPurgeChannel creates a text channel with n messages authored by username.
+func seedPurgeChannel(t *testing.T, database *db.DB, username string, n int) (int64, []int64) {
+	t.Helper()
+	user, err := database.GetUserByUsername(context.Background(), username)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername(%q): %v", username, err)
+	}
+	chID, err := database.CreateChannel(context.Background(), "purge-"+username, "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ids := make([]int64, 0, n)
+	for i := range n {
+		id, msgErr := database.CreateMessage(context.Background(), chID, user.ID, fmt.Sprintf("m%d", i), nil)
+		if msgErr != nil {
+			t.Fatalf("CreateMessage: %v", msgErr)
+		}
+		ids = append(ids, id)
+	}
+	return chID, ids
+}
+
+type purgeResponseBody struct {
+	ChannelID int64   `json:"channel_id"`
+	IDs       []int64 `json:"ids"`
+	Count     int     `json:"count"`
+}
+
+func TestPurgeMessages_ModeratorSucceedsAndBroadcastsOnce(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgemod", 3) // Moderator: MANAGE_MESSAGES
+	chID, ids := seedPurgeChannel(t, database, "purgemod", 5)
+
+	rr := chPurge(t, router, chID, token, `{"limit":3}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var body purgeResponseBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Count != 3 || len(body.IDs) != 3 {
+		t.Fatalf("count = %d, ids = %v, want 3 of each", body.Count, body.IDs)
+	}
+	if body.IDs[0] != ids[4] {
+		t.Errorf("ids[0] = %d, want the newest message %d", body.IDs[0], ids[4])
+	}
+
+	// One chat_bulk_deleted event, not three chat_deleted ones.
+	if len(broadcaster.calls) != 1 {
+		t.Fatalf("broadcast calls = %d, want exactly 1", len(broadcaster.calls))
+	}
+	if broadcaster.calls[0].channelID != chID {
+		t.Errorf("broadcast channel = %d, want %d", broadcaster.calls[0].channelID, chID)
+	}
+	if len(broadcaster.calls[0].ids) != 3 {
+		t.Errorf("broadcast ids = %v, want 3 entries", broadcaster.calls[0].ids)
+	}
+
+	// Tombstones: the rows survive, flagged deleted.
+	for _, id := range body.IDs {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg == nil || !msg.Deleted {
+			t.Errorf("message %d is not a surviving tombstone", id)
+		}
+	}
+	// The two oldest are untouched.
+	for _, id := range ids[:2] {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg.Deleted {
+			t.Errorf("message %d outside the purge window was deleted", id)
+		}
+	}
+}
+
+func TestPurgeMessages_MemberForbidden(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgemember", 4) // Member: no MANAGE_MESSAGES
+	chID, ids := seedPurgeChannel(t, database, "purgemember", 3)
+
+	rr := chPurge(t, router, chID, token, `{"limit":3}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("denied purge still broadcast: %v", broadcaster.calls)
+	}
+	for _, id := range ids {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg.Deleted {
+			t.Errorf("denied purge deleted message %d", id)
+		}
+	}
+}
+
+func TestPurgeMessages_DMForbidden(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgedmmod", 1) // Owner — every bit set
+	user, _ := database.GetUserByUsername(context.Background(), "purgedmmod")
+	dmID, _ := database.CreateChannel(context.Background(), "dm", "dm", "", "", 0)
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?)`, dmID, user.ID); err != nil {
+		t.Fatalf("seed dm participant: %v", err)
+	}
+	msgID, _ := database.CreateMessage(context.Background(), dmID, user.ID, "private", nil)
+
+	rr := chPurge(t, router, dmID, token, `{"limit":10}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a DM; body: %s", rr.Code, rr.Body.String())
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("DM purge broadcast: %v", broadcaster.calls)
+	}
+	msg, _ := database.GetMessage(context.Background(), msgID)
+	if msg.Deleted {
+		t.Error("DM message was purged")
+	}
+}
+
+func TestPurgeMessages_LimitClampedToHundred(t *testing.T) {
+	router, database, _ := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgeclamp", 3)
+	chID, _ := seedPurgeChannel(t, database, "purgeclamp", 105)
+
+	rr := chPurge(t, router, chID, token, `{"limit":1000}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var body purgeResponseBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Count != 100 {
+		t.Fatalf("count = %d, want the clamp of 100", body.Count)
+	}
+}
+
+func TestPurgeMessages_BadRequests(t *testing.T) {
+	router, database, _ := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgebad", 3)
+	chID, _ := seedPurgeChannel(t, database, "purgebad", 2)
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"zero limit", `{"limit":0}`},
+		{"negative limit", `{"limit":-5}`},
+		{"malformed json", `{"limit":`},
+		{"negative before", `{"limit":5,"before":-1}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := chPurge(t, router, chID, token, tc.body)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestPurgeMessages_Unauthenticated(t *testing.T) {
+	router, database, _ := buildPurgeRouter(t)
+	chTestCreateToken(t, database, "purgeanon", 3)
+	chID, _ := seedPurgeChannel(t, database, "purgeanon", 2)
+
+	rr := chPurge(t, router, chID, "", `{"limit":2}`)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPurgeMessages_EmptyChannelDoesNotBroadcast(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "purgeempty", 3)
+	chID, _ := seedPurgeChannel(t, database, "purgeempty", 0)
+
+	rr := chPurge(t, router, chID, token, `{"limit":50}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var body purgeResponseBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Count != 0 || body.IDs == nil {
+		t.Errorf("count = %d, ids = %v, want 0 and a non-null array", body.Count, body.IDs)
+	}
+	if len(broadcaster.calls) != 0 {
+		t.Errorf("a no-op purge broadcast: %v", broadcaster.calls)
+	}
+}
+
+func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database) // mounted with a nil broadcaster
+	token := chTestCreateToken(t, database, "purgenilbc", 3)
+	chID, ids := seedPurgeChannel(t, database, "purgenilbc", 2)
+
+	rr := chPurge(t, router, chID, token, `{"limit":2}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	for _, id := range ids {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if !msg.Deleted {
+			t.Errorf("message %d not purged", id)
+		}
 	}
 }

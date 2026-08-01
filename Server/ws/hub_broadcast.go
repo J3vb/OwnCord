@@ -126,18 +126,16 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 	if h.db == nil || h.permChecker == nil {
 		return audience
 	}
-	visibleByRole := make(map[int64]bool)
+	// Resolved per USER, not memoised per role: channel_user_overrides is the
+	// last layer of the resolution order, so two members of the same role can
+	// legitimately disagree about one channel and a per-role memo would hand
+	// one of them the other's verdict.
 	for _, uid := range userIDs {
 		role, err := h.db.GetRoleForUser(ctx, uid)
 		if err != nil || role == nil {
 			continue
 		}
-		visible, ok := visibleByRole[role.ID]
-		if !ok {
-			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, permissions.ReadMessages)
-			visibleByRole[role.ID] = visible
-		}
-		if visible {
+		if h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, uid, channelID, permissions.ReadMessages) {
 			audience = append(audience, uid)
 		}
 	}
@@ -215,22 +213,21 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// calling into the hub, so the lookups below repopulate from post-change
 	// data; the 30s TTL is only a backstop and the F6 gen-counter guard keeps
 	// a racing populate from caching stale rows. Without a service (bare test
-	// hubs) each role is resolved live, once.
-	visibleByRole := make(map[int64]bool)
-	roleVisible := func(roleID int64) bool {
-		if v, ok := visibleByRole[roleID]; ok {
-			return v
-		}
-		visible := false
+	// hubs) each client is resolved live.
+	//
+	// Deliberately NOT memoised per role: channel_user_overrides is the last
+	// layer of the resolution order, so two members of the same role can
+	// legitimately disagree about one channel — exactly the case a per-user
+	// override edit creates, and exactly the fan-out this function targets.
+	userVisible := func(userID, roleID int64) bool {
 		role, err := h.db.GetRoleByID(ctx, roleID)
-		if err == nil && role != nil {
-			// Single visibility predicate shared with buildReady / REST
-			// ListVisibleChannels; the checker fails closed on a lookup error
-			// and bypasses for admins, matching the other sites exactly.
-			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, ch.ID, permissions.ReadMessages)
+		if err != nil || role == nil {
+			return false
 		}
-		visibleByRole[roleID] = visible
-		return visible
+		// Single visibility predicate shared with buildReady / REST
+		// ListVisibleChannels; the checker fails closed on a lookup error
+		// and bypasses for admins, matching the other sites exactly.
+		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, permissions.ReadMessages)
 	}
 
 	for _, c := range clients {
@@ -258,7 +255,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 					"user_id", c.user.ID, "err", err)
 				continue
 			}
-			visible = roleVisible(fresh.RoleID)
+			visible = userVisible(fresh.ID, fresh.RoleID)
 		}
 		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
@@ -279,6 +276,64 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// forced onto the full-ready path instead of replay (stored after the
 	// sends so a concurrent seq advance errs toward re-syncing more clients).
 	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+}
+
+// RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every
+// non-DM channel. A role's permission mask is the base every channel's
+// effective permission is computed from, so editing or deleting a role can
+// change visibility of *any* channel at once — where a channel_overrides edit
+// touches exactly one. DM channels are skipped: their access is participant-
+// based and no role change can alter it.
+//
+// Called via the admin HubBroadcaster interface (no context), so the channel
+// list is read against Background — the re-sync must complete regardless of the
+// triggering request. The caller invalidates the permission cache first, as the
+// channel-override handlers do, so the per-client lookups below repopulate from
+// post-change data.
+func (h *Hub) RefreshAllChannelVisibility() {
+	if h.db == nil {
+		return
+	}
+	ctx := context.Background()
+	channels, err := h.db.ListChannels(ctx)
+	if err != nil {
+		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
+		return
+	}
+	for i := range channels {
+		if channels[i].Type == "dm" {
+			continue
+		}
+		h.RefreshChannelVisibility(&channels[i])
+	}
+}
+
+// BroadcastRolesUpdate sends the full role list to every connected client so
+// name colors and permission-gated affordances converge without a reconnect.
+//
+// Unfiltered on purpose: the role list is already in every client's ready
+// payload, so it discloses nothing a connected client cannot already read.
+func (h *Hub) BroadcastRolesUpdate(roles []*db.Role) {
+	h.BroadcastToAll(buildRolesUpdate(roles))
+}
+
+// BroadcastEmojiUpdate sends the full custom-emoji set to every connected
+// client so a newly uploaded (or deleted) emoji renders in messages, the
+// picker and reaction pills without a reconnect.
+//
+// Unfiltered, like BroadcastRolesUpdate: emoji are server-wide with no channel
+// scope, and every client may already GET the same list.
+func (h *Hub) BroadcastEmojiUpdate(list []*db.Emoji) {
+	h.BroadcastToAll(buildEmojiUpdate(list))
+}
+
+// BroadcastChatBulkDeleted sends one chat_bulk_deleted message carrying every
+// purged message id to the subscribers of channelID, replacing the N separate
+// chat_deleted broadcasts a loop of single deletes would produce. Fan-out goes
+// through the ordinary sequenced channel path, so the event replays on
+// reconnect exactly like chat_deleted does.
+func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
+	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
 }
 
 // BroadcastMemberBan sends a member_ban message to all connected clients
@@ -303,9 +358,24 @@ func (h *Hub) DisconnectUser(userID int64) {
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
-// when a user changes their profile (username, avatar, identity key).
-func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) {
-	h.BroadcastToAll(buildUserUpdate(userID, username, avatar, identityPublicKey))
+// when a user changes their profile (username, avatar, display name, about,
+// identity key).
+func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
+	h.BroadcastToAll(buildUserUpdate(u))
+}
+
+// BroadcastPresence fans a presence change out with the invisible mapping
+// applied: everyone else sees db.BroadcastStatus(status), the user themselves
+// sees the truth. It is the non-handler counterpart of presenceEvents, used by
+// the connect and disconnect paths which write to the hub directly.
+func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *string) {
+	public := db.BroadcastStatus(status)
+	if public == status {
+		h.BroadcastToAll(buildPresenceMsg(userID, status, customStatus))
+		return
+	}
+	h.broadcastExcludeLow(0, userID, buildPresenceMsg(userID, public, customStatus))
+	h.SendToUser(userID, buildPresenceMsg(userID, status, customStatus))
 }
 
 // BroadcastMemberUpdate sends a member_update message to all connected clients

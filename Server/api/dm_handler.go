@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -24,7 +25,9 @@ func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadca
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Post("/", handleCreateDM(svc))
+		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
+		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster))
 		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
 	})
 
@@ -47,6 +50,17 @@ type createDMResponse struct {
 	ChannelID int64     `json:"channel_id"`
 	Recipient db.DMUser `json:"recipient"`
 	Created   bool      `json:"created"`
+}
+
+// createGroupDMRequest is the JSON body for POST /api/v1/dms/group.
+type createGroupDMRequest struct {
+	RecipientIDs []int64 `json:"recipient_ids"`
+	Name         string  `json:"name"`
+}
+
+// renameDMRequest is the JSON body for PATCH /api/v1/dms/{channelId}.
+type renameDMRequest struct {
+	Name string `json:"name"`
 }
 
 // listDMsResponse is the JSON response for GET /api/v1/dms.
@@ -83,11 +97,16 @@ func handleCreateDM(svc *service.Services) http.HandlerFunc {
 		if result.Recipient.Avatar != nil {
 			avatarStr = *result.Recipient.Avatar
 		}
+		displayName := ""
+		if result.Recipient.DisplayName != nil {
+			displayName = *result.Recipient.DisplayName
+		}
 		dmUser := db.DMUser{
-			ID:       result.Recipient.ID,
-			Username: result.Recipient.Username,
-			Avatar:   avatarStr,
-			Status:   result.Recipient.Status,
+			ID:          result.Recipient.ID,
+			Username:    result.Recipient.Username,
+			Avatar:      avatarStr,
+			Status:      db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID),
+			DisplayName: displayName,
 		}
 
 		status := http.StatusOK
@@ -138,7 +157,8 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 			return
 		}
 
-		if err := svc.DMs.CloseDM(r.Context(), user.ID, channelID); err != nil {
+		result, err := svc.DMs.CloseDM(r.Context(), user.ID, channelID)
+		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
@@ -149,9 +169,125 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
+			// A group leave changes the membership everyone else renders, so
+			// the survivors get a refreshed dm_channel_open rather than being
+			// left showing a member who has gone.
+			if result.Left && !result.ChannelDeleted {
+				broadcastDMOpen(r.Context(), svc, broadcaster, channelID, result.RemainingParticipantIDs)
+			}
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// broadcastDMOpen sends a per-viewer dm_channel_open for channelID to each of
+// targetIDs. The payload differs per addressee (`recipient`/`recipients` are
+// relative to who is reading), so it is rebuilt inside the loop.
+//
+// Failures are logged and skipped, never surfaced: the mutation that prompted
+// this has already committed, and a client that misses the event re-derives
+// the same state from its next `ready`.
+func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, targetIDs []int64) {
+	if broadcaster == nil || len(targetIDs) == 0 {
+		return
+	}
+	for _, pid := range targetIDs {
+		summary, pErr := svc.DMs.DMSummaryFor(ctx, pid, channelID)
+		if pErr != nil {
+			slog.Debug("broadcastDMOpen: summary unavailable", "user_id", pid, "channel_id", channelID, "err", pErr)
+			continue
+		}
+		msg, mErr := json.Marshal(map[string]any{
+			"type":    "dm_channel_open",
+			"payload": summary,
+		})
+		if mErr != nil {
+			slog.Warn("broadcastDMOpen: marshal failed", "err", mErr, "channel_id", channelID)
+			continue
+		}
+		if ok := broadcaster.SendToUser(pid, msg); !ok {
+			slog.Debug("broadcastDMOpen: user not connected", "user_id", pid, "channel_id", channelID)
+		}
+	}
+}
+
+// handleCreateGroupDM creates a group DM between the caller and 2..8 others.
+func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "authentication required",
+			})
+			return
+		}
+
+		var req createGroupDMRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "invalid request body",
+			})
+			return
+		}
+
+		result, err := svc.DMs.CreateGroupDM(r.Context(), user.ID, req.RecipientIDs, req.Name)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+
+		// Everyone gets the DM in their sidebar immediately, the creator
+		// included — the REST response is only the creator's copy, and a
+		// second window of theirs needs the event just as much as the others.
+		broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, result.ParticipantIDs)
+
+		writeJSON(w, http.StatusCreated,
+			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, result.Participants, user.ID))
+	}
+}
+
+// handleRenameGroupDM sets or clears a group DM's name. Participants only —
+// there is no owner, so every member holds the same authority over it.
+func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "authentication required",
+			})
+			return
+		}
+
+		channelID, ok := parseIDParam(w, r, "channelId")
+		if !ok {
+			return
+		}
+
+		var req renameDMRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "invalid request body",
+			})
+			return
+		}
+
+		if _, err := svc.DMs.RenameGroupDM(r.Context(), user.ID, channelID, req.Name); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+
+		participantIDs, pErr := svc.Channels.GetDMParticipantIDs(r.Context(), channelID)
+		if pErr == nil {
+			broadcastDMOpen(r.Context(), svc, broadcaster, channelID, participantIDs)
+		}
+
+		summary, sErr := svc.DMs.DMSummaryFor(r.Context(), user.ID, channelID)
+		if sErr != nil {
+			writeServiceError(r.Context(), w, sErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	}
 }
 

@@ -257,17 +257,29 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 
 		if !isAdmin {
 			if aa.ChannelID == nil {
+				// An unlinked attachment that some user's avatar points at is
+				// readable by every authenticated user: an avatar has to be
+				// visible to the people who see the messages it sits next to.
+				// The check is by the exact URL the column stores, so the file
+				// stops being public the instant the avatar is replaced.
+				isAvatar, avatarErr := database.IsAvatarFileURL(r.Context(), service.AvatarFileURL(fileID))
+				if avatarErr != nil {
+					slog.Error("failed to check avatar file", "id", fileID, "error", avatarErr)
+				}
+				switch {
+				case isAvatar:
+					// Public while in use — fall through to serving.
 				// Unlinked attachment — only the uploader may access.
 				// M-2: Legacy rows (NULL uploader_id) are now denied rather than
 				// served to any authenticated user.
-				if aa.UploaderID == nil {
+				case aa.UploaderID == nil:
 					slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", fileID)
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",
 						Message: "you do not have access to this file",
 					})
 					return
-				} else if user == nil || *aa.UploaderID != user.ID {
+				case user == nil || *aa.UploaderID != user.ID:
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",
 						Message: "you do not have access to this file",

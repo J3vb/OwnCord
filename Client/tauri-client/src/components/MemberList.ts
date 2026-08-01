@@ -1,26 +1,36 @@
 /**
  * MemberList component — shows server members grouped by role with online status.
  * Subscribes to membersStore for reactive updates.
- * Right-click context menu for admin actions (kick, ban, role change).
+ * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
-import { membersStore, type Member, type MembersState } from "@stores/members.store";
+import {
+  membersStore,
+  memberDisplayName,
+  type Member,
+  type MembersState,
+} from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
 import {
   createUserProfilePopup,
   type UserProfilePopupComponent,
 } from "@components/UserProfilePopup";
-import type { UserStatus } from "@lib/types";
+import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
+import { roleHasPermission } from "@lib/permissions";
+import { createAvatarElement } from "@lib/avatar";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
+  /** Role name of the signed-in user; resolved against the server's role list
+   *  to get the permission mask that gates the moderation menu items. */
   readonly currentUserRole: string;
+  /** Force logout: revokes the target's sessions (KICK_MEMBERS). */
   readonly onKick: (userId: number, username: string) => Promise<void>;
   readonly onBan: (
     userId: number,
@@ -47,6 +57,28 @@ function assignableRoleNames(): readonly string[] {
     .roles.map((r) => r.name.toLowerCase())
     .filter((name) => name !== "owner");
   return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
+}
+
+/** Which moderation menu items the signed-in user may see. */
+interface ModerationGates {
+  readonly canKick: boolean;
+  readonly canBan: boolean;
+  readonly canManageRoles: boolean;
+}
+
+/**
+ * Menu items the signed-in user's role permits, from the permission mask the
+ * server ships in `ready`. Administrator implies all three. When the role name
+ * has no match in that list (pre-`ready`, or an older server that sent none)
+ * the legacy owner/admin name check stands in — a mask of 0 would otherwise
+ * hide moderation from every actual admin.
+ */
+function moderationGates(roleName: string): ModerationGates {
+  return {
+    canKick: roleHasPermission(roleName, Permission.KICK_MEMBERS),
+    canBan: roleHasPermission(roleName, Permission.BAN_MEMBERS),
+    canManageRoles: roleHasPermission(roleName, Permission.MANAGE_ROLES),
+  };
 }
 
 interface RoleGroup {
@@ -99,6 +131,10 @@ function statusPriority(status: UserStatus): number {
       return 1;
     case "dnd":
       return 2;
+    // "invisible" only ever describes the signed-in user (the server shows
+    // everyone else offline), and it sorts with offline because that is where
+    // they appear to everybody — including, in this list, to themselves.
+    case "invisible":
     case "offline":
       return 3;
     default:
@@ -114,11 +150,17 @@ function statusColor(status: UserStatus): string {
       return "var(--yellow)";
     case "dnd":
       return "var(--red)";
+    case "invisible":
     case "offline":
       return "var(--text-micro)";
     default:
       return "#747f8d";
   }
+}
+
+/** True for the statuses that render a member as "not here". */
+function isAwayStatus(status: UserStatus): boolean {
+  return status === "offline" || status === "invisible";
 }
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
@@ -152,15 +194,13 @@ function createMemberItem(
   signal: AbortSignal,
 ): HTMLDivElement {
   const item = createElement("div", {
-    class: member.status === "offline" ? "member-item offline" : "member-item",
+    class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
   });
 
-  const initial = member.username.charAt(0).toUpperCase() || "?";
-  const avatar = createElement(
-    "div",
-    { class: "mi-avatar", style: `background: ${colorVar}` },
-    initial,
+  const avatar = createAvatarElement(
+    { username: member.username, displayName: member.displayName, avatar: member.avatar },
+    { className: "mi-avatar", background: colorVar },
   );
 
   const statusDot = createElement("div", {
@@ -171,10 +211,23 @@ function createMemberItem(
   });
   avatar.appendChild(statusDot);
 
+  // Name + custom status stack. The custom status is only rendered when there
+  // is one, so a member without it keeps the single-line row it always had.
+  const nameWrap = createElement("div", { class: "mi-text" });
   const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
-  setText(name, member.username);
+  setText(name, memberDisplayName(member));
+  nameWrap.appendChild(name);
+  const custom = member.customStatus;
+  if (typeof custom === "string" && custom.length > 0) {
+    const customEl = createElement("span", {
+      class: "mi-custom-status",
+      "data-testid": `member-custom-status-${member.id}`,
+    });
+    setText(customEl, custom);
+    nameWrap.appendChild(customEl);
+  }
 
-  appendChildren(item, avatar, name);
+  appendChildren(item, avatar, nameWrap);
 
   // Left-click opens the profile popup (previously dead code — built and
   // tested but never mounted from anywhere).
@@ -193,6 +246,8 @@ function createMemberItem(
           avatar: member.avatar,
           role: member.role,
           status: member.status,
+          displayName: member.displayName,
+          customStatus: member.customStatus,
         },
         anchorX: e.clientX,
         anchorY: e.clientY,
@@ -215,9 +270,10 @@ function createMemberItem(
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (member.id === currentUserId) return;
 
-      // Admin actions are role-gated; block/unblock is available to everyone.
-      const role = opts.currentUserRole.toLowerCase();
-      const showAdminActions = role === "owner" || role === "admin";
+      // Moderation actions are permission-gated per item (a role name told us
+      // nothing about what its bits allow); block/unblock is open to everyone.
+      const gates = moderationGates(opts.currentUserRole);
+      const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
       closeActiveMenu();
       document.removeEventListener("mousedown", handleOutsideClick);
@@ -234,6 +290,9 @@ function createMemberItem(
         currentRole: member.role.toLowerCase(),
         availableRoles,
         showAdminActions,
+        canKick: gates.canKick,
+        canBan: gates.canBan,
+        canManageRoles: gates.canManageRoles,
         isBlocked,
         onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),
@@ -352,6 +411,10 @@ function isPresenceOnlyChange(
       before.username !== member.username ||
       before.role !== member.role ||
       before.avatar !== member.avatar ||
+      before.displayName !== member.displayName ||
+      // A custom status is rendered as its own line, so a change to it is a
+      // structural change, not a dot recolor.
+      before.customStatus !== member.customStatus ||
       before.identityPublicKey !== member.identityPublicKey
     ) {
       return false;
@@ -374,7 +437,7 @@ function patchPresence(
     if (before === undefined || before.status === member.status) continue;
     const row = rowsByUserId.get(id);
     if (row === undefined) continue;
-    row.classList.toggle("offline", member.status === "offline");
+    row.classList.toggle("offline", isAwayStatus(member.status));
     const dot = row.querySelector<HTMLDivElement>(".mi-status");
     if (dot !== null) {
       dot.style.background = statusColor(member.status);
@@ -408,6 +471,20 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
           }
         }
         prevMembers = members;
+      },
+    );
+
+    // Role groups, their labels and their colors all come from the server's
+    // role list, which role management makes mutable at runtime (a roles_update
+    // broadcast replaces it). Without this the list kept the old grouping until
+    // some unrelated member change happened to force a re-render.
+    disposable.onStoreChange<ChannelsState, readonly ReadyRole[]>(
+      channelsStore,
+      (s) => s.roles,
+      () => {
+        if (root !== null) {
+          renderList(root, opts, disposable.signal, rowsByUserId);
+        }
       },
     );
 

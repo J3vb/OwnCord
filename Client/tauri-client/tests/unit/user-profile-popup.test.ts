@@ -173,3 +173,110 @@ describe("UserProfilePopup", () => {
     expect(popup.isOpen()).toBe(false);
   });
 });
+
+// ─── Phase 6: display name, about, custom status ─────────────────────────────
+
+describe("UserProfilePopup profile fields", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("shows the display name as the heading and the username as an @handle", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser({ username: "alice", displayName: "Alice A." }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    popup.mount(container);
+
+    expect(container.querySelector(".upp-username")?.textContent).toBe("Alice A.");
+    // The username is still the handle you @mention, so the popup keeps
+    // telling you what to type.
+    expect(container.querySelector(".upp-username-handle")?.textContent).toBe("@alice");
+
+    popup.destroy?.();
+  });
+
+  it("omits the @handle when there is no display name", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser({ username: "alice", displayName: null }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    popup.mount(container);
+
+    expect(container.querySelector(".upp-username")?.textContent).toBe("alice");
+    expect(container.querySelector(".upp-username-handle")?.textContent).toBe("");
+
+    popup.destroy?.();
+  });
+
+  it("renders the about section from real data", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser({ about: "Writes tests for a living." }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    popup.mount(container);
+
+    // The section used to be dead code — `about` was hardcoded null at every
+    // call site until phase 6 gave the column somewhere to come from.
+    expect(container.querySelector(".upp-about-text")?.textContent).toBe(
+      "Writes tests for a living.",
+    );
+
+    popup.destroy?.();
+  });
+
+  it("renders the custom status line, and nothing when there is none", () => {
+    const withStatus = createUserProfilePopup({
+      user: makeUser({ customStatus: "shipping phase 6" }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    withStatus.mount(container);
+    expect(container.querySelector(".upp-custom-status")?.textContent).toBe("shipping phase 6");
+    withStatus.destroy?.();
+
+    const without = createUserProfilePopup({ user: makeUser(), anchorX: 10, anchorY: 10 });
+    without.mount(container);
+    expect(container.querySelector(".upp-custom-status")?.textContent).toBe("");
+    without.destroy?.();
+  });
+
+  it("labels the owner's own invisible status", () => {
+    // Only ever reachable for the signed-in user: everyone else is mapped to
+    // offline before the payload leaves the server.
+    const popup = createUserProfilePopup({
+      user: makeUser({ status: "invisible" }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    popup.mount(container);
+
+    const statusText = container.querySelector(".upp-status-line")?.textContent ?? "";
+    expect(statusText).toContain("Invisible");
+
+    popup.destroy?.();
+  });
+
+  it("uses the display name's initial for the letter fallback", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser({ username: "alice", displayName: "Zoe", avatar: null }),
+      anchorX: 10,
+      anchorY: 10,
+    });
+    popup.mount(container);
+
+    expect(container.querySelector(".upp-avatar .avatar-initial")?.textContent).toBe("Z");
+
+    popup.destroy?.();
+  });
+});

@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
 | `017_user_identity_key.sql` | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU) |
 | `018_api_tokens.sql` | Adds `api_tokens` — long-lived, revocable bearer tokens for headless clients (bot/service auth) |
+| `019_perf_indexes.sql` | Adds hot-path indexes |
+| `020_drop_redundant_indexes.sql` | Drops indexes duplicating UNIQUE auto-indexes |
+| `021_voice_server_moderation.sql` | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed) |
+| `022_message_mentions.sql` | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles |
+| `023_role_management.sql` | Adds `idx_roles_name_nocase` — role names become unique case-insensitively, matching how they are looked up |
+| `024_channel_user_overrides.sql` | Adds `channel_user_overrides` — per-member channel permission overrides, the last layer of the resolution order |
+| `025_channel_nsfw.sql` | Adds `channels.nsfw` — the age-gate flag the server stores and broadcasts but imposes no behaviour of its own on |
+| `026_emoji_mime.sql` | Adds `emoji.mime_type` — the sniffed image type, so the emoji image route can send a Content-Type without re-reading the file |
+| `027_user_profile_fields.sql` | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe |
+| `028_group_dms.sql` | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving |
 
 ---
 
@@ -81,7 +91,8 @@ CREATE TABLE roles (
 );
 ```
 
-**Default roles:**
+**Default roles** (seeded by migration `001`, but no longer fixed — see
+*Role semantics* below):
 
 | id | name | color | permissions | position | Notes |
 |----|------|-------|-------------|----------|-------|
@@ -89,6 +100,33 @@ CREATE TABLE roles (
 | 2 | Admin | `#F39C12` | `0x3FFFFFFF` | 80 | Everything except ADMINISTRATOR |
 | 3 | Moderator | `#3498DB` | `0x000FFFFF` | 60 | All message + voice + moderation |
 | 4 | Member | NULL | `0x1E63` | 40 | Send, read, attach, react, voice, video, screen share |
+
+**Role semantics:**
+
+- **`name`** is unique case-insensitively. The column's own `UNIQUE` constraint
+  uses SQLite's default BINARY collation, so migration `023` adds
+  `idx_roles_name_nocase` (`UNIQUE … ON roles(name COLLATE NOCASE)`) —
+  otherwise "Moderator" and "moderator" would be two roles the client, which
+  resolves names case-insensitively, could not tell apart. Max 32 characters.
+- **`color`** is `#rgb` or `#rrggbb` (stored uppercase) or `NULL`. It is
+  rendered directly into a style attribute by the desktop client and the admin
+  panel, so no other form is accepted.
+- **`position`** is the hierarchy rank — higher outranks lower. Every
+  moderation and role-management check is "actor's position strictly greater
+  than the target's". Positions are not required to be contiguous, but
+  `PATCH /admin/api/roles/reorder` normalizes the roles below the actor to
+  `N…1`, which keeps them unique. Position `100`
+  (`permissions.OwnerRolePosition`) is the top: nothing outranks it, which is
+  what makes the seeded Owner role uneditable and undeletable.
+- **`is_default`** marks the single fallback role. New users are created on it
+  and members of a deleted role are moved onto it, so it cannot itself be
+  deleted. It is set by migration and is not writable through the API — which
+  role is the fallback is a schema decision, not an operator one.
+- Roles are created, edited, deleted and reordered through
+  `/admin/api/roles` (`MANAGE_ROLES` + hierarchy; see `docs/api.md`). Deleting
+  a role reassigns its members and drops its `channel_overrides` rows in one
+  transaction. `users.role_id` is a single role per user — there is no
+  many-to-many membership table.
 
 ---
 
@@ -108,15 +146,47 @@ CREATE TABLE users (
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
     ban_expires TEXT,
-    identity_public_key TEXT
+    identity_public_key TEXT,
+    display_name  TEXT,
+    about         TEXT,
+    custom_status TEXT
 );
+
+CREATE INDEX idx_users_avatar ON users(avatar) WHERE avatar IS NOT NULL;
 ```
 
-Valid status values: `online`, `idle`, `dnd`, `offline`. All statuses are reset to `offline` on server startup.
+Valid status values: `online`, `idle`, `dnd`, `invisible`, `offline`.
+
+`status` holds the status the user **chose**, `invisible` included — it is
+deliberately not collapsed to `offline` at the write, because the server has to
+be able to tell "chose to appear offline" from "is not connected" on the next
+connect. The collapse happens at read time instead (`db.BroadcastStatus` /
+`StatusForViewer`): every payload another user can see maps `invisible` to
+`offline`, while the owner's own payloads keep the true value.
+
+A chosen `idle`/`dnd`/`invisible` therefore survives a disconnect (only
+`online` is cleared, by `MarkUserDisconnected`) and survives a server restart
+(`ResetAllUserStatuses` clears only `online`). It cannot render as "present" in
+the meantime because the ready payload treats a member with no live connection
+as `offline` regardless of the column.
 
 `identity_public_key` (added in migration 017) is the user's long-term E2EE
 identity public key (base64 ECDSA P-256) used for TOFU pinning of voice E2EE
 announces; `NULL` = not published (legacy client).
+
+`display_name`, `about` and `custom_status` (migration 027) are the profile
+fields, all `NULL` when unset. Bounds — 32, 300 and 128 characters
+respectively — are enforced in the service layer, where the HTML sanitizer runs
+and a violation can answer `400` instead of a constraint error. `display_name`
+is display only: `@mentions` resolve against `username`, which is the unique,
+case-insensitive key.
+
+`idx_users_avatar` covers the file route's authorization probe. An avatar
+uploaded through `POST /api/v1/users/me/avatar` is an attachment with no
+channel — private to its uploader by default — and `GET /api/v1/files/{id}`
+additionally admits one that some user's `avatar` currently equals, so an
+avatar is readable by every authenticated user for exactly as long as it is in
+use.
 
 ---
 
@@ -179,7 +249,9 @@ CREATE TABLE channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 25
+    voice_max_video  INTEGER NOT NULL DEFAULT 25,
+    nsfw             INTEGER NOT NULL DEFAULT 0,
+    is_group         INTEGER NOT NULL DEFAULT 0
 );
 ```
 
@@ -188,6 +260,40 @@ INSERT/UPDATE triggers restricting the value to this set (migration 016 added
 `announcement`). Announcement channels are readable like text channels but
 posting is restricted to users with `MANAGE_MESSAGES` (enforced in the service
 layer, `Server/service/message.go`).
+
+`nsfw` (migration 025) is the age-restriction flag, stored 0/1 like `archived`
+because SQLite has no boolean type. **It drives nothing server-side.** The
+server stores it, ships it in `ready` and in the `channel_create` /
+`channel_update` broadcasts, and audits an operator flipping it — it does not
+filter content, check anyone's age, or restrict who may read or post in a
+flagged channel. Clients decide what the flag means to them; the desktop client
+shows a one-time-per-session warning before rendering the channel and marks it
+in the sidebar.
+
+`voice_max_users` and `voice_max_video` (0 = unlimited) are the only channel
+columns that *are* enforced by the server, on voice join and on video publish
+respectively (`CHANNEL_FULL` / `VIDEO_LIMIT`). They exist on every row but are
+meaningless on a non-voice channel.
+
+`is_group` (migration 028) marks a `dm` channel as a group DM. It is decided
+once at creation and **never recomputed from the live participant count**,
+because that count changes underneath you:
+
+- A group of three that two people leave has two participants, and the 1:1
+  lookup — "the dm channel both of these users are in" — would then match it.
+  "Message Bob" would silently deliver into the remnants of a group, in front of
+  whoever else is still there.
+- Leaving is destructive for a group (removal from `dm_participants`) and
+  non-destructive for a 1:1 (hide only). Deriving which one to run from the live
+  count means the third-from-last leaver runs a different operation than the
+  second-from-last, for no reason the user can see.
+
+`name` carries the optional group name; it is `''` for every 1:1 DM (a
+two-person DM is named by who is in it) and for an unnamed group.
+
+`PATCH /admin/api/channels/{id}` (`MANAGE_CHANNELS`) is the write path for
+`slow_mode` (0…21600), `nsfw` and both voice limits (0…99 each); values outside
+those ranges are refused rather than clamped.
 
 ---
 
@@ -206,7 +312,38 @@ CREATE TABLE channel_overrides (
 );
 ```
 
-Effective permission calculation: `effective = (base_permissions & ~deny) | allow`
+Effective permission calculation for this layer:
+`effective = (base_permissions & ~deny) | allow`
+
+This is the ROLE layer. The per-member layer (`channel_user_overrides`) is
+applied on top of the result — see "Permission Checking Logic" below.
+
+---
+
+### channel_user_overrides
+
+Per-channel permission overrides for a single **member**, independent of their
+role. This is Discord's narrowest override layer: it grants or refuses one
+person a bit in one channel without minting a role for them.
+
+```sql
+CREATE TABLE channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+```
+
+The shape mirrors `channel_overrides` (allow/deny masks, cascade on both
+parents) so both layers are fetched and merged by the same code
+(`db.GetChannelOverridesFor`). The composite PRIMARY KEY replaces the surrogate
+`id` + `UNIQUE` pair `channel_overrides` carries — nothing references an
+override row by id.
+
+Only members who actually carry an override have a row: an all-inherit override
+is deleted rather than stored as `(0, 0)`.
 
 ---
 
@@ -222,11 +359,39 @@ CREATE TABLE messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
 ```
 
 Messages are soft-deleted (`deleted = 1`), never physically removed by user action.
+
+`mentions_everyone` (migration 022) is set when the message carried `@everyone`
+or `@here` **and** the author held `MENTION_EVERYONE` on that channel. It is a
+column rather than a sentinel row in `message_mentions` so that table never
+holds a `mentioned_user_id` that is not a real user. The message row and its
+mention rows are written in one writer transaction, and an edit rewrites both.
+
+---
+
+### message_mentions
+
+```sql
+CREATE TABLE message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
+CREATE INDEX idx_message_mentions_user ON message_mentions(mentioned_user_id);
+```
+
+The user IDs a message resolved from its `@username` tokens, capped at 20 rows
+per message. Resolution is case-insensitive whole-word matching against
+`users.username` (which is `UNIQUE COLLATE NOCASE`); a token that matches no
+username is not stored and stays plain text. The primary key serves the
+per-message lookup that message history and search batch on; the index serves
+the per-user direction.
 
 ---
 
@@ -315,6 +480,16 @@ CREATE TABLE read_states (
 );
 ```
 
+`mention_count` is incremented on message insert for every mentioned user who
+can read the channel, except the author and except users who have blocked the
+author. `@everyone` counts every reader; `@here` counts only readers whose
+*broadcast* status is not `offline` — the column stores the status the user
+chose, so a reader who picked `invisible` is collapsed to `offline` here and is
+skipped, exactly as they appear to everyone else. Edits never increment it — a badge is only
+raised by the original send, so an edit cannot double-count a mention. The
+`channel_focus` read-state upsert resets it to 0, and the `ready` payload ships
+it per channel.
+
 ---
 
 ### audit_log
@@ -346,9 +521,16 @@ CREATE TABLE voice_states (
     speaking    INTEGER NOT NULL DEFAULT 0,
     camera      INTEGER NOT NULL DEFAULT 0,
     screenshare INTEGER NOT NULL DEFAULT 0,
+    server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+`server_muted` / `server_deafened` are moderator-imposed (`MUTE_MEMBERS`) and,
+unlike `muted` / `deafened`, the user cannot clear them. They survive a channel
+switch (the join upsert does not reset them) but not a leave, which deletes the
+row.
 
 ---
 
@@ -361,6 +543,15 @@ CREATE TABLE dm_participants (
     PRIMARY KEY (channel_id, user_id)
 );
 ```
+
+N rows per channel: two for a 1:1 DM, three to ten for a group
+(`db.MaxGroupDMParticipants`). Every DM authorization check is a lookup on
+`(user_id, channel_id)`, which is why group DMs needed no new authorization
+path — only `channels.is_group` to tell the two kinds apart.
+
+A group leave deletes the row. When the last one goes, the `channels` row is
+deleted with it: a DM nobody is in is reachable by nobody, and its messages and
+attachments cascade off the channel.
 
 ---
 
@@ -410,7 +601,7 @@ CREATE TABLE settings (
 
 ### emoji
 
-Custom emoji metadata.
+Server-wide custom emoji: one row per `:shortcode:`.
 
 ```sql
 CREATE TABLE emoji (
@@ -418,9 +609,29 @@ CREATE TABLE emoji (
     shortcode   TEXT    NOT NULL UNIQUE,
     filename    TEXT    NOT NULL,
     uploaded_by INTEGER NOT NULL REFERENCES users(id),
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mime_type   TEXT    NOT NULL DEFAULT 'image/png'   -- migration 026
 );
 ```
+
+`filename` holds the **storage UUID** the image bytes were written under (the
+same convention as `attachments.stored_as`); the column name is inherited from
+the initial schema. It is never derived from anything the uploader sent and is
+never shown to a user.
+
+`shortcode` is always lowercase — `[a-z0-9_]{2,32}` is the only spelling the
+validator admits — which is what makes the plain `UNIQUE` index a
+case-insensitive one without a `COLLATE NOCASE` change.
+
+`mime_type` (migration 026) is the type **sniffed from the file's own bytes** at
+upload, restricted to `image/png`, `image/jpeg`, `image/gif` and `image/webp`.
+It exists so `GET /api/v1/emoji/{id}/image` can set a Content-Type without
+opening and re-sniffing the file on every request. The `DEFAULT` is only there
+to make the `ALTER` legal; nothing had ever written to this table before
+migration 026, because the table shipped in 001 with no server code at all.
+
+Writes are gated on `MANAGE_SERVER` (see api.md for why no new permission bit
+was added), and every mutation broadcasts the whole set as `emoji_update`.
 
 ---
 
@@ -538,12 +749,17 @@ CREATE TABLE plugin_kv (
 | `idx_user_blocks_blocked` | user_blocks | `(blocked_id, blocker_id)` | Reverse block lookup |
 | `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
 | `idx_events_created_at` | events | `(created_at)` | Retention pruning |
+| `idx_message_mentions_user` | message_mentions | `(mentioned_user_id)` | Per-user mention lookup |
+| `idx_channel_user_overrides_user` | channel_user_overrides | `(user_id)` | "every override this member carries" — the direction the permission cache populates from (the PK covers the per-channel direction) |
+| `idx_roles_name_nocase` | roles | `(name COLLATE NOCASE)` UNIQUE | Case-insensitive role-name uniqueness |
 
 ---
 
 ## Permission Bitfield System
 
-Permissions are stored as an integer bitfield (31 bits used) in `roles.permissions`, `channel_overrides.allow`, and `channel_overrides.deny`.
+Permissions are stored as an integer bitfield (31 bits used) in
+`roles.permissions`, `channel_overrides.allow`/`deny`, and
+`channel_user_overrides.allow`/`deny`.
 
 ### Bit Map
 
@@ -558,31 +774,81 @@ Permissions are stored as an integer bitfield (31 bits used) in `roles.permissio
 | 11 | `0x800` | `USE_VIDEO` | Enable camera in voice channels |
 | 12 | `0x1000` | `SHARE_SCREEN` | Share screen in voice channels |
 | 16 | `0x10000` | `MANAGE_MESSAGES` | Delete others' messages, pin/unpin |
-| 17 | `0x20000` | `MANAGE_CHANNELS` | Create, edit, delete channels |
-| 18 | `0x40000` | `KICK_MEMBERS` | Kick users |
-| 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban users |
-| 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice |
-| 24 | `0x1000000` | `MANAGE_ROLES` | Create, edit, delete roles |
-| 25 | `0x2000000` | `MANAGE_SERVER` | Modify server settings |
+| 17 | `0x20000` | `MANAGE_CHANNELS` | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`) |
+| 18 | `0x40000` | `KICK_MEMBERS` | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`) |
+| 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`) |
+| 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet |
+| 21 | `0x200000` | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text |
+| 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`), and create/edit/delete/reorder roles below the actor's own (`/admin/api/roles…`) |
+| 25 | `0x2000000` | `MANAGE_SERVER` | Read and modify server settings (`/admin/api/settings`) |
 | 26 | `0x4000000` | `MANAGE_INVITES` | Create and revoke invite codes |
-| 27 | `0x8000000` | `VIEW_AUDIT_LOG` | View the audit log |
+| 27 | `0x8000000` | `VIEW_AUDIT_LOG` | Read the audit log (`GET /admin/api/audit-log`) |
 | 30 | `0x40000000` | `ADMINISTRATOR` | Bypasses ALL permission checks |
 
-Bits 2-4, 7, 13-15, 21-23, 28-29, 31 are reserved.
+Bits 2-4, 7, 13-15, 22-23, 28-29, 31 are reserved.
+
+### Permission groups
+
+The bit map above is the authority on what each bit *does*; this grouping is
+how the bits are *presented* — it is the layout of the admin panel's role
+permission grid (`PERM_GROUPS` in `Server/admin/static/index.html`). It carries
+no semantics, but the two must stay in step: every defined bit belongs to
+exactly one group, and a bit missing from the grouping is a bit no operator can
+grant through the panel.
+
+| Group | Bits |
+|-------|------|
+| General | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `ADMINISTRATOR` |
+| Text | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES` |
+| Voice | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN` |
+| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS` |
+
+### Admin perimeter
+
+`permissions.AdminPerimeter` is the ANY-of mask that admits a principal to
+`/admin/api/*`: `ADMINISTRATOR | MANAGE_CHANNELS | MANAGE_ROLES |
+MANAGE_SERVER | VIEW_AUDIT_LOG | KICK_MEMBERS | BAN_MEMBERS | MUTE_MEMBERS`.
+Holding one bit only gets a principal through the door — each route group
+re-checks the specific bit it needs, so the seeded Moderator role can manage
+channels and ban members without reading settings or the audit log. Owner-only
+routes (backups, updates, API tokens) still gate on role *position*, not on a
+bit. See `docs/api.md` for the per-route mapping.
 
 ### Permission Checking Logic
 
 ```
 1. Get the user's role -> role.Permissions (base)
 2. If (base & ADMINISTRATOR) != 0 -> ALLOW everything
-3. Get channel_overrides for (channel_id, role_id) -> allow, deny
-4. effective = (base & ~deny) | allow
-5. Check: (effective & required_permission) != 0
+3. Get channel_overrides      for (channel_id, role_id) -> allow,  deny
+4. Get channel_user_overrides for (channel_id, user_id) -> uAllow, uDeny
+5. roleLayer = (base      & ~deny)  | allow
+6. effective = (roleLayer & ~uDeny) | uAllow
+7. Check: (effective & required_permission) == required_permission
 ```
 
-Deny is applied first (strips bits), then allow (adds bits), so allow wins
-when both target the same bit — matching Discord's channel-override semantics
-(`permissions.EffectivePerms`).
+The order is Discord's: **base role permissions -> role override -> user
+override**. Within a layer deny is applied first (strips bits) then allow (adds
+bits), so allow wins when both target the same bit. Across layers the later,
+narrower layer wins:
+
+| Situation | Outcome |
+|-----------|---------|
+| role override allows, user override denies | denied |
+| role override denies, user override allows | allowed |
+| user override allows and denies the same bit | allowed |
+| holder has `ADMINISTRATOR` | allowed regardless of either layer |
+
+`permissions.EffectiveChannelPerms` is the single implementation of steps 5-6,
+and `permissions.EffectivePerms` the one-layer primitive it is built from. The
+`ADMINISTRATOR` bypass lives at the call sites (`Checker.HasChannelPerm`,
+`Checker.HasChannelPermBatch`, and through it `VisibleChannelIDs`), not inside
+the formula — it is a bypass, not a bit that survives an override.
+
+Both layers are fetched together and per member, never per channel:
+`db.GetChannelOverridesFor(roleID, userID)` runs two batch queries and merges
+them, which is what keeps `buildReady`, REST `ListVisibleChannels`, reconnect
+replay filtering and the cached `service.PermissionService` free of N+1 lookups
+and unable to drift from each other.
 
 DM channels bypass role permissions entirely and use participant-based authorization instead.
 
@@ -592,5 +858,5 @@ DM channels bypass role permissions entirely and use participant-based authoriza
 |------|-----|-------------|
 | Owner | `0x7FFFFFFF` | Everything including ADMINISTRATOR |
 | Admin | `0x3FFFFFFF` | Everything except ADMINISTRATOR |
-| Moderator | `0x000FFFFF` | All message + voice + moderation |
+| Moderator | `0x002FFFFF` | All message + voice + moderation, plus `MENTION_EVERYONE` (granted by migration 022) |
 | Member | `0x1E63` | Send, read, attach, react, voice, video, screen share |

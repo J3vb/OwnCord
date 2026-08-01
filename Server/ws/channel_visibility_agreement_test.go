@@ -170,6 +170,108 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	}
 }
 
+// TestChannelVisibility_UserOverrideAgreement extends the invariant to the
+// per-user override layer: the same three sites must agree for two members who
+// share a role but carry different channel_user_overrides rows. A per-role memo
+// anywhere in the three paths would show up here as a disagreement.
+func TestChannelVisibility_UserOverrideAgreement(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter, nil)
+	svc := service.New(database, limiter)
+
+	openID, err := database.CreateChannel(context.Background(), "open", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel open: %v", err)
+	}
+	lockedID, err := database.CreateChannel(context.Background(), "locked", "text", "", "", 1)
+	if err != nil {
+		t.Fatalf("CreateChannel locked: %v", err)
+	}
+
+	const roleMember = 4
+	// The role cannot read #locked at all.
+	if err := database.UpsertChannelOverride(context.Background(), lockedID, roleMember, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	// Three members of the SAME role, differing only by their user override.
+	plain := seedVisibilityUser(t, database, "uo-plain", roleMember)
+	granted := seedVisibilityUser(t, database, "uo-granted", roleMember)
+	revoked := seedVisibilityUser(t, database, "uo-revoked", roleMember)
+
+	// granted: user allow on the locked channel beats the role deny.
+	if err := database.UpsertChannelUserOverride(context.Background(), lockedID, granted.ID, permissions.ReadMessages, 0); err != nil {
+		t.Fatalf("UpsertChannelUserOverride granted: %v", err)
+	}
+	// revoked: user deny on the open channel beats the base READ grant.
+	if err := database.UpsertChannelUserOverride(context.Background(), openID, revoked.ID, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride revoked: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		user *db.User
+		want map[int64]bool
+	}{
+		{"no user override sees only the open channel", plain, idSet([]int64{openID})},
+		{"user allow reveals the role-denied channel", granted, idSet([]int64{openID, lockedID})},
+		{"user deny hides an otherwise readable channel", revoked, idSet([]int64{})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := database.GetRoleByID(context.Background(), tc.user.RoleID)
+			if err != nil || role == nil {
+				t.Fatalf("GetRoleByID: %v", err)
+			}
+
+			restChans, err := svc.Channels.ListVisibleChannels(context.Background(), tc.user.ID)
+			if err != nil {
+				t.Fatalf("ListVisibleChannels: %v", err)
+			}
+			restSet := make(map[int64]bool, len(restChans))
+			for i := range restChans {
+				restSet[restChans[i].ID] = true
+			}
+
+			readyRaw, err := hub.BuildReadyWithRoleForTest(database, tc.user.ID, role)
+			if err != nil {
+				t.Fatalf("BuildReadyWithRoleForTest: %v", err)
+			}
+			var ready struct {
+				Payload struct {
+					Channels []struct {
+						ID int64 `json:"id"`
+					} `json:"channels"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal(readyRaw, &ready); err != nil {
+				t.Fatalf("unmarshal ready: %v", err)
+			}
+			readySet := make(map[int64]bool, len(ready.Payload.Channels))
+			for _, ch := range ready.Payload.Channels {
+				readySet[ch.ID] = true
+			}
+
+			allowed, err := hub.ComputeAllowedChannelsForTest(database, tc.user)
+			if err != nil {
+				t.Fatalf("ComputeAllowedChannelsForTest: %v", err)
+			}
+
+			for label, got := range map[string]map[int64]bool{
+				"REST ListVisibleChannels": restSet,
+				"WS buildReady":            readySet,
+				"replay computeAllowed":    allowed,
+			} {
+				if !equalSets(got, tc.want) {
+					t.Errorf("%s = %v, want %v", label, sortedKeys(got), sortedKeys(tc.want))
+				}
+			}
+		})
+	}
+}
+
 func equalSets(a, b map[int64]bool) bool {
 	if len(a) != len(b) {
 		return false

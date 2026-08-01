@@ -111,6 +111,14 @@
   .form-input{width:100%;padding:10px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;transition:border-color .2s}
   .form-input::placeholder{color:var(--text-micro)}.form-input:focus{border-color:var(--accent)}
   .form-textarea{resize:vertical;min-height:80px}
+  .role-swatch{width:14px;height:14px;border-radius:50%;flex-shrink:0;border:1px solid var(--border-strong)}
+  .perm-group{margin-bottom:14px}
+  .perm-group-title{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+  .perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
+  .perm-item{display:flex;align-items:flex-start;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer}
+  .perm-item input{margin-top:2px;flex-shrink:0}
+  .perm-item.locked{opacity:.45;cursor:not-allowed}
+  @media(max-width:600px){.perm-grid{grid-template-columns:1fr}}
   .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-strong);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0;appearance:none;-webkit-appearance:none;border:none}
   .toggle.on{background:var(--green)}
   .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
@@ -294,13 +302,18 @@ const I={
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
   plugins:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6"/><path d="M18 3v6"/><path d="M4 9h16v4a8 8 0 0 1-16 0z"/><path d="M12 21v-4"/></svg>',
   upload:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  arrowUp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+  arrowDown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+  smile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
 };
 
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
+  me:null,
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
-  cachedStats:null,cachedUpdate:null,channelCache:{},pluginRuntime:'unknown',pluginBusy:false,
+  cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
@@ -312,7 +325,7 @@ function handleSessionExpired(){
   state.logConnectSeq++;
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
-  state.token='';localStorage.removeItem('admin_token');
+  state.token='';state.me=null;localStorage.removeItem('admin_token');
   const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
   showOverlay('loginOverlay');
 }
@@ -328,6 +341,23 @@ async function api(method,path,body){
   return data;
 }
 
+/* ═══ Permissions ═══ */
+/* The panel perimeter admits any role holding one moderation bit, so what a
+   principal may actually do varies. GET /admin/api/me reports the caller's
+   role mask; tabs and row actions hide what it cannot use. Hiding is an
+   affordance only — every route re-checks the bit server-side. */
+const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
+  MUTE_MEMBERS:0x100000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
+  VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
+function can(bit){
+  const p=(state.me&&state.me.permissions)||0;
+  if((p&PERM.ADMINISTRATOR)!==0)return true;
+  return (p&bit)===bit;
+}
+/* Owner-only routes (tokens, backups, updates) gate on role position, not on
+   a bit, so the mask alone cannot answer this. */
+function isOwner(){return !!(state.me&&state.me.is_owner)}
+
 /* ═══ Utilities ═══ */
 function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 /* Escape for embedding inside a single-quoted JS string in an inline onclick
@@ -337,8 +367,24 @@ function jsq(s){return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"))}
 function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
-function roleColor(rid){return{1:'var(--role-owner)',2:'var(--role-admin)',3:'var(--role-mod)'}[rid]||'var(--role-member)'}
-function roleName(rid){return{1:'Owner',2:'Admin',3:'Moderator',4:'Member'}[rid]||'Member'}
+/* Roles are createable now, so the four seeded ids are a fallback, not the set.
+   Anything role-shaped prefers the live list (state.roleList, filled by the
+   Roles section and by openEditUser) and only then the seeded map — otherwise a
+   custom role renders as "Member" in its own colour. */
+function roleFromCache(rid){return (state.roleList||[]).find(r=>r.id===rid)||null}
+function roleColor(rid){
+  const r=roleFromCache(rid);
+  if(r&&r.color)return r.color;
+  return{1:'var(--role-owner)',2:'var(--role-admin)',3:'var(--role-mod)'}[rid]||'var(--role-member)';
+}
+/* name is the server-supplied role_name where the caller has one (the users
+   list ships it); it wins over any cache because it is always current. */
+function roleName(rid,name){
+  if(name)return name;
+  const r=roleFromCache(rid);
+  if(r)return r.name;
+  return{1:'Owner',2:'Admin',3:'Moderator',4:'Member'}[rid]||'Member';
+}
 
 function showToast(msg,type='success'){
   const t=document.getElementById('toast');
@@ -365,7 +411,28 @@ function showApp(){hideAll();document.getElementById('adminShell').classList.rem
 async function checkAuth(){
   try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){wizInit(d.defaults);showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
   if(!state.token){showOverlay('loginOverlay');return}
-  try{await api('GET','/stats');showApp();renderNav();renderContent()}catch(e){showOverlay('loginOverlay')}
+  try{await enterApp()}catch(e){showOverlay('loginOverlay')}
+}
+
+/* Loads the caller's permissions before the first render — the nav is built
+   from them, so rendering earlier would flash tabs the principal cannot open.
+   Throws on an unusable session so callers fall back to the login overlay. */
+/* A #section fragment deep-links the panel: the desktop client's "Audit Log"
+   entry opens /admin#audit, so the operator lands on the log rather than on the
+   dashboard with a tab still to find. Applied before the permission fallback
+   below, so a fragment naming a section the principal may not open falls back
+   to the dashboard exactly like a stale stored section does. */
+function sectionFromHash(){
+  const id=(location.hash||'').replace(/^#/,'');
+  return NAV.some(n=>n.id===id)?id:'';
+}
+
+async function enterApp(){
+  state.me=await api('GET','/me');
+  const deepLink=sectionFromHash();
+  if(deepLink)state.section=deepLink;
+  if(!sectionAllowed(state.section))state.section='dashboard';
+  showApp();renderNav();renderContent();
 }
 
 /* ═══ First-Run Setup Wizard ═══ */
@@ -577,7 +644,7 @@ function beginRestartWait(url){
   },4000);
 }
 
-document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
+document.getElementById('setupContinueBtn').onclick=()=>{enterApp().catch(()=>showOverlay('loginOverlay'))};
 function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
 document.getElementById('loginBtn').onclick=async()=>{
@@ -589,7 +656,7 @@ document.getElementById('loginBtn').onclick=async()=>{
   if(btn.disabled)return;
   btn.disabled=true;
   try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
-    state.token=d.token;localStorage.setItem('admin_token',state.token);showApp();renderNav();renderContent();
+    state.token=d.token;localStorage.setItem('admin_token',state.token);await enterApp();
   }catch(e){err.textContent=e.message}
   finally{btn.disabled=false}
 };
@@ -598,26 +665,59 @@ document.getElementById('loginBtn').onclick=async()=>{
 ['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
 
 /* ═══ Nav ═══ */
+/* `allowed` mirrors the server-side gate on each section's routes; omitted
+   means perimeter-level (any principal the panel let in). */
 const NAV=[
   {section:'Management'},
   {id:'dashboard',label:'Dashboard',icon:I.dashboard},
   {id:'users',label:'Users',icon:I.users},
-  {id:'channels',label:'Channels',icon:I.channels},
+  {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
+  {id:'roles',label:'Roles',icon:I.shield,allowed:()=>can(PERM.MANAGE_ROLES)},
+  {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
   {sep:true},
   {section:'Configuration'},
-  {id:'audit',label:'Audit Log',icon:I.audit},
-  {id:'tokens',label:'API Tokens',icon:I.lock},
-  {id:'plugins',label:'Plugins',icon:I.plugins},
-  {id:'logs',label:'Server Logs',icon:I.logs},
-  {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
-  {id:'backups',label:'Backups',icon:I.backup},
-  {id:'updates',label:'Updates',icon:I.updates},
+  {id:'audit',label:'Audit Log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
+  {id:'tokens',label:'API Tokens',icon:I.lock,allowed:isOwner},
+  {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'logs',label:'Server Logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'backups',label:'Backups',icon:I.backup,allowed:isOwner},
+  {id:'updates',label:'Updates',icon:I.updates,allowed:isOwner},
   {sep:true},
   {id:'logout',label:'Sign Out',icon:I.logout,danger:true},
 ];
 
+/* True when the principal may open the section. Unknown ids are refused so a
+   stale localStorage/section value can't route into a hidden page. */
+function sectionAllowed(id){
+  const n=NAV.find(x=>x.id===id);
+  if(!n)return false;
+  return !n.allowed||n.allowed();
+}
+
+/* Drops section labels with no visible item under them and separators that
+   would end up leading, trailing, or doubled once entries are filtered out. */
+function visibleNav(){
+  const kept=NAV.filter(n=>n.section||n.sep||!n.allowed||n.allowed());
+  const out=[];
+  for(let i=0;i<kept.length;i++){
+    const n=kept[i];
+    if(n.section){
+      const next=kept[i+1];
+      if(!next||next.section||next.sep)continue;
+    }
+    if(n.sep){
+      const prev=out[out.length-1];
+      if(!prev||prev.sep)continue;
+    }
+    out.push(n);
+  }
+  while(out.length&&out[out.length-1].sep)out.pop();
+  return out;
+}
+
 function renderNav(){
-  document.getElementById('sidebarNav').innerHTML=NAV.map(n=>{
+  document.getElementById('sidebarNav').innerHTML=visibleNav().map(n=>{
     if(n.section)return'<div class="sidebar-label">'+n.section+'</div>';
     if(n.sep)return'<div class="sidebar-sep"></div>';
     const active=state.section===n.id?'active':'';
@@ -629,6 +729,7 @@ function renderNav(){
 }
 
 function navigateTo(id){
+  if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
     state.section=id;renderNav();renderContent();
@@ -639,12 +740,12 @@ function navigateTo(id){
   }
 }
 
-function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';state.me=null;localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -666,7 +767,9 @@ function renderContent(){
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
-  try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}
+  /* Update checks are owner-only; skip the call for everyone else instead of
+     spending a guaranteed 403 on every dashboard load. */
+  if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
@@ -676,8 +779,8 @@ async function renderDashboard(){
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
   html+='</div>';
-  // Recent audit
-  try{
+  // Recent audit — VIEW_AUDIT_LOG only.
+  if(can(PERM.VIEW_AUDIT_LOG))try{
     const entries=await api('GET','/audit-log?limit=5&offset=0');
     if(entries&&entries.length){
       html+='<div class="section-card"><div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" onclick="navigateTo(\'audit\')">View All</button></div><div class="section-card-body">';
@@ -703,7 +806,7 @@ async function renderUsers(){
     const statusDot=banned?'banned':status;const statusLabel=banned?'Banned':status==='online'?'Online':'Offline';
     const initial=uname?uname[0].toUpperCase():'?';
     html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:var(--accent)">'+initial+'</div><strong>'+esc(uname)+'</strong></div></td>';
-    html+='<td><span class="role-badge"><span class="role-dot" style="background:'+roleColor(rid)+'"></span>'+roleName(rid)+'</span></td>';
+    html+='<td><span class="role-badge"><span class="role-dot" style="background:'+esc(roleColor(rid))+'"></span>'+esc(roleName(rid,u.role_name||u.RoleName))+'</span></td>';
     html+='<td><span class="dot '+statusDot+'"></span>'+statusLabel+'</td>';
     // The ban reason is collected on ban and stored server-side; showing it
     // here is the only place an admin can read back why someone was banned.
@@ -714,10 +817,12 @@ async function renderUsers(){
       :'<span class="badge badge-muted">No</span>';
     html+='<td>'+bannedCell+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
-    html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
-    html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
-    if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
-    else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
+    if(can(PERM.MANAGE_ROLES))html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
+    if(can(PERM.KICK_MEMBERS))html+='<button class="act-btn" title="Force Logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
+    if(can(PERM.BAN_MEMBERS)){
+      if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
+      else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
+    }
     html+='</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
@@ -729,8 +834,26 @@ async function renderUsers(){
   return html;
 }
 
-function openEditUser(uid,uname,currentRole){
-  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto"><option value="1" '+(currentRole===1?'selected':'')+'>Owner</option><option value="2" '+(currentRole===2?'selected':'')+'>Admin</option><option value="3" '+(currentRole===3?'selected':'')+'>Moderator</option><option value="4" '+(currentRole===4?'selected':'')+'>Member</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
+/* Seeded roles with their hierarchy positions — the fallback used only when the
+   live list cannot be read. Role CRUD means the real set is whatever /roles
+   returns, so assigning a custom role must not depend on this literal. */
+const ROLE_CHOICES=[{id:1,name:'Owner',position:100},{id:2,name:'Admin',position:80},{id:3,name:'Moderator',position:60},{id:4,name:'Member',position:40}];
+
+/* The picker needs every assignable role, not the four seeded ones. The button
+   that opens this is gated on MANAGE_ROLES, which is exactly what GET /roles
+   requires, so the fetch is authorized whenever the modal is reachable; a
+   failure degrades to the seeded list rather than blocking the edit. */
+async function openEditUser(uid,uname,currentRole){
+  const myPos=(state.me&&state.me.role_position)||0;
+  let roles;
+  try{roles=await api('GET','/roles');state.roleList=roles||[]}
+  catch(e){roles=ROLE_CHOICES}
+  /* The server refuses to assign a role positioned at or above the actor's
+     own, so anything higher is dropped rather than offered as a guaranteed
+     403. The current role is always listed so the select can show it. */
+  const opts=roles.filter(r=>r.position<myPos||r.id===currentRole)
+    .map(r=>'<option value="'+r.id+'" '+(currentRole===r.id?'selected':'')+'>'+esc(r.name)+'</option>').join('');
+  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
 }
 
 async function saveUserRole(uid){
@@ -752,11 +875,11 @@ async function unbanUser(uid){
 }
 
 async function forceLogout(uid){
-  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Logout</button></div>');
+  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user? They can sign back in immediately &mdash; this is not a removal.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Force Logout</button></div>');
 }
 
 async function confirmForceLogout(uid){
-  try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
+  try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Forced logout: all sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Channels ═══ */
@@ -764,6 +887,10 @@ async function renderChannels(){
   let channels;
   try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
   const chIcon=t=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
+  /* Categories are free text — a channel of any type may live under any one of
+     them. Collect the ones already in use so the create/edit forms can offer
+     them as a datalist instead of hardcoding names nobody has to use. */
+  const catSet={};
   let html='<div class="page-title">Channels</div><div class="page-desc">'+channels.length+' channels</div>';
   html+='<div class="filter-bar"><button class="btn btn-accent" onclick="openChannelModal(null)">'+I.plus+' Create Channel</button></div>';
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
@@ -777,14 +904,25 @@ async function renderChannels(){
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
     const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
     state.channelCache[id]=ch;
+    if(cat)catSet[cat]=true;
     html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
+  state.channelCategories=Object.keys(catSet).sort();
   return html;
 }
 
+/* <datalist> of the categories currently in use. Purely a suggestion list —
+   typing a brand-new name is the supported way to create a category. */
+function categoryDatalist(listId){
+  const cats=state.channelCategories||[];
+  let html='<datalist id="'+listId+'">';
+  cats.forEach(c=>{html+='<option value="'+esc(c)+'"></option>'});
+  return html+'</datalist>';
+}
+
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" placeholder="Text Channels"></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
 }
 
 async function createChannel(){
@@ -793,23 +931,43 @@ async function createChannel(){
   try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-/* PATCH /channels/{id} accepts name, topic, slow_mode, position and archived —
-   the modal used to offer only the name, so the Archived column in the table
-   was read-only state with no control behind it. */
+/* PATCH /channels/{id} accepts name, topic, category, slow_mode, position,
+   archived, nsfw and the two voice capacity limits — the modal used to offer
+   only the name, so the Archived column in the table was read-only state with
+   no control behind it.
+
+   NSFW is a flag and nothing more: the server stores, broadcasts and audits it
+   but applies no content behaviour to a flagged channel. Clients decide what to
+   do with it (the desktop client shows a per-session age gate).
+
+   The voice limits are only rendered for a voice channel. They are stored on
+   any type, but on a text channel they are values nothing will ever read, and
+   offering them there would imply an enforcement that does not exist. */
 function openChannelEditModal(id){
   const ch=state.channelCache[id]||{};
   const name=ch.name||ch.Name||'';
   const topic=ch.topic||ch.Topic||'';
+  const cat=ch.category||ch.Category||'';
   const slow=ch.slow_mode||ch.SlowMode||0;
   const pos=ch.position||ch.Position||0;
   const archived=ch.archived||ch.Archived||false;
+  const nsfw=ch.nsfw||ch.NSFW||false;
+  const type=ch.type||ch.Type||'text';
+  const maxUsers=ch.voice_max_users||ch.VoiceMaxUsers||0;
+  const maxVideo=ch.voice_max_video||ch.VoiceMaxVideo||0;
+  const voiceRows=type!=='voice'?'':
+     '<div class="form-group"><label class="form-label">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
   openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
+    +'<div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
     +'<div class="form-group"><label class="form-label">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
     +'<div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
+    +voiceRows
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" onclick="this.classList.toggle(\'on\')"></button></div></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" onclick="this.classList.toggle(\'on\')"></button></div></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
 }
@@ -820,10 +978,20 @@ async function saveChannelEdit(id){
   const body={
     name,
     topic:document.getElementById('chEditTopic').value.trim(),
+    category:document.getElementById('chEditCat').value.trim(),
     slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
     position:parseInt(document.getElementById('chEditPos').value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
+    nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
+  /* Only present for a voice channel. Omitting them entirely (rather than
+     sending 0) is what keeps a text-channel edit from clobbering limits a
+     channel might carry from an earlier life as a voice channel — the handler
+     starts from the stored values for every field the body leaves out. */
+  const maxUsersEl=document.getElementById('chEditMaxUsers');
+  const maxVideoEl=document.getElementById('chEditMaxVideo');
+  if(maxUsersEl){body.voice_max_users=parseInt(maxUsersEl.value,10)||0}
+  if(maxVideoEl){body.voice_max_video=parseInt(maxVideoEl.value,10)||0}
   try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
@@ -835,45 +1003,377 @@ async function confirmDeleteChannel(id){
   try{await api('DELETE','/channels/'+id);closeModal();showToast('Channel deleted');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-/* ═══ Channel Access (private channels) ═══ */
+/* ═══ Channel permissions (override matrix) ═══ */
+/* Two editors over the same two endpoints, because they answer two different
+   questions. The quick "Can access" list is the 90% case — hide this channel
+   from a role — and still writes exactly the mask it always did. The matrix
+   below it is the honest one: pick a role OR a single member, then set each
+   relevant bit to allow / inherit / deny, which is what the API has always
+   accepted and what the resolution order (base -> role override -> user
+   override) actually resolves. */
 const DENY_PRIVATE=0x202; /* READ_MESSAGES | CONNECT_VOICE */
 const ADMIN_BIT=0x40000000;
 
+/* The bits worth overriding PER CHANNEL. Server-wide bits (Manage Roles, Ban
+   Members, …) are deliberately absent: they answer to the server, not to one
+   channel, so offering them here would write masks nothing ever reads. */
+const OVERRIDE_BITS=[
+  [0x2,'Read Messages'],
+  [0x1,'Send Messages'],
+  [0x20,'Attach Files'],
+  [0x40,'Add Reactions'],
+  [0x10000,'Manage Messages'],
+  [0x200000,'Mention @everyone'],
+  [0x200,'Connect'],
+  [0x400,'Speak'],
+  [0x800,'Video'],
+  [0x1000,'Share Screen'],
+];
+
+/* Tri-state per bit: 'allow' sets the bit in the allow mask, 'deny' sets it in
+   the deny mask, 'inherit' sets it in neither. An override row whose two masks
+   are both zero is deleted rather than stored — an all-inherit row is the same
+   thing as no row, and keeping it would leave phantom entries in the listing. */
+function overrideStateOf(allow,deny,bit){
+  if((allow&bit)===bit)return 'allow';
+  if((deny&bit)===bit)return 'deny';
+  return 'inherit';
+}
+
 async function openChannelPermsModal(id,name){
-  let data;
-  try{data=await api('GET','/channels/'+id+'/permissions')}catch(e){showToast(e.message,'error');return}
-  const roles=data.roles||[];
-  state.permChannelRoles=roles;
-  let rows='';
-  roles.forEach(role=>{
+  let data,users;
+  try{
+    data=await api('GET','/channels/'+id+'/permissions');
+    users=await api('GET','/users?limit=500&offset=0');
+  }catch(e){showToast(e.message,'error');return}
+  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[]};
+  renderChannelPermsModal();
+}
+
+function renderChannelPermsModal(){
+  const pc=state.permChannel;if(!pc)return;
+  let quick='';
+  pc.roles.forEach(role=>{
     const isAdmin=(role.permissions&ADMIN_BIT)!==0;
     const canAccess=isAdmin||((role.deny&0x2)===0);
-    rows+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bg-active)">'
+    quick+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bg-active)">'
       +'<span style="color:'+roleColor(role.role_id)+';font-weight:600">'+esc(role.role_name)+'</span>'
       +(isAdmin
         ?'<span style="font-size:12px;color:var(--text-faint)">always has access</span>'
         :'<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer"><input type="checkbox" id="permRole'+role.role_id+'" '+(canAccess?'checked':'')+'> Can access</label>')
       +'</div>';
   });
-  openModal('<div class="modal-header"><h3>Channel Access — #'+esc(name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
-    +'<div class="modal-body"><p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Uncheck a role to hide this channel from it (private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
-    +rows+'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelPerms('+id+')">Save</button></div>');
+
+  let opts='<option value="">— pick a role or member —</option><optgroup label="Roles">';
+  pc.roles.forEach(r=>{opts+='<option value="r:'+r.role_id+'">'+esc(r.role_name)+'</option>'});
+  opts+='</optgroup><optgroup label="Members">';
+  /* The member list is paginated, so a member who already has an override could
+     fall outside the page and become uneditable. Union the two lists — the
+     override rows carry the username the picker needs. */
+  const picked=[];const seen={};
+  pc.users.forEach(o=>{seen[o.user_id]=true;picked.push({id:o.user_id,username:o.username,has:true})});
+  pc.allUsers.forEach(u=>{if(!seen[u.id])picked.push({id:u.id,username:u.username,has:false})});
+  picked.sort((a,b)=>String(a.username).localeCompare(String(b.username)));
+  picked.forEach(u=>{
+    opts+='<option value="u:'+u.id+'">'+esc(u.username)+(u.has?' (override)':'')+'</option>';
+  });
+  opts+='</optgroup>';
+
+  openModal('<div class="modal-header"><h3>Channel Permissions — #'+esc(pc.name)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Uncheck a role to hide this channel from it (private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
+    +quick
+    +'<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bg-active)">'
+    +'<div class="form-group"><label class="form-label">Override matrix</label>'
+    +'<select class="form-input" id="permTarget" style="appearance:auto" onchange="renderPermMatrix()">'+opts+'</select></div>'
+    +'<p style="color:var(--text-faint);font-size:12px;margin:0 0 10px">Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
+    +'<div id="permMatrix"></div>'
+    +'</div></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelPerms()">Save</button></div>');
+  renderPermMatrix();
 }
 
-async function saveChannelPerms(id){
-  const roles=state.permChannelRoles||[];
+/* Reads the current masks for the selected target and paints one tri-state row
+   per bit. A member with no override row starts all-inherit. */
+function renderPermMatrix(){
+  const pc=state.permChannel;if(!pc)return;
+  const box=document.getElementById('permMatrix');if(!box)return;
+  const sel=document.getElementById('permTarget');
+  const val=sel?sel.value:'';
+  if(!val){box.innerHTML='<p style="color:var(--text-faint);font-size:12px">Pick a role or member above to edit its per-channel bits.</p>';return}
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  let allow=0,deny=0,adminNote='';
+  if(kind==='r'){
+    const role=pc.roles.find(r=>r.role_id===tid);
+    if(role){allow=role.allow;deny=role.deny;if((role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.'}
+  }else{
+    const o=pc.users.find(u=>u.user_id===tid);
+    if(o){allow=o.allow;deny=o.deny}
+  }
+  let html='';
+  if(adminNote)html+='<p style="color:var(--yellow);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
+  html+='<table class="tbl"><thead><tr><th>Permission</th><th style="text-align:center">Allow</th><th style="text-align:center">Inherit</th><th style="text-align:center">Deny</th></tr></thead><tbody>';
+  OVERRIDE_BITS.forEach(b=>{
+    const bit=b[0],label=b[1],st=overrideStateOf(allow,deny,bit);
+    html+='<tr><td>'+esc(label)+'</td>';
+    ['allow','inherit','deny'].forEach(k=>{
+      html+='<td style="text-align:center"><input type="radio" name="ovr'+bit+'" data-ovrbit="'+bit+'" value="'+k+'"'+(st===k?' checked':'')+'></td>';
+    });
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  html+='<div style="margin-top:10px"><button class="btn btn-ghost" onclick="clearPermOverride()">Clear override</button></div>';
+  box.innerHTML=html;
+}
+
+/* Collects the tri-state rows back into the two masks the API takes. */
+function collectOverrideMasks(){
+  let allow=0,deny=0;
+  document.querySelectorAll('#permMatrix input[data-ovrbit]:checked').forEach(el=>{
+    const bit=parseInt(el.getAttribute('data-ovrbit'),10);
+    if(el.value==='allow')allow|=bit;
+    else if(el.value==='deny')deny|=bit;
+  });
+  return {allow:allow,deny:deny};
+}
+
+function permTargetPath(){
+  const pc=state.permChannel;
+  const sel=document.getElementById('permTarget');
+  const val=sel?sel.value:'';
+  if(!pc||!val)return null;
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+}
+
+async function clearPermOverride(){
+  const path=permTargetPath();
+  if(!path){showToast('Pick a role or member first','error');return}
   try{
-    for(const role of roles){
+    await api('DELETE',path);
+    closeModal();showToast('Override cleared');renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+async function saveChannelPerms(){
+  const pc=state.permChannel;if(!pc)return;
+  try{
+    /* Quick toggles first: same masks this panel has always written. */
+    for(const role of pc.roles){
       if((role.permissions&ADMIN_BIT)!==0)continue;
       const box=document.getElementById('permRole'+role.role_id);
       if(!box)continue;
       const wasHidden=(role.deny&0x2)!==0;
-      if(!box.checked)await api('PUT','/channels/'+id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});
-      else if(wasHidden)await api('DELETE','/channels/'+id+'/permissions/'+role.role_id);
+      if(!box.checked)await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});
+      else if(wasHidden)await api('DELETE','/channels/'+pc.id+'/permissions/'+role.role_id);
     }
-    closeModal();showToast('Channel access updated');renderContent();
+    /* Then the matrix, if a target is selected. An all-inherit row is a delete:
+       storing (0,0) would leave a row that resolves to nothing. */
+    const path=permTargetPath();
+    if(path){
+      const masks=collectOverrideMasks();
+      if(masks.allow===0&&masks.deny===0)await api('DELETE',path);
+      else await api('PUT',path,masks);
+    }
+    closeModal();showToast('Channel permissions updated');renderContent();
   }catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Roles ═══ */
+/* Roles are real CRUD now, not four seeded rows. Everything here is gated on
+   MANAGE_ROLES, and the server additionally enforces the hierarchy: you may
+   only touch roles strictly BELOW your own position, and may never grant a bit
+   your own role lacks. The UI mirrors both rules so a doomed request is not
+   offered — but the server is the authority, and a 403 surfaces as a toast. */
+
+/* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
+   groups" section groups the bitfield. Keep the two in step: the doc is the
+   reference an operator reads next to this grid, and every one of the 19
+   defined bits must appear in exactly one group or it becomes ungrantable
+   here. */
+const PERM_GROUPS=[
+  {title:'General',bits:[
+    [0x20000,'Manage Channels','Create, edit and delete channels and their overrides'],
+    [0x1000000,'Manage Roles','Create, edit, delete and assign roles below your own'],
+    [0x4000000,'Manage Invites','Create and revoke invite codes'],
+    [0x2000000,'Manage Server','Read and change server settings'],
+    [0x8000000,'View Audit Log','Read the action history'],
+    [0x40000000,'Administrator','Bypasses every permission check'],
+  ]},
+  {title:'Text',bits:[
+    [0x2,'Read Messages','View messages in text channels'],
+    [0x1,'Send Messages','Post messages in text channels'],
+    [0x20,'Attach Files','Upload file attachments'],
+    [0x40,'Add Reactions','React to messages with emoji'],
+    [0x200000,'Mention @everyone','Give @everyone/@here real mention semantics'],
+    [0x10000,'Manage Messages','Delete others’ messages, pin and purge'],
+  ]},
+  {title:'Voice',bits:[
+    [0x200,'Connect','Join voice channels'],
+    [0x400,'Speak','Transmit audio in voice channels'],
+    [0x800,'Video','Enable the camera in voice channels'],
+    [0x1000,'Share Screen','Share the screen in voice channels'],
+  ]},
+  {title:'Moderation',bits:[
+    [0x40000,'Kick Members','Force-logout a lower-ranked member'],
+    [0x80000,'Ban Members','Ban and unban lower-ranked members'],
+    [0x100000,'Mute Members','Server mute, deafen, move and disconnect in voice'],
+  ]},
+];
+
+/* My own position, from GET /me — the hierarchy boundary every row respects. */
+function myPosition(){return (state.me&&state.me.role_position)||0}
+/* True when the signed-in principal may manage this role at all. */
+function canManageRole(role){return role.position<myPosition()}
+/* True when this bit may be granted: ADMINISTRATOR grants anything, otherwise
+   only bits the caller's own role holds. */
+function canGrantBit(bit){
+  const p=(state.me&&state.me.permissions)||0;
+  if((p&PERM.ADMINISTRATOR)!==0)return true;
+  return (p&bit)===bit;
+}
+
+async function renderRoles(){
+  let roles;
+  try{roles=await api('GET','/roles')}catch(e){return'<div class="page-title">Roles</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  state.roleList=roles||[];
+  let html='<div class="page-title">Roles</div><div class="page-desc">'+state.roleList.length+' roles, highest rank first. You can only manage roles below your own.</div>';
+  html+='<div class="filter-bar"><button class="btn btn-accent" onclick="openRoleModal(null)">'+I.plus+' Create Role</button></div>';
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Role</th><th>Members</th><th>Position</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!state.roleList.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px">No roles</td></tr>';
+  /* Only the manageable slice can be reordered — the reorder endpoint takes
+     exactly the roles below the caller, so the arrows move within that slice. */
+  const movable=state.roleList.filter(canManageRole);
+  state.roleList.forEach(role=>{
+    const mine=canManageRole(role);
+    const mIdx=movable.findIndex(r=>r.id===role.id);
+    const swatch='<span class="role-swatch" style="background:'+(role.color?esc(role.color):'var(--text-micro)')+'"></span>';
+    html+='<tr><td><div style="display:flex;align-items:center;gap:8px">'+swatch+'<strong style="color:'+(role.color?esc(role.color):'var(--text-normal)')+'">'+esc(role.name)+'</strong>';
+    if(role.is_default)html+='<span class="badge badge-muted">default</span>';
+    if(!mine)html+='<span class="badge badge-muted">above you</span>';
+    html+='</div></td>';
+    html+='<td style="color:var(--text-muted)">'+(role.member_count||0)+'</td>';
+    html+='<td style="font-size:12px;color:var(--text-faint)">'+role.position+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">';
+    if(mine){
+      const upDisabled=mIdx<=0?'disabled style="opacity:.3"':'';
+      const downDisabled=(mIdx<0||mIdx>=movable.length-1)?'disabled style="opacity:.3"':'';
+      html+='<button class="act-btn" title="Move up" '+upDisabled+' onclick="moveRole('+role.id+',-1)">'+I.arrowUp+'</button>';
+      html+='<button class="act-btn" title="Move down" '+downDisabled+' onclick="moveRole('+role.id+',1)">'+I.arrowDown+'</button>';
+      html+='<button class="act-btn" title="Edit" onclick="openRoleModal('+role.id+')">'+I.edit+'</button>';
+      if(role.is_default)html+='<button class="act-btn" title="The default role cannot be deleted" disabled style="opacity:.3">'+I.trash+'</button>';
+      else html+='<button class="act-btn danger" title="Delete" onclick="openDeleteRole('+role.id+')">'+I.trash+'</button>';
+    }else{
+      html+='<span style="font-size:12px;color:var(--text-micro)">read-only</span>';
+    }
+    html+='</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+/* Swap a role with its neighbour and send the whole manageable order. The
+   endpoint normalizes positions, so the client never computes them. */
+async function moveRole(id,delta){
+  const movable=state.roleList.filter(canManageRole);
+  const i=movable.findIndex(r=>r.id===id);
+  const j=i+delta;
+  if(i<0||j<0||j>=movable.length)return;
+  const ids=movable.map(r=>r.id);
+  ids[i]=movable[j].id;ids[j]=movable[i].id;
+  try{await api('PATCH','/roles/reorder',{role_ids:ids});showToast('Roles reordered');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
+/* Shared create/edit modal. id === null creates. */
+function openRoleModal(id){
+  const role=id===null?null:state.roleList.find(r=>r.id===id);
+  if(id!==null&&!role){showToast('Role not found','error');return}
+  const name=role?role.name:'';
+  const color=(role&&role.color)?role.color:'';
+  const perms=role?role.permissions:0;
+  /* A new role defaults to just below the caller, which is what the server
+     does for an omitted position — shown so the number is never a surprise. */
+  const position=role?role.position:Math.max(0,myPosition()-1);
+
+  let grid='';
+  PERM_GROUPS.forEach(g=>{
+    grid+='<div class="perm-group"><div class="perm-group-title">'+esc(g.title)+'</div><div class="perm-grid">';
+    g.bits.forEach(b=>{
+      const bit=b[0],label=b[1],desc=b[2];
+      const granted=(perms&bit)===bit;
+      /* A bit the caller does not hold can only be left as it is: checked and
+         locked when the role already has it (removing is a de-escalation the
+         server allows, but the panel keeps the rule to one sentence), unchecked
+         and locked otherwise. */
+      const locked=!canGrantBit(bit);
+      const title=locked?'Your own role does not have this permission':desc;
+      grid+='<label class="perm-item'+(locked?' locked':'')+'" title="'+esc(title)+'">'
+        +'<input type="checkbox" data-permbit="'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+'>'
+        +'<span>'+esc(label)+'</span></label>';
+    });
+    grid+='</div></div>';
+  });
+
+  openModal('<div class="modal-header"><h3>'+(role?'Edit Role':'Create Role')+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body">'
+    +'<div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="roleName" maxlength="32" value="'+esc(name)+'" placeholder="Moderator"></div>'
+    +'<div class="form-group"><label class="form-label">Color</label><div style="display:flex;align-items:center;gap:10px">'
+      +'<input type="color" id="roleColor" value="'+esc(color||'#5865F2')+'" style="width:44px;height:34px;padding:2px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm)">'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><input type="checkbox" id="roleNoColor" '+(color?'':'checked')+'> No color</label>'
+    +'</div></div>'
+    +'<div class="form-group"><label class="form-label">Position (must be below your own rank of '+myPosition()+')</label><input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'"></div>'
+    +'<div class="form-group"><label class="form-label">Permissions</label>'+grid+'</div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveRole('+(role?role.id:'null')+')">'+(role?'Save':'Create')+'</button></div>');
+}
+
+/* Collect the checked bits. Disabled boxes still report their state, so a bit
+   the caller cannot grant is preserved rather than silently stripped. */
+function collectRolePerms(){
+  let mask=0;
+  document.querySelectorAll('#modalInner input[data-permbit]').forEach(box=>{
+    if(box.checked)mask|=parseInt(box.getAttribute('data-permbit'),10);
+  });
+  return mask;
+}
+
+async function saveRole(id){
+  const name=document.getElementById('roleName').value.trim();
+  if(!name){showToast('Name is required','error');return}
+  const noColor=document.getElementById('roleNoColor').checked;
+  const body={
+    name:name,
+    color:noColor?'':document.getElementById('roleColor').value,
+    permissions:collectRolePerms(),
+    position:parseInt(document.getElementById('rolePos').value,10)||0,
+  };
+  try{
+    if(id===null)await api('POST','/roles',body);
+    else await api('PATCH','/roles/'+id,body);
+    closeModal();showToast(id===null?'Role created':'Role updated');renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+function openDeleteRole(id){
+  const role=state.roleList.find(r=>r.id===id);
+  if(!role){showToast('Role not found','error');return}
+  const fallback=state.roleList.find(r=>r.is_default);
+  const fallbackName=fallback?fallback.name:'the default role';
+  const count=role.member_count||0;
+  const members=count===0
+    ?'No members hold this role.'
+    :'<strong style="color:white">'+count+' member'+(count===1?'':'s')+'</strong> will be moved to <strong style="color:white">'+esc(fallbackName)+'</strong>.';
+  openModal('<div class="modal-header"><h3>Delete Role</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'
+    +'<div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:'+(role.color?esc(role.color):'white')+'">'+esc(role.name)+'</strong>?</p>'
+    +'<p style="color:var(--text-muted);margin-top:8px">'+members+'</p>'
+    +'<p style="color:var(--text-faint);font-size:12px;margin-top:8px">Its channel permission overrides are removed too. This cannot be undone.</p></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteRole('+id+')">Delete</button></div>');
+}
+
+async function confirmDeleteRole(id){
+  try{await api('DELETE','/roles/'+id);closeModal();showToast('Role deleted');renderContent()}
+  catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Audit Log ═══ */
@@ -1207,6 +1707,98 @@ function confirmRevokeToken(id,label){
 }
 async function revokeToken(id){
   try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Emoji ═══ */
+/* Custom emoji live on the ordinary member API (/api/v1/emoji) rather than
+   under /admin/api: the desktop client reads the same list, and MANAGE_SERVER
+   is enforced by the route itself. The panel's session token authenticates
+   there unchanged, so this needs its own fetch helper — like pluginApi. */
+async function emojiApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined)init.body=opts.body;
+  const res=await fetch('/api/v1/emoji'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return null;
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
+  return data;
+}
+
+/* The image route needs the Authorization header, which <img src> cannot send.
+   Each thumbnail is therefore fetched with the token and swapped in as a blob:
+   URL once the section has been written into the DOM. */
+async function loadEmojiThumbnails(){
+  const imgs=document.querySelectorAll('img[data-emoji-url]');
+  for(const img of imgs){
+    try{
+      const res=await fetch(img.getAttribute('data-emoji-url'),{headers:{'Authorization':'Bearer '+state.token}});
+      if(!res.ok)continue;
+      const blob=await res.blob();
+      img.src=URL.createObjectURL(blob);
+      img.addEventListener('load',()=>URL.revokeObjectURL(img.src),{once:true});
+    }catch(e){/* a thumbnail that will not load is not worth an error toast */}
+  }
+}
+
+async function renderEmoji(){
+  let list;
+  try{list=await emojiApi('GET','/')}catch(e){return'<div class="page-title">Emoji</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  if(!Array.isArray(list))list=[];
+
+  let html='<div class="page-title">Emoji</div><div class="page-desc">Server-wide custom emoji, usable as <span style="font-family:var(--font-mono)">:shortcode:</span> in messages and reactions</div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Upload</h3></div><div class="section-card-body">';
+  html+='<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+  html+='<input type="text" id="emojiShortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
+  html+='<input type="file" id="emojiFile" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
+  html+='<button class="btn btn-accent" onclick="uploadEmoji()">'+I.upload+' Upload</button>';
+  html+='</div></div></div>';
+
+  html+='<div class="section-card"><div class="section-card-header"><h3>Installed ('+list.length+')</h3><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
+  html+='<table class="tbl"><thead><tr><th style="width:60px">Preview</th><th>Shortcode</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:24px">No custom emoji yet</td></tr>';
+  else list.forEach(function(e){
+    html+='<tr><td><img alt="'+esc(e.shortcode)+'" data-emoji-url="'+esc(e.url)+'" style="width:32px;height:32px;object-fit:contain"></td>';
+    html+='<td style="font-family:var(--font-mono)">:'+esc(e.shortcode)+':</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" onclick="confirmDeleteEmoji('+e.id+',\''+jsq(e.shortcode)+'\')">'+I.trash+'</button></div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  setTimeout(loadEmojiThumbnails,0);
+  return html;
+}
+
+async function uploadEmoji(){
+  const codeInput=document.getElementById('emojiShortcode');
+  const fileInput=document.getElementById('emojiFile');
+  const shortcode=(codeInput&&codeInput.value||'').trim();
+  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  if(!shortcode){showToast('Enter a shortcode first','error');return}
+  if(!file){showToast('Choose an image first','error');return}
+  const fd=new FormData();
+  fd.append('shortcode',shortcode);
+  fd.append('file',file);
+  try{
+    /* No explicit Content-Type: the browser must set the multipart boundary. */
+    await emojiApi('POST','/',{body:fd});
+    showToast('Added :'+shortcode.toLowerCase()+':');
+    renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+function confirmDeleteEmoji(id,shortcode){
+  openModal('<div class="modal-header"><h3>Delete Emoji</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:white">:'+esc(shortcode)+':</strong>? Messages and reactions that use it will show the plain text instead. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteEmoji('+id+')">Delete</button></div>');
+}
+
+async function deleteEmoji(id){
+  try{
+    await emojiApi('DELETE','/'+id);
+    closeModal();
+    showToast('Emoji deleted');
+    renderContent();
+  }catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Plugins ═══ */

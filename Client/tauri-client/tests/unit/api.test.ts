@@ -242,6 +242,50 @@ describe("API Client", () => {
       await api.getMessages(3);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/3/messages");
     });
+
+    it("getMessagesAround hits the around route with the message id in the path", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: false, has_more_after: false }),
+      );
+      await api.getMessagesAround(5, 4242);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/5/messages/around/4242");
+    });
+
+    it("getMessagesAround passes the limit", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: false, has_more_after: false }),
+      );
+      await api.getMessagesAround(5, 42, { limit: 30 });
+      expect(fetchCallUrl()).toContain("limit=30");
+    });
+
+    it("getMessagesAround returns the has-more flags for both sides", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ messages: [], has_more_before: true, has_more_after: false }),
+      );
+      const resp = await api.getMessagesAround(5, 42);
+      expect(resp.has_more_before).toBe(true);
+      expect(resp.has_more_after).toBe(false);
+    });
+
+    // The emoji is a path segment: unescaped it would either break the route or
+    // resolve to a different emoji than the one on the pill.
+    it("getReactionUsers percent-encodes the emoji in the path", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ users: [] }));
+      await api.getReactionUsers(5, 42, "👍");
+      expect(fetchCallUrl()).toBe(
+        "https://localhost:8443/api/v1/channels/5/messages/42/reactions/%F0%9F%91%8D/users",
+      );
+    });
+
+    it("getReactionUsers returns the reactor list", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ users: [{ id: 1, username: "alice", avatar: "" }] }),
+      );
+      const resp = await api.getReactionUsers(5, 42, "👍");
+      expect(resp.users).toHaveLength(1);
+      expect(resp.users[0]?.username).toBe("alice");
+    });
   });
 
   describe("config management", () => {
@@ -298,6 +342,15 @@ describe("API Client", () => {
       await api.updateProfile({ avatar: "data:image/png;base64,abc" });
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body.avatar).toBe("data:image/png;base64,abc");
+    });
+
+    it("updateProfile sends display_name and about, empty string included", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "u" }));
+      // "" is how the API says "clear it"; omitting a field means "leave it
+      // alone", so the two must not be collapsed on the way out.
+      await api.updateProfile({ username: "u", display_name: "Ada L.", about: "" });
+      const body = JSON.parse(fetchCallOpts().body as string);
+      expect(body).toEqual({ username: "u", display_name: "Ada L.", about: "" });
     });
 
     it("changePassword sends PUT /users/me/password", async () => {
@@ -471,6 +524,21 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/7/pins/99");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
+
+    it("purgeMessages posts the limit to /channels/{id}/messages/purge", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 7, ids: [3, 2], count: 2 }));
+      const result = await api.purgeMessages(7, 25);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/7/messages/purge");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(String(fetchCallOpts().body))).toEqual({ limit: 25 });
+      expect(result.count).toBe(2);
+    });
+
+    it("purgeMessages includes before only when supplied", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 7, ids: [], count: 0 }));
+      await api.purgeMessages(7, 10, { before: 42 });
+      expect(JSON.parse(String(fetchCallOpts().body))).toEqual({ limit: 10, before: 42 });
+    });
   });
 
   describe("search endpoint", () => {
@@ -511,6 +579,48 @@ describe("API Client", () => {
       // Should NOT set Content-Type (browser sets multipart boundary)
       expect(headers["Content-Type"]).toBeUndefined();
       expect(result).toEqual({ url: "https://cdn/file.png", filename: "file.png" });
+    });
+
+    it("uploadAvatar posts multipart to /users/me/avatar", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          id: "abc",
+          filename: "me.png",
+          size: 100,
+          mime: "image/png",
+          url: "/api/v1/files/abc",
+        }),
+      );
+      const file = new File(["png"], "me.png", { type: "image/png" });
+      const result = await api.uploadAvatar(file);
+
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/avatar");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(fetchCallOpts().body).toBeInstanceOf(FormData);
+      const headers = fetchCallOpts().headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer test-token");
+      // The browser has to set the multipart boundary itself.
+      expect(headers["Content-Type"]).toBeUndefined();
+      // The URL the server stored is what the caller needs back.
+      expect(result.url).toBe("/api/v1/files/abc");
+    });
+
+    it("uploadAvatar surfaces a rejected image as an ApiClientError", async () => {
+      mockFetch.mockResolvedValue(
+        errorResponse(400, "BAD_REQUEST", "avatar must be a PNG, JPEG or WebP image"),
+      );
+      const file = new File(["x"], "me.gif", { type: "image/gif" });
+      await expect(api.uploadAvatar(file)).rejects.toMatchObject({
+        status: 400,
+        code: "BAD_REQUEST",
+      });
+    });
+
+    it("uploadAvatar calls onUnauthorized on 401", async () => {
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
+      const file = new File(["x"], "me.png", { type: "image/png" });
+      await expect(api.uploadAvatar(file)).rejects.toMatchObject({ status: 401 });
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
     it("uploadFile throws ApiClientError on non-ok", async () => {
@@ -591,12 +701,49 @@ describe("API Client", () => {
   });
 
   describe("emoji endpoints", () => {
-    it("getEmoji calls GET /emoji", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([{ id: 1, name: "smile" }]));
-      const result = await api.getEmoji();
+    it("listEmoji calls GET /emoji", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse([{ id: 1, shortcode: "smile", url: "/api/v1/emoji/1/image" }]),
+      );
+      const result = await api.listEmoji();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/emoji");
       expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual([{ id: 1, name: "smile" }]);
+      expect(result).toEqual([{ id: 1, shortcode: "smile", url: "/api/v1/emoji/1/image" }]);
+    });
+
+    it("uploadEmoji POSTs multipart with the shortcode and file", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ id: 7, shortcode: "wave", url: "/api/v1/emoji/7/image" }, 201),
+      );
+      const file = new File(["png"], "wave.png", { type: "image/png" });
+      const result = await api.uploadEmoji("wave", file);
+
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/emoji");
+      const opts = fetchCallOpts();
+      expect(opts.method).toBe("POST");
+      const body = opts.body as FormData;
+      expect(body.get("shortcode")).toBe("wave");
+      expect(body.get("file")).toBe(file);
+      // The browser owns the multipart boundary — setting Content-Type breaks it.
+      expect((opts.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+      expect(result.shortcode).toBe("wave");
+    });
+
+    it("uploadEmoji calls onUnauthorized on 401", async () => {
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
+      const file = new File(["png"], "wave.png", { type: "image/png" });
+      await expect(api.uploadEmoji("wave", file)).rejects.toMatchObject({ status: 401 });
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it("uploadEmoji surfaces a 403 without calling onUnauthorized", async () => {
+      mockFetch.mockResolvedValue(errorResponse(403, "FORBIDDEN", "insufficient permissions"));
+      const file = new File(["png"], "wave.png", { type: "image/png" });
+      await expect(api.uploadEmoji("wave", file)).rejects.toMatchObject({
+        status: 403,
+        code: "FORBIDDEN",
+      });
+      expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
     it("deleteEmoji calls DELETE /emoji/{id}", async () => {
@@ -641,6 +788,35 @@ describe("API Client", () => {
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ recipient_id: 42 });
       expect(result).toEqual({ channel: { id: 10, type: "dm" } });
+    });
+
+    it("createGroupDm calls POST /dms/group with recipient_ids and a name", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, is_group: true }));
+      const result = await api.createGroupDm([2, 3], "Crew");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/group");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        recipient_ids: [2, 3],
+        name: "Crew",
+      });
+      expect(result).toEqual({ channel_id: 11, is_group: true });
+    });
+
+    it("createGroupDm sends an empty name when none is given", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11 }));
+      await api.createGroupDm([2, 3]);
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        recipient_ids: [2, 3],
+        name: "",
+      });
+    });
+
+    it("renameGroupDm calls PATCH /dms/{channelId}", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, name: "New" }));
+      await api.renameGroupDm(11, "New");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11");
+      expect(fetchCallOpts().method).toBe("PATCH");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ name: "New" });
     });
 
     it("closeDm calls DELETE /dms/{channelId}", async () => {

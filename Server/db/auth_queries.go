@@ -180,11 +180,23 @@ func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) e
 	return nil
 }
 
-// ResetAllUserStatuses sets all users to "offline". Called on server startup
-// to clear stale statuses from a previous run or crash.
+// ResetAllUserStatuses clears the "online" status left behind by a previous
+// run or crash. Called on server startup. Chosen statuses (idle/dnd/invisible)
+// are left standing — they are what the user picked, not evidence of a session,
+// and the read path already renders a user with no live connection as offline.
 func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	if err := d.q.ResetAllUserStatuses(ctx); err != nil {
 		return fmt.Errorf("ResetAllUserStatuses: %w", err)
+	}
+	return nil
+}
+
+// MarkUserDisconnected records that a user's last session went away: last_seen
+// is refreshed and "online" falls back to "offline", while a chosen
+// idle/dnd/invisible is preserved for the next connect to honour.
+func (d *DB) MarkUserDisconnected(ctx context.Context, userID int64) error {
+	if err := d.q.MarkUserDisconnected(ctx, userID); err != nil {
+		return fmt.Errorf("MarkUserDisconnected: %w", err)
 	}
 	return nil
 }
@@ -502,6 +514,20 @@ type MemberSummary struct {
 	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
 	// user has not published one.
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
+	// DisplayName is the nickname to render instead of Username. Null when
+	// unset; clients fall back to Username.
+	DisplayName *string `json:"display_name"`
+	// CustomStatus is the free-text status line shown under the name. Null
+	// when unset.
+	CustomStatus *string `json:"custom_status"`
+}
+
+// ForViewer returns a copy of the summary as viewerID may see it: an invisible
+// member is offline to everyone but themselves. Ready payloads go through this
+// so "who is invisible" is decided in exactly one place.
+func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
+	m.Status = StatusForViewer(m.Status, m.ID, viewerID)
+	return m
 }
 
 // ListMembers returns non-banned users as lightweight summaries.
@@ -520,6 +546,8 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 			Status:            r.Status,
 			Role:              r.Lower,
 			IdentityPublicKey: r.IdentityPublicKey,
+			DisplayName:       r.DisplayName,
+			CustomStatus:      r.CustomStatus,
 		})
 	}
 	return members, nil

@@ -20,11 +20,14 @@ type Store interface {
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
 	CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*db.Message, error)
+	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error)
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
+	PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error)
 	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
 	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
@@ -32,8 +35,20 @@ type Store interface {
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
+	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
 	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
+
+	// ── Mentions ──
+	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
+	GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error)
+	IncrementMentionCounts(ctx context.Context, channelID int64, userIDs []int64) error
+	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
+	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
+	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
@@ -46,8 +61,17 @@ type Store interface {
 	DeleteChannel(ctx context.Context, id int64) error
 	SetChannelSlowMode(ctx context.Context, id int64, slowMode int) error
 	SetChannelVoiceMaxUsers(ctx context.Context, id int64, maxUsers int) error
+	// GetChannelPermissions / GetUserChannelPermissions are the two single-row
+	// override lookups permissions.DB requires (Store is passed straight to
+	// permissions.NewChecker).
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
+	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
 	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
+	// GetChannelOverridesFor merges the role and per-user override layers for
+	// one member in two batch queries — the single fetch behind every
+	// "what can this member do here" site, and the reason no site pays an N+1
+	// for the second layer.
+	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
 	GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// ── Users ──
@@ -56,7 +80,8 @@ type Store interface {
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error)
-	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar *string) error
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
+	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
@@ -84,6 +109,21 @@ type Store interface {
 	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
 	GetUserWithRole(ctx context.Context, userID int64) (*db.User, *db.Role, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
+	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
+	GetDefaultRole(ctx context.Context) (*db.Role, error)
+	CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*db.Role, error)
+	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error
+	SetRolePositions(ctx context.Context, positions map[int64]int) error
+	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
+	CountRoleMembers(ctx context.Context) (map[int64]int, error)
+
+	// ── Emoji ──
+	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
+	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
+	GetEmojiByShortcode(ctx context.Context, shortcode string) (*db.Emoji, error)
+	CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*db.Emoji, error)
+	DeleteEmoji(ctx context.Context, id int64) (bool, error)
 
 	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
@@ -119,6 +159,12 @@ type Store interface {
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
+	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
+	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
+	CountDMParticipants(ctx context.Context, channelID int64) (int, error)
+	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
+	SetDMChannelName(ctx context.Context, channelID int64, name string) error
+	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
 	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
@@ -142,7 +188,7 @@ type Store interface {
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
 	GetAuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error)
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
-	AdminUpdateChannel(ctx context.Context, id int64, name, topic string, slowMode, position int, archived bool) error
+	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminDeleteChannel(ctx context.Context, id int64) error
 	BackupTo(ctx context.Context, path string) error
 	BackupToSafe(ctx context.Context, path, safeRoot string) error

@@ -109,8 +109,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database, svc)
 
-	// Channel and message REST routes.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
+	// Channel and message REST routes are mounted after hub creation (below)
+	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
 
 	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
 	// with no key configured the endpoints answer 503 GIF_DISABLED so the
@@ -208,11 +208,29 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	MountProfileRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+	// A storage failure leaves store unusable, so the avatar-upload route is
+	// simply not registered; the rest of the profile surface is unaffected.
+	profileStore := store
+	if storeErr != nil {
+		profileStore = nil
+	}
+	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, svc, hub)
+
+	// Channel and message REST routes — mounted after hub creation so a
+	// message purge can broadcast chat_bulk_deleted to the channel.
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+
+	// Custom emoji REST routes — mounted after hub creation so an upload or a
+	// delete can fan the new set out as an emoji_update. Requires the same file
+	// storage the attachment routes use; without it the emoji endpoints are not
+	// mounted at all (a 404 the client reads as "this server has no emoji").
+	if storeErr == nil {
+		MountEmojiRoutes(r, database, svc, store, limiter, hub)
+	}
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -246,7 +264,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation,
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation, svc.Roles,
 		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))

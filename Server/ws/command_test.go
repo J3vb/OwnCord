@@ -17,6 +17,7 @@ func allClientToServerTypes() []string {
 		MsgTypeTypingStart,
 		MsgTypePresenceUpdate,
 		MsgTypeChannelFocus,
+		MsgTypeMarkRead,
 		MsgTypeReactionAdd,
 		MsgTypeReactionRemove,
 		MsgTypeVoiceJoin,
@@ -53,6 +54,7 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		{"TypingStartCmd", TypingStartCmd{userID: 5, channelID: 11}, MsgTypeTypingStart, 5},
 		{"PresenceUpdateCmd", PresenceUpdateCmd{userID: 6, status: "online"}, MsgTypePresenceUpdate, 6},
 		{"ChannelFocusCmd", ChannelFocusCmd{userID: 7, channelID: 12}, MsgTypeChannelFocus, 7},
+		{"MarkReadCmd", MarkReadCmd{userID: 7, channelID: 12}, MsgTypeMarkRead, 7},
 		{"ReactionAddCmd", ReactionAddCmd{userID: 8, messageID: 40, emoji: "👍"}, MsgTypeReactionAdd, 8},
 		{"ReactionRemoveCmd", ReactionRemoveCmd{userID: 9, messageID: 41, emoji: "👎"}, MsgTypeReactionRemove, 9},
 		{"VoiceJoinCmd", VoiceJoinCmd{userID: 10, channelID: 13}, MsgTypeVoiceJoin, 10},
@@ -87,6 +89,7 @@ func TestCommandChannelScoped(t *testing.T) {
 		{"ChatSendCmd", ChatSendCmd{channelID: 100}, 100, true},
 		{"TypingStartCmd", TypingStartCmd{channelID: 200}, 200, true},
 		{"ChannelFocusCmd", ChannelFocusCmd{channelID: 300}, 300, true},
+		{"MarkReadCmd", MarkReadCmd{channelID: 301}, 301, true},
 		{"VoiceJoinCmd", VoiceJoinCmd{channelID: 400}, 400, true},
 		{"PingCmd", PingCmd{userID: 1}, 0, false},
 		{"VoiceLeaveCmd", VoiceLeaveCmd{userID: 1}, 0, false},
@@ -197,6 +200,17 @@ func TestCommandConstructorParseValid(t *testing.T) {
 				cf := cmd.(ChannelFocusCmd)
 				if cf.ChannelID() != 33 {
 					t.Errorf("ChannelID() = %d, want 33", cf.ChannelID())
+				}
+			},
+		},
+		{
+			name:    "mark_read",
+			msgType: MsgTypeMarkRead,
+			payload: `{"channel_id": 34}`,
+			checkFn: func(t *testing.T, cmd Command) {
+				mr := cmd.(MarkReadCmd)
+				if mr.ChannelID() != 34 {
+					t.Errorf("ChannelID() = %d, want 34", mr.ChannelID())
 				}
 			},
 		},
@@ -356,6 +370,7 @@ func TestCommandConstructorRejectsInvalidJSON(t *testing.T) {
 		MsgTypeTypingStart,
 		MsgTypePresenceUpdate,
 		MsgTypeChannelFocus,
+		MsgTypeMarkRead,
 		MsgTypeReactionAdd,
 		MsgTypeReactionRemove,
 		MsgTypeVoiceJoin,

@@ -11,8 +11,13 @@ import {
   setActiveChannel,
   getActiveChannel,
   getChannelsByCategory,
+  getKnownCategories,
+  displayCategoryOf,
+  UNCATEGORIZED_VOICE_CATEGORY,
   incrementUnread,
+  incrementMention,
   clearUnread,
+  getUnreadOnOpen,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
 
@@ -72,10 +77,14 @@ describe("channels store", () => {
         category: "Text",
         position: 0,
         unreadCount: 3,
+        mentionCount: 0,
         lastMessageId: 100,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
 
       const voice = state.channels.get(2);
@@ -86,10 +95,14 @@ describe("channels store", () => {
         category: "Voice",
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
     });
 
@@ -125,10 +138,14 @@ describe("channels store", () => {
         category: "Text",
         position: 2,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
     });
 
@@ -290,10 +307,14 @@ describe("channels store", () => {
         category: "Text",
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: 100,
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
     });
 
@@ -333,6 +354,147 @@ describe("channels store", () => {
     it("returns empty map when no channels", () => {
       const grouped = getChannelsByCategory();
       expect(grouped.size).toBe(0);
+    });
+
+    // No category name is magic: a voice channel groups under whatever it
+    // carries, and text/voice channels share a category happily.
+    it("groups a voice channel under an arbitrary category alongside text", () => {
+      setChannels([
+        { id: 1, name: "chat", type: "text", category: "Gaming", position: 0 },
+        { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
+      ]);
+
+      const grouped = getChannelsByCategory();
+      expect(grouped.size).toBe(1);
+      expect(grouped.get("Gaming")?.map((c) => c.name)).toEqual(["chat", "lounge"]);
+    });
+
+    it("falls back to a Voice group only for uncategorized voice channels", () => {
+      setChannels([
+        { id: 1, name: "loose-text", type: "text", category: null, position: 0 },
+        { id: 2, name: "loose-voice", type: "voice", category: null, position: 1 },
+        { id: 3, name: "blank-voice", type: "voice", category: "", position: 2 },
+      ]);
+
+      const grouped = getChannelsByCategory();
+      expect(grouped.get(null)?.map((c) => c.name)).toEqual(["loose-text"]);
+      expect(grouped.get(UNCATEGORIZED_VOICE_CATEGORY)?.map((c) => c.name)).toEqual([
+        "loose-voice",
+        "blank-voice",
+      ]);
+    });
+
+    it("keeps DM channels out of every group", () => {
+      setChannels([
+        { id: 1, name: "chat", type: "text", category: "Gaming", position: 0 },
+        { id: 2, name: "dm", type: "dm", category: null, position: 0 },
+      ]);
+      const grouped = getChannelsByCategory();
+      expect(grouped.size).toBe(1);
+      expect(grouped.has(null)).toBe(false);
+    });
+  });
+
+  describe("displayCategoryOf", () => {
+    it("prefers the channel's own category over the voice fallback", () => {
+      setChannels([{ id: 1, name: "lounge", type: "voice", category: "Gaming", position: 0 }]);
+      const channel = channelsStore.getState().channels.get(1)!;
+      expect(displayCategoryOf(channel)).toBe("Gaming");
+    });
+
+    it("returns null for an uncategorized text channel", () => {
+      setChannels([{ id: 1, name: "loose", type: "text", category: null, position: 0 }]);
+      const channel = channelsStore.getState().channels.get(1)!;
+      expect(displayCategoryOf(channel)).toBeNull();
+    });
+  });
+
+  describe("getKnownCategories", () => {
+    it("returns distinct non-empty categories, sorted, DMs excluded", () => {
+      setChannels([
+        { id: 1, name: "a", type: "text", category: "Zeta", position: 0 },
+        { id: 2, name: "b", type: "voice", category: "Alpha", position: 1 },
+        { id: 3, name: "c", type: "text", category: "Alpha", position: 2 },
+        { id: 4, name: "d", type: "text", category: null, position: 3 },
+        { id: 5, name: "e", type: "text", category: "", position: 4 },
+        { id: 6, name: "dm", type: "dm", category: "Hidden", position: 5 },
+      ]);
+
+      expect(getKnownCategories()).toEqual(["Alpha", "Zeta"]);
+    });
+
+    it("returns an empty list when nothing is categorized", () => {
+      setChannels([{ id: 1, name: "a", type: "text", category: null, position: 0 }]);
+      expect(getKnownCategories()).toEqual([]);
+    });
+  });
+
+  describe("mention counts", () => {
+    it("reads mention_count from the ready payload", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+    });
+
+    it("defaults to 0 when an older server omits mention_count", () => {
+      setChannels(readyChannels);
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    });
+
+    it("increments the mention count for a non-active channel", () => {
+      setChannels(readyChannels);
+
+      incrementMention(1);
+      incrementMention(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+    });
+
+    it("skips increment for the active channel", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+
+      incrementMention(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    });
+
+    it("is a no-op for an unknown channel id", () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      incrementMention(999);
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+
+    it("clears on activation alongside unread", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+
+      setActiveChannel(1);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(0);
+    });
+
+    it("clears via clearUnread", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+
+      clearUnread(1);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(0);
+    });
+
+    it("leaves a mention-only channel's badge clearing to activation", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 0, mention_count: 3 }]);
+
+      // Previously setActiveChannel bailed early when unreadCount was 0; a
+      // mention-only channel must still have its badge cleared.
+      setActiveChannel(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
     });
   });
 
@@ -425,6 +587,31 @@ describe("channels store", () => {
     it("returns undefined when no roles set", () => {
       expect(getRoleIdByName("admin")).toBeUndefined();
     });
+
+    // Role CRUD makes the list mutable at runtime, so these lookups have to
+    // track a replacement list rather than the one shipped in `ready`.
+    it("resolves a custom role added after the initial role list", () => {
+      setRoles([{ id: 4, name: "Member", color: null, permissions: 0 }]);
+      expect(getRoleIdByName("contractor")).toBeUndefined();
+
+      setRoles([
+        { id: 4, name: "Member", color: null, permissions: 0 },
+        { id: 9, name: "Contractor", color: "#123456", permissions: 3, position: 30 },
+      ]);
+      // Case-insensitive, which is safe because the server enforces role names
+      // to be unique case-insensitively (migration 023).
+      expect(getRoleIdByName("contractor")).toBe(9);
+      expect(getRoleIdByName("CONTRACTOR")).toBe(9);
+    });
+
+    it("stops resolving a role's old name after it is renamed", () => {
+      setRoles([{ id: 9, name: "Contractor", color: null, permissions: 0 }]);
+      expect(getRoleIdByName("contractor")).toBe(9);
+
+      setRoles([{ id: 9, name: "Partner", color: null, permissions: 0 }]);
+      expect(getRoleIdByName("contractor")).toBeUndefined();
+      expect(getRoleIdByName("partner")).toBe(9);
+    });
   });
 
   describe("updateChannelPosition", () => {
@@ -507,6 +694,63 @@ describe("channels store", () => {
     });
   });
 
+  // The badge is cleared the moment a channel is opened, which destroys the
+  // only record of where the reader had got to. MessageList needs that number
+  // to place the "NEW" divider, so setActiveChannel snapshots it first.
+  describe("getUnreadOnOpen", () => {
+    it("is 0 for a channel that was never opened", () => {
+      setChannels(readyChannels);
+      expect(getUnreadOnOpen(1)).toBe(0);
+    });
+
+    it("captures the unread count as it was before the visit cleared it", () => {
+      setChannels(readyChannels); // channel 1 starts at 3 unread
+      incrementUnread(1);
+      incrementUnread(1);
+
+      setActiveChannel(1);
+
+      expect(getUnreadOnOpen(1)).toBe(5);
+      // …and the badge itself is gone.
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
+    });
+
+    it("resets to 0 on the next visit, which is what clears the divider", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(3);
+
+      setActiveChannel(null);
+      setActiveChannel(1);
+
+      expect(getUnreadOnOpen(1)).toBe(0);
+    });
+
+    it("is per channel", () => {
+      setChannels(readyChannels);
+      incrementUnread(3);
+      incrementUnread(3);
+
+      setActiveChannel(1);
+      setActiveChannel(3);
+
+      expect(getUnreadOnOpen(1)).toBe(3);
+      expect(getUnreadOnOpen(3)).toBe(2);
+    });
+
+    // A fresh ready payload restates unread from the server; a snapshot from
+    // the previous connection describes a read position that no longer applies.
+    it("is dropped by a new ready payload", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(3);
+
+      setChannels(readyChannels);
+
+      expect(getUnreadOnOpen(1)).toBe(0);
+    });
+  });
+
   describe("updateChannel — no changes", () => {
     it("still creates new object when neither name nor position is provided", () => {
       setChannels(readyChannels);
@@ -517,6 +761,153 @@ describe("channels store", () => {
       const ch = channelsStore.getState().channels.get(1);
       expect(ch?.name).toBe("general");
       expect(ch?.position).toBe(0);
+    });
+  });
+  // ─── Channel feature flags ───────────────────────────────────────────────
+  //
+  // nsfw and the two voice limits arrive in `ready`, in channel_create and in
+  // channel_update, and the store is what the sidebar and the edit modal read.
+  // The interesting cases are all about ABSENCE: an older server omits the
+  // keys, and a partial channel_update carries only what changed.
+
+  describe("channel feature flags", () => {
+    it("reads the flags out of the ready payload", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "spicy",
+          type: "text",
+          category: null,
+          position: 0,
+          nsfw: true,
+        },
+        {
+          id: 2,
+          name: "lounge",
+          type: "voice",
+          category: null,
+          position: 1,
+          voice_max_users: 5,
+          voice_max_video: 2,
+        },
+      ]);
+
+      const spicy = channelsStore.getState().channels.get(1);
+      expect(spicy?.nsfw).toBe(true);
+      expect(spicy?.voiceMaxUsers).toBe(0);
+
+      const lounge = channelsStore.getState().channels.get(2);
+      expect(lounge?.nsfw).toBe(false);
+      expect(lounge?.voiceMaxUsers).toBe(5);
+      expect(lounge?.voiceMaxVideo).toBe(2);
+    });
+
+    it("defaults to unflagged and unlimited when a server omits the keys", () => {
+      setChannels([{ id: 1, name: "general", type: "text", category: null, position: 0 }]);
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.nsfw).toBe(false);
+      expect(ch?.voiceMaxUsers).toBe(0);
+      expect(ch?.voiceMaxVideo).toBe(0);
+    });
+
+    it("reads the flags off a channel_create broadcast", () => {
+      addChannel({
+        id: 9,
+        name: "lounge",
+        type: "voice",
+        category: null,
+        position: 0,
+        nsfw: true,
+        voice_max_users: 4,
+        voice_max_video: 1,
+      } as ChannelCreatePayload);
+
+      const ch = channelsStore.getState().channels.get(9);
+      expect(ch?.nsfw).toBe(true);
+      expect(ch?.voiceMaxUsers).toBe(4);
+      expect(ch?.voiceMaxVideo).toBe(1);
+    });
+
+    it("applies a channel_update that flips the flags", () => {
+      setChannels([{ id: 1, name: "general", type: "text", category: null, position: 0 }]);
+
+      updateChannel({
+        id: 1,
+        nsfw: true,
+        slow_mode: 30,
+        voice_max_users: 7,
+        voice_max_video: 3,
+      } as ChannelUpdatePayload);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.nsfw).toBe(true);
+      expect(ch?.slowMode).toBe(30);
+      expect(ch?.voiceMaxUsers).toBe(7);
+      expect(ch?.voiceMaxVideo).toBe(3);
+    });
+
+    it("clears the flag when a channel_update says false", () => {
+      setChannels([
+        { id: 1, name: "spicy", type: "text", category: null, position: 0, nsfw: true },
+      ]);
+
+      updateChannel({ id: 1, nsfw: false } as ChannelUpdatePayload);
+
+      expect(channelsStore.getState().channels.get(1)?.nsfw).toBe(false);
+    });
+
+    // An older server's channel_update carries only name/position. Treating the
+    // missing keys as "cleared" would drop the flag on the first rename.
+    it("leaves flags alone when a partial update omits them", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "spicy",
+          type: "text",
+          category: null,
+          position: 0,
+          nsfw: true,
+          slow_mode: 15,
+          voice_max_users: 6,
+        },
+      ]);
+
+      updateChannel({ id: 1, name: "spicier" } as ChannelUpdatePayload);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.name).toBe("spicier");
+      expect(ch?.nsfw).toBe(true);
+      expect(ch?.slowMode).toBe(15);
+      expect(ch?.voiceMaxUsers).toBe(6);
+    });
+
+    it("moves a channel between categories on a channel_update", () => {
+      setChannels([{ id: 1, name: "general", type: "text", category: "Chat", position: 0 }]);
+
+      updateChannel({ id: 1, category: "Hangout" } as ChannelUpdatePayload);
+
+      expect(channelsStore.getState().channels.get(1)?.category).toBe("Hangout");
+    });
+
+    // "" is a real value — it is how a channel becomes uncategorized — so it
+    // must not be confused with "the server did not send a category".
+    it("uncategorizes on an empty-string category", () => {
+      setChannels([{ id: 1, name: "general", type: "text", category: "Chat", position: 0 }]);
+
+      updateChannel({ id: 1, category: "" } as ChannelUpdatePayload);
+
+      expect(channelsStore.getState().channels.get(1)?.category).toBe("");
+    });
+
+    it("keeps the store immutable across a flag update", () => {
+      setChannels([{ id: 1, name: "general", type: "text", category: null, position: 0 }]);
+      const before = channelsStore.getState().channels.get(1);
+
+      updateChannel({ id: 1, nsfw: true } as ChannelUpdatePayload);
+
+      const after = channelsStore.getState().channels.get(1);
+      expect(after).not.toBe(before);
+      expect(before?.nsfw).toBe(false);
     });
   });
 });

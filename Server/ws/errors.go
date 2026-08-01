@@ -18,4 +18,7 @@ const (
 	ErrCodeConflict      = "CONFLICT"
 	ErrCodeBadPayload    = "BAD_PAYLOAD"
 	ErrCodeNotKeyHolder  = "NOT_KEY_HOLDER"
+	// Returned when a user tries to lift a moderator-imposed voice state.
+	ErrCodeServerMuted    = "SERVER_MUTED"
+	ErrCodeServerDeafened = "SERVER_DEAFENED"
 )

@@ -36,10 +36,14 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
     channelId: 100,
     recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+    participants: [],
+    name: "",
+    isGroup: false,
     lastMessageId: null,
     lastMessage: "",
     lastMessageAt: "",
     unreadCount: 0,
+    mentionCount: 0,
     ...overrides,
   };
 }

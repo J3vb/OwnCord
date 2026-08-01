@@ -45,9 +45,14 @@ func getPermChannel(database *db.DB, w http.ResponseWriter, r *http.Request) *db
 }
 
 // channelPermissionsResponse is the JSON shape for GET .../permissions.
+// Roles lists EVERY role (zero allow/deny when it carries no override), while
+// Users lists only the members who actually have a per-user override row —
+// every member of a server is not a sensible list to ship, and the matrix
+// editor adds a member by writing one.
 type channelPermissionsResponse struct {
 	ChannelID int64                    `json:"channel_id"`
 	Roles     []db.ChannelRoleOverride `json:"roles"`
+	Users     []db.ChannelUserOverride `json:"users"`
 }
 
 func handleGetChannelPermissions(database *db.DB) http.HandlerFunc {
@@ -61,7 +66,16 @@ func handleGetChannelPermissions(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
 			return
 		}
-		writeJSON(w, http.StatusOK, channelPermissionsResponse{ChannelID: ch.ID, Roles: overrides})
+		userOverrides, err := database.ListChannelUserOverrides(r.Context(), ch.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel user permissions")
+			return
+		}
+		writeJSON(w, http.StatusOK, channelPermissionsResponse{
+			ChannelID: ch.ID,
+			Roles:     overrides,
+			Users:     userOverrides,
+		})
 	}
 }
 
@@ -153,6 +167,119 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 
 		if permInvalidator != nil {
 			permInvalidator.InvalidateAll()
+		}
+		if hub != nil {
+			hub.RefreshChannelVisibility(ch)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ─── Per-user overrides ──────────────────────────────────────────────────────
+//
+// channel_user_overrides is the last layer of the resolution order (base role
+// perms -> role override -> user override), so these two endpoints can grant a
+// single member access to a channel their role is denied, or take it away
+// without minting a role for them.
+//
+// Unlike the role endpoints they invalidate only the target user's cached
+// permissions (InvalidateUser): a per-user override cannot change anyone else's
+// verdict, and blowing the whole cache away for one member would cost every
+// connected client a repopulate.
+
+// getPermUser resolves the {userId} path parameter for a per-user override
+// request, writing the error response itself. Returns nil when a response has
+// already been written.
+func getPermUser(database *db.DB, w http.ResponseWriter, r *http.Request) *db.User {
+	userID, err := pathInt64(r, "userId")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+		return nil
+	}
+	user, err := database.GetUserByID(r.Context(), userID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+		return nil
+	}
+	if user == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+		return nil
+	}
+	return user
+}
+
+func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch := getPermChannel(database, w, r)
+		if ch == nil {
+			return
+		}
+		user := getPermUser(database, w, r)
+		if user == nil {
+			return
+		}
+
+		var req putChannelPermissionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			return
+		}
+		// Drop unknown bits so garbage input cannot persist undefined perms.
+		allow := req.Allow & permissions.AllPerms
+		deny := req.Deny & permissions.AllPerms
+
+		if err := database.UpsertChannelUserOverride(r.Context(), ch.ID, user.ID, allow, deny); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save channel user permission")
+			return
+		}
+
+		actor := actorFromContext(r)
+		slog.Info("channel user permissions updated", "actor_id", actor, "channel_id", ch.ID,
+			"user_id", user.ID, "allow", allow, "deny", deny)
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_user_perms_update", "channel", ch.ID,
+			fmt.Sprintf("set overrides for user %s on #%s (allow=%#x deny=%#x)", user.Username, ch.Name, allow, deny))
+
+		// Invalidate BEFORE the hub call: RefreshChannelVisibility resolves the
+		// target's visibility through the same cache (see handlePutChannelPermission).
+		if permInvalidator != nil {
+			permInvalidator.InvalidateUser(user.ID)
+		}
+		if hub != nil {
+			hub.RefreshChannelVisibility(ch)
+		}
+		writeJSON(w, http.StatusOK, db.ChannelUserOverride{
+			UserID:   user.ID,
+			Username: user.Username,
+			RoleID:   user.RoleID,
+			Allow:    allow,
+			Deny:     deny,
+		})
+	}
+}
+
+func handleDeleteChannelUserPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch := getPermChannel(database, w, r)
+		if ch == nil {
+			return
+		}
+		user := getPermUser(database, w, r)
+		if user == nil {
+			return
+		}
+
+		if err := database.DeleteChannelUserOverride(r.Context(), ch.ID, user.ID); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel user permission")
+			return
+		}
+
+		actor := actorFromContext(r)
+		slog.Info("channel user permissions cleared", "actor_id", actor, "channel_id", ch.ID, "user_id", user.ID)
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_user_perms_clear", "channel", ch.ID,
+			fmt.Sprintf("cleared overrides for user %s on #%s", user.Username, ch.Name))
+
+		if permInvalidator != nil {
+			permInvalidator.InvalidateUser(user.ID)
 		}
 		if hub != nil {
 			hub.RefreshChannelVisibility(ch)

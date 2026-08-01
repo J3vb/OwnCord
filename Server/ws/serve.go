@@ -194,12 +194,37 @@ func (h *Hub) handleReconnect(
 	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
 
 	// Update presence but skip member_join — user was already known.
-	if updateErr := database.UpdateUserStatus(ctx, c.userID, "online"); updateErr != nil {
-		slog.Warn("ws UpdateUserStatus", "err", updateErr)
-	}
-	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
+	applyConnectStatus(ctx, database, c)
+	h.announceConnectPresence(c)
 
 	return true
+}
+
+// applyConnectStatus writes the status this session comes online as and caches
+// it on the client.
+//
+// It is db.ConnectStatus(saved) rather than a flat "online": stamping online on
+// every connect is what made a saved Do Not Disturb — and, before this phase,
+// an "appear offline" — flash back to online on every reconnect, with the
+// client racing to re-assert its choice afterwards. idle/dnd/invisible are
+// deliberate choices and survive; anything else becomes online. The write still
+// happens when the status is unchanged, because UpdateUserStatus also refreshes
+// last_seen.
+//
+// It runs BEFORE the ready payload is built so the member list the client is
+// handed already agrees with the presence broadcast that follows it.
+func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
+	status := db.ConnectStatus(c.user.Status)
+	if updateErr := database.UpdateUserStatus(ctx, c.userID, status); updateErr != nil {
+		slog.Warn("ws UpdateUserStatus", "err", updateErr)
+	}
+	c.user.Status = status
+}
+
+// announceConnectPresence fans out the status applyConnectStatus settled on,
+// with the invisible mapping applied.
+func (h *Hub) announceConnectPresence(c *Client) {
+	h.BroadcastPresence(c.userID, c.user.Status, c.user.CustomStatus)
 }
 
 // computeAllowedChannels returns the set of channel IDs a user may access,
@@ -224,9 +249,9 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user 
 	if role != nil {
 		var overrides map[int64]db.ChannelOverride
 		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetAllChannelPermissionsForRole(ctx, role.ID)
+			overrides, err = database.GetChannelOverridesFor(ctx, role.ID, user.ID)
 			if err != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", err)
+				return nil, fmt.Errorf("computeAllowedChannels GetChannelOverridesFor: %w", err)
 			}
 		}
 		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
@@ -315,6 +340,10 @@ func (h *Hub) handleFreshConnect(
 	}
 	h.registerNow(c, allowedChannelIDs)
 
+	// Settle the session's status before buildReady reads the member list, so
+	// the ready payload and the presence broadcast below cannot disagree.
+	applyConnectStatus(ctx, database, c)
+
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
 	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
@@ -340,13 +369,9 @@ func (h *Hub) handleFreshConnect(
 		return readyErr
 	}
 
-	if updateErr := database.UpdateUserStatus(ctx, c.userID, "online"); updateErr != nil {
-		slog.Warn("ws UpdateUserStatus", "err", updateErr)
-	}
-
 	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
 	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
-	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
+	h.announceConnectPresence(c)
 
 	return nil
 }

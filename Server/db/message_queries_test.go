@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -332,6 +334,149 @@ func TestDeleteMessage_NotFound(t *testing.T) {
 	err := database.DeleteMessage(context.Background(), 9999, userID, true)
 	if err == nil {
 		t.Error("DeleteMessage non-existent should return error")
+	}
+}
+
+// ─── PurgeChannelMessages ─────────────────────────────────────────────────────
+
+// purgeSeed inserts n messages into a fresh channel and returns the database,
+// the channel id, and the message ids in insertion (oldest-first) order.
+func purgeSeed(t *testing.T, n int) (*db.DB, int64, []int64) {
+	t.Helper()
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "purger")
+	chID := seedChannel(t, database, "purge-ch")
+	ids := make([]int64, 0, n)
+	for i := range n {
+		id, err := database.CreateMessage(context.Background(), chID, userID,
+			"msg"+strconv.Itoa(i), nil)
+		if err != nil {
+			t.Fatalf("CreateMessage %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	return database, chID, ids
+}
+
+func TestPurgeChannelMessages_DeletesNewestFirst(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 5)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 2)
+	if err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+	want := []int64{ids[4], ids[3]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("purged ids = %v, want %v", got, want)
+	}
+	for _, id := range want {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg == nil || !msg.Deleted {
+			t.Errorf("message %d should be soft-deleted", id)
+		}
+	}
+	for _, id := range ids[:3] {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg == nil || msg.Deleted {
+			t.Errorf("message %d should be untouched", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_PreservesTombstones(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 3)
+
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 3); err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+
+	// The rows must survive with their content, so tombstones render and
+	// reply_to targets still resolve — exactly as a single soft delete.
+	for _, id := range ids {
+		msg, err := database.GetMessage(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetMessage(%d): %v", id, err)
+		}
+		if msg == nil {
+			t.Fatalf("message %d was hard-deleted", id)
+		}
+		if !msg.Deleted {
+			t.Errorf("message %d not marked deleted", id)
+		}
+		if msg.Content == "" {
+			t.Errorf("message %d lost its content", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_SkipsAlreadyDeleted(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 4)
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 1); err != nil {
+		t.Fatalf("first purge: %v", err)
+	}
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 10)
+	if err != nil {
+		t.Fatalf("second purge: %v", err)
+	}
+	want := []int64{ids[2], ids[1], ids[0]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("second purge ids = %v, want %v", got, want)
+	}
+}
+
+func TestPurgeChannelMessages_BeforeCursor(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 5)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, ids[2], 10)
+	if err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+	want := []int64{ids[1], ids[0]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("purged ids = %v, want %v", got, want)
+	}
+	for _, id := range ids[2:] {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg.Deleted {
+			t.Errorf("message %d at/after the cursor should be untouched", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_OtherChannelsUntouched(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 2)
+	otherCh := seedChannel(t, database, "other")
+	otherID, _ := database.CreateMessage(context.Background(), otherCh, ids[0], "keep", nil)
+
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 100); err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+
+	msg, _ := database.GetMessage(context.Background(), otherID)
+	if msg == nil || msg.Deleted {
+		t.Error("a message in another channel was purged")
+	}
+}
+
+func TestPurgeChannelMessages_EmptyChannelAndZeroLimit(t *testing.T) {
+	database, chID, _ := purgeSeed(t, 1)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 0)
+	if err != nil {
+		t.Fatalf("zero limit: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("zero limit purged %v, want none", got)
+	}
+
+	emptyCh := seedChannel(t, database, "empty")
+	got, err = database.PurgeChannelMessages(context.Background(), emptyCh, 0, 50)
+	if err != nil {
+		t.Fatalf("empty channel: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("empty channel returned %v, want empty non-nil slice", got)
 	}
 }
 
@@ -681,6 +826,147 @@ func TestGetMessagesForAPI_ExcludesDeleted(t *testing.T) {
 	}
 }
 
+// ─── GetMessagesAroundForAPI ────────────────────────────────────────────────
+
+// seedAroundMessages fills a channel with n messages and returns their ids in
+// ascending order.
+func seedAroundMessages(t *testing.T, database *db.DB, chID, userID int64, n int) []int64 {
+	t.Helper()
+	ids := make([]int64, 0, n)
+	for i := range n {
+		id, err := database.CreateMessage(context.Background(), chID, userID, "m"+strconv.Itoa(i), nil)
+		if err != nil {
+			t.Fatalf("CreateMessage %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func TestGetMessagesAroundForAPI_CentersAndOrdersAscending(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu1")
+	chID := seedChannel(t, database, "aroundc1")
+	ids := seedAroundMessages(t, database, chID, userID, 20)
+
+	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[10], 3, 2, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI: %v", err)
+	}
+	// 3 older + centre + 2 newer.
+	want := []int64{ids[7], ids[8], ids[9], ids[10], ids[11], ids[12]}
+	got := make([]int64, 0, len(msgs))
+	for _, m := range msgs {
+		got = append(got, m.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("window = %v, want %v", got, want)
+	}
+}
+
+func TestGetMessagesAroundForAPI_ClampsAtChannelEdges(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu2")
+	chID := seedChannel(t, database, "aroundc2")
+	ids := seedAroundMessages(t, database, chID, userID, 4)
+
+	first, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[0], 10, 10, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI(first): %v", err)
+	}
+	if len(first) != 4 || first[0].ID != ids[0] {
+		t.Errorf("window at the first message = %d entries starting at %d, want 4 starting at %d",
+			len(first), first[0].ID, ids[0])
+	}
+
+	last, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[3], 10, 10, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI(last): %v", err)
+	}
+	if len(last) != 4 || last[len(last)-1].ID != ids[3] {
+		t.Errorf("window at the last message = %d entries ending at %d, want 4 ending at %d",
+			len(last), last[len(last)-1].ID, ids[3])
+	}
+}
+
+func TestGetMessagesAroundForAPI_ExcludesDeleted(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu3")
+	chID := seedChannel(t, database, "aroundc3")
+	ids := seedAroundMessages(t, database, chID, userID, 5)
+	if err := database.DeleteMessage(context.Background(), ids[1], userID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[2], 5, 5, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI: %v", err)
+	}
+	for _, m := range msgs {
+		if m.ID == ids[1] {
+			t.Fatalf("deleted message %d present in the window", ids[1])
+		}
+	}
+	if len(msgs) != 4 {
+		t.Errorf("window size = %d, want 4", len(msgs))
+	}
+}
+
+func TestGetMessagesAroundForAPI_ScopedToChannel(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu4")
+	chA := seedChannel(t, database, "aroundc4a")
+	chB := seedChannel(t, database, "aroundc4b")
+	idsA := seedAroundMessages(t, database, chA, userID, 3)
+	seedAroundMessages(t, database, chB, userID, 3)
+
+	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chA, idsA[1], 10, 10, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("window size = %d, want the 3 messages of channel A only", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.ChannelID != chA {
+			t.Errorf("message %d belongs to channel %d, not %d", m.ID, m.ChannelID, chA)
+		}
+	}
+}
+
+func TestGetMessagesAroundForAPI_NegativeCountsClampToZero(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu5")
+	chID := seedChannel(t, database, "aroundc5")
+	ids := seedAroundMessages(t, database, chID, userID, 5)
+
+	// A negative count must not become a negative SQL LIMIT (which SQLite
+	// reads as "no limit" and would silently return the whole channel).
+	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[2], -4, -4, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].ID != ids[2] {
+		t.Errorf("window = %d entries, want just the centre %d", len(msgs), ids[2])
+	}
+}
+
+func TestGetMessagesAroundForAPI_UnknownCentreIsEmpty(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "aroundu6")
+	chID := seedChannel(t, database, "aroundc6")
+	seedAroundMessages(t, database, chID, userID, 3)
+
+	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, 999999, 5, 5, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesAroundForAPI: %v", err)
+	}
+	// Nothing is <= the centre in this channel below it, and nothing above it.
+	if len(msgs) != 3 {
+		t.Errorf("window size = %d; an out-of-range centre should still be bounded by the channel", len(msgs))
+	}
+}
+
 // ─── GetChannelUnreadCounts ─────────────────────────────────────────────────
 
 func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
@@ -850,5 +1136,168 @@ func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
 	}
 	if latestID != id1 {
 		t.Errorf("GetLatestMessageID = %d, want %d (deleted excluded)", latestID, id1)
+	}
+}
+
+// ─── GetReactionUsers ───────────────────────────────────────────────────────
+
+func TestGetReactionUsers_ReturnsReactorsInReactionOrder(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "reactusers")
+	author := seedUser(t, database, "reactauthor")
+	first := seedUser(t, database, "reactfirst")
+	second := seedUser(t, database, "reactsecond")
+	msgID, _ := database.CreateMessage(context.Background(), chID, author, "react to me", nil)
+
+	// second reacts before first, so reaction order (not user id) decides.
+	if err := database.AddReaction(context.Background(), msgID, second, "👍"); err != nil {
+		t.Fatalf("AddReaction(second): %v", err)
+	}
+	if err := database.AddReaction(context.Background(), msgID, first, "👍"); err != nil {
+		t.Fatalf("AddReaction(first): %v", err)
+	}
+	// A different emoji on the same message must not leak in.
+	if err := database.AddReaction(context.Background(), msgID, author, "🎉"); err != nil {
+		t.Fatalf("AddReaction(other emoji): %v", err)
+	}
+
+	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 100)
+	if err != nil {
+		t.Fatalf("GetReactionUsers: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("len(users) = %d, want 2 (%+v)", len(users), users)
+	}
+	if users[0].Username != "reactsecond" || users[1].Username != "reactfirst" {
+		t.Errorf("order = [%s %s], want [reactsecond reactfirst]", users[0].Username, users[1].Username)
+	}
+	if users[0].ID != second {
+		t.Errorf("users[0].ID = %d, want %d", users[0].ID, second)
+	}
+}
+
+func TestGetReactionUsers_UnknownEmojiIsEmptyNotError(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "reactempty")
+	userID := seedUser(t, database, "reactnone")
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
+
+	users, err := database.GetReactionUsers(context.Background(), msgID, "🐉", 100)
+	if err != nil {
+		t.Fatalf("GetReactionUsers: %v", err)
+	}
+	if len(users) != 0 {
+		t.Errorf("len(users) = %d, want 0", len(users))
+	}
+}
+
+func TestGetReactionUsers_ClampsLimitToMax(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "reactclamp")
+	author := seedUser(t, database, "clampauthor")
+	msgID, _ := database.CreateMessage(context.Background(), chID, author, "many", nil)
+
+	const reactors = db.MaxReactionUsers + 5
+	for i := range reactors {
+		uid := seedUser(t, database, "clamper"+strconv.Itoa(i))
+		if err := database.AddReaction(context.Background(), msgID, uid, "👍"); err != nil {
+			t.Fatalf("AddReaction(%d): %v", i, err)
+		}
+	}
+
+	// A caller asking for more than the cap still gets at most the cap.
+	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 10_000)
+	if err != nil {
+		t.Fatalf("GetReactionUsers: %v", err)
+	}
+	if len(users) != db.MaxReactionUsers {
+		t.Errorf("len(users) = %d, want %d", len(users), db.MaxReactionUsers)
+	}
+
+	// A non-positive limit means "the cap", not "nothing".
+	users, err = database.GetReactionUsers(context.Background(), msgID, "👍", 0)
+	if err != nil {
+		t.Fatalf("GetReactionUsers(0): %v", err)
+	}
+	if len(users) != db.MaxReactionUsers {
+		t.Errorf("len(users) with limit 0 = %d, want %d", len(users), db.MaxReactionUsers)
+	}
+}
+
+func TestGetReactionUsers_RespectsSmallerLimit(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "reactsmall")
+	author := seedUser(t, database, "smallauthor")
+	msgID, _ := database.CreateMessage(context.Background(), chID, author, "some", nil)
+	for i := range 5 {
+		uid := seedUser(t, database, "smaller"+strconv.Itoa(i))
+		_ = database.AddReaction(context.Background(), msgID, uid, "👍")
+	}
+
+	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 2)
+	if err != nil {
+		t.Fatalf("GetReactionUsers: %v", err)
+	}
+	if len(users) != 2 {
+		t.Errorf("len(users) = %d, want 2", len(users))
+	}
+}
+
+// ─── GetChannelUnreadCounts: DM rows ────────────────────────────────────────
+
+// DM channels the user participates in must appear, so the ready payload can
+// ship a real mention_count for them instead of resetting the badge to 0 on
+// every reconnect.
+func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
+	database := openMigratedMemory(t)
+	alice := seedUser(t, database, "dmunreadalice")
+	bob := seedUser(t, database, "dmunreadbob")
+
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	msgID, _ := database.CreateMessage(context.Background(), ch.ID, bob, "hey", nil)
+	if err := database.IncrementMentionCounts(context.Background(), ch.ID, []int64{alice}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), alice)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	cu, ok := counts[ch.ID]
+	if !ok {
+		t.Fatalf("DM channel %d missing from unread counts for a participant", ch.ID)
+	}
+	if cu.LastMessageID != msgID {
+		t.Errorf("LastMessageID = %d, want %d", cu.LastMessageID, msgID)
+	}
+	if cu.UnreadCount != 1 {
+		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
+	}
+	if cu.MentionCount != 1 {
+		t.Errorf("MentionCount = %d, want 1", cu.MentionCount)
+	}
+}
+
+func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
+	database := openMigratedMemory(t)
+	alice := seedUser(t, database, "dmforeignalice")
+	bob := seedUser(t, database, "dmforeignbob")
+	outsider := seedUser(t, database, "dmforeignoutsider")
+
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	_, _ = database.CreateMessage(context.Background(), ch.ID, bob, "private", nil)
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), outsider)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	if _, ok := counts[ch.ID]; ok {
+		t.Errorf("DM channel %d leaked into a non-participant's unread counts", ch.ID)
 	}
 }

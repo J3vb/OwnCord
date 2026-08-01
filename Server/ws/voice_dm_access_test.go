@@ -140,3 +140,52 @@ func TestVoiceTokenRefresh_DMParticipant_StillRefreshes(t *testing.T) {
 		t.Error("a DM participant must still be able to refresh their voice token")
 	}
 }
+
+// Group DMs need no separate voice authorization path: dm_participants holds
+// one row per participant and the gate is a lookup on (user_id, channel_id).
+// These two pin that the existing path genuinely covers the N-participant case
+// — a third member gets in, and an outsider still does not.
+func TestVoiceJoin_GroupDMParticipant_Joins(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "grpvoice-alice")
+	bob := seedMemberUser(t, database, "grpvoice-bob")
+	carol := seedMemberUser(t, database, "grpvoice-carol")
+	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, carol, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
+
+	if !hasVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond)) {
+		t.Error("the third member of a group DM must receive a voice token")
+	}
+
+	state, err := database.GetVoiceState(context.Background(), carol.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil || state.ChannelID != chID {
+		t.Fatalf("group participant voice state = %+v, want channel %d", state, chID)
+	}
+}
+
+func TestVoiceJoin_GroupDMNonParticipant_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "grpvoice-x-alice")
+	bob := seedMemberUser(t, database, "grpvoice-x-bob")
+	carol := seedMemberUser(t, database, "grpvoice-x-carol")
+	mallory := seedMemberUser(t, database, "grpvoice-x-mallory")
+	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
+
+	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
+}

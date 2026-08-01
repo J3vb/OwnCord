@@ -19,6 +19,7 @@ export const ServerMessageType = {
   CHAT_SEND_OK: "chat_send_ok",
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
+  CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
   TYPING: "typing",
   PRESENCE: "presence",
@@ -30,16 +31,22 @@ export const ServerMessageType = {
   VOICE_TOKEN: "voice_token",
   VOICE_SPEAKERS: "voice_speakers",
   VOICE_LEAVE: "voice_leave", // broadcast (same string as client msg)
+  VOICE_MOVED: "voice_moved",
+  VOICE_DISCONNECTED: "voice_disconnected",
   MEMBER_JOIN: "member_join",
   MEMBER_LEAVE: "member_leave",
   MEMBER_UPDATE: "member_update",
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
+  ROLES_UPDATE: "roles_update",
+  EMOJI_UPDATE: "emoji_update",
   SERVER_RESTART: "server_restart",
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  CALL_INCOMING: "call_incoming",
+  CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
 } as const;
@@ -59,6 +66,7 @@ export const ClientMessageType = {
   REACTION_REMOVE: "reaction_remove",
   TYPING_START: "typing_start",
   CHANNEL_FOCUS: "channel_focus",
+  MARK_READ: "mark_read",
   PRESENCE_UPDATE: "presence_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",
@@ -66,10 +74,16 @@ export const ClientMessageType = {
   VOICE_DEAFEN: "voice_deafen",
   VOICE_CAMERA: "voice_camera",
   VOICE_SCREENSHARE: "voice_screenshare",
+  VOICE_MOD_MUTE: "voice_mod_mute",
+  VOICE_MOD_DEAFEN: "voice_mod_deafen",
+  VOICE_MOD_MOVE: "voice_mod_move",
+  VOICE_MOD_KICK: "voice_mod_kick",
   PING: "ping",
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
+  CALL_RING: "call_ring",
+  CALL_DECLINE: "call_decline",
 } as const;
 
 export type ClientMessageTypeValue = (typeof ClientMessageType)[keyof typeof ClientMessageType];

@@ -1,0 +1,282 @@
+package db_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/owncord/server/db"
+)
+
+// storageMentionCap mirrors the package-internal maxMentionsPerMessage backstop.
+const storageMentionCap = 20
+
+// seedMentionFixture creates two users and a text channel for mention tests.
+func seedMentionFixture(t *testing.T, database *db.DB) {
+	t.Helper()
+	ctx := context.Background()
+	for _, name := range []string{"alice", "bob", "Carol"} {
+		if _, err := database.CreateUser(ctx, name, "hash", 4); err != nil {
+			t.Fatalf("CreateUser(%s): %v", name, err)
+		}
+	}
+	if _, err := database.CreateChannel(ctx, "general", "text", "", "", 0); err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+}
+
+func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	if !msg.MentionsEveryone {
+		t.Error("MentionsEveryone = false, want true")
+	}
+
+	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if err != nil {
+		t.Fatalf("GetMentionsByMessageIDs: %v", err)
+	}
+	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 2 {
+		t.Errorf("mentions = %v, want [2]", got[msg.ID])
+	}
+
+	// The flag must survive a re-read through the ordinary message getter.
+	reread, err := database.GetMessage(ctx, msg.ID)
+	if err != nil || reread == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !reread.MentionsEveryone {
+		t.Error("re-read MentionsEveryone = false, want true")
+	}
+}
+
+// TestCreateMessageWithMentions_CapsStoredRows locks the storage-side backstop:
+// a caller cannot widen the fan-out past storageMentionCap.
+func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	ids := make([]int64, 0, storageMentionCap+5)
+	for i := range storageMentionCap + 5 {
+		uid, err := database.CreateUser(ctx, "capped"+string(rune('a'+i)), "hash", 4)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		ids = append(ids, uid)
+	}
+
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if err != nil {
+		t.Fatalf("GetMentionsByMessageIDs: %v", err)
+	}
+	if len(got[msg.ID]) != storageMentionCap {
+		t.Errorf("stored = %d, want %d", len(got[msg.ID]), storageMentionCap)
+	}
+}
+
+func TestReplaceMessageMentions(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	if err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false); err != nil {
+		t.Fatalf("ReplaceMessageMentions: %v", err)
+	}
+
+	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if err != nil {
+		t.Fatalf("GetMentionsByMessageIDs: %v", err)
+	}
+	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 3 {
+		t.Errorf("mentions = %v, want [3]", got[msg.ID])
+	}
+	reread, err := database.GetMessage(ctx, msg.ID)
+	if err != nil || reread == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if reread.MentionsEveryone {
+		t.Error("MentionsEveryone = true, want false after replace")
+	}
+}
+
+func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if err := database.IncrementMentionCounts(ctx, 1, []int64{2, 3}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 1, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 2 {
+		t.Errorf("user 2 mention_count = %d, want 2", n)
+	}
+	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 1 {
+		t.Errorf("user 3 mention_count = %d, want 1", n)
+	}
+
+	// Marking the channel read clears the badge, and only for that user.
+	if err := database.UpdateReadState(ctx, 2, 1, 99); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 0 {
+		t.Errorf("after read state, user 2 mention_count = %d, want 0", n)
+	}
+	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 1 {
+		t.Errorf("user 3 mention_count = %d, want 1", n)
+	}
+}
+
+func TestIncrementMentionCounts_EmptyIsNoop(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	if err := database.IncrementMentionCounts(context.Background(), 1, nil); err != nil {
+		t.Fatalf("IncrementMentionCounts(nil): %v", err)
+	}
+}
+
+func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+
+	got, err := database.GetUserIDsByUsernames(context.Background(), []string{"BOB", "carol", "ghost"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if got["bob"] != 2 {
+		t.Errorf("bob = %d, want 2", got["bob"])
+	}
+	if got["carol"] != 3 {
+		t.Errorf("carol = %d, want 3 (stored as \"Carol\")", got["carol"])
+	}
+	if _, ok := got["ghost"]; ok {
+		t.Error("unknown username must not resolve")
+	}
+}
+
+func TestListMentionTargetsByRoles(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if err := database.UpdateUserStatus(ctx, 2, "online"); err != nil {
+		t.Fatalf("UpdateUserStatus: %v", err)
+	}
+
+	targets, err := database.ListMentionTargetsByRoles(ctx, []int64{4})
+	if err != nil {
+		t.Fatalf("ListMentionTargetsByRoles: %v", err)
+	}
+	if len(targets) != 3 {
+		t.Fatalf("targets = %d, want 3", len(targets))
+	}
+	for _, tgt := range targets {
+		if tgt.UserID == 2 && tgt.Status != "online" {
+			t.Errorf("user 2 status = %q, want online", tgt.Status)
+		}
+	}
+
+	empty, err := database.ListMentionTargetsByRoles(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("no roles must yield no targets: %v %v", empty, err)
+	}
+}
+
+func TestListBlockersOf(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if err := database.BlockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	blockers, err := database.ListBlockersOf(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListBlockersOf: %v", err)
+	}
+	if len(blockers) != 1 || blockers[0] != 2 {
+		t.Errorf("blockers = %v, want [2]", blockers)
+	}
+}
+
+func TestGetChannelOverrides(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if err := database.UpsertChannelOverride(ctx, 1, 4, 0, 2); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+	got, err := database.GetChannelOverrides(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetChannelOverrides: %v", err)
+	}
+	if o, ok := got[4]; !ok || o.Deny != 2 {
+		t.Errorf("override for role 4 = %+v, want deny=2", o)
+	}
+}
+
+// TestMessagesForAPI_CarryMentions locks that REST history hands back the
+// resolved mention list and the everyone flag.
+func TestMessagesForAPI_CarryMentions(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true); err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	msgs, err := database.GetMessagesForAPI(ctx, 1, 0, 10, 1)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0] != 2 {
+		t.Errorf("mentions = %v, want [2]", msgs[0].Mentions)
+	}
+	if !msgs[0].MentionsEveryone {
+		t.Error("mentions_everyone = false, want true")
+	}
+}
+
+func TestSearchMessages_CarryMentions(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, false); err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	results, err := database.SearchMessages(ctx, "deployment", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if len(results[0].Mentions) != 1 || results[0].Mentions[0] != 2 {
+		t.Errorf("mentions = %v, want [2]", results[0].Mentions)
+	}
+	if results[0].MentionsEveryone {
+		t.Error("mentions_everyone = true, want false")
+	}
+}

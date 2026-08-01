@@ -42,6 +42,7 @@ UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?;
 -- (and an explicit LIMIT 1 is mis-emitted by sqlc here). ORDER BY puts the
 -- highest-position role first, so that first row is the owner.
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
+       display_name, about, custom_status
 FROM users
 ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id ASC;

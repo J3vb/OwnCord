@@ -11,6 +11,7 @@ import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
 import {
   createConnectionStatsPoller,
@@ -230,22 +231,44 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     updateStatus(voice.voiceStatus);
     updateFrozen(uiStore.getState().connectionStatus);
 
-    // Channel name
+    // Channel name. A DM call resolves through the DM store rather than the
+    // channels store: the channels-store row for a DM is synthesised when the
+    // conversation is opened, so accepting a call for a DM the user has not
+    // looked at yet would otherwise label the call "Voice Channel".
     const channel = channelsStore.getState().channels.get(channelId);
-    setText(channelNameEl, channel?.name ?? "Voice Channel");
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    setText(
+      channelNameEl,
+      dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? "Voice Channel"),
+    );
 
     // Toggle button active states, swap icons, and update aria-pressed
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
+    // A moderator-imposed mute/deafen is not ours to lift: the server refuses
+    // the unmute, so disable the control and say why instead of letting the
+    // click bounce off with an error toast.
+    const serverMuted = voice.localServerMuted === true;
+    const serverDeafened = voice.localServerDeafened === true;
     if (muteBtn) {
       swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic");
       muteBtn.setAttribute("aria-pressed", String(voice.localMuted));
+      // Only ever tighten: updateFrozen ran above and owns the socket-down
+      // disable, which must not be relaxed here.
+      if (serverMuted) {
+        muteBtn.disabled = true;
+        muteBtn.title = "You were muted by a moderator";
+      }
     }
     if (deafenBtn) {
       swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
       deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened));
+      if (serverDeafened) {
+        deafenBtn.disabled = true;
+        deafenBtn.title = "You were deafened by a moderator";
+      }
     }
     if (cameraBtn) {
       swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
@@ -435,6 +458,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           channelId: s.currentChannelId,
           muted: s.localMuted,
           deafened: s.localDeafened,
+          serverMuted: s.localServerMuted,
+          serverDeafened: s.localServerDeafened,
           camera: s.localCamera,
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
@@ -445,6 +470,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.channelId === b.channelId &&
           a.muted === b.muted &&
           a.deafened === b.deafened &&
+          a.serverMuted === b.serverMuted &&
+          a.serverDeafened === b.serverDeafened &&
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&

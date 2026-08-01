@@ -32,12 +32,58 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"role":     roleName,
+				// The signed-in user's own profile fields. Null when unset;
+				// display_name falls back to username client-side, and about
+				// is what the "edit my profile" form pre-fills from.
+				"display_name":  user.DisplayName,
+				"about":         user.About,
+				"custom_status": user.CustomStatus,
+				// The user's own true status — invisible included. Only their
+				// own auth_ok ever carries it, which is the whole point: the
+				// picker has to render what they chose, while every other
+				// client is told offline.
+				"status": user.Status,
 			},
 			"server_name":   serverName,
 			"motd":          motd,
 			"replay_source": replaySource,
 		},
 	})
+}
+
+// presentableMembers rewrites each member's status into what viewerID may see.
+//
+// Two rules, both applied here so no payload builder can implement only one:
+//
+//  1. A member with no live connection is offline, whatever the row says.
+//     users.status keeps a *chosen* idle/dnd/invisible across a disconnect so
+//     the next connect can honour it, which would otherwise leave a signed-out
+//     user showing as "Do Not Disturb" indefinitely.
+//  2. An invisible member is offline to everyone but themselves
+//     (db.StatusForViewer). The owner keeps their true state so their own
+//     picker renders the status they actually chose.
+func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []db.MemberSummary {
+	connected := h.connectedUserIDs()
+	out := make([]db.MemberSummary, 0, len(members))
+	for _, m := range members {
+		if !connected[m.ID] {
+			m.Status = db.StatusOffline
+			m.CustomStatus = nil
+		}
+		out = append(out, m.ForViewer(viewerID))
+	}
+	return out
+}
+
+// connectedUserIDs snapshots the ids with a live WebSocket connection.
+func (h *Hub) connectedUserIDs() map[int64]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	set := make(map[int64]bool, len(h.clients))
+	for uid := range h.clients {
+		set[uid] = true
+	}
+	return set
 }
 
 // channelRefs maps db channels to the checker's db-agnostic ChannelRef so
@@ -50,11 +96,18 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// permOverrides maps a db override map to the checker's override map.
+// permOverrides maps a db override map to the checker's override map, carrying
+// BOTH layers — the role override and the per-user override — so the checker
+// resolves the full order (base -> role -> user) rather than half of it.
 func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
 	out := make(map[int64]permissions.ChannelOverride, len(overrides))
 	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny}
+		out[id] = permissions.ChannelOverride{
+			Allow:     o.Allow,
+			Deny:      o.Deny,
+			UserAllow: o.UserAllow,
+			UserDeny:  o.UserDeny,
+		}
 	}
 	return out
 }
@@ -70,7 +123,9 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 	if permissions.HasAdmin(role.Permissions) {
 		return true
 	}
-	eff := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+	eff := permissions.EffectiveChannelPerms(role.Permissions, permissions.ChannelOverride{
+		Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny,
+	})
 	need := permissions.ReadMessages | permissions.SendMessages
 	if eff&need != need {
 		return false
@@ -99,6 +154,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		slog.Warn("buildReady ListMembers", "err", err)
 		members = []db.MemberSummary{}
 	}
+	members = h.presentableMembers(members, userID)
 
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
@@ -108,9 +164,9 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	overrides := map[int64]db.ChannelOverride{}
 	if role != nil && !permissions.HasAdmin(role.Permissions) {
 		var oErr error
-		overrides, oErr = database.GetAllChannelPermissionsForRole(ctx, role.ID)
+		overrides, oErr = database.GetChannelOverridesFor(ctx, role.ID, userID)
 		if oErr != nil {
-			return nil, fmt.Errorf("buildReady GetAllChannelPermissionsForRole: %w", oErr)
+			return nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
 		}
 	}
 	var visibleChannels []db.Channel
@@ -154,14 +210,24 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
+			// Age-gate flag. Shipped so a client can label or gate the
+			// channel; the server applies no content behaviour of its own to
+			// a flagged channel (migration 025).
+			"nsfw": visibleChannels[i].NSFW,
+			// Voice capacity limits (0 = unlimited) — the same values the
+			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
+			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
+			"voice_max_video": visibleChannels[i].VoiceMaxVideo,
 		}
 		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
+				entry["mention_count"] = u.MentionCount
 			} else {
 				entry["unread_count"] = 0
 				entry["last_message_id"] = 0
+				entry["mention_count"] = 0
 			}
 		}
 		channelPayloads = append(channelPayloads, entry)
@@ -190,6 +256,14 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	if err != nil {
 		slog.Warn("buildReady GetUserDMChannels", "err", err)
 		dmChannels = []db.DMChannelInfo{}
+	}
+	// GetUserDMChannels computes unread from read_states but carries no mention
+	// count, so a DM mention badge used to vanish on every reconnect. The
+	// unread map now includes the user's DM rows — pull mention_count from it.
+	for i := range dmChannels {
+		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
+			dmChannels[i].MentionCount = u.MentionCount
+		}
 	}
 
 	serverName, motd := h.getCachedSettings(ctx)

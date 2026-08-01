@@ -14,12 +14,14 @@ import {
   updateChannel,
   removeChannel,
   incrementUnread,
+  incrementMention,
 } from "@stores/channels.store";
 import { channelsStore } from "@stores/channels.store";
 import {
   addMessage,
   editMessage,
   deleteMessage,
+  bulkDeleteMessages,
   updateReaction,
   confirmSend,
   markSendFailed,
@@ -51,14 +53,19 @@ import {
   removeDmChannel,
   updateDmLastMessage,
   updateDmLastMessagePreview,
+  dmDisplayName,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
+import { setCustomEmoji } from "@stores/emoji.store";
 import type { DmChannelPayload } from "./types";
 import type { ApiClient } from "./api";
+import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { notifyIncomingMessage } from "./notifications";
+import { highlightsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { createLogger } from "./logger";
+import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
 
 const log = createLogger("dispatcher");
@@ -70,20 +77,34 @@ function livekitSession(): Promise<typeof import("@lib/livekitSession")> {
   return import("@lib/livekitSession");
 }
 
+/** Map one DM participant from the wire shape to the store's. */
+function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
+  return {
+    id: u.id,
+    username: u.username,
+    avatar: u.avatar,
+    status: u.status,
+    displayName: u.display_name ?? "",
+  };
+}
+
 /** Map a server DM channel payload to the client DmChannel type. */
 function mapDmPayload(p: DmChannelPayload): DmChannel {
+  // A pre-group server sends only `recipient`, which for it *is* the whole
+  // membership — so the fallback is a one-element list rather than an empty
+  // one, and every group-aware call site keeps working against an old server.
+  const participants = (p.recipients ?? [p.recipient]).map(mapDmUser);
   return {
     channelId: p.channel_id,
-    recipient: {
-      id: p.recipient.id,
-      username: p.recipient.username,
-      avatar: p.recipient.avatar,
-      status: p.recipient.status,
-    },
+    recipient: participants[0] ?? mapDmUser(p.recipient),
+    participants,
+    name: p.name ?? "",
+    isGroup: p.is_group ?? false,
     lastMessageId: p.last_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
+    mentionCount: p.mention_count ?? 0,
   };
 }
 
@@ -109,7 +130,8 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
  */
 export function wireDispatcher(
   ws: WsClient,
-  api?: Pick<ApiClient, "listBlocks"> & Partial<Pick<ApiClient, "updateProfile" | "getConfig">>,
+  api?: Pick<ApiClient, "listBlocks"> &
+    Partial<Pick<ApiClient, "updateProfile" | "getConfig" | "listEmoji">>,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
 
@@ -200,6 +222,17 @@ export function wireDispatcher(
           .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
       }
 
+      // Custom emoji are not in the ready payload (they are server-wide and
+      // change rarely, so they do not belong in the per-session dump). Load
+      // them once here; `emoji_update` keeps them fresh from then on. A
+      // failure is non-fatal — unresolved shortcodes stay plain text.
+      if (api?.listEmoji !== undefined) {
+        api
+          .listEmoji()
+          .then((list) => setCustomEmoji(list))
+          .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
+      }
+
       log.info("Ready payload applied", {
         channels: payload.channels.length,
         members: payload.members.length,
@@ -214,7 +247,21 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.DM_CHANNEL_OPEN, (payload) => {
       log.info("DM channel opened", { channelId: payload.channel_id });
-      addDmChannel(mapDmPayload(payload));
+      const dm = mapDmPayload(payload);
+      addDmChannel(dm);
+
+      // A DM's channels-store row is synthesised from the DM store, and this
+      // event is also how a *membership* change arrives (group renamed, member
+      // left). Without this the chat header would keep the name the DM had
+      // when it was first opened, until the user navigated away and back.
+      channelsStore.setState((prev) => {
+        const existing = prev.channels.get(dm.channelId);
+        const name = dmDisplayName(dm);
+        if (existing === undefined || existing.name === name) return prev;
+        const next = new Map(prev.channels);
+        next.set(dm.channelId, { ...existing, name });
+        return { ...prev, channels: next };
+      });
     }),
   );
 
@@ -251,6 +298,15 @@ export function wireDispatcher(
       // applied here for defence-in-depth.
       if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
         incrementUnread(payload.channel_id);
+        // A mention is an unread too — the mention badge just outranks it.
+        if (
+          highlightsCurrentUser(payload.content, {
+            mentions: payload.mentions,
+            mentionsEveryone: payload.mentions_everyone,
+          })
+        ) {
+          incrementMention(payload.channel_id);
+        }
       }
 
       // Update DM store last message if this message belongs to a DM channel.
@@ -288,6 +344,12 @@ export function wireDispatcher(
   );
 
   unsubs.push(
+    ws.on(S.CHAT_BULK_DELETED, (payload) => {
+      bulkDeleteMessages(payload);
+    }),
+  );
+
+  unsubs.push(
     ws.on(S.CHAT_SEND_OK, (payload, id) => {
       if (id) {
         confirmSend(id, payload.message_id, payload.timestamp);
@@ -301,6 +363,9 @@ export function wireDispatcher(
     ws.on(S.REACTION_UPDATE, (payload) => {
       const userId = authStore.getState().user?.id ?? 0;
       updateReaction(payload, userId);
+      // The who-reacted tooltip caches the reactor list per message+emoji; any
+      // add/remove on this message makes those lists stale.
+      invalidateReactionUsers(payload.message_id);
     }),
   );
 
@@ -316,7 +381,10 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.PRESENCE, (payload) => {
-      updatePresence(payload.user_id, payload.status);
+      // custom_status is passed through verbatim, undefined included: the
+      // store treats "field absent" as "leave the text alone", which is what
+      // an older server's presence event means.
+      updatePresence(payload.user_id, payload.status, payload.custom_status);
     }),
   );
 
@@ -381,22 +449,49 @@ export function wireDispatcher(
     }),
   );
 
+  // Roles changed server-side (created, edited, deleted or reordered). The
+  // payload is the whole list, so the store is replaced rather than patched —
+  // name colors, the member-list groups and every permission-gated affordance
+  // re-derive from it without a reconnect.
+  unsubs.push(
+    ws.on(S.ROLES_UPDATE, (payload) => {
+      log.info("Roles updated", { count: payload.roles?.length ?? 0 });
+      setRoles(payload.roles ?? []);
+    }),
+  );
+
+  // Custom emoji changed server-side (uploaded or deleted). Whole set, like
+  // roles_update: the store is replaced so a deleted emoji stops rendering in
+  // messages, pickers and reaction pills without a reconnect.
+  unsubs.push(
+    ws.on(S.EMOJI_UPDATE, (payload) => {
+      log.info("Custom emoji updated", { count: payload.emoji?.length ?? 0 });
+      setCustomEmoji(payload.emoji ?? []);
+    }),
+  );
+
   unsubs.push(
     ws.on(S.USER_UPDATE, (payload) => {
       log.info("User profile updated", { userId: payload.user_id, username: payload.username });
-      updateMemberProfile(
-        payload.user_id,
-        payload.username,
-        payload.avatar,
-        payload.identity_public_key,
-      );
+      updateMemberProfile(payload.user_id, {
+        username: payload.username,
+        avatar: payload.avatar,
+        displayName: payload.display_name,
+        identityPublicKey: payload.identity_public_key,
+      });
 
       // Update auth store if the current user changed their own profile.
       const currentUser = authStore.getState().user;
       if (currentUser && payload.user_id === currentUser.id) {
         setAuth(
           authStore.getState().token ?? "",
-          { ...currentUser, username: payload.username, avatar: payload.avatar },
+          {
+            ...currentUser,
+            username: payload.username,
+            avatar: payload.avatar,
+            display_name: payload.display_name,
+            about: payload.about,
+          },
           authStore.getState().serverName ?? "",
           authStore.getState().motd ?? "",
         );
@@ -411,9 +506,49 @@ export function wireDispatcher(
       updateVoiceState(payload);
       // Auto-join voice channel if the event is for the current user
       const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
-        joinVoiceChannel(payload.channel_id);
+      if (payload.user_id !== currentUserId) return;
+      joinVoiceChannel(payload.channel_id);
+      // Honor a moderator's mute/deafen locally. Mute is also enforced at the
+      // SFU, but deafen governs what WE play back, so the client is the only
+      // place it can take effect. Both apply through one lazy import so the
+      // two effects cannot land in different ticks.
+      const voice = voiceStore.getState();
+      const applyDeafen = payload.server_deafened === true && !voice.localDeafened;
+      const applyMute = payload.server_muted === true && !voice.localMuted;
+      if (applyDeafen || applyMute) {
+        void livekitSession().then(({ setDeafened, setMuted }) => {
+          if (applyDeafen) setDeafened(true);
+          if (applyMute) setMuted(true);
+        });
       }
+    }),
+  );
+
+  // A moderator moved this client: tear the media session down and re-join the
+  // destination through the ordinary join path (the server already removed us
+  // from the old room and broadcast voice_leave).
+  unsubs.push(
+    ws.on(S.VOICE_MOVED, (payload) => {
+      log.info("Moved to another voice channel by a moderator", {
+        toChannelId: payload.to_channel_id,
+      });
+      void livekitSession().then(({ leaveVoice }) => {
+        leaveVoice(false);
+        leaveVoiceChannel();
+        joinVoiceChannel(payload.to_channel_id);
+        ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } });
+      });
+    }),
+  );
+
+  // A moderator disconnected this client from voice. voice_leave has already
+  // cleared the store; this only surfaces the reason.
+  unsubs.push(
+    ws.on(S.VOICE_DISCONNECTED, (payload) => {
+      log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
+      void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+      leaveVoiceChannel();
+      showToast(payload.reason || "You were disconnected from voice", "error");
     }),
   );
 
@@ -543,6 +678,20 @@ export function wireDispatcher(
           if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
         }
         markSendFailed(id, payload.code);
+        return;
+      }
+      // Voice capacity refusals. The server owns the limits (voice_max_users /
+      // voice_max_video) and refuses the join or the camera; the client never
+      // pre-blocks the click, because its copy of the participant list can lag
+      // and a refusal it invented would be uncorrectable. So the only job here
+      // is to say what happened — without this the click was a silent no-op
+      // with an explanation buried in the log.
+      if (payload.code === "CHANNEL_FULL") {
+        showToast(payload.message || "That voice channel is full", "error");
+        return;
+      }
+      if (payload.code === "VIDEO_LIMIT") {
+        showToast(payload.message || "That voice channel has reached its video limit", "error");
         return;
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {

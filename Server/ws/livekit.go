@@ -173,6 +173,46 @@ func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, 
 	return nil
 }
 
+// MuteParticipantAudio mutes or unmutes every microphone track the participant
+// publishes, so a moderator's server mute holds at the SFU instead of relying
+// on the target's client to honor it. A participant with no published audio
+// track yet is not an error: the room join grant is re-derived on the next
+// token mint, and the client refuses its own unmute while server_muted.
+func (c *LiveKitClient) MuteParticipantAudio(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
+	roomName := RoomName(channelID)
+	identity := participantIdentity(userID, voiceJoinToken)
+
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	p, err := c.roomSvc.GetParticipant(ctx, &livekit.RoomParticipantIdentity{
+		Room:     roomName,
+		Identity: identity,
+	})
+	if err != nil {
+		return fmt.Errorf("livekit: getting participant %s in %s: %w", identity, roomName, err)
+	}
+
+	for _, t := range p.Tracks {
+		if t.Type != livekit.TrackType_AUDIO {
+			continue
+		}
+		if _, mErr := c.roomSvc.MutePublishedTrack(ctx, &livekit.MuteRoomTrackRequest{
+			Room:     roomName,
+			Identity: identity,
+			TrackSid: t.Sid,
+			Muted:    muted,
+		}); mErr != nil {
+			return fmt.Errorf("livekit: muting track %s of %s: %w", t.Sid, identity, mErr)
+		}
+	}
+
+	slog.Info("livekit: server mute applied",
+		"identity", identity,
+		"room", roomName,
+		"muted", muted)
+	return nil
+}
+
 // ListParticipants returns all participants in a channel's voice room.
 func (c *LiveKitClient) ListParticipants(channelID int64) ([]*livekit.ParticipantInfo, error) {
 	roomName := RoomName(channelID)

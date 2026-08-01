@@ -10,12 +10,48 @@ import (
 	"database/sql"
 )
 
+const applyVoiceServerDeafen = `-- name: ApplyVoiceServerDeafen :exec
+UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ?
+`
+
+func (q *Queries) ApplyVoiceServerDeafen(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, applyVoiceServerDeafen, userID)
+	return err
+}
+
+const applyVoiceServerMute = `-- name: ApplyVoiceServerMute :exec
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ?
+`
+
+func (q *Queries) ApplyVoiceServerMute(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, applyVoiceServerMute, userID)
+	return err
+}
+
 const clearAllVoiceStates = `-- name: ClearAllVoiceStates :exec
 DELETE FROM voice_states
 `
 
 func (q *Queries) ClearAllVoiceStates(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, clearAllVoiceStates)
+	return err
+}
+
+const clearVoiceServerDeafen = `-- name: ClearVoiceServerDeafen :exec
+UPDATE voice_states SET server_deafened = 0 WHERE user_id = ?
+`
+
+func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, clearVoiceServerDeafen, userID)
+	return err
+}
+
+const clearVoiceServerMute = `-- name: ClearVoiceServerMute :exec
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ?
+`
+
+func (q *Queries) ClearVoiceServerMute(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, clearVoiceServerMute, userID)
 	return err
 }
 
@@ -64,22 +100,25 @@ func (q *Queries) EnableCameraIfUnderLimit(ctx context.Context, arg EnableCamera
 const getAllVoiceStates = `-- name: GetAllVoiceStates :many
 SELECT vs.user_id, vs.channel_id, u.username,
        vs.muted, vs.deafened, vs.speaking,
-       vs.camera, vs.screenshare, vs.joined_at
+       vs.camera, vs.screenshare,
+       vs.server_muted, vs.server_deafened, vs.joined_at
 FROM voice_states vs
 JOIN users u ON u.id = vs.user_id
 ORDER BY vs.channel_id, vs.joined_at ASC
 `
 
 type GetAllVoiceStatesRow struct {
-	UserID      int64  `json:"userId"`
-	ChannelID   int64  `json:"channelId"`
-	Username    string `json:"username"`
-	Muted       int64  `json:"muted"`
-	Deafened    int64  `json:"deafened"`
-	Speaking    int64  `json:"speaking"`
-	Camera      int64  `json:"camera"`
-	Screenshare int64  `json:"screenshare"`
-	JoinedAt    string `json:"joinedAt"`
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	Username       string `json:"username"`
+	Muted          int64  `json:"muted"`
+	Deafened       int64  `json:"deafened"`
+	Speaking       int64  `json:"speaking"`
+	Camera         int64  `json:"camera"`
+	Screenshare    int64  `json:"screenshare"`
+	ServerMuted    int64  `json:"serverMuted"`
+	ServerDeafened int64  `json:"serverDeafened"`
+	JoinedAt       string `json:"joinedAt"`
 }
 
 func (q *Queries) GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error) {
@@ -100,6 +139,8 @@ func (q *Queries) GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow
 			&i.Speaking,
 			&i.Camera,
 			&i.Screenshare,
+			&i.ServerMuted,
+			&i.ServerDeafened,
 			&i.JoinedAt,
 		); err != nil {
 			return nil, err
@@ -118,7 +159,8 @@ func (q *Queries) GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow
 const getChannelVoiceStates = `-- name: GetChannelVoiceStates :many
 SELECT vs.user_id, vs.channel_id, u.username,
        vs.muted, vs.deafened, vs.speaking,
-       vs.camera, vs.screenshare, vs.joined_at
+       vs.camera, vs.screenshare,
+       vs.server_muted, vs.server_deafened, vs.joined_at
 FROM voice_states vs
 JOIN users u ON u.id = vs.user_id
 WHERE vs.channel_id = ?
@@ -126,15 +168,17 @@ ORDER BY vs.joined_at ASC
 `
 
 type GetChannelVoiceStatesRow struct {
-	UserID      int64  `json:"userId"`
-	ChannelID   int64  `json:"channelId"`
-	Username    string `json:"username"`
-	Muted       int64  `json:"muted"`
-	Deafened    int64  `json:"deafened"`
-	Speaking    int64  `json:"speaking"`
-	Camera      int64  `json:"camera"`
-	Screenshare int64  `json:"screenshare"`
-	JoinedAt    string `json:"joinedAt"`
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	Username       string `json:"username"`
+	Muted          int64  `json:"muted"`
+	Deafened       int64  `json:"deafened"`
+	Speaking       int64  `json:"speaking"`
+	Camera         int64  `json:"camera"`
+	Screenshare    int64  `json:"screenshare"`
+	ServerMuted    int64  `json:"serverMuted"`
+	ServerDeafened int64  `json:"serverDeafened"`
+	JoinedAt       string `json:"joinedAt"`
 }
 
 func (q *Queries) GetChannelVoiceStates(ctx context.Context, channelID int64) ([]GetChannelVoiceStatesRow, error) {
@@ -155,6 +199,8 @@ func (q *Queries) GetChannelVoiceStates(ctx context.Context, channelID int64) ([
 			&i.Speaking,
 			&i.Camera,
 			&i.Screenshare,
+			&i.ServerMuted,
+			&i.ServerDeafened,
 			&i.JoinedAt,
 		); err != nil {
 			return nil, err
@@ -173,22 +219,25 @@ func (q *Queries) GetChannelVoiceStates(ctx context.Context, channelID int64) ([
 const getUserVoiceState = `-- name: GetUserVoiceState :one
 SELECT vs.user_id, vs.channel_id, u.username,
        vs.muted, vs.deafened, vs.speaking,
-       vs.camera, vs.screenshare, vs.joined_at
+       vs.camera, vs.screenshare,
+       vs.server_muted, vs.server_deafened, vs.joined_at
 FROM voice_states vs
 JOIN users u ON u.id = vs.user_id
 WHERE vs.user_id = ?
 `
 
 type GetUserVoiceStateRow struct {
-	UserID      int64  `json:"userId"`
-	ChannelID   int64  `json:"channelId"`
-	Username    string `json:"username"`
-	Muted       int64  `json:"muted"`
-	Deafened    int64  `json:"deafened"`
-	Speaking    int64  `json:"speaking"`
-	Camera      int64  `json:"camera"`
-	Screenshare int64  `json:"screenshare"`
-	JoinedAt    string `json:"joinedAt"`
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	Username       string `json:"username"`
+	Muted          int64  `json:"muted"`
+	Deafened       int64  `json:"deafened"`
+	Speaking       int64  `json:"speaking"`
+	Camera         int64  `json:"camera"`
+	Screenshare    int64  `json:"screenshare"`
+	ServerMuted    int64  `json:"serverMuted"`
+	ServerDeafened int64  `json:"serverDeafened"`
+	JoinedAt       string `json:"joinedAt"`
 }
 
 func (q *Queries) GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error) {
@@ -203,12 +252,15 @@ func (q *Queries) GetUserVoiceState(ctx context.Context, userID int64) (GetUserV
 		&i.Speaking,
 		&i.Camera,
 		&i.Screenshare,
+		&i.ServerMuted,
+		&i.ServerDeafened,
 		&i.JoinedAt,
 	)
 	return i, err
 }
 
 const joinVoiceChannel = `-- name: JoinVoiceChannel :exec
+
 INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare, joined_at)
 VALUES (?, ?, 0, 0, 0, 0, 0, ?)
 ON CONFLICT(user_id) DO UPDATE SET
@@ -227,6 +279,10 @@ type JoinVoiceChannelParams struct {
 	JoinedAt  string `json:"joinedAt"`
 }
 
+// server_muted / server_deafened are deliberately absent from both upserts'
+// reset lists: a moderator-imposed mute must survive a channel switch, which
+// reaches the ON CONFLICT branch. It is scoped to the voice session:
+// leaving voice deletes the row, so a rejoin starts clean.
 func (q *Queries) JoinVoiceChannel(ctx context.Context, arg JoinVoiceChannelParams) error {
 	_, err := q.db.ExecContext(ctx, joinVoiceChannel, arg.UserID, arg.ChannelID, arg.JoinedAt)
 	return err

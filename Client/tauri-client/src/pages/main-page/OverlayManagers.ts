@@ -204,7 +204,12 @@ export function createPinnedPanelController(opts: {
   readonly getRoot: () => HTMLDivElement | null;
 
   readonly getCurrentChannelId: () => number | null;
-  readonly onJumpToMessage?: (messageId: number) => boolean;
+  /**
+   * Jump to a pinned message. Fire-and-forget: the jumper fetches the
+   * around-window when the message is not loaded and reports its own failures,
+   * so the panel simply closes and gets out of the way.
+   */
+  readonly onJumpToMessage?: (messageId: number) => void;
 }): PinnedPanelController {
   let instance: MountableComponent | null = null;
 
@@ -230,16 +235,8 @@ export function createPinnedPanelController(opts: {
         channelId,
         pinnedMessages: pins,
         onJumpToMessage: (msgId: number) => {
-          if (opts.onJumpToMessage !== undefined) {
-            const found = opts.onJumpToMessage(msgId);
-            if (found) {
-              close();
-            } else {
-              showToast("Message not in loaded window", "info");
-            }
-          } else {
-            close();
-          }
+          opts.onJumpToMessage?.(msgId);
+          close();
         },
         onUnpin: (msgId: number) => {
           void opts.api
@@ -280,7 +277,12 @@ export function createSearchOverlayController(opts: {
   readonly getRoot: () => HTMLDivElement | null;
 
   readonly getCurrentChannelId: () => number | null;
-  readonly onJumpToMessage?: (channelId: number, messageId: number) => boolean;
+  /**
+   * Jump to a search hit, in whichever channel it lives. Fire-and-forget — the
+   * jumper opens the channel, fetches the around-window when needed, and
+   * surfaces its own failures.
+   */
+  readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): SearchOverlayController {
   let instance: MountableComponent | null = null;
 
@@ -311,16 +313,13 @@ export function createSearchOverlayController(opts: {
         }
       },
       onSelectResult: (result) => {
-        setActiveChannel(result.channel_id);
-        if (opts.onJumpToMessage !== undefined) {
-          // Give the channel a frame to mount before scrolling
-          requestAnimationFrame(() => {
-            const found = opts.onJumpToMessage!(result.channel_id, result.message_id);
-            if (!found) {
-              showToast("Message not in loaded history", "info");
-            }
-          });
+        if (opts.onJumpToMessage === undefined) {
+          setActiveChannel(result.channel_id);
+          return;
         }
+        // The jumper owns the channel switch too, so the fetch it may need to
+        // do is sequenced after the switch rather than racing it.
+        opts.onJumpToMessage(result.channel_id, result.message_id);
       },
       onClose: close,
     });

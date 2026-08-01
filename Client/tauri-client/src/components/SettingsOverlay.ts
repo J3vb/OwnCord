@@ -28,7 +28,18 @@ import { createLogsTab } from "./settings/LogsTab";
 export interface SettingsOverlayOptions {
   onClose(): void;
   onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
-  onUpdateProfile(username: string): Promise<void>;
+  /**
+   * Patch the signed-in user's profile. Every field is optional and omitted
+   * means "leave unchanged"; an empty string clears the nullable ones, which
+   * is how the API itself distinguishes the two.
+   */
+  onUpdateProfile(patch: {
+    username?: string;
+    display_name?: string;
+    about?: string;
+  }): Promise<void>;
+  /** Upload an avatar image. Resolves with the URL the server stored. */
+  onUploadAvatar(file: File): Promise<string>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   onStatusChange(status: UserStatus): void;

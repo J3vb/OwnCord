@@ -124,6 +124,37 @@ export function getUserRole(userId: number): string {
   return membersStore.getState().members.get(userId)?.role ?? "member";
 }
 
+/**
+ * The author identity to render for a message, resolved against the member
+ * store first and the message payload second.
+ *
+ * The store is preferred because it is the live copy: a rename or an avatar
+ * change arrives as a `user_update` and patches every member, while the
+ * messages already on screen keep whatever the author looked like when they
+ * posted. The payload is the fallback for someone who is not in the member
+ * list at all — a deleted account, or a poster from before this session.
+ */
+export function resolveAuthor(user: {
+  id: number;
+  username: string;
+  avatar: string | null;
+  display_name?: string | null;
+}): { username: string; displayName: string | null; avatar: string | null } {
+  const member = membersStore.getState().members.get(user.id);
+  if (member !== undefined) {
+    return {
+      username: member.username,
+      displayName: member.displayName ?? null,
+      avatar: member.avatar,
+    };
+  }
+  return {
+    username: user.username,
+    displayName: user.display_name ?? null,
+    avatar: user.avatar,
+  };
+}
+
 export function roleColorVar(role: string): string {
   if (!roleColorsEnabled) {
     return "var(--role-member)";

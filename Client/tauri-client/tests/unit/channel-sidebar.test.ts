@@ -32,13 +32,19 @@ vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
 });
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
+import {
+  channelsStore,
+  setChannels,
+  setActiveChannel,
+  setRoles,
+  type Channel,
+} from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, toggleCategory } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
-import type { ReadyChannel } from "../../src/lib/types";
+import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 
 function resetStores(): void {
@@ -152,6 +158,16 @@ const testChannels: ReadyChannel[] = [
   },
 ];
 
+/** Fresh spies for the four voice moderation callbacks. */
+function voiceModCallbacks() {
+  return {
+    onServerMute: vi.fn(),
+    onServerDeafen: vi.fn(),
+    onMove: vi.fn(),
+    onDisconnect: vi.fn(),
+  };
+}
+
 /** Set auth user so admin-gated features (context menus, drag, create channel) activate. */
 function setAdminUser(): void {
   authStore.setState(() => ({
@@ -212,6 +228,45 @@ describe("ChannelSidebar", () => {
     expect(categoryNames).toContain("Text Channels");
     expect(categoryNames).toContain("Voice Channels");
     expect(categoryNames).toContain("Info");
+  });
+
+  // Categories are free text: a voice channel groups under whatever it carries,
+  // and shares a category with text channels rather than being pulled into a
+  // hardcoded voice section.
+  it("groups a voice channel under an arbitrary shared category", () => {
+    setChannels([
+      { id: 1, name: "chat", type: "text", category: "Gaming", position: 0 },
+      { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
+    ]);
+    sidebar.mount(container);
+
+    const headers = Array.from(container.querySelectorAll(".category"));
+    const names = headers.map((el) => el.querySelector(".category-name")?.textContent);
+    expect(names).toEqual(["Gaming"]);
+
+    const group = headers[0]?.parentElement;
+    const rendered = Array.from(group?.querySelectorAll(".ch-name") ?? []).map(
+      (el) => el.textContent,
+    );
+    expect(rendered).toEqual(["chat", "lounge"]);
+  });
+
+  it("puts only uncategorized voice channels in the fallback Voice group", () => {
+    setChannels([
+      { id: 1, name: "loose-text", type: "text", category: null, position: 0 },
+      { id: 2, name: "loose-voice", type: "voice", category: null, position: 1 },
+    ]);
+    sidebar.mount(container);
+
+    const names = Array.from(container.querySelectorAll(".category-name")).map(
+      (el) => el.textContent,
+    );
+    expect(names).toEqual(["Voice"]);
+
+    // The uncategorized TEXT channel still renders, headerless.
+    const allNames = Array.from(container.querySelectorAll(".ch-name")).map((el) => el.textContent);
+    expect(allNames).toContain("loose-text");
+    expect(allNames).toContain("loose-voice");
   });
 
   it("click channel sets active and clears unread", () => {
@@ -283,6 +338,40 @@ describe("ChannelSidebar", () => {
     const badgeTexts = Array.from(badges).map((b) => b.textContent);
     expect(badgeTexts).toContain("2");
     expect(badgeTexts).toContain("5");
+  });
+
+  it("shows the red mention badge instead of the unread badge", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }, testChannels[1]!]);
+    sidebar.mount(container);
+
+    const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("mentioned")).toBe(true);
+    const mentionBadge = item.querySelector(".mention-badge");
+    expect(mentionBadge?.textContent).toBe("2");
+    // The mention badge wins outright — no double badge on one row.
+    expect(item.querySelector(".unread-badge")).toBeNull();
+  });
+
+  it("falls back to the unread badge when there are no mentions", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 0 }]);
+    sidebar.mount(container);
+
+    const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("mentioned")).toBe(false);
+    expect(item.querySelector(".mention-badge")).toBeNull();
+    expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
+  });
+
+  it("clears the mention badge when the channel is activated", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }]);
+    sidebar.mount(container);
+
+    (container.querySelector('[data-channel-id="1"]') as HTMLElement).click();
+    channelsStore.flush();
+
+    expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    expect(channelsStore.getState().activeChannelId).toBe(1);
+    expect(container.querySelector(".mention-badge")).toBeNull();
   });
 
   it("marks active channel with active class", () => {
@@ -870,7 +959,9 @@ describe("ChannelSidebar", () => {
     expect(onDeleteChannel.mock.calls[0]![0].id).toBe(1);
   });
 
-  it("does not show context menu for non-admin users", () => {
+  // Mark as Read is offered to everyone (it touches only the caller's own read
+  // state), so a non-admin now gets a menu — just without the admin entries.
+  it("shows only Mark as Read in the context menu for non-admin users", () => {
     const onEditChannel = vi.fn();
     sidebar.destroy?.();
     // Set a regular member (not admin/owner)
@@ -899,9 +990,114 @@ describe("ChannelSidebar", () => {
       }),
     );
 
-    // No context menu should appear for non-admin
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
-    expect(ctxMenu).toBeNull();
+    expect(ctxMenu).not.toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-mark-read"]')).not.toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-edit-channel"]')).toBeNull();
+    expect(ctxMenu?.querySelector('[data-testid="ctx-delete-channel"]')).toBeNull();
+    expect(onEditChannel).not.toHaveBeenCalled();
+  });
+
+  // ── Purge messages context-menu item ──
+
+  /** Right-click channel 1 and return the opened context menu. */
+  function openChannelCtxMenu(): HTMLElement | null {
+    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
+    );
+    return document.querySelector('[data-testid="channel-context-menu"]');
+  }
+
+  it("shows Purge Messages for a role holding MANAGE_MESSAGES", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    // A moderator is not owner/admin, so the menu exists only because of purge.
+    expect(openChannelCtxMenu()).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-edit-channel"]')).toBeNull();
+  });
+
+  it("hides Purge Messages for a role without MANAGE_MESSAGES", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    setAdminUser();
+    sidebar = createChannelSidebar({
+      onVoiceJoin,
+      onVoiceLeave,
+      onEditChannel: vi.fn(),
+      onPurgeChannel,
+    });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    expect(openChannelCtxMenu()).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+  });
+
+  it("purge prompt clamps the count and calls onPurgeChannel with the channel", async () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+    openChannelCtxMenu();
+
+    const trigger = document.querySelector('[data-testid="ctx-purge-messages"]') as HTMLElement;
+    trigger.click();
+
+    const input = document.querySelector('[data-testid="purge-count-input"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    input.value = "5000";
+    (document.querySelector('[data-testid="purge-confirm"]') as HTMLElement).click();
+
+    await vi.waitFor(() => {
+      expect(onPurgeChannel).toHaveBeenCalledTimes(1);
+    });
+    expect(onPurgeChannel.mock.calls[0]![0]).toMatchObject({ id: 1, name: "general" });
+    expect(onPurgeChannel.mock.calls[0]![1]).toBe(100);
+  });
+
+  it("does not offer purge on a voice channel", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onPurgeChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const voiceEl = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    voiceEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+
+    expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
 
   // ── Create channel button ──
@@ -993,6 +1189,49 @@ describe("ChannelSidebar", () => {
     expect(addBtn).toBeNull();
   });
 
+  // The button used to be gated on the role NAME, so a Moderator holding
+  // MANAGE_CHANNELS — which the server now honors on /admin/api/channels — saw
+  // no way to create one.
+  it("shows create channel button for a role holding MANAGE_CHANNELS", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+  });
+
+  it("hides create channel button for a server role without MANAGE_CHANNELS", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    // A role the server DID send, holding no channel bit: the name fallback
+    // must not apply, even for a role called "admin".
+    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.SEND_MESSAGES }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 2, username: "Admin", avatar: null, role: "admin" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    expect(container.querySelector(".category-add-btn")).toBeNull();
+  });
+
   // ── Voice user volume context menu ──
 
   it("right-click on other user's voice row opens volume context menu", () => {
@@ -1036,6 +1275,154 @@ describe("ChannelSidebar", () => {
     expect(slider).not.toBeNull();
     // Should have a Reset Volume button
     expect(volMenu!.textContent).toContain("Reset Volume");
+  });
+
+  // ── Voice moderation context menu (MUTE_MEMBERS) ──
+
+  /** Signs in as a user whose role holds exactly `permissions`, puts one other
+   *  user in the voice channel, mounts the sidebar and right-clicks their row.
+   *  Returns the open menu element (or null). */
+  function openVoiceMenuAs(
+    permissions: number,
+    voiceUser: Partial<VoiceStatePayload> = {},
+    onVoiceModerate?: Parameters<typeof createChannelSidebar>[0]["onVoiceModerate"],
+    channels: ReadyChannel[] = testChannels,
+  ): HTMLElement | null {
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onVoiceModerate });
+
+    setChannels(channels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 80,
+      username: "Target",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      ...voiceUser,
+    });
+    sidebar.mount(container);
+
+    const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
+    voiceRow.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    return document.querySelector(".user-vol-menu");
+  }
+
+  it("hides the moderation section for a role without MUTE_MEMBERS", () => {
+    const menu = openVoiceMenuAs(Permission.MANAGE_CHANNELS, {}, voiceModCallbacks());
+    expect(menu).not.toBeNull();
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
+    // The volume controls stay available to everyone.
+    expect(menu!.textContent).toContain("Reset Volume");
+  });
+
+  it("hides the moderation section when the page wired no callbacks", () => {
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS);
+    expect(menu).not.toBeNull();
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+  });
+
+  it("shows the moderation section for a role holding MUTE_MEMBERS", () => {
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks());
+    expect(menu).not.toBeNull();
+    expect(menu!.querySelector('[data-action="server-mute"]')!.textContent).toBe("Server Mute");
+    expect(menu!.querySelector('[data-action="server-deafen"]')!.textContent).toBe("Server Deafen");
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
+  });
+
+  it("shows the moderation section for an ADMINISTRATOR role", () => {
+    const menu = openVoiceMenuAs(Permission.ADMINISTRATOR, {}, voiceModCallbacks());
+    expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+  });
+
+  it("labels the toggles by the target's current server-imposed state", () => {
+    const menu = openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      { muted: true, deafened: true, server_muted: true, server_deafened: true },
+      voiceModCallbacks(),
+    );
+    expect(menu!.querySelector('[data-action="server-mute"]')!.textContent).toBe("Server Unmute");
+    expect(menu!.querySelector('[data-action="server-deafen"]')!.textContent).toBe(
+      "Server Undeafen",
+    );
+  });
+
+  it("sends server mute with the channel and target, and disconnect with the target", () => {
+    const cb = voiceModCallbacks();
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+
+    (menu!.querySelector('[data-action="server-mute"]') as HTMLElement).click();
+    expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
+
+    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    (menu2!.querySelector('[data-action="voice-disconnect"]') as HTMLElement).click();
+    expect(cb.onDisconnect).toHaveBeenCalledWith(80);
+  });
+
+  it("offers only the other voice channels as move targets", () => {
+    const cb = voiceModCallbacks();
+    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+
+    const moveItems = menu!.querySelectorAll("[data-move-channel]");
+    // testChannels has one voice channel (id 3) — the one the target is in.
+    expect(moveItems.length).toBe(0);
+
+    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ]);
+    const moveItems2 = menu2!.querySelectorAll("[data-move-channel]");
+    expect(moveItems2.length).toBe(1);
+    expect((moveItems2[0] as HTMLElement).dataset.moveChannel).toBe("5");
+
+    (moveItems2[0] as HTMLElement).click();
+    expect(cb.onMove).toHaveBeenCalledWith(80, 5);
+  });
+
+  it("marks a server-muted participant distinctly from a self-muted one", () => {
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 81,
+      username: "Selfmuted",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+    expect(container.querySelector(".vu-muted.vu-server-muted")).toBeNull();
+
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 81,
+      username: "Selfmuted",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+    });
+    voiceStore.flush();
+
+    const icon = container.querySelector(".vu-muted.vu-server-muted") as HTMLElement;
+    expect(icon).not.toBeNull();
+    expect(icon.title).toBe("Muted by a moderator");
   });
 
   // ── Collapsed category shows arrow-right, expanded shows arrow-down ──
@@ -1619,5 +2006,211 @@ describe("ChannelSidebar voice identity badge", () => {
 
     sidebar.destroy?.();
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
+  });
+});
+
+// ── Channel feature flags in the sidebar ──
+//
+// nsfw and voice_max_users reach the sidebar through the channel store, so
+// these mount a fresh sidebar per case rather than reusing another suite's
+// fixture (which seeds voice users and identity state the readouts would pick
+// up).
+describe("ChannelSidebar channel feature flags", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+  let onVoiceJoin: ReturnType<typeof vi.fn>;
+  let onVoiceLeave: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    onVoiceJoin = vi.fn();
+    onVoiceLeave = vi.fn();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+  });
+  describe("NSFW indicator", () => {
+    it("marks a flagged text channel", () => {
+      setChannels([
+        { id: 1, name: "spicy", type: "text", category: "Text Channels", position: 0, nsfw: true },
+        { id: 2, name: "general", type: "text", category: "Text Channels", position: 1 },
+      ]);
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-nsfw-1']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-nsfw-2']")).toBeNull();
+    });
+
+    it("marks a flagged voice channel too", () => {
+      setChannels([
+        { id: 5, name: "lounge", type: "voice", category: "Voice", position: 0, nsfw: true },
+      ]);
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-nsfw-5']")).not.toBeNull();
+    });
+
+    // The marker is information, not a state — it must not colonise the "#"
+    // glyph or the name, which already encode unread/mention/active.
+    it("leaves the channel name intact", () => {
+      setChannels([
+        { id: 1, name: "spicy", type: "text", category: "Text Channels", position: 0, nsfw: true },
+      ]);
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-1'] .ch-name")?.textContent).toBe(
+        "spicy",
+      );
+    });
+  });
+
+  describe("voice capacity readout", () => {
+    it("shows connected/limit when the channel has a user limit", () => {
+      setChannels([
+        {
+          id: 5,
+          name: "lounge",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          voice_max_users: 5,
+        },
+      ]);
+      addVoiceUser(5, 10, "Alice");
+      addVoiceUser(5, 11, "Bob");
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-capacity-5']")?.textContent).toBe(
+        "2/5",
+      );
+    });
+
+    it("shows 0/limit for an empty limited channel", () => {
+      setChannels([
+        {
+          id: 5,
+          name: "lounge",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          voice_max_users: 3,
+        },
+      ]);
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-capacity-5']")?.textContent).toBe(
+        "0/3",
+      );
+    });
+
+    // "3/0" would read as a bug, and the participant rows underneath already
+    // show the count.
+    it("shows nothing when the channel is unlimited", () => {
+      setChannels([{ id: 5, name: "lounge", type: "voice", category: "Voice", position: 0 }]);
+      addVoiceUser(5, 10, "Alice");
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-capacity-5']")).toBeNull();
+    });
+
+    it("is not rendered for a text channel", () => {
+      setChannels([
+        { id: 1, name: "general", type: "text", category: "Text Channels", position: 0 },
+      ]);
+      sidebar.mount(container);
+
+      expect(container.querySelector("[data-testid='channel-capacity-1']")).toBeNull();
+    });
+
+    // The client never blocks the join: its participant list can lag, and a
+    // refusal it invented would be uncorrectable. The server answers with
+    // CHANNEL_FULL.
+    it("still joins on click when the channel looks full", () => {
+      setChannels([
+        {
+          id: 5,
+          name: "lounge",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          voice_max_users: 1,
+        },
+      ]);
+      addVoiceUser(5, 10, "Alice");
+      sidebar.mount(container);
+
+      (container.querySelector("[data-testid='channel-5']") as HTMLElement).click();
+
+      expect(onVoiceJoin).toHaveBeenCalledWith(5);
+    });
+  });
+});
+
+// ── Channel context menu: Edit/Delete follow MANAGE_CHANNELS ──
+//
+// These items used to be gated on the role NAME ("owner"/"admin"), so a custom
+// role the server would happily let edit a channel saw no way to, and a role
+// merely *called* "admin" with no channel bit saw items every click would be
+// refused for.
+describe("ChannelSidebar channel context menu permissions", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+
+  function mountAs(roleName: string, permissions: number): HTMLElement | null {
+    setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 9, username: "U", avatar: null, role: roleName },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onVoiceLeave: vi.fn(),
+      onEditChannel: vi.fn(),
+      onDeleteChannel: vi.fn(),
+    });
+    setChannels([{ id: 1, name: "general", type: "text", category: "Text Channels", position: 0 }]);
+    sidebar.mount(container);
+
+    (container.querySelector('[data-channel-id="1"]') as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
+    );
+    return document.querySelector('[data-testid="channel-context-menu"]');
+  }
+
+  it("offers Edit and Delete to a custom role holding MANAGE_CHANNELS", () => {
+    const menu = mountAs("Curator", Permission.MANAGE_CHANNELS);
+    expect(menu?.querySelector('[data-testid="ctx-edit-channel"]')).not.toBeNull();
+    expect(menu?.querySelector('[data-testid="ctx-delete-channel"]')).not.toBeNull();
+  });
+
+  it("hides them from a role named 'admin' that lacks the bit", () => {
+    const menu = mountAs("Admin", Permission.SEND_MESSAGES);
+    expect(menu?.querySelector('[data-testid="ctx-edit-channel"]')).toBeNull();
+    expect(menu?.querySelector('[data-testid="ctx-delete-channel"]')).toBeNull();
+  });
+
+  it("offers them to a role holding ADMINISTRATOR", () => {
+    const menu = mountAs("Owner", Permission.ADMINISTRATOR);
+    expect(menu?.querySelector('[data-testid="ctx-edit-channel"]')).not.toBeNull();
   });
 });

@@ -11,13 +11,16 @@ import (
 
 type mockDB struct {
 	channelPerms   map[chanRoleKey]chanPerm
+	userPerms      map[chanUserKey]chanPerm
 	dmParticipants map[dmKey]bool
 	chanErr        error
+	userErr        error
 	dmErr          error
 }
 
 type (
 	chanRoleKey struct{ channelID, roleID int64 }
+	chanUserKey struct{ channelID, userID int64 }
 	chanPerm    struct{ allow, deny int64 }
 	dmKey       struct{ userID, channelID int64 }
 )
@@ -25,6 +28,7 @@ type (
 func newMockDB() *mockDB {
 	return &mockDB{
 		channelPerms:   make(map[chanRoleKey]chanPerm),
+		userPerms:      make(map[chanUserKey]chanPerm),
 		dmParticipants: make(map[dmKey]bool),
 	}
 }
@@ -35,6 +39,17 @@ func (m *mockDB) GetChannelPermissions(_ context.Context, channelID, roleID int6
 	}
 	key := chanRoleKey{channelID, roleID}
 	p, ok := m.channelPerms[key]
+	if !ok {
+		return 0, 0, nil
+	}
+	return p.allow, p.deny, nil
+}
+
+func (m *mockDB) GetUserChannelPermissions(_ context.Context, channelID, userID int64) (int64, int64, error) {
+	if m.userErr != nil {
+		return 0, 0, m.userErr
+	}
+	p, ok := m.userPerms[chanUserKey{channelID, userID}]
 	if !ok {
 		return 0, 0, nil
 	}
@@ -125,7 +140,7 @@ func TestHasChannelPerm(t *testing.T) {
 			maps.Copy(db.channelPerms, tt.overrides)
 			ck := NewChecker(db)
 
-			got := ck.HasChannelPerm(context.Background(), tt.rolePerms, tt.roleID, tt.channelID, tt.perm)
+			got := ck.HasChannelPerm(context.Background(), tt.rolePerms, tt.roleID, 0, tt.channelID, tt.perm)
 			if got != tt.want {
 				t.Errorf("HasChannelPerm() = %v, want %v", got, tt.want)
 			}

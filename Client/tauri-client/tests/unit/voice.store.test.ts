@@ -146,6 +146,9 @@ describe("voice store", () => {
         speaking: true,
         camera: false,
         screenshare: false,
+        // Absent from the payload means not moderator-imposed.
+        serverMuted: false,
+        serverDeafened: false,
       });
     });
 
@@ -167,6 +170,33 @@ describe("voice store", () => {
       const before = voiceStore.getState();
       updateVoiceState(FULL_VOICE_PAYLOAD);
       expect(voiceStore.getState()).not.toBe(before);
+    });
+
+    it("mirrors the moderator flags into the local ones for the signed-in user", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "dave", avatar: null, role: "member" },
+      }));
+      updateVoiceState({
+        ...FULL_VOICE_PAYLOAD,
+        muted: true,
+        deafened: true,
+        server_muted: true,
+        server_deafened: true,
+      });
+      const state = voiceStore.getState();
+      expect(state.localServerMuted).toBe(true);
+      expect(state.localServerDeafened).toBe(true);
+      expect(state.voiceUsers.get(10)?.get(5)?.serverMuted).toBe(true);
+    });
+
+    it("leaves the local flags alone for another user's state", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 999, username: "me", avatar: null, role: "member" },
+      }));
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, muted: true, server_muted: true });
+      expect(voiceStore.getState().localServerMuted).not.toBe(true);
     });
   });
 
@@ -203,6 +233,20 @@ describe("voice store", () => {
     it("joinVoiceChannel sets currentChannelId", () => {
       joinVoiceChannel(42);
       expect(voiceStore.getState().currentChannelId).toBe(42);
+    });
+
+    it("leaveVoiceChannel clears the moderator-imposed flags with the session", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "dave", avatar: null, role: "member" },
+      }));
+      joinVoiceChannel(10);
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, muted: true, server_muted: true });
+      expect(voiceStore.getState().localServerMuted).toBe(true);
+
+      leaveVoiceChannel();
+      expect(voiceStore.getState().localServerMuted).toBe(false);
+      expect(voiceStore.getState().localServerDeafened).toBe(false);
     });
 
     it("joinVoiceChannel overwrites previous channel", () => {

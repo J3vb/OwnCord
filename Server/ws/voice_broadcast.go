@@ -14,6 +14,10 @@ const (
 	voiceCameraWindow         = time.Second
 	voiceScreenshareRateLimit = 2
 	voiceScreenshareWindow    = time.Second
+	// Shared by the four voice moderation commands. Each fans a voice_state or
+	// voice_leave broadcast out to everyone who can see the channel.
+	voiceModRateLimit = 5
+	voiceModWindow    = time.Second
 )
 
 // voiceQualities maps accepted voice quality presets to their target bitrate

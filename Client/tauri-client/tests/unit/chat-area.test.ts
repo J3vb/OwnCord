@@ -11,6 +11,7 @@ const {
   mockSearchCleanup,
   mockVideoMount,
   mockVideoDestroy,
+  mockJumpTo,
 } = vi.hoisted(() => ({
   mockPinnedToggle: vi.fn(),
   mockPinnedCleanup: vi.fn(),
@@ -18,6 +19,13 @@ const {
   mockSearchCleanup: vi.fn(),
   mockVideoMount: vi.fn(),
   mockVideoDestroy: vi.fn(),
+  mockJumpTo: vi.fn(),
+}));
+
+// The jumper itself is exercised in message-jump.test.ts; here we only care
+// that ChatArea wires every jump affordance into the same one.
+vi.mock("../../src/pages/main-page/MessageJump", () => ({
+  createMessageJumper: vi.fn(() => ({ jumpTo: mockJumpTo })),
 }));
 
 vi.mock("@lib/icons", () => ({
@@ -68,6 +76,7 @@ vi.mock("@components/VideoGrid", () => ({
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
+import { hasMessageJumpHandler, setMessageJumpHandler } from "@lib/message-navigation";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -106,6 +115,9 @@ describe("createChatArea", () => {
 
   afterEach(() => {
     container.remove();
+    // Each createChatArea installs a global jump handler; drop it so the next
+    // test starts from "no page mounted".
+    setMessageJumpHandler(() => {})();
   });
 
   // --- DOM structure ---
@@ -281,23 +293,33 @@ describe("createChatArea", () => {
 
   // --- Unsubscribers ---
 
-  it("includes cleanup functions for pinned and search controllers", () => {
+  it("includes cleanup functions for the jump handler and both controllers", () => {
     const result = createChatArea(makeOptions());
 
-    // Should have at least 2 unsubscribers (pinned + search)
-    expect(result.unsubscribers.length).toBe(2);
-    expect(typeof result.unsubscribers[0]).toBe("function");
-    expect(typeof result.unsubscribers[1]).toBe("function");
+    // jump-handler unregister + pinned + search
+    expect(result.unsubscribers.length).toBe(3);
+    for (const unsub of result.unsubscribers) {
+      expect(typeof unsub).toBe("function");
+    }
   });
 
   it("unsubscribers call cleanup on pinned and search controllers", () => {
     const result = createChatArea(makeOptions());
 
-    result.unsubscribers[0]!();
-    expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
+    for (const unsub of result.unsubscribers) unsub();
 
-    result.unsubscribers[1]!();
+    expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers a global message-jump handler and unregisters it on cleanup", () => {
+    const result = createChatArea(makeOptions());
+    expect(hasMessageJumpHandler()).toBe(true);
+
+    for (const unsub of result.unsubscribers) unsub();
+
+    // A page that has been torn down must not keep answering permalink jumps.
+    expect(hasMessageJumpHandler()).toBe(false);
   });
 
   // --- Pin button interaction ---
@@ -356,80 +378,37 @@ describe("createChatArea", () => {
     expect(call.getCurrentChannelId()).toBe(99);
   });
 
-  // --- onJumpToMessage for pinned controller ---
+  // --- Jump wiring: both overlays route into the one jumper ---
 
-  it("pinned onJumpToMessage returns false when channel controller is null", () => {
+  it("pinned onJumpToMessage jumps within the current channel", () => {
+    const channelCtrl = { currentChannelId: 7, messageList: null } as any;
+    createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
+
+    const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
+    call.onJumpToMessage!(42);
+
+    // The pinned panel only ever lists the current channel's pins, so the
+    // channel id comes from the controller rather than the entry.
+    expect(mockJumpTo).toHaveBeenCalledWith(7, 42);
+  });
+
+  it("pinned onJumpToMessage is a no-op with no channel mounted", () => {
     createChatArea(makeOptions({ getChannelCtrl: () => null }));
 
     const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    expect(call.onJumpToMessage!(123)).toBe(false);
+    expect(() => call.onJumpToMessage!(42)).not.toThrow();
+    expect(mockJumpTo).not.toHaveBeenCalled();
   });
 
-  it("pinned onJumpToMessage returns false when messageList is null", () => {
-    const channelCtrl = { currentChannelId: 1, messageList: null } as any;
-    createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
-
-    const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    expect(call.onJumpToMessage!(123)).toBe(false);
-  });
-
-  it("pinned onJumpToMessage delegates to messageList.scrollToMessage", () => {
-    const mockScrollToMessage = vi.fn(() => true);
-    const channelCtrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage: mockScrollToMessage },
-    } as any;
-    createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
-
-    const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    const result = call.onJumpToMessage!(42);
-    expect(result).toBe(true);
-    expect(mockScrollToMessage).toHaveBeenCalledWith(42);
-  });
-
-  it("pinned onJumpToMessage returns false when scrollToMessage returns false", () => {
-    const mockScrollToMessage = vi.fn(() => false);
-    const channelCtrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage: mockScrollToMessage },
-    } as any;
-    createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
-
-    const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    const result = call.onJumpToMessage!(99);
-    expect(result).toBe(false);
-    expect(mockScrollToMessage).toHaveBeenCalledWith(99);
-  });
-
-  // --- onJumpToMessage for search controller ---
-
-  it("search onJumpToMessage returns false when channel controller is null", () => {
-    createChatArea(makeOptions({ getChannelCtrl: () => null }));
-
-    const call = vi.mocked(createSearchOverlayController).mock.calls[0]![0];
-    expect(call.onJumpToMessage!(1, 123)).toBe(false);
-  });
-
-  it("search onJumpToMessage returns false when messageList is null", () => {
+  it("search onJumpToMessage jumps to the result's own channel", () => {
     const channelCtrl = { currentChannelId: 1, messageList: null } as any;
     createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
 
     const call = vi.mocked(createSearchOverlayController).mock.calls[0]![0];
-    expect(call.onJumpToMessage!(1, 123)).toBe(false);
-  });
+    call.onJumpToMessage!(3, 55);
 
-  it("search onJumpToMessage delegates to messageList.scrollToMessage", () => {
-    const mockScrollToMessage = vi.fn(() => true);
-    const channelCtrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage: mockScrollToMessage },
-    } as any;
-    createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
-
-    const call = vi.mocked(createSearchOverlayController).mock.calls[0]![0];
-    const result = call.onJumpToMessage!(1, 55);
-    expect(result).toBe(true);
-    expect(mockScrollToMessage).toHaveBeenCalledWith(55);
+    // A search hit can live anywhere, so the jumper handles the switch too.
+    expect(mockJumpTo).toHaveBeenCalledWith(3, 55);
   });
 
   // --- Header default content ---

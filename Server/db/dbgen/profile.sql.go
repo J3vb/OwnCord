@@ -10,6 +10,37 @@ import (
 	"database/sql"
 )
 
+const countUsersWithAvatar = `-- name: CountUsersWithAvatar :one
+SELECT COUNT(*) FROM users WHERE avatar = ?
+`
+
+// Authorization probe for the file route: an unlinked attachment is readable by
+// everyone exactly while some user's avatar points at it. Covered by the
+// partial index on users(avatar) added in migration 027.
+func (q *Queries) CountUsersWithAvatar(ctx context.Context, avatar *string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUsersWithAvatar, avatar)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const updateUserCustomStatus = `-- name: UpdateUserCustomStatus :exec
+UPDATE users SET custom_status = ? WHERE id = ?
+`
+
+type UpdateUserCustomStatusParams struct {
+	CustomStatus *string `json:"customStatus"`
+	ID           int64   `json:"id"`
+}
+
+// Separate from UpdateUserProfile because a custom status arrives over the
+// WebSocket presence path, not the REST profile PATCH, and must not be able to
+// clobber the username/avatar of a profile edit racing it.
+func (q *Queries) UpdateUserCustomStatus(ctx context.Context, arg UpdateUserCustomStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserCustomStatus, arg.CustomStatus, arg.ID)
+	return err
+}
+
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users SET password = ? WHERE id = ?
 `
@@ -25,15 +56,25 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 }
 
 const updateUserProfile = `-- name: UpdateUserProfile :execresult
-UPDATE users SET username = ?, avatar = ? WHERE id = ?
+UPDATE users
+SET username = ?, avatar = ?, display_name = ?, about = ?
+WHERE id = ?
 `
 
 type UpdateUserProfileParams struct {
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar"`
-	ID       int64   `json:"id"`
+	Username    string  `json:"username"`
+	Avatar      *string `json:"avatar"`
+	DisplayName *string `json:"displayName"`
+	About       *string `json:"about"`
+	ID          int64   `json:"id"`
 }
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, updateUserProfile, arg.Username, arg.Avatar, arg.ID)
+	return q.db.ExecContext(ctx, updateUserProfile,
+		arg.Username,
+		arg.Avatar,
+		arg.DisplayName,
+		arg.About,
+		arg.ID,
+	)
 }

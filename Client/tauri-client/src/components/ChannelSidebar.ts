@@ -7,26 +7,28 @@
 import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import {
-  channelsStore,
-  getChannelsByCategory,
-  setActiveChannel,
-  clearUnread,
-} from "@stores/channels.store";
+import { channelsStore, getChannelsByCategory } from "@stores/channels.store";
+import { navigateToChannel } from "@lib/channel-navigation";
+import { markAllRead, unreadChannelIds } from "@lib/read-state";
+import { isChannelMuted } from "@lib/channel-mutes";
+import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
-import type { PeerVerification } from "@stores/voice.store";
+import type { PeerVerification, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
-import { attachChannelContextMenu } from "./channel-sidebar/context-menu";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore } from "@stores/members.store";
+import { roleHasPermission, canManageChannels } from "@lib/permissions";
+import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 
 const log = createLogger("ChannelSidebar");
@@ -139,9 +141,30 @@ export interface ChannelReorderData {
   readonly newPosition: number;
 }
 
+/** Moderator actions on another user's voice session. Supplied by the page,
+ *  which owns the WS socket; the sidebar only decides whether to offer them. */
+export interface VoiceModerationCallbacks {
+  readonly onServerMute: (channelId: number, userId: number, muted: boolean) => void;
+  readonly onServerDeafen: (channelId: number, userId: number, deafened: boolean) => void;
+  readonly onMove: (userId: number, toChannelId: number) => void;
+  readonly onDisconnect: (userId: number) => void;
+}
+
+/** Whether the signed-in user's role holds MUTE_MEMBERS. The server enforces
+ *  it (and the rank rule the client cannot evaluate); this only decides whether
+ *  the menu is worth offering. Derived through the same helper as the
+ *  member-list moderation gates so the two cannot disagree about who is a
+ *  moderator. */
+export function canModerateVoice(): boolean {
+  const role = getCurrentUser()?.role ?? "";
+  return roleHasPermission(role, Permission.MUTE_MEMBERS);
+}
+
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
   readonly onVoiceLeave: () => void;
+  /** Voice moderation wiring; the moderation menu section is hidden without it. */
+  readonly onVoiceModerate?: VoiceModerationCallbacks;
   /** Called when the user clicks the "+" on a category header. */
   readonly onCreateChannel?: (category: string) => void;
   /** Called when the user right-clicks a channel and selects Edit. */
@@ -150,6 +173,8 @@ export interface ChannelSidebarOptions {
   readonly onDeleteChannel?: (channel: Channel) => void;
   /** Called when the user drags a channel to a new position. */
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
+  /** Bulk-delete the newest `count` messages; gated on MANAGE_MESSAGES. */
+  readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
 }
@@ -164,6 +189,39 @@ function pickAvatarColor(username: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
+/**
+ * The marker on an age-restricted channel row.
+ *
+ * A glyph plus a title rather than a coloured name: the flag is information
+ * about the channel, and recolouring the name would collide with the unread
+ * and mention states the row already encodes that way.
+ */
+function nsfwIndicator(channelId: number): HTMLSpanElement {
+  const badge = createElement("span", {
+    class: "ch-nsfw",
+    "data-testid": `channel-nsfw-${channelId}`,
+    "aria-label": "Age restricted",
+  });
+  badge.title = "Age-restricted channel";
+  badge.appendChild(createIcon("shield-alert", 13));
+  return badge;
+}
+
+/**
+ * "3/5" for a voice channel that has a user limit, or null when it is
+ * unlimited (0) — a count with no ceiling is already shown by the participant
+ * rows underneath, and "3/0" would read as a bug.
+ *
+ * Purely a readout: the server owns capacity and refuses a join over the limit
+ * with CHANNEL_FULL. The client never blocks the click, because its copy of
+ * the participant list can lag and a join it refused locally would be a
+ * mistake nobody could correct.
+ */
+function voiceCapacityLabel(channel: Channel, connected: number): string | null {
+  if (channel.voiceMaxUsers <= 0) return null;
+  return `${connected}/${channel.voiceMaxUsers}`;
+}
+
 function renderTextChannelItem(
   channel: Channel,
   isActive: boolean,
@@ -173,6 +231,7 @@ function renderTextChannelItem(
     "channel-item",
     isActive ? "active" : "",
     channel.unreadCount > 0 ? "unread" : "",
+    channel.mentionCount > 0 ? "mentioned" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -190,21 +249,68 @@ function renderTextChannelItem(
 
   appendChildren(item, prefix, name);
 
-  if (channel.unreadCount > 0) {
-    const badge = createElement("span", { class: "unread-badge" }, String(channel.unreadCount));
+  // Age-restricted marker. Next to the name rather than replacing the "#", so
+  // the channel still reads as a channel and the mark is visible whether or
+  // not the reader has already accepted the gate this session.
+  if (channel.nsfw) {
+    item.appendChild(nsfwIndicator(channel.id));
+  }
+
+  // A muted channel still counts its unreads — it has not stopped existing,
+  // it has stopped shouting — so the badge dims rather than disappearing. The
+  // mention badge is deliberately left alone: a mute silences chatter, never
+  // something addressed to the reader.
+  const muted = isChannelMuted(channel.id);
+  if (muted) {
+    item.classList.add("muted");
+  }
+
+  // A mention badge outranks the plain unread badge: only one is shown, and
+  // it counts the mentions, not the messages.
+  if (channel.mentionCount > 0) {
+    const badge = createElement(
+      "span",
+      { class: "mention-badge", "data-testid": `channel-mentions-${channel.id}` },
+      String(channel.mentionCount),
+    );
+    badge.title = `${channel.mentionCount} mention${channel.mentionCount === 1 ? "" : "s"}`;
+    item.appendChild(badge);
+  } else if (channel.unreadCount > 0) {
+    const badge = createElement(
+      "span",
+      { class: muted ? "unread-badge muted" : "unread-badge" },
+      String(channel.unreadCount),
+    );
     item.appendChild(badge);
   }
 
-  item.addEventListener(
-    "click",
-    () => {
-      setActiveChannel(channel.id);
-      clearUnread(channel.id);
-    },
-    { signal },
-  );
+  item.addEventListener("click", () => navigateToChannel(channel.id), { signal });
 
   return item;
+}
+
+/** Moderation section for one participant row, or undefined when the local
+ *  user may not moderate voice (which hides the section entirely). Move targets
+ *  are the other voice channels; the server re-checks that the TARGET may
+ *  connect to the one picked. */
+function buildVoiceModOptions(
+  channelId: number,
+  user: VoiceUser,
+  cb?: VoiceModerationCallbacks,
+): VoiceModMenuOptions | undefined {
+  if (cb === undefined || !canModerateVoice()) return undefined;
+  const moveTargets = Array.from(channelsStore.getState().channels.values())
+    .filter((ch) => ch.type === "voice" && ch.id !== channelId)
+    .map((ch) => ({ id: ch.id, name: ch.name }));
+  return {
+    serverMuted: user.serverMuted === true,
+    serverDeafened: user.serverDeafened === true,
+    moveTargets,
+    onServerMute: (muted) => cb.onServerMute(channelId, user.userId, muted),
+    onServerDeafen: (deafened) => cb.onServerDeafen(channelId, user.userId, deafened),
+    onMove: (toChannelId) => cb.onMove(user.userId, toChannelId),
+    onDisconnect: () => cb.onDisconnect(user.userId),
+  };
 }
 
 function renderVoiceChannelItem(
@@ -213,6 +319,7 @@ function renderVoiceChannelItem(
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
 ): HTMLDivElement {
   const voiceState = voiceStore.getState();
   const isJoined = voiceState.currentChannelId === channel.id;
@@ -243,6 +350,22 @@ function renderVoiceChannelItem(
 
   appendChildren(item, prefix, name);
 
+  if (channel.nsfw) {
+    item.appendChild(nsfwIndicator(channel.id));
+  }
+
+  const voiceUsers = getChannelVoiceUsers(channel.id);
+  const capacity = voiceCapacityLabel(channel, voiceUsers.length);
+  if (capacity !== null) {
+    const badge = createElement(
+      "span",
+      { class: "ch-capacity", "data-testid": `channel-capacity-${channel.id}` },
+      capacity,
+    );
+    badge.title = `${voiceUsers.length} of ${channel.voiceMaxUsers} connected`;
+    item.appendChild(badge);
+  }
+
   item.addEventListener(
     "click",
     () => {
@@ -260,7 +383,6 @@ function renderVoiceChannelItem(
   wrapper.appendChild(item);
 
   // Render connected voice users below the channel
-  const voiceUsers = getChannelVoiceUsers(channel.id);
   if (voiceUsers.length > 0) {
     const usersContainer = createElement("div", { class: "voice-users-list" });
     for (const user of voiceUsers) {
@@ -293,17 +415,26 @@ function renderVoiceChannelItem(
         row.appendChild(liveBadge);
       }
 
+      // A moderator-imposed mute/deafen gets its own class and tooltip: the
+      // same mic-off glyph would otherwise read as an ordinary self-mute.
       if (user.deafened) {
-        // Deafened: show both mic-off and headphones-off
-        const muteIcon = createElement("span", { class: "vu-muted" });
+        const muteIcon = createElement("span", {
+          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
         muteIcon.appendChild(createIcon("mic-off", 14));
-        const deafIcon = createElement("span", { class: "vu-muted" });
+        const deafIcon = createElement("span", {
+          class: user.serverDeafened === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverDeafened === true) deafIcon.title = "Deafened by a moderator";
         deafIcon.appendChild(createIcon("headphones-off", 14));
         row.appendChild(muteIcon);
         row.appendChild(deafIcon);
       } else if (user.muted) {
-        // Muted only: show mic-off
-        const muteIcon = createElement("span", { class: "vu-muted" });
+        const muteIcon = createElement("span", {
+          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
         muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
       }
@@ -349,6 +480,7 @@ function renderVoiceChannelItem(
               e.clientX,
               e.clientY,
               signal,
+              buildVoiceModOptions(channel.id, user, onVoiceModerate),
             );
           },
           { signal },
@@ -419,14 +551,23 @@ function renderChannelItem(
   channels?: readonly Channel[],
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
+  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
-    el = renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave, onWatchStream);
+    el = renderVoiceChannelItem(
+      channel,
+      signal,
+      onVoiceJoin,
+      onVoiceLeave,
+      onWatchStream,
+      onVoiceModerate,
+    );
   } else {
     el = renderTextChannelItem(channel, isActive, signal);
   }
-  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel);
+  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel, onPurgeChannel);
   if (containerEl !== undefined && channels !== undefined) {
     attachDragHandlers(el, channel, containerEl, channels, signal, onReorderChannel);
   }
@@ -445,6 +586,8 @@ function renderCategoryGroup(
   onDeleteChannel?: (channel: Channel) => void,
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
+  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
 ): HTMLDivElement {
   const group = createElement("div", {});
 
@@ -462,11 +605,11 @@ function renderCategoryGroup(
     appendChildren(header, arrow, label);
 
     if (onCreateChannel !== undefined) {
-      const user = getCurrentUser();
-      const role = user?.role?.toLowerCase() ?? "";
-      const canManageChannels = role === "owner" || role === "admin";
-
-      if (canManageChannels) {
+      // MANAGE_CHANNELS is enforced server-side on /admin/api/channels*, so
+      // gate on the bit; the role-name check only stands in when the `ready`
+      // role list has no entry for this role. Same derivation as the channel
+      // context menu's Edit/Delete items.
+      if (canManageChannels()) {
         const addBtn = createElement(
           "span",
           {
@@ -514,6 +657,8 @@ function renderCategoryGroup(
             channels,
             onReorderChannel,
             onWatchStream,
+            onVoiceModerate,
+            onPurgeChannel,
           ),
         );
       }
@@ -536,6 +681,8 @@ function renderCategoryGroup(
           channels,
           onReorderChannel,
           onWatchStream,
+          onVoiceModerate,
+          onPurgeChannel,
         ),
       );
     }
@@ -554,11 +701,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onDeleteChannel,
     onReorderChannel,
     onWatchStream,
+    onVoiceModerate,
+    onPurgeChannel,
   } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
+  let markAllBtn: HTMLButtonElement | null = null;
 
   const unsubscribers: Array<() => void> = [];
 
@@ -576,7 +726,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
   }
 
+  /** Hide Mark All as Read while nothing is unread — a header button that can
+   *  never do anything is worse than no button. */
+  function updateMarkAllBtn(): void {
+    if (markAllBtn === null) return;
+    markAllBtn.classList.toggle("visible", unreadChannelIds().length > 0);
+  }
+
   function renderChannels(): void {
+    updateMarkAllBtn();
     if (channelList === null) {
       return;
     }
@@ -613,6 +771,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           onDeleteChannel,
           onReorderChannel,
           onWatchStream,
+          onVoiceModerate,
+          onPurgeChannel,
         ),
       );
     }
@@ -620,14 +780,40 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     rebuildVoiceRowCache();
   }
 
+  /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */
+  function handleMuteChanged(): void {
+    renderChannels();
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
+    root.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: ac.signal });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
     const authState = authStore.getState();
     serverNameEl = createElement("h2", {}, authState.serverName ?? "Server Name");
     header.appendChild(serverNameEl);
+
+    // Mark All as Read lives on the server header — it is a server-wide action,
+    // and it only appears while something is actually unread so the header does
+    // not carry a permanently dead button.
+    markAllBtn = createElement("button", {
+      class: "sidebar-mark-all-read",
+      title: "Mark All as Read",
+      "aria-label": "Mark All as Read",
+      "data-testid": "mark-all-read",
+    });
+    markAllBtn.appendChild(createIcon("check", 16));
+    markAllBtn.addEventListener(
+      "click",
+      (e: Event) => {
+        e.stopPropagation();
+        markAllRead();
+      },
+      { signal: ac.signal },
+    );
+    header.appendChild(markAllBtn);
 
     // Channel list
     channelList = createElement("div", { class: "channel-list" });
@@ -637,6 +823,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     // Initial render
     renderChannels();
+
+    // DM badges live in dm.store, and Mark All as Read covers them too, so the
+    // header button's visibility has to track that store as well.
+    unsubscribers.push(dmStore.subscribeSelector((s) => s.channels, updateMarkAllBtn));
 
     // Subscribe to channels store changes (channels map OR active channel)
     const unsubChannelsMap = channelsStore.subscribeSelector(
@@ -692,7 +882,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // Include the E2EE verification status so a verified↔unverified↔mismatch
             // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
             const verif = state.peerVerifications?.get(uid);
-            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${verif ? `@${verif.status}` : ""}`;
+            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}` : ""}`;
           }
         }
         return structSig;
@@ -730,6 +920,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     channelList = null;
     serverNameEl = null;
+    markAllBtn = null;
   }
 
   return { mount, destroy };

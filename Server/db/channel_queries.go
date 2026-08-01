@@ -10,7 +10,7 @@ import (
 	"github.com/owncord/server/db/dbgen"
 )
 
-// channelFields carries the 13 columns shared by GetChannelRow and
+// channelFields carries the 14 columns shared by GetChannelRow and
 // ListChannelsRow; both generated row types are structurally identical, so a
 // single mapper narrows either to the domain Channel model.
 type channelFields struct {
@@ -27,6 +27,10 @@ type channelFields struct {
 	VoiceQuality    *string
 	MixingThreshold *int64
 	VoiceMaxVideo   int64
+	// Nsfw keeps sqlc's spelling, not the domain model's NSFW: the two
+	// generated row types are narrowed by a direct struct conversion, which
+	// requires identical field names.
+	Nsfw int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -44,6 +48,7 @@ func channelFromFields(f channelFields) Channel {
 		VoiceQuality:    f.VoiceQuality,
 		MixingThreshold: ptrI64toI(f.MixingThreshold),
 		VoiceMaxVideo:   int(f.VoiceMaxVideo),
+		NSFW:            f.Nsfw != 0,
 	}
 }
 
@@ -147,10 +152,15 @@ func (d *DB) GetChannelPermissions(ctx context.Context, channelID, roleID int64)
 	return r.Allow, r.Deny, nil
 }
 
-// ChannelOverride holds the allow/deny permission bits for a single channel.
+// ChannelOverride holds the resolved override layers for a single channel.
+// Allow/Deny are the ROLE layer (channel_overrides); UserAllow/UserDeny are the
+// per-member layer (channel_user_overrides) applied on top of it. See
+// permissions.EffectiveChannelPerms for the resolution order.
 type ChannelOverride struct {
-	Allow int64
-	Deny  int64
+	Allow     int64
+	Deny      int64
+	UserAllow int64
+	UserDeny  int64
 }
 
 // GetAllChannelPermissionsForRole returns all channel permission overrides for
@@ -192,6 +202,143 @@ func (d *DB) DeleteChannelOverride(ctx context.Context, channelID, roleID int64)
 		return fmt.Errorf("DeleteChannelOverride: %w", err)
 	}
 	return nil
+}
+
+// GetUserChannelPermissions returns the per-user allow/deny override bits for a
+// user on a channel. Returns (0, 0, nil) when no override exists.
+func (d *DB) GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error) {
+	r, scanErr := d.q.GetChannelUserPermission(ctx, dbgen.GetChannelUserPermissionParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	if scanErr != nil {
+		return 0, 0, fmt.Errorf("GetUserChannelPermissions: %w", scanErr)
+	}
+	return r.Allow, r.Deny, nil
+}
+
+// GetAllChannelPermissionsForUser returns every per-user channel override the
+// user carries, keyed by channel ID, in one query. The per-user layer is fetched
+// exactly like the per-role one (GetAllChannelPermissionsForRole) so no call
+// site pays an N+1 for the second layer.
+func (d *DB) GetAllChannelPermissionsForUser(ctx context.Context, userID int64) (map[int64]ChannelOverride, error) {
+	rows, err := d.q.GetUserChannelPermissions(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("GetAllChannelPermissionsForUser: %w", err)
+	}
+	result := make(map[int64]ChannelOverride, len(rows))
+	for _, r := range rows {
+		result[r.ChannelID] = ChannelOverride{UserAllow: r.Allow, UserDeny: r.Deny}
+	}
+	return result, nil
+}
+
+// GetChannelOverridesFor returns the merged role + user override layers for one
+// member, keyed by channel ID: two batch queries, never per channel. It is the
+// single fetch every "what can this member do here" site uses, so the role and
+// user layers can never be loaded by one site and forgotten by another.
+func (d *DB) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]ChannelOverride, error) {
+	merged, err := d.GetAllChannelPermissionsForRole(ctx, roleID)
+	if err != nil {
+		return nil, err
+	}
+	userOv, err := d.GetAllChannelPermissionsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for chID, o := range userOv {
+		existing := merged[chID]
+		existing.UserAllow = o.UserAllow
+		existing.UserDeny = o.UserDeny
+		merged[chID] = existing
+	}
+	return merged, nil
+}
+
+// UpsertChannelUserOverride inserts or updates the allow/deny permission
+// override for a single user on a channel.
+func (d *DB) UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error {
+	if err := d.q.UpsertChannelUserPermission(ctx, dbgen.UpsertChannelUserPermissionParams{
+		ChannelID: channelID,
+		UserID:    userID,
+		Allow:     allow,
+		Deny:      deny,
+	}); err != nil {
+		return fmt.Errorf("UpsertChannelUserOverride: %w", err)
+	}
+	return nil
+}
+
+// DeleteChannelUserOverride removes a user's permission override on a channel.
+// Deleting a non-existent override is a no-op.
+func (d *DB) DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error {
+	if err := d.q.DeleteChannelUserPermission(ctx, dbgen.DeleteChannelUserPermissionParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	}); err != nil {
+		return fmt.Errorf("DeleteChannelUserOverride: %w", err)
+	}
+	return nil
+}
+
+// GetChannelUserOverrides returns every per-user override on a channel, keyed
+// by user id. The per-user reverse (GetAllChannelPermissionsForUser) backs the
+// permission cache; this direction backs the @everyone fan-out and the admin
+// panel's override matrix, which need every member's verdict on one channel.
+func (d *DB) GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]ChannelOverride, error) {
+	rows, err := d.q.GetChannelUserOverrides(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("GetChannelUserOverrides: %w", err)
+	}
+	result := make(map[int64]ChannelOverride, len(rows))
+	for _, r := range rows {
+		result[r.UserID] = ChannelOverride{UserAllow: r.Allow, UserDeny: r.Deny}
+	}
+	return result, nil
+}
+
+// ChannelUserOverride pairs a user with their allow/deny override on a specific
+// channel. Unlike ChannelRoleOverride it lists only users who actually HAVE an
+// override row — every member of a server is not a sensible list to ship.
+type ChannelUserOverride struct {
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	RoleID   int64  `json:"role_id"`
+	Allow    int64  `json:"allow"`
+	Deny     int64  `json:"deny"`
+}
+
+// ListChannelUserOverrides returns the per-user overrides on a channel joined
+// with the users' names, ordered by username.
+func (d *DB) ListChannelUserOverrides(ctx context.Context, channelID int64) ([]ChannelUserOverride, error) {
+	rows, err := d.reader.QueryContext(ctx,
+		`SELECT u.id, u.username, u.role_id, o.allow, o.deny
+		 FROM channel_user_overrides o
+		 JOIN users u ON u.id = o.user_id
+		 WHERE o.channel_id = ?
+		 ORDER BY u.username COLLATE NOCASE ASC`,
+		channelID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListChannelUserOverrides: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	result := []ChannelUserOverride{}
+	for rows.Next() {
+		var o ChannelUserOverride
+		if scanErr := rows.Scan(&o.UserID, &o.Username, &o.RoleID, &o.Allow, &o.Deny); scanErr != nil {
+			return nil, fmt.Errorf("ListChannelUserOverrides scan: %w", scanErr)
+		}
+		result = append(result, o)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("ListChannelUserOverrides rows: %w", rows.Err())
+	}
+	return result, nil
 }
 
 // ChannelRoleOverride pairs a role with its (possibly zero) permission

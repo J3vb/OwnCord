@@ -22,38 +22,62 @@ func NewModerationService(st Store, perms *PermissionService) *ModerationService
 	return &ModerationService{st: st, perms: perms}
 }
 
-// requireBanPermission verifies the actor holds BAN_MEMBERS (or the
-// Administrator bypass). It deliberately takes no target: it runs before any
-// target lookup so an actor without ban authority always sees Forbidden and
-// never NotFound — the ban path cannot be used to enumerate user ids.
-func (s *ModerationService) requireBanPermission(ctx context.Context, actorID int64) error {
+// roleFor loads a principal's role through the permission cache. Every failure
+// is Forbidden: an unresolvable role must never authorize a moderation action.
+// The which argument names the principal in the error message ("actor" or
+// "target").
+func (s *ModerationService) roleFor(ctx context.Context, userID int64, which string) (*db.Role, error) {
 	if s.perms == nil {
-		// No permission service wired — fail closed rather than allow unchecked bans.
-		return fmt.Errorf("%w: permission service unavailable", ErrForbidden)
+		// No permission service wired — fail closed rather than allow unchecked actions.
+		return nil, fmt.Errorf("%w: permission service unavailable", ErrForbidden)
 	}
-	actorRole, err := s.perms.GetRoleForUser(ctx, actorID)
-	if err != nil || actorRole == nil {
-		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
+	role, err := s.perms.GetRoleForUser(ctx, userID)
+	if err != nil || role == nil {
+		return nil, fmt.Errorf("%w: failed to load %s role", ErrForbidden, which)
 	}
-	if !permissions.HasServerPerm(actorRole.Permissions, permissions.BanMembers) {
-		return fmt.Errorf("%w: missing BAN_MEMBERS permission", ErrForbidden)
+	return role, nil
+}
+
+// requirePerm verifies the actor holds perm (or the Administrator bypass) and
+// returns the actor's role for follow-up hierarchy checks. It deliberately
+// takes no target: it runs before any target lookup so an actor without
+// authority always sees Forbidden and never NotFound — these paths cannot be
+// used to enumerate user ids.
+func (s *ModerationService) requirePerm(ctx context.Context, actorID, perm int64) (*db.Role, error) {
+	actorRole, err := s.roleFor(ctx, actorID, "actor")
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if !permissions.HasServerPerm(actorRole.Permissions, perm) {
+		return nil, fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(perm))
+	}
+	return actorRole, nil
+}
+
+// requireBanPermission verifies the actor holds BAN_MEMBERS. See requirePerm.
+func (s *ModerationService) requireBanPermission(ctx context.Context, actorID int64) error {
+	_, err := s.requirePerm(ctx, actorID, permissions.BanMembers)
+	return err
 }
 
 // requireOutranks enforces the role hierarchy: the actor must strictly
-// outrank the target so a user cannot ban a peer or a higher-ranked user
+// outrank the target so a user cannot moderate a peer or a higher-ranked user
 // (e.g. the owner) — mirroring the position-based hierarchy used elsewhere.
-// Runs after requireBanPermission and the existence check, so only callers
-// that already hold ban authority reach it.
+// Runs after the permission and existence checks, so only callers that already
+// hold authority reach it.
 func (s *ModerationService) requireOutranks(ctx context.Context, actorID, targetID int64) error {
-	actorRole, err := s.perms.GetRoleForUser(ctx, actorID)
-	if err != nil || actorRole == nil {
-		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
+	actorRole, err := s.roleFor(ctx, actorID, "actor")
+	if err != nil {
+		return err
 	}
-	targetRole, err := s.perms.GetRoleForUser(ctx, targetID)
-	if err != nil || targetRole == nil {
-		return fmt.Errorf("%w: failed to load target role", ErrForbidden)
+	return s.requireOutranksRole(ctx, actorRole, targetID)
+}
+
+// requireOutranksRole is requireOutranks with the actor's role already loaded.
+func (s *ModerationService) requireOutranksRole(ctx context.Context, actorRole *db.Role, targetID int64) error {
+	targetRole, err := s.roleFor(ctx, targetID, "target")
+	if err != nil {
+		return err
 	}
 	if actorRole.Position <= targetRole.Position {
 		return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
@@ -103,6 +127,93 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, reason)
 
 	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
+	return nil
+}
+
+// ChangeUserRole assigns newRoleID to the target user. It enforces
+// MANAGE_ROLES plus two hierarchy rules the admin panel previously had none
+// of: the actor must strictly outrank the target, and may not hand out a role
+// positioned at or above their own — otherwise any admin could promote anyone
+// (including themselves via a second account) to Owner.
+func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetID, newRoleID int64) error {
+	if targetID <= 0 {
+		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return fmt.Errorf("%w: cannot change your own role", ErrBadRequest)
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.ManageRoles)
+	if err != nil {
+		return err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return err
+	}
+
+	newRole, err := s.st.GetRoleByID(ctx, newRoleID)
+	if err != nil || newRole == nil {
+		return fmt.Errorf("%w: role not found", ErrBadRequest)
+	}
+	// Administrator bypasses permission bits, never the hierarchy: the owner
+	// role is above every admin, so only the owner can grant it.
+	if newRole.Position >= actorRole.Position {
+		return fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
+	}
+
+	if err := s.st.UpdateUserRole(ctx, targetID, newRoleID); err != nil {
+		return fmt.Errorf("%w: failed to update role: %v", ErrInternal, err)
+	}
+	// Drop the target's cached role immediately: without this a demotion keeps
+	// granting the old bits (and the old rank) for up to permCacheTTL.
+	s.perms.InvalidateUser(targetID)
+
+	// Audit rows must survive a request canceled after the update committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_change", "user", targetID,
+		fmt.Sprintf("changed %s role to %s", target.Username, newRole.Name))
+
+	slog.Info("role changed", "actor_id", actorID, "target_id", targetID, "new_role_id", newRoleID)
+	return nil
+}
+
+// ForceLogout revokes every session of the target user (the client's "Kick").
+// Gated on KICK_MEMBERS plus the same hierarchy rule as ban, so a moderator
+// cannot log out an admin or the owner.
+func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID int64) error {
+	if targetID <= 0 {
+		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return fmt.Errorf("%w: cannot force-logout yourself", ErrBadRequest)
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err := s.requirePerm(ctx, actorID, permissions.KickMembers)
+	if err != nil {
+		return err
+	}
+	target, err := s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return err
+	}
+
+	if err := s.st.ForceLogoutUser(ctx, targetID); err != nil {
+		return fmt.Errorf("%w: failed to log out user: %v", ErrInternal, err)
+	}
+
+	// Audit rows must survive a request canceled after the sessions were cut.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "force_logout", "user", targetID,
+		"all sessions terminated")
+
+	slog.Info("force logout", "actor_id", actorID, "target_id", targetID)
 	return nil
 }
 

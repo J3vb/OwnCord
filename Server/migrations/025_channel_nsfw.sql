@@ -1,0 +1,13 @@
+-- Phase 5 (channel management): the per-channel NSFW / age-gate flag.
+--
+-- The flag is metadata and nothing else. The server stores it, ships it in
+-- `ready` and in the channel_create/channel_update broadcasts, and audits the
+-- edit — it deliberately imposes NO content behaviour of its own: no filtering,
+-- no age check, no restriction on who may read or post. Every client is free
+-- to decide what to do with it (the desktop client shows a one-time-per-session
+-- "may contain sensitive content" gate and marks the sidebar row), which is the
+-- only honest contract on a self-hosted server that knows nobody's age.
+--
+-- Stored as INTEGER 0/1 to match `archived` — SQLite has no boolean type, and
+-- every other flag column on this table already uses that shape.
+ALTER TABLE channels ADD COLUMN nsfw INTEGER NOT NULL DEFAULT 0;

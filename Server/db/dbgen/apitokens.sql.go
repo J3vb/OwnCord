@@ -60,7 +60,8 @@ func (q *Queries) GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiT
 
 const getOwnerUser = `-- name: GetOwnerUser :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
+       display_name, about, custom_status
 FROM users
 ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id ASC
 `
@@ -89,6 +90,9 @@ func (q *Queries) GetOwnerUser(ctx context.Context) (User, error) {
 		&i.BanReason,
 		&i.BanExpires,
 		&i.IdentityPublicKey,
+		&i.DisplayName,
+		&i.About,
+		&i.CustomStatus,
 	)
 	return i, err
 }

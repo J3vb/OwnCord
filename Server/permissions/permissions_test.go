@@ -420,3 +420,101 @@ func TestPermissionBits_AreDistinctPowersOfTwo(t *testing.T) {
 		seen[b] = true
 	}
 }
+
+// ─── HasAnyPerm / AdminPerimeter / Name tests ────────────────────────────────
+
+func TestHasAnyPerm_AnyOfSemantics(t *testing.T) {
+	rolePerms := permissions.KickMembers | permissions.SendMessages
+	// One matching bit is enough, unlike HasPerm's ALL-of.
+	if !permissions.HasAnyPerm(rolePerms, permissions.KickMembers|permissions.ManageServer) {
+		t.Error("expected HasAnyPerm to match on KickMembers")
+	}
+	if permissions.HasPerm(rolePerms, permissions.KickMembers|permissions.ManageServer) {
+		t.Error("HasPerm must stay ALL-of")
+	}
+	if permissions.HasAnyPerm(rolePerms, permissions.ManageServer|permissions.ViewAuditLog) {
+		t.Error("expected HasAnyPerm to reject a disjoint mask")
+	}
+	if permissions.HasAnyPerm(rolePerms, 0) {
+		t.Error("a zero mask must never be satisfied")
+	}
+	if permissions.HasAnyPerm(0, permissions.AdminPerimeter) {
+		t.Error("a zero role must never satisfy the perimeter")
+	}
+}
+
+func TestAdminPerimeter_Membership(t *testing.T) {
+	admitted := []int64{
+		permissions.Administrator, permissions.ManageChannels, permissions.ManageRoles,
+		permissions.ManageServer, permissions.ViewAuditLog, permissions.KickMembers,
+		permissions.BanMembers, permissions.MuteMembers,
+	}
+	for _, p := range admitted {
+		if !permissions.HasAnyPerm(p, permissions.AdminPerimeter) {
+			t.Errorf("%s should admit to the admin perimeter", permissions.Name(p))
+		}
+	}
+	// Bits with no admin-panel route must not open the perimeter.
+	refused := []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.ManageMessages,
+		permissions.ManageInvites, permissions.ConnectVoice,
+	}
+	for _, p := range refused {
+		if permissions.HasAnyPerm(p, permissions.AdminPerimeter) {
+			t.Errorf("%s must not admit to the admin perimeter", permissions.Name(p))
+		}
+	}
+	// The seeded Moderator role (migration 001) gets in.
+	if !permissions.HasAnyPerm(0x000FFFFF, permissions.AdminPerimeter) {
+		t.Error("the seeded Moderator mask should admit to the admin perimeter")
+	}
+	// The seeded Member role does not.
+	if permissions.HasAnyPerm(1635, permissions.AdminPerimeter) {
+		t.Error("the seeded Member mask must not admit to the admin perimeter")
+	}
+}
+
+func TestName_KnownAndUnknownBits(t *testing.T) {
+	if got := permissions.Name(permissions.ManageChannels); got != "MANAGE_CHANNELS" {
+		t.Errorf("Name(ManageChannels) = %q", got)
+	}
+	if got := permissions.Name(permissions.ViewAuditLog); got != "VIEW_AUDIT_LOG" {
+		t.Errorf("Name(ViewAuditLog) = %q", got)
+	}
+	// Zero, multi-bit and undefined values have no single name.
+	for _, bit := range []int64{0, permissions.KickMembers | permissions.BanMembers, 0x4} {
+		if got := permissions.Name(bit); got != "UNKNOWN" {
+			t.Errorf("Name(0x%X) = %q, want UNKNOWN", bit, got)
+		}
+	}
+}
+
+// TestMentionEveryone_BitIsFreeAndNamed locks phase 3's new bit: 21 was
+// unassigned, it is part of AllPerms so an externally supplied mask keeps it,
+// and it stays out of the admin perimeter (mentioning is not moderation).
+func TestMentionEveryone_BitIsFreeAndNamed(t *testing.T) {
+	if permissions.MentionEveryone != 0x200000 {
+		t.Errorf("MentionEveryone = 0x%X, want 0x200000 (bit 21)", permissions.MentionEveryone)
+	}
+	for _, other := range []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
+		permissions.AddReactions, permissions.ConnectVoice, permissions.SpeakVoice,
+		permissions.UseVideo, permissions.ShareScreen, permissions.ManageMessages,
+		permissions.ManageChannels, permissions.KickMembers, permissions.BanMembers,
+		permissions.MuteMembers, permissions.ManageRoles, permissions.ManageServer,
+		permissions.ManageInvites, permissions.ViewAuditLog, permissions.Administrator,
+	} {
+		if other&permissions.MentionEveryone != 0 {
+			t.Errorf("bit 21 collides with 0x%X", other)
+		}
+	}
+	if permissions.AllPerms&permissions.MentionEveryone == 0 {
+		t.Error("AllPerms must include MentionEveryone")
+	}
+	if permissions.AdminPerimeter&permissions.MentionEveryone != 0 {
+		t.Error("MentionEveryone must not admit to the admin perimeter")
+	}
+	if got := permissions.Name(permissions.MentionEveryone); got != "MENTION_EVERYONE" {
+		t.Errorf("Name(MentionEveryone) = %q", got)
+	}
+}

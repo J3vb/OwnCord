@@ -11,13 +11,22 @@ import {
   getChannelMessages,
   hasMoreMessages,
   getHistoryLoadState,
+  isWindowDetached,
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { unobserveMedia } from "@lib/media-visibility";
 
 const log = createLogger("message-list");
-import { shouldGroup, isSameDay, renderDayDivider, renderMessage } from "./message-list/renderers";
+import {
+  shouldGroup,
+  isSameDay,
+  renderDayDivider,
+  renderNewDivider,
+  renderMessage,
+} from "./message-list/renderers";
+import { getUnreadOnOpen } from "@stores/channels.store";
+import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 
 // -- Options ------------------------------------------------------------------
@@ -39,6 +48,17 @@ export interface MessageListOptions {
   readonly onDeleteDraft?: (correlationId: string) => void;
   /** Retry a failed first-page history fetch. */
   readonly onRetryLoad?: () => void;
+  /**
+   * Jump to another message in this channel — the reply bar above a reply, and
+   * any other in-row affordance. May target a message outside the loaded
+   * window; the handler is expected to fetch the around-window in that case.
+   */
+  readonly onJumpToMessage?: (messageId: number) => void;
+  /**
+   * Leave a detached around-window and reload the live tail. Wired to the
+   * "Jump to Present" pill, which only appears while the window is detached.
+   */
+  readonly onJumpToPresent?: () => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -68,20 +88,31 @@ interface VirtualItemDivider {
   readonly timestamp: string;
 }
 
-type VirtualItem = VirtualItemMessage | VirtualItemDivider;
+/** The "NEW" line marking where the reader's unread messages begin. At most
+ *  one per list, and only for a visit that opened with unread messages. */
+interface VirtualItemNewDivider {
+  readonly kind: "new-divider";
+}
+
+type VirtualItem = VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider;
 
 // -- Smart height estimation --------------------------------------------------
 
 function estimateItemHeight(item: VirtualItem): number {
-  if (item.kind === "divider") return 32;
+  if (item.kind === "divider" || item.kind === "new-divider") return 32;
 
   // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
   // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
   let height = item.isGrouped ? 22 : 61;
 
-  // Image attachments
+  // Media attachments. Video shares the image box, so it reserves the same
+  // space; the audio player is a chip-height row.
   for (const att of item.message.attachments) {
-    if (att.mime.startsWith("image/")) {
+    if (isVideoMime(att.mime)) {
+      height += 220;
+    } else if (isAudioMime(att.mime)) {
+      height += 96;
+    } else if (att.mime.startsWith("image/")) {
       height += 220;
     }
   }
@@ -108,21 +139,42 @@ function buildVirtualItems(
   messages: readonly Message[],
   seedPrevMsg: Message | null = null,
   seedLastTimestamp: string | null = null,
+  newDividerAt = -1,
 ): readonly VirtualItem[] {
   const items: VirtualItem[] = [];
   let lastTimestamp: string | null = seedLastTimestamp;
   let prevMsg: Message | null = seedPrevMsg;
 
-  for (const msg of messages) {
+  for (const [i, msg] of messages.entries()) {
     if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
       items.push({ kind: "divider", timestamp: msg.timestamp });
     }
-    const isGrouped = prevMsg !== null && shouldGroup(prevMsg, msg);
+    const isFirstUnread = i === newDividerAt;
+    if (isFirstUnread) {
+      items.push({ kind: "new-divider" });
+    }
+    // A message directly under the NEW line starts a fresh block: rendering it
+    // as a grouped continuation of a message from before the line hides both
+    // its author and the fact that the line is there.
+    const isGrouped = !isFirstUnread && prevMsg !== null && shouldGroup(prevMsg, msg);
     items.push({ kind: "message", message: msg, isGrouped });
     lastTimestamp = msg.timestamp;
     prevMsg = msg;
   }
   return items;
+}
+
+/**
+ * Index of the first unread message in `messages`, or -1 for none.
+ *
+ * Derived from the unread count the channel had when it was opened (the
+ * badge itself is cleared by the visit): the last N loaded messages are the
+ * unread ones. Clamped to 0 when the whole loaded window is unread, and
+ * suppressed at 0-length so an empty channel never renders a lone divider.
+ */
+function firstUnreadIndex(messages: readonly Message[], unreadOnOpen: number): number {
+  if (unreadOnOpen <= 0 || messages.length === 0) return -1;
+  return Math.max(0, messages.length - unreadOnOpen);
 }
 
 // -- Empty state --------------------------------------------------------------
@@ -197,17 +249,39 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let bottomSpacer: HTMLDivElement | null = null;
   let contentContainer: HTMLDivElement | null = null;
   let scrollToBottomBtn: HTMLButtonElement | null = null;
+  let jumpToPresentPill: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
+
+  /**
+   * Unread count this channel carried when the visit that created this list
+   * began. Read once here, not per render: the badge is cleared by the visit
+   * itself, and the divider must stay put for the whole visit rather than
+   * jumping as new messages arrive. Zero once the reader comes back, which is
+   * what makes the divider clear on the next visit.
+   *
+   * Suppressed while the window is detached (jumped to an old message): the
+   * loaded slice is then not the tail, so "the last N messages" would put the
+   * line somewhere arbitrary.
+   */
+  const unreadOnOpen = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
 
   // ---------------------------------------------------------------------------
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
 
+  /** Render one virtual item — the single place the three item kinds map to DOM. */
+  function renderVirtualItem(item: VirtualItem): HTMLElement {
+    if (item.kind === "divider") return renderDayDivider(item.timestamp);
+    if (item.kind === "new-divider") return renderNewDivider();
+    return renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal);
+  }
+
   function itemKey(index: number): string {
     const item = virtualItems[index];
     if (item === undefined) return `idx-${index}`;
     if (item.kind === "divider") return `div-${item.timestamp}`;
+    if (item.kind === "new-divider") return "new-divider";
     return `msg-${item.message.id}`;
   }
 
@@ -269,6 +343,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     } else {
       scrollToBottomBtn.classList.add("visible");
     }
+  }
+
+  /** The pill is the only signal that the bottom of the list is not "now". */
+  function updateJumpToPresentPill(): void {
+    if (jumpToPresentPill === null) return;
+    jumpToPresentPill.classList.toggle("visible", isWindowDetached(options.channelId));
   }
 
   // ---------------------------------------------------------------------------
@@ -410,14 +490,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       clearChildren(contentContainer);
       const fragment = document.createDocumentFragment();
       for (let i = start; i < end; i++) {
-        const item = virtualItems[i]!;
-        if (item.kind === "divider") {
-          fragment.appendChild(renderDayDivider(item.timestamp));
-        } else {
-          fragment.appendChild(
-            renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
-          );
-        }
+        fragment.appendChild(renderVirtualItem(virtualItems[i]!));
       }
       contentContainer.appendChild(fragment);
 
@@ -439,7 +512,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   function rebuildItems(): void {
     allMessages = getChannelMessages(options.channelId);
-    virtualItems = buildVirtualItems(allMessages);
+    virtualItems = buildVirtualItems(
+      allMessages,
+      null,
+      null,
+      firstUnreadIndex(allMessages, unreadOnOpen),
+    );
 
     // Build Fenwick tree initialized with smart estimates / cached heights
     tree = new FenwickTree(virtualItems.length);
@@ -516,13 +594,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // The rendered window includes the old tail — append the new rows.
       const fragment = document.createDocumentFragment();
       for (const item of appendedItems) {
-        if (item.kind === "divider") {
-          fragment.appendChild(renderDayDivider(item.timestamp));
-        } else {
-          fragment.appendChild(
-            renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
-          );
-        }
+        fragment.appendChild(renderVirtualItem(item));
       }
       contentContainer.appendChild(fragment);
       renderedEnd = virtualItems.length;
@@ -676,11 +748,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       { signal: ac.signal },
     );
 
+    jumpToPresentPill = createElement("button", {
+      class: "jump-to-present-pill",
+      "data-testid": "jump-to-present",
+    });
+    jumpToPresentPill.textContent = "Jump to Present ↓";
+    jumpToPresentPill.addEventListener("click", () => options.onJumpToPresent?.(), {
+      signal: ac.signal,
+    });
+
     root.appendChild(topSpacer);
     root.appendChild(contentContainer);
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
     root.appendChild(scrollToBottomBtn);
+    root.appendChild(jumpToPresentPill);
 
     root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
@@ -722,6 +804,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     parentContainer.appendChild(root);
 
     renderAll();
+    updateJumpToPresentPill();
     scrollToBottom();
     const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
     ac.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
@@ -746,6 +829,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (s) => s.historyLoadState.get(options.channelId),
         () => {
           renderAll();
+        },
+      ),
+    );
+
+    // Show/hide the pill as the window detaches from (and reattaches to) the
+    // live tail. No re-render — only the pill's visibility changes.
+    unsubscribers.push(
+      messagesStore.subscribeSelector(
+        (s) => s.detachedChannels.has(options.channelId),
+        () => {
+          updateJumpToPresentPill();
         },
       ),
     );
@@ -801,6 +895,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = null;
     bottomSpacer = null;
     scrollToBottomBtn = null;
+    jumpToPresentPill = null;
   }
 
   function scrollToMessage(messageId: number): boolean {
@@ -811,6 +906,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (idx === -1) return false;
 
     root.scrollTop = offsetBefore(idx);
+    // Force the rebuild path: a scroll-driven renderWindow only moves spacers,
+    // so without this the target row can sit outside the rendered window and
+    // there is nothing to flash (and nothing to look at after the scroll).
+    renderedStart = -1;
     renderWindow();
 
     // Briefly highlight the target message element
@@ -819,9 +918,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const el = contentContainer.children[localIdx] as HTMLElement | undefined;
       if (el !== undefined) {
         el.classList.add("highlight-flash");
-        setTimeout(() => {
+        const timer = window.setTimeout(() => {
           el.classList.remove("highlight-flash");
         }, 1500);
+        // Unmounting mid-flash must not leave a timer pointing at a dead node.
+        ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
       }
     }
 

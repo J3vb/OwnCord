@@ -82,6 +82,166 @@ func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 	}
 }
 
+// newTestRoleService seeds a four-rank hierarchy for the role-assignment and
+// force-logout paths: owner (pos 100, Administrator) > admin (pos 80,
+// Administrator) > mod (pos 60, MANAGE_ROLES+KICK_MEMBERS) > member (pos 40).
+// Users: 1=owner, 2=admin, 3=mod, 4=member, 5=member.
+func newTestRoleService(t *testing.T) (*ModerationService, *db.DB) {
+	t.Helper()
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{ID: 1, Name: "owner", Permissions: permissions.Administrator, Position: 100})
+	seedRole(t, database, &db.Role{ID: 2, Name: "admin", Permissions: permissions.Administrator, Position: 80})
+	seedRole(t, database, &db.Role{ID: 3, Name: "mod",
+		Permissions: permissions.ManageRoles | permissions.KickMembers, Position: 60})
+	seedRole(t, database, &db.Role{ID: 4, Name: "member", Permissions: permissions.SendMessages, Position: 40})
+	for userID, roleID := range map[int64]int64{1: 1, 2: 2, 3: 3, 4: 4, 5: 4} {
+		seedUser(t, database, &db.User{ID: userID, Username: fmt.Sprintf("u%d", userID), Status: "offline"})
+		seedUserRole(t, database, userID, roleID)
+	}
+	checker := permissions.NewChecker(database)
+	return NewModerationService(database, NewPermissionService(database, checker)), database
+}
+
+func roleIDOf(t *testing.T, database *db.DB, userID int64) int64 {
+	t.Helper()
+	user, err := database.GetUserByID(context.Background(), userID)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByID(%d): %v", userID, err)
+	}
+	return user.RoleID
+}
+
+func TestChangeUserRole_RequiresManageRoles(t *testing.T) {
+	svc, database := newTestRoleService(t)
+
+	// A member without MANAGE_ROLES is refused...
+	if err := svc.ChangeUserRole(context.Background(), 4, 5, 3); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member role change: want ErrForbidden, got %v", err)
+	}
+	// ...and gets Forbidden, not NotFound, for a missing target.
+	if err := svc.ChangeUserRole(context.Background(), 4, 999, 3); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("unauthorized probe of missing id: want ErrForbidden, got %v", err)
+	}
+	if got := roleIDOf(t, database, 5); got != 4 {
+		t.Fatalf("target role changed to %d despite refusal", got)
+	}
+}
+
+func TestChangeUserRole_CannotAssignAtOrAboveOwnRank(t *testing.T) {
+	svc, database := newTestRoleService(t)
+
+	// The hole this closes: an Administrator could promote anyone to Owner.
+	if err := svc.ChangeUserRole(context.Background(), 2, 4, 1); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("admin promoting to owner: want ErrForbidden, got %v", err)
+	}
+	// Equal rank is refused too — an admin cannot mint another admin.
+	if err := svc.ChangeUserRole(context.Background(), 2, 4, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("admin assigning own rank: want ErrForbidden, got %v", err)
+	}
+	if got := roleIDOf(t, database, 4); got != 4 {
+		t.Fatalf("member role changed to %d despite refusal", got)
+	}
+	// Strictly below own rank is allowed.
+	if err := svc.ChangeUserRole(context.Background(), 2, 4, 3); err != nil {
+		t.Fatalf("admin promoting to mod: %v", err)
+	}
+	if got := roleIDOf(t, database, 4); got != 3 {
+		t.Fatalf("role after promotion = %d, want 3", got)
+	}
+	// The owner outranks the admin role, so the owner may grant it.
+	if err := svc.ChangeUserRole(context.Background(), 1, 5, 2); err != nil {
+		t.Fatalf("owner promoting to admin: %v", err)
+	}
+}
+
+func TestChangeUserRole_HierarchyAndValidation(t *testing.T) {
+	svc, database := newTestRoleService(t)
+
+	// A moderator holding MANAGE_ROLES still cannot touch a higher-ranked user.
+	if err := svc.ChangeUserRole(context.Background(), 3, 2, 4); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("mod demoting an admin: want ErrForbidden, got %v", err)
+	}
+	if got := roleIDOf(t, database, 2); got != 2 {
+		t.Fatalf("admin role changed to %d despite refusal", got)
+	}
+	// Nor the owner.
+	if err := svc.ChangeUserRole(context.Background(), 3, 1, 4); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("mod demoting the owner: want ErrForbidden, got %v", err)
+	}
+	// Self-service promotion is a bad request regardless of authority.
+	if err := svc.ChangeUserRole(context.Background(), 2, 2, 1); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("self role change: want ErrBadRequest, got %v", err)
+	}
+	// A nonexistent role is a bad request, not a 500.
+	if err := svc.ChangeUserRole(context.Background(), 1, 4, 9999); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("unknown role id: want ErrBadRequest, got %v", err)
+	}
+	// Authorized actor gets a real NotFound for a missing target.
+	if err := svc.ChangeUserRole(context.Background(), 1, 999, 4); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing target: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestChangeUserRole_AuditWritten(t *testing.T) {
+	svc, database := newTestRoleService(t)
+
+	if err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
+		t.Fatalf("owner role change: %v", err)
+	}
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Action == "role_change" && e.TargetID == 4 && e.ActorID == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no role_change audit entry, got %+v", entries)
+	}
+}
+
+func TestForceLogout_AuthorizationMatrix(t *testing.T) {
+	svc, database := newTestRoleService(t)
+
+	ctx := context.Background()
+	if _, err := database.CreateSession(ctx, 4, "victim-hash", "web", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// No KICK_MEMBERS → Forbidden (member 5 targeting member 4).
+	if err := svc.ForceLogout(ctx, 5, 4); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member force-logout: want ErrForbidden, got %v", err)
+	}
+	// Holding KICK_MEMBERS is not enough against a higher rank.
+	if err := svc.ForceLogout(ctx, 3, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("mod force-logout of admin: want ErrForbidden, got %v", err)
+	}
+	// Self is a bad request.
+	if err := svc.ForceLogout(ctx, 3, 3); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("self force-logout: want ErrBadRequest, got %v", err)
+	}
+	sessions, _ := database.GetUserSessions(ctx, 4)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d before an authorized call, want 1", len(sessions))
+	}
+
+	// Authorized: mod outranks member and holds KICK_MEMBERS.
+	if err := svc.ForceLogout(ctx, 3, 4); err != nil {
+		t.Fatalf("authorized force-logout: %v", err)
+	}
+	sessions, _ = database.GetUserSessions(ctx, 4)
+	if len(sessions) != 0 {
+		t.Fatalf("sessions = %d after force logout, want 0", len(sessions))
+	}
+	// Authorized actor gets a real NotFound for a missing target.
+	if err := svc.ForceLogout(ctx, 3, 999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing target: want ErrNotFound, got %v", err)
+	}
+}
+
 func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	svc, database := newTestModerationService(t)
 

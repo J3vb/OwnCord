@@ -49,6 +49,11 @@ func HandleLiveKitHealthForTest(healthCheck func(context.Context) (bool, error))
 // IsPrivateIPForTest exposes isPrivateIP for use in external tests.
 var IsPrivateIPForTest = isPrivateIP
 
+// WebPDimensionsForTest exposes the hand-rolled WebP header reader. It has no
+// standard-library counterpart to cross-check it against, so the chunk-flavour
+// cases are tested directly rather than only through the upload handler.
+var WebPDimensionsForTest = webpDimensions
+
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
 // restore func. The production transport uses the SSRF-guarded dialer, which
 // refuses loopback addresses, so tests must supply their own client too.

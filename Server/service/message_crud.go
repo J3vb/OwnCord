@@ -71,9 +71,15 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		}
 	}
 
+	// Resolve mentions against the sanitized content, before the insert, so the
+	// row and its mention set are written together. Unknown @words and an
+	// unauthorized @everyone resolve to nothing and stay plain text.
+	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM)
+
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
-	msg, err := s.st.CreateMessageReturning(ctx, p.ChannelID, p.UserID, content, p.ReplyTo)
+	msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo,
+		mentions.UserIDs, mentions.Everyone)
 	if err != nil {
 		slog.Error("MessageService.SendMessage CreateMessage", "err", err)
 		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
@@ -111,12 +117,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	}
 
 	result := &SendMessageResult{
-		MessageID:   msgID,
-		Timestamp:   msg.Timestamp,
-		Content:     content,
-		IsDM:        isDM,
-		Channel:     ch,
-		Attachments: attachments,
+		MessageID:        msgID,
+		Timestamp:        msg.Timestamp,
+		Content:          content,
+		IsDM:             isDM,
+		Channel:          ch,
+		Attachments:      attachments,
+		Mentions:         mentions.UserIDs,
+		MentionsEveryone: mentions.Everyone,
 	}
 
 	// DM path: open DM for recipients.
@@ -131,6 +139,19 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		sender, _ := s.st.GetUserByID(ctx, p.UserID)
 		result.SenderUser = sender
 
+		// Viewer-neutral (viewerID 0 matches nobody, so every status is
+		// broadcast-collapsed); the ws layer re-derives "who is the recipient"
+		// per addressee. A read failure is non-fatal — the message is already
+		// committed, and the caller falls back to the 1:1 shape.
+		if participants, partErr := s.st.GetDMParticipants(ctx, p.ChannelID, 0); partErr == nil {
+			result.DMParticipants = participants
+		} else {
+			slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
+		}
+		if isGroup, gErr := s.st.IsGroupDM(ctx, p.ChannelID); gErr == nil {
+			result.DMIsGroup = isGroup
+		}
+
 		for _, pid := range participantIDs {
 			if pid == p.UserID {
 				continue
@@ -142,6 +163,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			result.OpenedDMFor = append(result.OpenedDMFor, pid)
 		}
 	}
+
+	// Mention badges. The message is committed, so this runs on a ctx detached
+	// from cancellation for the same reason audit writes do: a client that hangs
+	// up mid-request must not silently drop the recipients' badges.
+	s.applyMentionCounts(context.WithoutCancel(ctx), p.ChannelID, p.UserID, mentions, isDM, result.ParticipantIDs)
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
@@ -215,12 +241,25 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		editedAt = *msg.EditedAt
 	}
 
+	// Re-resolve mentions from the new content and replace the stored set, so a
+	// mention added by an edit is highlighted and one removed by an edit stops
+	// being. Mention counts are deliberately NOT advanced here: an edit that
+	// re-adds an already-counted mention would otherwise raise the badge twice,
+	// and "only the original insert can raise a badge" is the simplest rule that
+	// is always correct.
+	mentions := s.resolveMentions(ctx, content, userID, msg.ChannelID, isDM)
+	if mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone); mErr != nil {
+		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
+	}
+
 	result := &EditMessageResult{
-		MessageID: msgID,
-		ChannelID: msg.ChannelID,
-		Content:   content,
-		EditedAt:  editedAt,
-		IsDM:      isDM,
+		MessageID:        msgID,
+		ChannelID:        msg.ChannelID,
+		Content:          content,
+		EditedAt:         editedAt,
+		IsDM:             isDM,
+		Mentions:         mentions.UserIDs,
+		MentionsEveryone: mentions.Everyone,
 	}
 
 	if isDM {

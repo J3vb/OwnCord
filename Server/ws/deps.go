@@ -15,9 +15,13 @@ import (
 // Handlers receive this instead of a mutable *Client pointer, making them
 // easier to test and reason about.
 type ClientInfo struct {
-	UserID         int64
-	Username       string
-	Avatar         *string
+	UserID   int64
+	Username string
+	Avatar   *string
+	// DisplayName is the connection's nickname, nil when unset. Carried
+	// alongside Username rather than replacing it: renderers fall back to the
+	// username, and mentions still resolve against it.
+	DisplayName    *string
 	RoleName       string
 	ReqID          string
 	VoiceChannelID int64  // 0 if not in a voice channel
@@ -55,6 +59,20 @@ type VoiceTokenGenerator interface {
 	URL() string
 }
 
+// VoiceModerator applies the effects of a voice moderation action that reach
+// past the acting connection: the SFU and the target's own socket. *Hub
+// implements it, and VoiceDeps carries the Hub itself so SetLiveKit's late
+// wiring is picked up at call time (same reason as VoiceTokenGenerator).
+type VoiceModerator interface {
+	// MuteParticipant mutes or unmutes the target's published audio at the SFU.
+	MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error
+	// DisconnectFromVoice runs the voice-leave routine for the target's
+	// connection. Reports false when the target has no connection on this node.
+	DisconnectFromVoice(ctx context.Context, userID int64) bool
+	// SendToUser delivers one server->client frame to the target.
+	SendToUser(userID int64, msg []byte) bool
+}
+
 // KeyHolderChecker reports whether a user is the E2EE key holder for a voice channel.
 type KeyHolderChecker interface {
 	IsVoiceKeyHolder(channelID, userID int64) bool
@@ -83,6 +101,7 @@ type VoiceDeps struct {
 	LiveKit   *LiveKitClient
 	TokenGen  VoiceTokenGenerator // used by voice_token_refresh V2
 	KeyHolder KeyHolderChecker    // used by voice_token_refresh V2
+	Mod       VoiceModerator      // used by the voice moderation handlers
 }
 
 // ── V2 permission helpers ───────────────────────────────────────────────────
@@ -124,7 +143,7 @@ func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checke
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
@@ -146,7 +165,7 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 	if err != nil || role == nil {
 		return false
 	}
-	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
+	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
 }
 
 // hasChannelAccess is the gate to use when the channel id comes from the client:
@@ -217,7 +236,7 @@ func hasChannelAccessLive(ctx context.Context, database *db.DB, perms *permissio
 	if err != nil || role == nil {
 		return false
 	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
 		return false
 	}
 	ch, err := database.GetChannel(ctx, channelID)

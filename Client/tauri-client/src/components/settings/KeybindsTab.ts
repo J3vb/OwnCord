@@ -176,6 +176,9 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const msgBinds: [string, string][] = [
     ["Upload File", "Ctrl + U"],
     ["Edit Last Message", "Arrow Up"],
+    ["Bold", "Ctrl + B"],
+    ["Italic", "Ctrl + I"],
+    ["Underline", "Ctrl + U"],
   ];
   for (const [label, shortcut] of msgBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -186,6 +189,16 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     );
     section.appendChild(row);
   }
+
+  section.appendChild(
+    createElement(
+      "div",
+      {
+        style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 0 0; line-height: 1.4;",
+      },
+      "Formatting shortcuts wrap the selected text while the message box has focus; Ctrl + U uploads a file everywhere else.",
+    ),
+  );
 
   return section;
 }

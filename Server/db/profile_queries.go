@@ -7,14 +7,18 @@ import (
 	"github.com/owncord/server/db/dbgen"
 )
 
-// UpdateUserProfile updates the username and avatar for the given user.
+// UpdateUserProfile updates the username, avatar, display name and about text
+// for the given user. All four are written unconditionally, so the caller is
+// responsible for merging a partial PATCH against the current row.
 // Returns ErrNotFound if the user does not exist. Returns an error wrapping
 // a UNIQUE constraint violation if the username is already taken.
-func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar *string) error {
+func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error {
 	result, err := d.q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
-		Username: username,
-		Avatar:   avatar,
-		ID:       userID,
+		Username:    username,
+		Avatar:      avatar,
+		DisplayName: displayName,
+		About:       about,
+		ID:          userID,
 	})
 	if err != nil {
 		return fmt.Errorf("UpdateUserProfile: %w", err)
@@ -27,6 +31,31 @@ func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username strin
 		return fmt.Errorf("UpdateUserProfile: %w", ErrNotFound)
 	}
 	return nil
+}
+
+// UpdateUserCustomStatus sets (or clears, with nil) the user's custom status
+// line. Kept separate from UpdateUserProfile because it arrives on the
+// presence path and must not overwrite a concurrent profile edit.
+func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error {
+	if err := d.q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{
+		CustomStatus: customStatus,
+		ID:           userID,
+	}); err != nil {
+		return fmt.Errorf("UpdateUserCustomStatus: %w", err)
+	}
+	return nil
+}
+
+// IsAvatarFileURL reports whether url is currently some user's avatar. It is
+// the authorization check that lets an uploaded avatar — an attachment with no
+// channel, and therefore private to its uploader by default — be served to
+// every authenticated user for exactly as long as it is in use.
+func (d *DB) IsAvatarFileURL(ctx context.Context, url string) (bool, error) {
+	n, err := d.q.CountUsersWithAvatar(ctx, &url)
+	if err != nil {
+		return false, fmt.Errorf("IsAvatarFileURL: %w", err)
+	}
+	return n > 0, nil
 }
 
 // UpdateUserPassword sets a new password hash for the given user.
