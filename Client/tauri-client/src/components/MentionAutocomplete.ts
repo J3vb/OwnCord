@@ -3,7 +3,7 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
-import { createElement, setText, appendChildren } from "@lib/dom";
+import { createElement, setText } from "@lib/dom";
 import { membersStore } from "@stores/members.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
