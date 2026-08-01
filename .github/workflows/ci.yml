@@ -278,6 +278,48 @@ jobs:
             Client/tauri-client/test-results/
           retention-days: 7
 
+  # Blocking e2e subset: the parity-feature specs (tagged "@parity"), covering
+  # the wire paths added in v1.2.0 (mentions/badges, per-channel mute, NSFW
+  # gate, group DMs, role change, custom-emoji autocomplete, voice moderation).
+  # These are new and authored green, so unlike the full legacy suite above they
+  # gate PRs: a regression on one of these features must fail CI. Kept as its own
+  # job (not folded into the non-blocking suite) so the legacy suite can keep
+  # earning its "few green pushes" before it too graduates to blocking.
+  client-e2e-parity:
+    name: Client E2E (parity subset, blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run parity e2e specs
+        run: npx playwright test --config=playwright.config.ts --grep "@parity"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report-parity
+          path: |
+            Client/tauri-client/playwright-report/
+            Client/tauri-client/test-results/
+          retention-days: 7
+
   # Image build is verification only, so it is skipped on dev to keep day-to-day
   # work on the fast check suite. Runs for main pushes and PRs targeting main.
   server-docker-build:

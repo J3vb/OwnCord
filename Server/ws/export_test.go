@@ -378,3 +378,11 @@ func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 	return h.hasChannelPerm(context.Background(), c, channelID, perm)
 }
+
+// BroadcastVoiceEventForTest exposes Hub.broadcastVoiceEvent for external
+// tests so a load/soak test can drive the channelReadAudience-resolved
+// voice_state/voice_leave fan-out directly, without a full LiveKit join
+// round-trip.
+func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
+	h.broadcastVoiceEvent(context.Background(), channelID, msg)
+}
