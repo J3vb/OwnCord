@@ -132,6 +132,14 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     PRIMARY KEY (channel_id, role_id)
 );
 
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

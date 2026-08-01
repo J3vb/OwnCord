@@ -257,6 +257,33 @@ describe("MemberList", () => {
     document.body.querySelector(".context-menu")?.remove();
   });
 
+  it("re-renders groups when a roles_update replaces the role list", () => {
+    // Role management makes the list mutable mid-session. Before this the list
+    // only re-rendered on a member change, so a rename/recolor/delete sat
+    // invisible until unrelated traffic arrived.
+    setRoles([
+      { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
+      { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
+    ]);
+    setTestMembers([
+      makeMember({ id: 2, username: "Stan", role: "staff", status: "online" as UserStatus }),
+    ]);
+    memberList.mount(container);
+    expect(
+      Array.from(container.querySelectorAll(".member-role-group")).map((h) => h.textContent),
+    ).toContainEqual(expect.stringContaining("STAFF"));
+
+    setRoles([
+      { id: 1, name: "Owner", color: "#E74C3C", permissions: 0, position: 100 },
+      { id: 2, name: "Staff", color: "#0000FF", permissions: 0, position: 50 },
+    ]);
+    // Store notifications are batched onto a microtask.
+    channelsStore.flush();
+
+    const stanName = container.querySelector('[data-testid="member-2"] .mi-name');
+    expect((stanName as HTMLSpanElement).style.color).toBe("rgb(0, 0, 255)");
+  });
+
   it("renders groups for custom server roles, colored by the server's role color", () => {
     setRoles([
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },

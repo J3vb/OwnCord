@@ -47,6 +47,8 @@ type Store interface {
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
 	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
@@ -59,8 +61,17 @@ type Store interface {
 	DeleteChannel(ctx context.Context, id int64) error
 	SetChannelSlowMode(ctx context.Context, id int64, slowMode int) error
 	SetChannelVoiceMaxUsers(ctx context.Context, id int64, maxUsers int) error
+	// GetChannelPermissions / GetUserChannelPermissions are the two single-row
+	// override lookups permissions.DB requires (Store is passed straight to
+	// permissions.NewChecker).
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
+	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
 	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
+	// GetChannelOverridesFor merges the role and per-user override layers for
+	// one member in two batch queries — the single fetch behind every
+	// "what can this member do here" site, and the reason no site pays an N+1
+	// for the second layer.
+	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
 	GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// ── Users ──
@@ -97,6 +108,14 @@ type Store interface {
 	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
 	GetUserWithRole(ctx context.Context, userID int64) (*db.User, *db.Role, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
+	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
+	GetDefaultRole(ctx context.Context) (*db.Role, error)
+	CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*db.Role, error)
+	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error
+	SetRolePositions(ctx context.Context, positions map[int64]int) error
+	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
+	CountRoleMembers(ctx context.Context) (map[int64]int, error)
 
 	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
@@ -155,7 +174,7 @@ type Store interface {
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
 	GetAuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error)
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
-	AdminUpdateChannel(ctx context.Context, id int64, name, topic string, slowMode, position int, archived bool) error
+	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminDeleteChannel(ctx context.Context, id int64) error
 	BackupTo(ctx context.Context, path string) error
 	BackupToSafe(ctx context.Context, path, safeRoot string) error

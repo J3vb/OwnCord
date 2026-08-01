@@ -148,10 +148,13 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *ca
 		return nil
 	}
 	// Admins bypass every channel check, so skip the fetch entirely (mirrors
-	// ChannelService.ListVisibleChannels and ws.buildReady).
+	// ChannelService.ListVisibleChannels and ws.buildReady). The fetch pulls
+	// BOTH override layers (role + per-user) in two batch queries, so the
+	// cached snapshot can answer the full Discord resolution order without an
+	// extra query per channel.
 	var overrides map[int64]permissions.ChannelOverride
 	if !permissions.HasAdmin(role.Permissions) {
-		raw, oErr := s.st.GetAllChannelPermissionsForRole(ctx, role.ID)
+		raw, oErr := s.st.GetChannelOverridesFor(ctx, role.ID, userID)
 		if oErr != nil {
 			// Fail closed: an empty map would silently drop every deny bit,
 			// and caching it would keep doing so for permCacheTTL.

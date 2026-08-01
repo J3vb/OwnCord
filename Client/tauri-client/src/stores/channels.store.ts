@@ -32,6 +32,22 @@ export interface Channel {
   readonly canSend: boolean;
   /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
   readonly slowMode: number;
+  /**
+   * Flagged as possibly carrying sensitive content.
+   *
+   * The server stores and broadcasts this and does nothing else with it — no
+   * filtering, no restriction on who may read or post — so every consequence
+   * is this client's: a one-time-per-session age gate before the channel's
+   * messages are shown, and a marker on the sidebar row.
+   */
+  readonly nsfw: boolean;
+  /**
+   * Voice capacity limits (0 = unlimited). The server enforces both on join
+   * (CHANNEL_FULL / VIDEO_LIMIT); these copies exist so the sidebar can show
+   * "3/5" and the client never has to guess why a join was refused.
+   */
+  readonly voiceMaxUsers: number;
+  readonly voiceMaxVideo: number;
 }
 
 export interface ChannelsState {
@@ -86,6 +102,11 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
       slowMode: ch.slow_mode ?? 0,
+      // Older servers omit these; "absent" reads as unflagged / unlimited,
+      // which is also what an unconfigured channel sends.
+      nsfw: ch.nsfw ?? false,
+      voiceMaxUsers: ch.voice_max_users ?? 0,
+      voiceMaxVideo: ch.voice_max_video ?? 0,
     });
   }
   channelsStore.setState((prev) => ({
@@ -124,12 +145,22 @@ export function addChannel(channel: ChannelCreatePayload): void {
       // payload delivers the authoritative can_send. Server enforces regardless.
       canSend: true,
       slowMode: channel.slow_mode ?? 0,
+      nsfw: channel.nsfw ?? false,
+      voiceMaxUsers: channel.voice_max_users ?? 0,
+      voiceMaxVideo: channel.voice_max_video ?? 0,
     });
     return { ...prev, channels: next };
   });
 }
 
-/** Update a channel's name and/or position immutably. */
+/**
+ * Apply a channel_update broadcast immutably.
+ *
+ * Every field is optional and an absent one is left alone rather than reset:
+ * the payload from an older server carries fewer keys than this one knows
+ * about, and treating "absent" as "cleared" would blank a channel's topic or
+ * drop its NSFW flag on the first update after connecting.
+ */
 export function updateChannel(update: ChannelUpdatePayload): void {
   channelsStore.setState((prev) => {
     const existing = prev.channels.get(update.id);
@@ -140,8 +171,14 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...existing,
       ...(update.name !== undefined ? { name: update.name } : {}),
       ...(update.topic !== undefined ? { topic: update.topic } : {}),
+      // "" is a real value here — it means "no category" — so only undefined
+      // is treated as "not sent".
+      ...(update.category !== undefined ? { category: update.category } : {}),
       ...(update.position !== undefined ? { position: update.position } : {}),
       ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
+      ...(update.nsfw !== undefined ? { nsfw: update.nsfw } : {}),
+      ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
+      ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);
@@ -213,6 +250,39 @@ export function getActiveChannel(): Channel | null {
   });
 }
 
+/**
+ * The group header an uncategorized VOICE channel falls back to.
+ *
+ * Categories are free text and a channel of any type may carry any of them, so
+ * a voice channel groups under whatever category it has — there is no magic
+ * name that makes a category "the voice one". Only a voice channel with no
+ * category at all needs somewhere to go, and mixing it into the unnamed group
+ * next to uncategorized text channels reads as a bug, so it gets this group.
+ */
+export const UNCATEGORIZED_VOICE_CATEGORY = "Voice";
+
+/** The category header a channel is displayed under. */
+export function displayCategoryOf(channel: Channel): string | null {
+  if (channel.category !== null && channel.category !== "") {
+    return channel.category;
+  }
+  return channel.type === "voice" ? UNCATEGORIZED_VOICE_CATEGORY : null;
+}
+
+/** Every distinct category name currently in use, sorted, for suggestion lists. */
+export function getKnownCategories(): string[] {
+  return channelsStore.select((s) => {
+    const names = new Set<string>();
+    for (const channel of s.channels.values()) {
+      if (channel.type === "dm") continue;
+      if (channel.category !== null && channel.category !== "") {
+        names.add(channel.category);
+      }
+    }
+    return [...names].toSorted((a, b) => a.localeCompare(b));
+  });
+}
+
 /** Group channels by category, sorted by position within each group. */
 export function getChannelsByCategory(): Map<string | null, Channel[]> {
   return channelsStore.select((s) => {
@@ -220,11 +290,12 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
     for (const channel of s.channels.values()) {
       // DM channels are shown in the DM sidebar, not the channel list
       if (channel.type === "dm") continue;
-      const existing = grouped.get(channel.category);
+      const category = displayCategoryOf(channel);
+      const existing = grouped.get(category);
       if (existing !== undefined) {
         existing.push(channel);
       } else {
-        grouped.set(channel.category, [channel]);
+        grouped.set(category, [channel]);
       }
     }
     for (const channels of grouped.values()) {

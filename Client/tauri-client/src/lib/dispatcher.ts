@@ -405,6 +405,17 @@ export function wireDispatcher(
     }),
   );
 
+  // Roles changed server-side (created, edited, deleted or reordered). The
+  // payload is the whole list, so the store is replaced rather than patched —
+  // name colors, the member-list groups and every permission-gated affordance
+  // re-derive from it without a reconnect.
+  unsubs.push(
+    ws.on(S.ROLES_UPDATE, (payload) => {
+      log.info("Roles updated", { count: payload.roles?.length ?? 0 });
+      setRoles(payload.roles ?? []);
+    }),
+  );
+
   unsubs.push(
     ws.on(S.USER_UPDATE, (payload) => {
       log.info("User profile updated", { userId: payload.user_id, username: payload.username });
@@ -607,6 +618,20 @@ export function wireDispatcher(
           if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
         }
         markSendFailed(id, payload.code);
+        return;
+      }
+      // Voice capacity refusals. The server owns the limits (voice_max_users /
+      // voice_max_video) and refuses the join or the camera; the client never
+      // pre-blocks the click, because its copy of the participant list can lag
+      // and a refusal it invented would be uncorrectable. So the only job here
+      // is to say what happened — without this the click was a silent no-op
+      // with an explanation buried in the log.
+      if (payload.code === "CHANNEL_FULL") {
+        showToast(payload.message || "That voice channel is full", "error");
+        return;
+      }
+      if (payload.code === "VIDEO_LIMIT") {
+        showToast(payload.message || "That voice channel has reached its video limit", "error");
         return;
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {

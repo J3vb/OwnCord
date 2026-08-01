@@ -93,7 +93,7 @@ The sequence number system enables reconnection with state recovery.
 | Category | Has seq? | Examples |
 |----------|----------|---------|
 | Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
-| Global broadcasts | Yes | `presence`, `member_join`, `member_leave`, `member_update`, `member_ban`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
+| Global broadcasts | Yes | `presence`, `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral | No | `typing` |
 | DM messages | No | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `dm_channel_open`, `dm_channel_close` |
 | Direct responses | No | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong` |
@@ -243,7 +243,14 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+
+`nsfw`, `voice_max_users` and `voice_max_video` are always present, with their
+zero values (`false`, `0`, `0`) on an unconfigured channel — never omitted, so
+"absent" never has to mean two different things. `nsfw` is a label the server
+never acts on (see below); the two voice limits are the values the voice-join
+path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a client can show
+"3/5" and explain a refusal it could have predicted.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
@@ -562,14 +569,32 @@ All channel update messages are broadcast to all connected clients. Triggered by
     "type": "text",
     "category": "Hangout",
     "topic": "",
-    "position": 3
+    "position": 3,
+    "slow_mode": 0,
+    "nsfw": false,
+    "voice_max_users": 0,
+    "voice_max_video": 0
   }
 }
 ```
 
 ### channel_update (Server -> Client, broadcast)
 
-Full channel object (all fields).
+Full channel object — the same payload shape as `channel_create`, built by the
+same constructor so the two events can never disagree about which fields a
+client is told about. Sent on every admin `PATCH`, so a client applies channel
+edits (rename, topic, category move, slow mode, `nsfw`, voice limits) without
+reconnecting.
+
+`nsfw` is shipped so clients can gate or label a channel; **the server applies
+no content behaviour of its own to a flagged channel** — no filtering, no age
+check, no restriction on who may read or post. The desktop client shows a
+one-time-per-session warning before rendering the channel and marks it in the
+sidebar; a client that ignores the field behaves exactly as before it existed.
+
+Archiving or unarchiving additionally triggers targeted `channel_create` /
+`channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
+may see the channel rather than only how it looks.
 
 ### channel_delete (Server -> Client, broadcast)
 
@@ -634,6 +659,33 @@ Triggered when an admin changes a user's role.
   "payload": { "user_id": 5 }
 }
 ```
+
+### roles_update (Server -> Client, broadcast)
+
+Sent to every connected client after any role mutation (create, edit, delete or
+reorder) through `/admin/api/roles`. The payload is the **whole** role list in
+the same shape and order the `ready` payload uses — position descending —
+rather than a delta: the client replaces `channelsStore.roles` wholesale, so a
+dropped intermediate event can never leave a deleted role on screen.
+
+```json
+{
+  "seq": 73,
+  "type": "roles_update",
+  "payload": {
+    "roles": [
+      { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647, "position": 100, "is_default": false },
+      { "id": 4, "name": "Member", "color": null, "permissions": 1635, "position": 40, "is_default": true }
+    ]
+  }
+}
+```
+
+Unfiltered on purpose — the same list already ships in every client's `ready`
+payload, so it discloses nothing new. A role permission change that alters
+channel visibility is delivered separately, as targeted
+`channel_create`/`channel_delete` messages, and a role deletion additionally
+sends one `member_update` per reassigned member.
 
 ### user_update (Server -> Client, broadcast)
 
@@ -1171,6 +1223,7 @@ tables below add per-type behavioral notes.
 | `member_update` | Yes | All clients |
 | `user_update` | Yes | All clients (profile changes) |
 | `member_ban` | Yes | All clients |
+| `roles_update` | Yes | All clients (full role list) |
 | `dm_channel_open` | No | Direct to participant |
 | `dm_channel_close` | No | Direct to participant |
 | `voice_e2ee_announce` | No | Voice channel (excl. sender) |

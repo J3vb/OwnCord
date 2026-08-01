@@ -98,6 +98,11 @@ vi.mock("@components/CreateChannelModal", () => ({
   }),
 }));
 
+const mockOpenUrl = vi.fn(async (_url: string) => {});
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: (url: string) => mockOpenUrl(url),
+}));
+
 vi.mock("@components/EditChannelModal", () => ({
   createEditChannelModal: vi.fn().mockReturnValue({
     mount: vi.fn(),
@@ -144,10 +149,11 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 // ---------------------------------------------------------------------------
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
+import { channelsStore, setActiveChannel, setRoles } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
+import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
@@ -1044,6 +1050,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1076,6 +1085,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });
@@ -1301,6 +1313,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1341,6 +1356,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         next.set(2, {
           id: 2,
@@ -1354,6 +1372,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -1419,6 +1440,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
       });
@@ -1859,6 +1883,9 @@ describe("SidebarArea", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -2249,6 +2276,93 @@ describe("SidebarArea", () => {
 
       expect(contentSlot.children[0]!.classList.contains("sidebar-dm-section")).toBe(true);
 
+      cleanup(result);
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Audit log entry point
+  // -------------------------------------------------------------------------
+  //
+  // The log itself stays in the admin panel; the desktop client only owes its
+  // moderators a way in. The entry is gated on VIEW_AUDIT_LOG, and the gate has
+  // to survive `ready` landing after the header is built.
+
+  describe("audit log entry point", () => {
+    function signInAs(roleName: string, permissions: number): void {
+      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: roleName },
+        isAuthenticated: true,
+      }));
+    }
+
+    function auditBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
+      return result.sidebarWrapper.querySelector("[data-testid='audit-log-btn']");
+    }
+
+    it("is shown to a role holding VIEW_AUDIT_LOG", () => {
+      signInAs("Moderator", Permission.VIEW_AUDIT_LOG);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("is hidden from a role without the bit", () => {
+      signInAs("Member", Permission.SEND_MESSAGES);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).toBe("none");
+      cleanup(result);
+    });
+
+    // `ready` can land after the header is built, and a moderator whose role
+    // only becomes known then would otherwise never see the entry.
+    it("appears when the role list arrives after mount", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        token: "tok",
+        user: { id: 9, username: "U", avatar: null, role: "Moderator" },
+        isAuthenticated: true,
+      }));
+      setRoles([]);
+      const result = createSidebarArea(defaultOpts());
+      expect(auditBtn(result)?.style.display).toBe("none");
+
+      setRoles([{ id: 9, name: "Moderator", color: null, permissions: Permission.VIEW_AUDIT_LOG }]);
+      // Store notifications are batched on a microtask.
+      channelsStore.flush();
+
+      expect(auditBtn(result)?.style.display).not.toBe("none");
+      cleanup(result);
+    });
+
+    it("opens the admin panel's audit section in the browser", async () => {
+      mockOpenUrl.mockClear();
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const result = createSidebarArea(defaultOpts());
+
+      auditBtn(result)?.click();
+
+      await vi.waitFor(() => {
+        expect(mockOpenUrl).toHaveBeenCalledWith("https://localhost:8080/admin#audit");
+      });
+      cleanup(result);
+    });
+
+    it("toasts instead of opening a bogus URL with no host", async () => {
+      mockOpenUrl.mockClear();
+      signInAs("Owner", Permission.ADMINISTRATOR);
+      const opts = defaultOpts();
+      (opts.api.getConfig as ReturnType<typeof vi.fn>).mockReturnValue({ host: "" });
+      const show = vi.fn();
+      (opts.getToast as ReturnType<typeof vi.fn>).mockReturnValue({ show });
+      const result = createSidebarArea(opts);
+
+      auditBtn(result)?.click();
+
+      expect(mockOpenUrl).not.toHaveBeenCalled();
+      expect(show).toHaveBeenCalledWith("Not connected to a server", "error");
       cleanup(result);
     });
   });

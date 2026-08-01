@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/owncord/server/db/dbgen"
 )
@@ -61,6 +63,164 @@ func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
 		return nil, fmt.Errorf("GetRoleForUser: %w", err)
 	}
 	return roleFromGen(r), nil
+}
+
+// GetRoleByName returns the role whose name matches name case-insensitively,
+// or nil if there is none. Case-insensitive because migration 023 enforces
+// uniqueness under the same collation — the lookup and the constraint must
+// agree, or "Moderator" and "moderator" become two roles the client (which
+// matches names case-insensitively) cannot tell apart.
+func (d *DB) GetRoleByName(ctx context.Context, name string) (*Role, error) {
+	r, err := d.q.GetRoleByName(ctx, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetRoleByName: %w", err)
+	}
+	return roleFromGen(r), nil
+}
+
+// GetDefaultRole returns the role new members are created with and deleted
+// roles' members fall back to. Returns (nil, nil) when no role is flagged
+// default — callers must treat that as a configuration error, not a licence to
+// leave members pointing at a deleted role.
+func (d *DB) GetDefaultRole(ctx context.Context) (*Role, error) {
+	r, err := d.q.GetDefaultRole(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetDefaultRole: %w", err)
+	}
+	return roleFromGen(r), nil
+}
+
+// CreateRole inserts a role and returns it. is_default is always 0: exactly one
+// role is the default and it is seeded, never created through the API.
+func (d *DB) CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*Role, error) {
+	r, err := d.q.CreateRole(ctx, dbgen.CreateRoleParams{
+		Name:        name,
+		Color:       color,
+		Permissions: perms,
+		Position:    int64(position),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("CreateRole: %w", err)
+	}
+	return roleFromGen(r), nil
+}
+
+// UpdateRole overwrites a role's mutable columns. is_default is deliberately
+// not writable: which role is the fallback is a schema decision.
+func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error {
+	if err := d.q.UpdateRole(ctx, dbgen.UpdateRoleParams{
+		Name:        name,
+		Color:       color,
+		Permissions: perms,
+		Position:    int64(position),
+		ID:          id,
+	}); err != nil {
+		return fmt.Errorf("UpdateRole: %w", err)
+	}
+	return nil
+}
+
+// ListUserIDsByRole returns the ids of every user currently holding roleID.
+// Used to invalidate exactly the permission-cache entries a role change
+// affects instead of dropping the whole cache.
+func (d *DB) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
+	ids, err := d.q.ListUserIDsByRole(ctx, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("ListUserIDsByRole: %w", err)
+	}
+	return ids, nil
+}
+
+// CountRoleMembers returns member counts keyed by role id. Roles with no
+// members are absent from the map rather than present with a zero.
+func (d *DB) CountRoleMembers(ctx context.Context) (map[int64]int, error) {
+	rows, err := d.q.CountRoleMembers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("CountRoleMembers: %w", err)
+	}
+	counts := make(map[int64]int, len(rows))
+	for _, row := range rows {
+		counts[row.RoleID] = int(row.MemberCount)
+	}
+	return counts, nil
+}
+
+// SetRolePositions writes new positions for several roles in one writer
+// transaction, so a reader can never observe a half-applied reorder (which
+// would briefly duplicate or invert the hierarchy the permission checks read).
+func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) error {
+	if len(positions) == 0 {
+		return nil
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("SetRolePositions begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	// Sorted so concurrent reorders always take the rows in the same order.
+	for _, id := range slices.Sorted(maps.Keys(positions)) {
+		if err := q.SetRolePosition(ctx, dbgen.SetRolePositionParams{
+			Position: int64(positions[id]),
+			ID:       id,
+		}); err != nil {
+			return fmt.Errorf("SetRolePositions update %d: %w", id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("SetRolePositions commit: %w", err)
+	}
+	return nil
+}
+
+// DeleteRoleReassigning deletes roleID after moving every member onto
+// fallbackRoleID and dropping the role's channel_overrides rows, all in one
+// writer transaction: a member must never be observable pointing at a role row
+// that no longer exists, and a stale override would silently apply to whichever
+// role reused the id.
+//
+// Returns the ids of the reassigned members so the caller can invalidate their
+// cached permissions and re-sync their clients.
+func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	moved, err := q.ListUserIDsByRole(ctx, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning list members: %w", err)
+	}
+	// One UPDATE for every member, not one per member.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE users SET role_id = ? WHERE role_id = ?`, fallbackRoleID, roleID,
+	); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning reassign: %w", err)
+	}
+	// channel_overrides cascades on delete in the production schema, but the
+	// delete is explicit so the behaviour does not depend on the foreign-key
+	// pragma being on for this connection.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM channel_overrides WHERE role_id = ?`, roleID,
+	); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning drop overrides: %w", err)
+	}
+	if err := q.DeleteRole(ctx, roleID); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning delete: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning commit: %w", err)
+	}
+	return moved, nil
 }
 
 // GetUserWithRole returns the user and their role in a single query.

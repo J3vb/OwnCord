@@ -9,6 +9,100 @@ import (
 	"context"
 )
 
+const countRoleMembers = `-- name: CountRoleMembers :many
+SELECT role_id, COUNT(*) AS member_count FROM users GROUP BY role_id
+`
+
+type CountRoleMembersRow struct {
+	RoleID      int64 `json:"roleId"`
+	MemberCount int64 `json:"memberCount"`
+}
+
+func (q *Queries) CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error) {
+	rows, err := q.db.QueryContext(ctx, countRoleMembers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountRoleMembersRow{}
+	for rows.Next() {
+		var i CountRoleMembersRow
+		if err := rows.Scan(&i.RoleID, &i.MemberCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const createRole = `-- name: CreateRole :one
+INSERT INTO roles (name, color, permissions, position, is_default)
+VALUES (?, ?, ?, ?, 0)
+RETURNING id, name, color, permissions, position, is_default
+`
+
+type CreateRoleParams struct {
+	Name        string  `json:"name"`
+	Color       *string `json:"color"`
+	Permissions int64   `json:"permissions"`
+	Position    int64   `json:"position"`
+}
+
+func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error) {
+	row := q.db.QueryRowContext(ctx, createRole,
+		arg.Name,
+		arg.Color,
+		arg.Permissions,
+		arg.Position,
+	)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.Permissions,
+		&i.Position,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
+const deleteRole = `-- name: DeleteRole :exec
+DELETE FROM roles WHERE id = ?
+`
+
+func (q *Queries) DeleteRole(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteRole, id)
+	return err
+}
+
+const getDefaultRole = `-- name: GetDefaultRole :one
+SELECT id, name, color, permissions, position, is_default
+FROM roles WHERE is_default = 1 ORDER BY position DESC, id ASC LIMIT 1
+`
+
+// The fallback role every member lands on when their role is deleted. Highest
+// position wins if a database somehow carries more than one default.
+func (q *Queries) GetDefaultRole(ctx context.Context) (Role, error) {
+	row := q.db.QueryRowContext(ctx, getDefaultRole)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.Permissions,
+		&i.Position,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
 const getRoleByID = `-- name: GetRoleByID :one
 SELECT id, name, color, permissions, position, is_default
 FROM roles WHERE id = ?
@@ -16,6 +110,27 @@ FROM roles WHERE id = ?
 
 func (q *Queries) GetRoleByID(ctx context.Context, id int64) (Role, error) {
 	row := q.db.QueryRowContext(ctx, getRoleByID, id)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.Permissions,
+		&i.Position,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
+const getRoleByName = `-- name: GetRoleByName :one
+SELECT id, name, color, permissions, position, is_default
+FROM roles WHERE name = ? COLLATE NOCASE
+`
+
+// Case-insensitive by design: migration 023 enforces uniqueness under the same
+// collation, so this is the lookup that agrees with the constraint.
+func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) {
+	row := q.db.QueryRowContext(ctx, getRoleByName, name)
 	var i Role
 	err := row.Scan(
 		&i.ID,
@@ -108,9 +223,17 @@ func (q *Queries) GetUserWithRole(ctx context.Context, id int64) (GetUserWithRol
 
 const listRoles = `-- name: ListRoles :many
 SELECT id, name, color, permissions, position, is_default
-FROM roles ORDER BY position DESC
+FROM roles ORDER BY position DESC, id ASC
 `
 
+// Highest rank first. Positions are only "unique enough": reorder normalizes
+// them, but creating a role inserts just below the actor and may tie with an
+// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
+// in any order, and the admin panel derives its reorder payload from this
+// order, so a single move-up would silently shuffle the tied roles.
+// NOTE: keep comments in this file ASCII-only. sqlc mixes byte and rune
+// offsets when stripping them, so a non-ASCII character here truncates the
+// generated SQL of THIS and every following query by the byte/rune delta.
 func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 	rows, err := q.db.QueryContext(ctx, listRoles)
 	if err != nil {
@@ -139,4 +262,68 @@ func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUserIDsByRole = `-- name: ListUserIDsByRole :many
+SELECT id FROM users WHERE role_id = ?
+`
+
+func (q *Queries) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listUserIDsByRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setRolePosition = `-- name: SetRolePosition :exec
+UPDATE roles SET position = ? WHERE id = ?
+`
+
+type SetRolePositionParams struct {
+	Position int64 `json:"position"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) SetRolePosition(ctx context.Context, arg SetRolePositionParams) error {
+	_, err := q.db.ExecContext(ctx, setRolePosition, arg.Position, arg.ID)
+	return err
+}
+
+const updateRole = `-- name: UpdateRole :exec
+UPDATE roles SET name = ?, color = ?, permissions = ?, position = ? WHERE id = ?
+`
+
+type UpdateRoleParams struct {
+	Name        string  `json:"name"`
+	Color       *string `json:"color"`
+	Permissions int64   `json:"permissions"`
+	Position    int64   `json:"position"`
+	ID          int64   `json:"id"`
+}
+
+func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) error {
+	_, err := q.db.ExecContext(ctx, updateRole,
+		arg.Name,
+		arg.Color,
+		arg.Permissions,
+		arg.Position,
+		arg.ID,
+	)
+	return err
 }

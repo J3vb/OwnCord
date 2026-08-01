@@ -120,3 +120,29 @@ export function currentUserHasPermission(perm: Permission): boolean {
 export function canManageMessages(): boolean {
   return currentUserHasPermission(Permission.MANAGE_MESSAGES);
 }
+
+/**
+ * Whether the signed-in user's role holds MANAGE_CHANNELS — create, edit,
+ * delete and reorder channels, all of which the server gates on the same bit
+ * behind `/admin/api/channels*`.
+ *
+ * Routed through `roleHasPermission` rather than `currentUserHasPermission` so
+ * a server that sent no role list still shows the affordances to owner/admin
+ * instead of hiding channel management from everyone. The one derivation for
+ * every channel-management affordance, so the category "+", the context menu
+ * and the audit-log entry cannot disagree about who may manage channels.
+ */
+export function canManageChannels(): boolean {
+  const roleName = authStore.getState().user?.role ?? "";
+  return roleHasPermission(roleName, Permission.MANAGE_CHANNELS);
+}
+
+/**
+ * Whether the signed-in user's role holds VIEW_AUDIT_LOG. Gates the desktop
+ * entry point into the admin panel's audit log; the panel re-checks the bit
+ * on every request.
+ */
+export function canViewAuditLog(): boolean {
+  const roleName = authStore.getState().user?.role ?? "";
+  return roleHasPermission(roleName, Permission.VIEW_AUDIT_LOG);
+}

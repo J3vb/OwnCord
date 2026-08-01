@@ -10,13 +10,13 @@ import { Disposable } from "@lib/disposable";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
 import {
   createUserProfilePopup,
   type UserProfilePopupComponent,
 } from "@components/UserProfilePopup";
-import { Permission, type UserStatus } from "@lib/types";
+import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
 import { roleHasPermission } from "@lib/permissions";
 
 /** Options for configuring admin action callbacks on the member list. */
@@ -438,6 +438,20 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
           }
         }
         prevMembers = members;
+      },
+    );
+
+    // Role groups, their labels and their colors all come from the server's
+    // role list, which role management makes mutable at runtime (a roles_update
+    // broadcast replaces it). Without this the list kept the old grouping until
+    // some unrelated member change happened to force a re-render.
+    disposable.onStoreChange<ChannelsState, readonly ReadyRole[]>(
+      channelsStore,
+      (s) => s.roles,
+      () => {
+        if (root !== null) {
+          renderList(root, opts, disposable.signal, rowsByUserId);
+        }
       },
     );
 

@@ -40,6 +40,8 @@ import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, removeDmChannel } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import { openAdminPanel } from "@lib/admin-panel";
+import { canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/profiles";
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,59 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     headerInviteCtrl.cleanup();
   });
 
+  // ---------------------------------------------------------------------------
+  // Audit log entry point
+  // ---------------------------------------------------------------------------
+  //
+  // The audit log itself stays in the admin panel — it is a paginated,
+  // filterable table over an endpoint this client otherwise never calls, and a
+  // second implementation would be a second thing to keep correct. What belongs
+  // here is the way in, for the moderators who hold VIEW_AUDIT_LOG and would
+  // otherwise have to know the panel's URL by heart.
+  //
+  // Rendered once per mount and kept in sync with the role list: `ready` may
+  // land after this header is built, and a moderator whose role only becomes
+  // known then would never see the entry otherwise.
+  const auditBtn = createElement(
+    "button",
+    {
+      class: "sidebar-audit-btn",
+      title: "Open the audit log in the admin panel (opens in your browser)",
+      "data-testid": "audit-log-btn",
+    },
+    "Audit Log",
+  );
+  auditBtn.addEventListener("click", () => {
+    const host = api.getConfig().host ?? "";
+    if (host === "") {
+      getToast()?.show("Not connected to a server", "error");
+      return;
+    }
+    void openAdminPanel(host, "audit").catch(() => {
+      getToast()?.show("Could not open the admin panel", "error");
+    });
+  });
+
+  const syncAuditBtn = (): void => {
+    auditBtn.style.display = canViewAuditLog() ? "" : "none";
+  };
+  syncAuditBtn();
+  serverHeader.appendChild(auditBtn);
+  // The permission is derived from the signed-in user's role plus the role
+  // list, so both have to be watched.
+  unsubscribers.push(
+    authStore.subscribeSelector(
+      (s) => s.user?.role ?? null,
+      () => syncAuditBtn(),
+    ),
+  );
+  unsubscribers.push(
+    channelsStore.subscribeSelector(
+      (s) => s.roles,
+      () => syncAuditBtn(),
+    ),
+  );
+
   sidebarWrapper.appendChild(serverHeader);
 
   // Load per-server collapsed category state from localStorage
@@ -216,11 +271,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
+        // Pre-fill from the store rather than from the sidebar's row: the store
+        // is what channel_update writes into, so the modal opens on the current
+        // values even if the row was rendered before the last edit landed.
+        const stored = channelsStore.getState().channels.get(channel.id);
         const modal = createEditChannelModal({
           channelId: channel.id,
           channelName: channel.name,
           channelType: channel.type,
-          channelTopic: channelsStore.getState().channels.get(channel.id)?.topic ?? "",
+          channelTopic: stored?.topic ?? "",
+          channelCategory: stored?.category ?? "",
+          channelSlowMode: stored?.slowMode ?? 0,
+          channelNsfw: stored?.nsfw ?? false,
+          channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
+          channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
           onSave: async (data) => {
             try {
               await api.adminUpdateChannel(channel.id, data);

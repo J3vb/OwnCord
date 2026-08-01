@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `020_drop_redundant_indexes.sql` | Drops indexes duplicating UNIQUE auto-indexes |
 | `021_voice_server_moderation.sql` | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed) |
 | `022_message_mentions.sql` | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles |
+| `023_role_management.sql` | Adds `idx_roles_name_nocase` — role names become unique case-insensitively, matching how they are looked up |
+| `024_channel_user_overrides.sql` | Adds `channel_user_overrides` — per-member channel permission overrides, the last layer of the resolution order |
 
 ---
 
@@ -85,7 +87,8 @@ CREATE TABLE roles (
 );
 ```
 
-**Default roles:**
+**Default roles** (seeded by migration `001`, but no longer fixed — see
+*Role semantics* below):
 
 | id | name | color | permissions | position | Notes |
 |----|------|-------|-------------|----------|-------|
@@ -93,6 +96,33 @@ CREATE TABLE roles (
 | 2 | Admin | `#F39C12` | `0x3FFFFFFF` | 80 | Everything except ADMINISTRATOR |
 | 3 | Moderator | `#3498DB` | `0x000FFFFF` | 60 | All message + voice + moderation |
 | 4 | Member | NULL | `0x1E63` | 40 | Send, read, attach, react, voice, video, screen share |
+
+**Role semantics:**
+
+- **`name`** is unique case-insensitively. The column's own `UNIQUE` constraint
+  uses SQLite's default BINARY collation, so migration `023` adds
+  `idx_roles_name_nocase` (`UNIQUE … ON roles(name COLLATE NOCASE)`) —
+  otherwise "Moderator" and "moderator" would be two roles the client, which
+  resolves names case-insensitively, could not tell apart. Max 32 characters.
+- **`color`** is `#rgb` or `#rrggbb` (stored uppercase) or `NULL`. It is
+  rendered directly into a style attribute by the desktop client and the admin
+  panel, so no other form is accepted.
+- **`position`** is the hierarchy rank — higher outranks lower. Every
+  moderation and role-management check is "actor's position strictly greater
+  than the target's". Positions are not required to be contiguous, but
+  `PATCH /admin/api/roles/reorder` normalizes the roles below the actor to
+  `N…1`, which keeps them unique. Position `100`
+  (`permissions.OwnerRolePosition`) is the top: nothing outranks it, which is
+  what makes the seeded Owner role uneditable and undeletable.
+- **`is_default`** marks the single fallback role. New users are created on it
+  and members of a deleted role are moved onto it, so it cannot itself be
+  deleted. It is set by migration and is not writable through the API — which
+  role is the fallback is a schema decision, not an operator one.
+- Roles are created, edited, deleted and reordered through
+  `/admin/api/roles` (`MANAGE_ROLES` + hierarchy; see `docs/api.md`). Deleting
+  a role reassigns its members and drops its `channel_overrides` rows in one
+  transaction. `users.role_id` is a single role per user — there is no
+  many-to-many membership table.
 
 ---
 
@@ -183,7 +213,8 @@ CREATE TABLE channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 25
+    voice_max_video  INTEGER NOT NULL DEFAULT 25,
+    nsfw             INTEGER NOT NULL DEFAULT 0
 );
 ```
 
@@ -192,6 +223,24 @@ INSERT/UPDATE triggers restricting the value to this set (migration 016 added
 `announcement`). Announcement channels are readable like text channels but
 posting is restricted to users with `MANAGE_MESSAGES` (enforced in the service
 layer, `Server/service/message.go`).
+
+`nsfw` (migration 025) is the age-restriction flag, stored 0/1 like `archived`
+because SQLite has no boolean type. **It drives nothing server-side.** The
+server stores it, ships it in `ready` and in the `channel_create` /
+`channel_update` broadcasts, and audits an operator flipping it — it does not
+filter content, check anyone's age, or restrict who may read or post in a
+flagged channel. Clients decide what the flag means to them; the desktop client
+shows a one-time-per-session warning before rendering the channel and marks it
+in the sidebar.
+
+`voice_max_users` and `voice_max_video` (0 = unlimited) are the only channel
+columns that *are* enforced by the server, on voice join and on video publish
+respectively (`CHANNEL_FULL` / `VIDEO_LIMIT`). They exist on every row but are
+meaningless on a non-voice channel.
+
+`PATCH /admin/api/channels/{id}` (`MANAGE_CHANNELS`) is the write path for
+`slow_mode` (0…21600), `nsfw` and both voice limits (0…99 each); values outside
+those ranges are refused rather than clamped.
 
 ---
 
@@ -210,7 +259,38 @@ CREATE TABLE channel_overrides (
 );
 ```
 
-Effective permission calculation: `effective = (base_permissions & ~deny) | allow`
+Effective permission calculation for this layer:
+`effective = (base_permissions & ~deny) | allow`
+
+This is the ROLE layer. The per-member layer (`channel_user_overrides`) is
+applied on top of the result — see "Permission Checking Logic" below.
+
+---
+
+### channel_user_overrides
+
+Per-channel permission overrides for a single **member**, independent of their
+role. This is Discord's narrowest override layer: it grants or refuses one
+person a bit in one channel without minting a role for them.
+
+```sql
+CREATE TABLE channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+```
+
+The shape mirrors `channel_overrides` (allow/deny masks, cascade on both
+parents) so both layers are fetched and merged by the same code
+(`db.GetChannelOverridesFor`). The composite PRIMARY KEY replaces the surrogate
+`id` + `UNIQUE` pair `channel_overrides` carries — nothing references an
+override row by id.
+
+Only members who actually carry an override have a row: an all-inherit override
+is deleted rather than stored as `(0, 0)`.
 
 ---
 
@@ -586,12 +666,16 @@ CREATE TABLE plugin_kv (
 | `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
 | `idx_events_created_at` | events | `(created_at)` | Retention pruning |
 | `idx_message_mentions_user` | message_mentions | `(mentioned_user_id)` | Per-user mention lookup |
+| `idx_channel_user_overrides_user` | channel_user_overrides | `(user_id)` | "every override this member carries" — the direction the permission cache populates from (the PK covers the per-channel direction) |
+| `idx_roles_name_nocase` | roles | `(name COLLATE NOCASE)` UNIQUE | Case-insensitive role-name uniqueness |
 
 ---
 
 ## Permission Bitfield System
 
-Permissions are stored as an integer bitfield (31 bits used) in `roles.permissions`, `channel_overrides.allow`, and `channel_overrides.deny`.
+Permissions are stored as an integer bitfield (31 bits used) in
+`roles.permissions`, `channel_overrides.allow`/`deny`, and
+`channel_user_overrides.allow`/`deny`.
 
 ### Bit Map
 
@@ -611,13 +695,29 @@ Permissions are stored as an integer bitfield (31 bits used) in `roles.permissio
 | 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`) |
 | 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet |
 | 21 | `0x200000` | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text |
-| 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`) |
+| 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`), and create/edit/delete/reorder roles below the actor's own (`/admin/api/roles…`) |
 | 25 | `0x2000000` | `MANAGE_SERVER` | Read and modify server settings (`/admin/api/settings`) |
 | 26 | `0x4000000` | `MANAGE_INVITES` | Create and revoke invite codes |
 | 27 | `0x8000000` | `VIEW_AUDIT_LOG` | Read the audit log (`GET /admin/api/audit-log`) |
 | 30 | `0x40000000` | `ADMINISTRATOR` | Bypasses ALL permission checks |
 
 Bits 2-4, 7, 13-15, 22-23, 28-29, 31 are reserved.
+
+### Permission groups
+
+The bit map above is the authority on what each bit *does*; this grouping is
+how the bits are *presented* — it is the layout of the admin panel's role
+permission grid (`PERM_GROUPS` in `Server/admin/static/index.html`). It carries
+no semantics, but the two must stay in step: every defined bit belongs to
+exactly one group, and a bit missing from the grouping is a bit no operator can
+grant through the panel.
+
+| Group | Bits |
+|-------|------|
+| General | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `ADMINISTRATOR` |
+| Text | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES` |
+| Voice | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN` |
+| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS` |
 
 ### Admin perimeter
 
@@ -635,14 +735,36 @@ bit. See `docs/api.md` for the per-route mapping.
 ```
 1. Get the user's role -> role.Permissions (base)
 2. If (base & ADMINISTRATOR) != 0 -> ALLOW everything
-3. Get channel_overrides for (channel_id, role_id) -> allow, deny
-4. effective = (base & ~deny) | allow
-5. Check: (effective & required_permission) != 0
+3. Get channel_overrides      for (channel_id, role_id) -> allow,  deny
+4. Get channel_user_overrides for (channel_id, user_id) -> uAllow, uDeny
+5. roleLayer = (base      & ~deny)  | allow
+6. effective = (roleLayer & ~uDeny) | uAllow
+7. Check: (effective & required_permission) == required_permission
 ```
 
-Deny is applied first (strips bits), then allow (adds bits), so allow wins
-when both target the same bit — matching Discord's channel-override semantics
-(`permissions.EffectivePerms`).
+The order is Discord's: **base role permissions -> role override -> user
+override**. Within a layer deny is applied first (strips bits) then allow (adds
+bits), so allow wins when both target the same bit. Across layers the later,
+narrower layer wins:
+
+| Situation | Outcome |
+|-----------|---------|
+| role override allows, user override denies | denied |
+| role override denies, user override allows | allowed |
+| user override allows and denies the same bit | allowed |
+| holder has `ADMINISTRATOR` | allowed regardless of either layer |
+
+`permissions.EffectiveChannelPerms` is the single implementation of steps 5-6,
+and `permissions.EffectivePerms` the one-layer primitive it is built from. The
+`ADMINISTRATOR` bypass lives at the call sites (`Checker.HasChannelPerm`,
+`Checker.HasChannelPermBatch`, and through it `VisibleChannelIDs`), not inside
+the formula — it is a bypass, not a bit that survives an override.
+
+Both layers are fetched together and per member, never per channel:
+`db.GetChannelOverridesFor(roleID, userID)` runs two batch queries and merges
+them, which is what keeps `buildReady`, REST `ListVisibleChannels`, reconnect
+replay filtering and the cached `service.PermissionService` free of N+1 lookups
+and unable to drift from each other.
 
 DM channels bypass role permissions entirely and use participant-based authorization instead.
 

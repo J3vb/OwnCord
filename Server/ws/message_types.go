@@ -62,6 +62,7 @@ const (
 	MsgTypeMemberUpdate        = "member_update"
 	MsgTypeUserUpdate          = "user_update"
 	MsgTypeMemberBan           = "member_ban"
+	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"

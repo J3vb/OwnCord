@@ -220,7 +220,7 @@ func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, pe
 	if err != nil || role == nil {
 		return false
 	}
-	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
+	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, c.userID, channelID, perm)
 }
 
 // requireChannelAccess checks whether the client may act on the channel with the

@@ -22,6 +22,12 @@ func (errOverrideStore) GetAllChannelPermissionsForRole(context.Context, int64) 
 	return nil, errors.New("boom")
 }
 
+// GetChannelOverridesFor is the merged role+user fetch every visibility site
+// now uses. It must fail closed for exactly the same reason.
+func (errOverrideStore) GetChannelOverridesFor(context.Context, int64, int64) (map[int64]db.ChannelOverride, error) {
+	return nil, errors.New("boom")
+}
+
 // TestHasChannelPerm_OverrideFetchErrorDenies locks the fail-closed rule: when
 // the override fetch errors we must NOT substitute an empty map, because that
 // restores every bit a channel-level deny had stripped — and PermissionService

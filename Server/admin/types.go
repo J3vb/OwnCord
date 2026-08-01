@@ -56,6 +56,16 @@ type HubBroadcaster interface {
 	// messages after a channel permission override change so each connected
 	// client's sidebar reflects its new visibility without a reconnect.
 	RefreshChannelVisibility(ch *db.Channel)
+	// RefreshAllChannelVisibility is RefreshChannelVisibility across every
+	// non-DM channel. A role's permission mask is the base every channel's
+	// effective permission derives from, so a role edit can change visibility
+	// of all of them at once — unlike a channel_overrides edit, which touches
+	// exactly one.
+	RefreshAllChannelVisibility()
+	// BroadcastRolesUpdate ships the full role list to every connected client
+	// after a role mutation, so name colors and permission-gated affordances
+	// converge without a reconnect.
+	BroadcastRolesUpdate(roles []*db.Role)
 	ClientCount() int
 }
 

@@ -23,7 +23,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 	var overrides map[int64]db.ChannelOverride
 	if !permissions.HasAdmin(role.Permissions) {
 		var overrideErr error
-		overrides, overrideErr = s.st.GetAllChannelPermissionsForRole(ctx, role.ID)
+		overrides, overrideErr = s.st.GetChannelOverridesFor(ctx, role.ID, userID)
 		if overrideErr != nil {
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides: %v", ErrInternal, overrideErr)
 		}

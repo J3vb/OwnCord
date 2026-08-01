@@ -139,7 +139,7 @@ func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checke
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
@@ -161,7 +161,7 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 	if err != nil || role == nil {
 		return false
 	}
-	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
+	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
 }
 
 // hasChannelAccess is the gate to use when the channel id comes from the client:
@@ -232,7 +232,7 @@ func hasChannelAccessLive(ctx context.Context, database *db.DB, perms *permissio
 	if err != nil || role == nil {
 		return false
 	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
 		return false
 	}
 	ch, err := database.GetChannel(ctx, channelID)

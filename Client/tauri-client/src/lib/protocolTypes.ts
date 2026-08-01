@@ -38,6 +38,7 @@ export const ServerMessageType = {
   MEMBER_UPDATE: "member_update",
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
+  ROLES_UPDATE: "roles_update",
   SERVER_RESTART: "server_restart",
   ERROR: "error",
   PONG: "pong",

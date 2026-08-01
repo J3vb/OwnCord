@@ -27,6 +27,7 @@ type Querier interface {
 	CountActiveInvites(ctx context.Context) (int64, error)
 	CountActiveMessages(ctx context.Context) (int64, error)
 	CountChannels(ctx context.Context) (int64, error)
+	CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CountUsersWithoutTOTP(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (sql.Result, error)
@@ -34,13 +35,16 @@ type Querier interface {
 	CreateChannel(ctx context.Context, arg CreateChannelParams) (sql.Result, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
+	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
 	DeleteChannel(ctx context.Context, id int64) error
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
+	DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteLockout(ctx context.Context, key string) error
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
+	DeleteRole(ctx context.Context, id int64) error
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
@@ -62,8 +66,13 @@ type Querier interface {
 	GetChannelOverrides(ctx context.Context, channelID int64) ([]GetChannelOverridesRow, error)
 	GetChannelPermission(ctx context.Context, arg GetChannelPermissionParams) (GetChannelPermissionRow, error)
 	GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error)
+	GetChannelUserOverrides(ctx context.Context, channelID int64) ([]GetChannelUserOverridesRow, error)
+	GetChannelUserPermission(ctx context.Context, arg GetChannelUserPermissionParams) (GetChannelUserPermissionRow, error)
 	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]GetChannelVoiceStatesRow, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	// The fallback role every member lands on when their role is deleted. Highest
+	// position wins if a database somehow carries more than one default.
+	GetDefaultRole(ctx context.Context) (Role, error)
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
 	GetInvite(ctx context.Context, code string) (GetInviteRow, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
@@ -83,6 +92,9 @@ type Querier interface {
 	// table has no timestamp column, so the autoincrement id carries the order.
 	GetReactionUsers(ctx context.Context, arg GetReactionUsersParams) ([]GetReactionUsersRow, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
+	// Case-insensitive by design: migration 023 enforces uniqueness under the same
+	// collation, so this is the lookup that agrees with the constraint.
+	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetRoleChannelPermissions(ctx context.Context, roleID int64) ([]GetRoleChannelPermissionsRow, error)
 	GetRoleForUser(ctx context.Context, id int64) (Role, error)
 	GetSessionByTokenHash(ctx context.Context, token string) (Session, error)
@@ -90,6 +102,7 @@ type Querier interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetUserChannelPermissions(ctx context.Context, userID int64) ([]GetUserChannelPermissionsRow, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
 	GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsParams) ([]GetUserDMChannelsRow, error)
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
@@ -118,7 +131,16 @@ type Querier interface {
 	ListInvites(ctx context.Context) ([]ListInvitesRow, error)
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	// Highest rank first. Positions are only "unique enough": reorder normalizes
+	// them, but creating a role inserts just below the actor and may tie with an
+	// existing role, so id is a tiebreaker. Without it SQLite may return tied rows
+	// in any order, and the admin panel derives its reorder payload from this
+	// order, so a single move-up would silently shuffle the tied roles.
+	// NOTE: keep comments in this file ASCII-only. sqlc mixes byte and rune
+	// offsets when stripping them, so a non-ASCII character here truncates the
+	// generated SQL of THIS and every following query by the byte/rune delta.
 	ListRoles(ctx context.Context) ([]Role, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
 	LogAudit(ctx context.Context, arg LogAuditParams) error
@@ -137,6 +159,7 @@ type Querier interface {
 	SetChannelSlowMode(ctx context.Context, arg SetChannelSlowModeParams) error
 	SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
+	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) error
 	TouchAPIToken(ctx context.Context, tokenHash string) error
@@ -148,6 +171,7 @@ type Querier interface {
 	// Marking a channel read also clears its mention badge: channel_focus is the
 	// only caller, and a focused channel has no outstanding mentions by definition.
 	UpdateReadState(ctx context.Context, arg UpdateReadStateParams) error
+	UpdateRole(ctx context.Context, arg UpdateRoleParams) error
 	UpdateUserIdentityKey(ctx context.Context, arg UpdateUserIdentityKeyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (sql.Result, error)
@@ -159,6 +183,7 @@ type Querier interface {
 	UpdateVoiceMute(ctx context.Context, arg UpdateVoiceMuteParams) error
 	UpdateVoiceScreenshare(ctx context.Context, arg UpdateVoiceScreenshareParams) error
 	UpsertChannelPermission(ctx context.Context, arg UpsertChannelPermissionParams) error
+	UpsertChannelUserPermission(ctx context.Context, arg UpsertChannelUserPermissionParams) error
 	UpsertLockout(ctx context.Context, arg UpsertLockoutParams) error
 	UseInviteAtomic(ctx context.Context, code string) (sql.Result, error)
 	UserCount(ctx context.Context) (int64, error)

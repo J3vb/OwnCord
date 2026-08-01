@@ -1,17 +1,24 @@
 /**
- * CreateChannelModal — modal for creating a new channel under a specific
- * category. The channel type is automatically restricted based on the
- * category: voice categories only allow voice channels, text categories
- * allow text and announcement channels.
+ * CreateChannelModal — modal for creating a new channel.
+ *
+ * The category is an editable text field pre-filled with the group the "+" was
+ * clicked on, backed by a <datalist> of the categories already in use. It used
+ * to be read-only, and the channel TYPE was inferred from the category name
+ * ("voice" anywhere in it meant voice-only), which made every other category
+ * name second-class: a voice channel could not live under "Gaming", and
+ * renaming a category silently changed what could be created there. Categories
+ * are free text and grouping is a display concern, so every type is offered
+ * under every category — the server agrees (it validates the type alone).
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
+import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
 
 export interface CreateChannelModalOptions {
-  /** The category this channel will be created under. */
+  /** The category the create affordance was invoked from ("" = uncategorized). */
   readonly category: string;
   /** Called when the user submits the form. */
   readonly onCreate: (data: { name: string; type: ChannelType; category: string }) => Promise<void>;
@@ -19,25 +26,24 @@ export interface CreateChannelModalOptions {
   readonly onClose: () => void;
 }
 
-/** Returns true if the category name indicates a voice section. */
-export function isVoiceCategory(category: string): boolean {
-  return category.toLowerCase().includes("voice");
-}
+/** Every channel type is creatable under every category. */
+export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
 
-/** Returns the allowed channel types for a given category. */
-export function allowedTypesForCategory(category: string): readonly ChannelType[] {
-  if (isVoiceCategory(category)) {
-    return ["voice"] as const;
-  }
-  return ["text", "announcement"] as const;
+/**
+ * The type pre-selected for a category. Only a hint for the dropdown's initial
+ * value — every type stays selectable. The one case worth guessing is the
+ * synthetic "Voice" fallback group the sidebar puts uncategorized voice
+ * channels in: creating from its "+" almost certainly means another voice
+ * channel.
+ */
+export function defaultTypeForCategory(category: string): ChannelType {
+  return category === UNCATEGORIZED_VOICE_CATEGORY ? "voice" : "text";
 }
 
 export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
-
-  const allowedTypes = allowedTypesForCategory(category);
 
   function mount(container: Element): void {
     overlay = createElement("div", {
@@ -62,15 +68,23 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     // Body
     const body = createElement("div", { class: "modal-body" });
 
-    // Category (read-only display)
+    // Category — free text, with the categories already in use as suggestions.
     const categoryGroup = createElement("div", { class: "form-group" });
     const categoryLabel = createElement("label", { class: "form-label" }, "Category");
-    const categoryDisplay = createElement("div", {
+    const categoryInput = createElement("input", {
       class: "form-input",
-      style: "opacity: 0.7; cursor: default;",
+      type: "text",
+      list: "create-channel-categories",
+      autocomplete: "off",
+      placeholder: "Leave blank for no category",
+      "data-testid": "channel-category-input",
     });
-    setText(categoryDisplay, category);
-    appendChildren(categoryGroup, categoryLabel, categoryDisplay);
+    categoryInput.value = category;
+    const categoryList = createElement("datalist", { id: "create-channel-categories" });
+    for (const known of getKnownCategories()) {
+      categoryList.appendChild(createElement("option", { value: known }));
+    }
+    appendChildren(categoryGroup, categoryLabel, categoryInput, categoryList);
 
     // Channel name
     const nameGroup = createElement("div", { class: "form-group" });
@@ -78,7 +92,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     const nameInput = createElement("input", {
       class: "form-input",
       type: "text",
-      placeholder: isVoiceCategory(category) ? "lounge" : "general",
+      placeholder: defaultTypeForCategory(category) === "voice" ? "lounge" : "general",
       "data-testid": "channel-name-input",
     });
     appendChildren(nameGroup, nameLabel, nameInput);
@@ -91,10 +105,11 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       "data-testid": "channel-type-select",
     });
 
-    for (const t of allowedTypes) {
+    for (const t of CHANNEL_TYPES) {
       const opt = createElement("option", { value: t }, t.charAt(0).toUpperCase() + t.slice(1));
       typeSelect.appendChild(opt);
     }
+    typeSelect.value = defaultTypeForCategory(category);
     appendChildren(typeGroup, typeLabel, typeSelect);
 
     // Error display
@@ -146,7 +161,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           await onCreate({
             name,
             type: typeSelect.value as ChannelType,
-            category,
+            category: categoryInput.value.trim(),
           });
         } catch (err) {
           errorEl.style.display = "block";

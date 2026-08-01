@@ -132,6 +132,9 @@ describe("VoiceWidget", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });
@@ -168,6 +171,9 @@ describe("VoiceWidget", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });
@@ -204,6 +210,9 @@ describe("VoiceWidget", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels };
     });

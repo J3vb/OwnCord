@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (

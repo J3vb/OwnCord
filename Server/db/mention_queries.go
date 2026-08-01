@@ -18,11 +18,14 @@ type mentionExecer interface {
 // storage-side backstop so a caller cannot widen the fan-out.
 const maxMentionsPerMessage = 20
 
-// MentionTarget is a candidate recipient of a mention fan-out: the user id plus
-// the presence status @here filters on.
+// MentionTarget is a candidate recipient of a mention fan-out: the user id, the
+// presence status @here filters on, and the role the user holds (so the caller
+// can apply the ADMINISTRATOR bypass when a per-user channel override would
+// otherwise drop them).
 type MentionTarget struct {
 	UserID int64
 	Status string
+	RoleID int64
 }
 
 // CreateMessageWithMentions inserts a message and its resolved mentions in one
@@ -251,7 +254,7 @@ func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, status FROM users WHERE banned = 0 AND role_id IN (%s)`,
+			`SELECT id, status, role_id FROM users WHERE banned = 0 AND role_id IN (%s)`,
 			strings.Join(placeholders, ",")),
 		args...,
 	)
@@ -263,13 +266,55 @@ func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]
 	targets := []MentionTarget{}
 	for rows.Next() {
 		var t MentionTarget
-		if scanErr := rows.Scan(&t.UserID, &t.Status); scanErr != nil {
+		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
 			return nil, fmt.Errorf("ListMentionTargetsByRoles scan: %w", scanErr)
 		}
 		targets = append(targets, t)
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("ListMentionTargetsByRoles rows: %w", rows.Err())
+	}
+	return targets, nil
+}
+
+// ListMentionTargetsByUserIDs returns non-banned users by explicit id, with the
+// same fields ListMentionTargetsByRoles returns. It backs the additive half of
+// the per-user channel override layer: a member whose user override ALLOWs
+// READ_MESSAGES can read a channel their role cannot, so the role walk alone
+// would leave them out of an @everyone fan-out they are entitled to.
+func (d *DB) ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]MentionTarget, error) {
+	if len(userIDs) == 0 {
+		return []MentionTarget{}, nil
+	}
+
+	placeholders := make([]string, len(userIDs))
+	args := make([]any, len(userIDs))
+	for i, id := range userIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := d.reader.QueryContext(ctx,
+		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+			`SELECT id, status, role_id FROM users WHERE banned = 0 AND id IN (%s)`,
+			strings.Join(placeholders, ",")),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListMentionTargetsByUserIDs: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	targets := []MentionTarget{}
+	for rows.Next() {
+		var t MentionTarget
+		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
+			return nil, fmt.Errorf("ListMentionTargetsByUserIDs scan: %w", scanErr)
+		}
+		targets = append(targets, t)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("ListMentionTargetsByUserIDs rows: %w", rows.Err())
 	}
 	return targets, nil
 }

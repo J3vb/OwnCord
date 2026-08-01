@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { channelsStore } from "../../src/stores/channels.store";
+import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
 import {
   messagesStore,
   addOptimisticMessage,
@@ -40,6 +40,11 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
+const mockShowToast = vi.fn();
+vi.mock("@lib/toast", () => ({
+  showToast: (...args: unknown[]) => mockShowToast(...args),
+}));
+
 vi.mock("@lib/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
@@ -229,6 +234,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
     });
@@ -263,6 +271,9 @@ describe("WS Dispatcher", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: ch, activeChannelId: 1 };
       });
@@ -359,6 +370,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -685,6 +699,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -716,6 +733,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       ch.set(20, {
         id: 20,
@@ -729,6 +749,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -754,6 +777,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -778,6 +804,58 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
     expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+  });
+
+  it("wires roles_update to replace the role list", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      roles: [
+        { id: 1, name: "Owner", color: "#E74C3C", permissions: 0x40000000, position: 100 },
+        { id: 9, name: "Contractor", color: "#123456", permissions: 0x3, position: 30 },
+      ],
+    }));
+
+    // A role was deleted and another recolored server-side. Replacing rather
+    // than merging is the point: the deleted role must not survive.
+    mock.dispatch("roles_update", {
+      roles: [
+        { id: 1, name: "Owner", color: "#FF0000", permissions: 0x40000000, position: 100 },
+        { id: 4, name: "Member", color: null, permissions: 0x3, position: 40, is_default: true },
+      ],
+    });
+
+    const roles = channelsStore.getState().roles;
+    expect(roles.map((r) => r.id)).toEqual([1, 4]);
+    expect(roles[0]?.color).toBe("#FF0000");
+    expect(roles.some((r) => r.name === "Contractor")).toBe(false);
+  });
+
+  it("makes a role created by roles_update immediately assignable", () => {
+    // The Change Role menu resolves a role by name, so a role created in the
+    // admin panel has to be resolvable from the broadcast alone — without this
+    // assigning a freshly created role needed a reconnect.
+    setRoles([{ id: 4, name: "Member", color: null, permissions: 0x3, position: 40 }]);
+    expect(getRoleIdByName("contractor")).toBeUndefined();
+
+    mock.dispatch("roles_update", {
+      roles: [
+        { id: 4, name: "Member", color: null, permissions: 0x3, position: 40, is_default: true },
+        { id: 9, name: "Contractor", color: "#123456", permissions: 0x3, position: 30 },
+      ],
+    });
+
+    expect(getRoleIdByName("contractor")).toBe(9);
+  });
+
+  it("treats a roles_update with no roles field as an empty list", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      roles: [{ id: 1, name: "Owner", color: null, permissions: 0 }],
+    }));
+
+    mock.dispatch("roles_update", {} as { roles: [] });
+
+    expect(channelsStore.getState().roles).toEqual([]);
   });
 
   it("wires voice_state and auto-joins if current user", () => {
@@ -1300,6 +1378,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -1334,6 +1415,9 @@ describe("WS Dispatcher", () => {
         canSend: true,
         topic: "",
         slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -1679,6 +1763,46 @@ describe("WS Dispatcher", () => {
     });
 
     expect(messagesStore.getState().messagesByChannel.get(1)).toBeUndefined();
+  });
+
+  // ─── Voice capacity refusals ────────────────────────────────────────────
+  //
+  // The server owns voice_max_users / voice_max_video and answers an over-limit
+  // join with CHANNEL_FULL (or an over-limit camera with VIDEO_LIMIT). The
+  // client deliberately does not pre-block the click — its participant list can
+  // lag, and a refusal it invented would be uncorrectable — so the only thing
+  // standing between the user and a silent no-op is this toast.
+
+  describe("voice capacity errors", () => {
+    beforeEach(() => {
+      mockShowToast.mockClear();
+    });
+
+    it("surfaces CHANNEL_FULL as a toast", () => {
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "voice channel is full" });
+      expect(mockShowToast).toHaveBeenCalledWith("voice channel is full", "error");
+    });
+
+    it("falls back to a readable message when the server sends none", () => {
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "" });
+      expect(mockShowToast).toHaveBeenCalledWith("That voice channel is full", "error");
+    });
+
+    it("surfaces VIDEO_LIMIT as a toast", () => {
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "That voice channel has reached its video limit",
+        "error",
+      );
+    });
+
+    // A capacity refusal is about the voice channel, not about the composer,
+    // so it must not also land in the login screen's transient-error slot.
+    it("does not set the transient error", () => {
+      uiStore.setState((prev) => ({ ...prev, transientError: null }));
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+      expect(uiStore.getState().transientError).toBeNull();
+    });
   });
 });
 

@@ -22,7 +22,7 @@ import (
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
 	var setupOpts SetupOptions
@@ -75,6 +75,24 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(database))
 			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(database, hub, permInvalidator))
 			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(database, hub, permInvalidator))
+			// Per-user overrides — the last layer of the resolution order,
+			// gated on the same MANAGE_CHANNELS bit as the role layer.
+			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(database, hub, permInvalidator))
+			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(database, hub, permInvalidator))
+		})
+
+		// Role CRUD. MANAGE_ROLES gates the group; RoleService additionally
+		// enforces the hierarchy (manage only roles below your own position,
+		// never grant a bit your role lacks) and refuses to delete the Owner
+		// or the default role.
+		r.Group(func(r chi.Router) {
+			r.Use(requirePerm(permissions.ManageRoles))
+			r.Get("/roles", handleListRoles(roles))
+			r.Post("/roles", handleCreateRole(database, hub, roles))
+			// Registered before /roles/{id} so "reorder" is never parsed as an id.
+			r.Patch("/roles/reorder", handleReorderRoles(hub, permInvalidator, roles))
+			r.Patch("/roles/{id}", handlePatchRole(database, hub, permInvalidator, roles))
+			r.Delete("/roles/{id}", handleDeleteRole(database, hub, permInvalidator, roles))
 		})
 
 		r.With(requirePerm(permissions.ViewAuditLog)).

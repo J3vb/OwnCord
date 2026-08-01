@@ -9,6 +9,8 @@ import {
   currentUserPermissions,
   isLegacyAdminRole,
   roleHasPermission,
+  canManageChannels,
+  canViewAuditLog,
 } from "../../src/lib/permissions";
 import { Permission } from "../../src/lib/types";
 import { setRoles } from "../../src/stores/channels.store";
@@ -299,5 +301,79 @@ describe("isLegacyAdminRole", () => {
     expect(isLegacyAdminRole("ADMIN")).toBe(true);
     expect(isLegacyAdminRole("moderator")).toBe(false);
     expect(isLegacyAdminRole("")).toBe(false);
+  });
+});
+
+// ─── Channel management / audit-log gates ────────────────────────────────────
+//
+// Both are derived from the permission BIT, not from a role name: a custom role
+// granted MANAGE_CHANNELS could edit channels through the API while the client
+// hid the affordance, because the old check asked whether the role was called
+// "owner" or "admin".
+
+describe("canManageChannels / canViewAuditLog", () => {
+  function signInAs(role: string): void {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "A", avatar: null, role },
+      serverName: "T",
+      motd: null,
+      isAuthenticated: true,
+    }));
+  }
+
+  it("grants channel management to a custom role holding the bit", () => {
+    setRoles([{ id: 9, name: "Curator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    signInAs("Curator");
+    expect(canManageChannels()).toBe(true);
+  });
+
+  it("denies channel management to a role without the bit", () => {
+    setRoles([{ id: 4, name: "Member", color: null, permissions: MEMBER_PERMS }]);
+    signInAs("Member");
+    expect(canManageChannels()).toBe(false);
+  });
+
+  it("lets the ADMINISTRATOR bit pass channel management", () => {
+    setRoles([{ id: 1, name: "Owner", color: null, permissions: OWNER_PERMS }]);
+    signInAs("Owner");
+    expect(canManageChannels()).toBe(true);
+  });
+
+  // Without a role list there is nothing to check the bit against; the legacy
+  // name check stands in so channel management is not hidden from every actual
+  // admin on an older server.
+  it("falls back to the legacy owner/admin names with no role list", () => {
+    setRoles([]);
+    signInAs("admin");
+    expect(canManageChannels()).toBe(true);
+    signInAs("moderator");
+    expect(canManageChannels()).toBe(false);
+  });
+
+  it("gates the audit-log entry on VIEW_AUDIT_LOG", () => {
+    setRoles([
+      { id: 3, name: "Moderator", color: null, permissions: Permission.VIEW_AUDIT_LOG },
+      { id: 4, name: "Member", color: null, permissions: MEMBER_PERMS },
+    ]);
+    signInAs("Moderator");
+    expect(canViewAuditLog()).toBe(true);
+    signInAs("Member");
+    expect(canViewAuditLog()).toBe(false);
+  });
+
+  // The two gates are independent: an auditor who may read the log need not be
+  // able to edit channels, and vice versa.
+  it("keeps the two gates independent", () => {
+    setRoles([
+      { id: 9, name: "Auditor", color: null, permissions: Permission.VIEW_AUDIT_LOG },
+      { id: 10, name: "Curator", color: null, permissions: Permission.MANAGE_CHANNELS },
+    ]);
+    signInAs("Auditor");
+    expect(canViewAuditLog()).toBe(true);
+    expect(canManageChannels()).toBe(false);
+    signInAs("Curator");
+    expect(canViewAuditLog()).toBe(false);
+    expect(canManageChannels()).toBe(true);
   });
 });

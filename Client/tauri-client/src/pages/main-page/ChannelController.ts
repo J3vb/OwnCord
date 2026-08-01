@@ -15,6 +15,8 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
+import { createNsfwGate } from "@components/NsfwGate";
+import { nsfwGateRequired } from "@lib/nsfw-gate";
 import {
   getChannelMessages,
   setMessagePinned,
@@ -35,7 +37,7 @@ import { dmStore } from "@stores/dm.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 
 const log = createLogger("channel-ctrl");
@@ -99,6 +101,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
+  // The age gate covering the message area of an NSFW channel, while it is up.
+  let nsfwGate: MountableComponent | null = null;
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
@@ -113,6 +117,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelAbort = null;
     }
 
+    if (nsfwGate !== null) {
+      nsfwGate.destroy?.();
+      nsfwGate = null;
+    }
     if (messageList !== null) {
       messageList.destroy?.();
       messageList = null;
@@ -459,6 +467,31 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       { signal },
     );
+
+    // Age gate. Mounted over the message area — the channel is live underneath,
+    // so accepting reveals it without a refetch, and declining leaves the
+    // channel rather than pretending it is empty. Only the first open of a
+    // flagged channel in a session shows it (see @lib/nsfw-gate).
+    const storedChannel = channelsStore.getState().channels.get(channelId);
+    if (storedChannel !== undefined && nsfwGateRequired(storedChannel)) {
+      const gate = createNsfwGate({
+        channelId,
+        channelName,
+        onContinue: () => {
+          gate.destroy?.();
+          if (nsfwGate === gate) nsfwGate = null;
+        },
+        onCancel: () => {
+          // Leave the channel entirely: keeping the gate up over a channel the
+          // reader declined would strand them on a screen with no way out that
+          // is not also "continue".
+          destroyChannel();
+          setActiveChannel(null);
+        },
+      });
+      gate.mount(slots.messagesSlot);
+      nsfwGate = gate;
+    }
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {

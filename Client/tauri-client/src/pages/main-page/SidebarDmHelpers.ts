@@ -80,6 +80,12 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     canSend: true,
     slowMode: 0,
     topic: "",
+    // A DM is never age-gated and has no voice capacity: the flags exist on
+    // guild channels, and a DM row is synthesised here rather than coming from
+    // the server's channel list.
+    nsfw: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
   };
   channelsStore.setState((prev) => {
     const next = new Map(prev.channels);

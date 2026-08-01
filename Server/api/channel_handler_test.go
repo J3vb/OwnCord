@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_users  INTEGER NOT NULL DEFAULT 0,
     voice_quality    TEXT,
     mixing_threshold INTEGER,
-    voice_max_video  INTEGER NOT NULL DEFAULT 0
+    voice_max_video  INTEGER NOT NULL DEFAULT 0,
+    nsfw             INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +84,14 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     allow      INTEGER NOT NULL DEFAULT 0,
     deny       INTEGER NOT NULL DEFAULT 0,
     UNIQUE(channel_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -267,6 +267,57 @@ func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {
 	}
 }
 
+// TestSendMessage_EveryoneHonorsUserOverrides locks the per-user layer in the
+// @everyone fan-out: it is the last layer of the resolution order, so it must
+// both DROP a reader the role admitted and ADD one the role excluded.
+func TestSendMessage_EveryoneHonorsUserOverrides(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// The role cannot read the channel at all...
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
+	// ...but bob is individually granted READ back.
+	if err := database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0); err != nil {
+		t.Fatalf("UpsertChannelUserOverride bob: %v", err)
+	}
+
+	sendAs(t, svc, 4, "@everyone notice")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob (user allow) mention_count = %d, want 1", got)
+	}
+	if got := mentionCount(t, database, 3); got != 0 {
+		t.Errorf("carol (no override) mention_count = %d, want 0", got)
+	}
+}
+
+func TestSendMessage_EveryoneSkipsUserDenied(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// carol alone is denied READ on a channel her role can read.
+	if err := database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride carol: %v", err)
+	}
+
+	sendAs(t, svc, 4, "@everyone notice")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d, want 1", got)
+	}
+	if got := mentionCount(t, database, 3); got != 0 {
+		t.Errorf("carol (user deny) mention_count = %d, want 0", got)
+	}
+}
+
+// A direct @mention of a user the channel's per-user deny excludes must not
+// raise their badge either — mentionReaders is the single gate behind both.
+func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	if err := database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride bob: %v", err)
+	}
+
+	sendAs(t, svc, 1, "@bob ping")
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("user-denied bob mention_count = %d, want 0", got)
+	}
+}
+
 // ─── mention counts ──────────────────────────────────────────────────────────
 
 func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {

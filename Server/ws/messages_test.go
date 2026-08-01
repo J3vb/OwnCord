@@ -767,3 +767,90 @@ func TestBuildUserUpdate_IncludesIdentityKey(t *testing.T) {
 		t.Errorf("identity_public_key = %q, want %q", env.Payload.IdentityPublicKey, key)
 	}
 }
+
+// ─── channel feature flags on the wire ───────────────────────────────────────
+
+// nsfwSampleChannel is a voice channel carrying every field the phase-5 flags
+// added, so a builder that drops one is caught by an explicit assertion rather
+// than by a client behaving oddly.
+func flaggedSampleChannel() *db.Channel {
+	return &db.Channel{
+		ID:            7,
+		Name:          "lounge",
+		Type:          "voice",
+		Category:      "Hangout",
+		Position:      1,
+		SlowMode:      30,
+		NSFW:          true,
+		VoiceMaxUsers: 5,
+		VoiceMaxVideo: 2,
+	}
+}
+
+// Both builders share one payload constructor, so both are asserted: the point
+// is that channel_create and channel_update can never disagree about which
+// fields a client is told about.
+func TestBuildChannelMessages_CarryFeatureFlags(t *testing.T) {
+	ch := flaggedSampleChannel()
+	for name, msg := range map[string][]byte{
+		"channel_create": buildChannelCreate(ch),
+		"channel_update": buildChannelUpdate(ch),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var env struct {
+				Payload channelPayload `json:"payload"`
+			}
+			if err := json.Unmarshal(msg, &env); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			p := env.Payload
+			if !p.NSFW {
+				t.Error("payload.nsfw = false, want true")
+			}
+			if p.SlowMode != ch.SlowMode {
+				t.Errorf("payload.slow_mode = %d, want %d", p.SlowMode, ch.SlowMode)
+			}
+			if p.VoiceMaxUsers != ch.VoiceMaxUsers {
+				t.Errorf("payload.voice_max_users = %d, want %d", p.VoiceMaxUsers, ch.VoiceMaxUsers)
+			}
+			if p.VoiceMaxVideo != ch.VoiceMaxVideo {
+				t.Errorf("payload.voice_max_video = %d, want %d", p.VoiceMaxVideo, ch.VoiceMaxVideo)
+			}
+		})
+	}
+}
+
+// The JSON keys are the contract the client reads; a Go-side rename that kept
+// the struct field would pass the assertions above and still break every
+// client, so the wire names are pinned explicitly.
+func TestBuildChannelUpdate_FeatureFlagWireNames(t *testing.T) {
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(buildChannelUpdate(flaggedSampleChannel()), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"nsfw", "slow_mode", "voice_max_users", "voice_max_video"} {
+		if _, ok := env.Payload[key]; !ok {
+			t.Errorf("payload is missing %q; got keys %v", key, env.Payload)
+		}
+	}
+}
+
+// An unflagged channel must send the flags as their zero values rather than
+// omitting them: a client that reads `nsfw` as undefined would fall back to
+// its own default, and "absent" would then mean two different things.
+func TestBuildChannelUpdate_UnflaggedChannelSendsZeroes(t *testing.T) {
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(buildChannelUpdate(sampleChannel()), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload["nsfw"] != false {
+		t.Errorf("payload.nsfw = %v, want false", env.Payload["nsfw"])
+	}
+	if env.Payload["voice_max_users"] != float64(0) {
+		t.Errorf("payload.voice_max_users = %v, want 0", env.Payload["voice_max_users"])
+	}
+}

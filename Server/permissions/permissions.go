@@ -125,13 +125,40 @@ func HasServerPerm(rolePerms, perm int64) bool {
 	return HasAdmin(rolePerms) || HasPerm(rolePerms, perm)
 }
 
-// EffectivePerms computes the resolved permission set for a channel override.
+// EffectivePerms computes the resolved permission set for ONE override layer.
 // The formula matches Discord's channel override semantics:
 //
 //	effective = (rolePerm & ^deny) | allow
 //
 // deny is applied first (strips bits), then allow is applied (adds bits),
 // so allow takes precedence over deny when both target the same bit.
+//
+// Prefer EffectiveChannelPerms, which applies both layers in order; this is the
+// primitive it is built from.
 func EffectivePerms(rolePerm, allow, deny int64) int64 {
 	return (rolePerm &^ deny) | allow
+}
+
+// EffectiveChannelPerms resolves a member's permissions in ONE channel, in
+// Discord's order:
+//
+//	base role permissions -> role override -> user override
+//
+// Each layer is EffectivePerms, so within a layer allow beats deny, and across
+// layers the later (narrower) layer wins: a per-user deny beats a per-role
+// allow, and a per-user allow beats a per-user deny.
+//
+// ADMINISTRATOR is deliberately NOT handled here — it is a bypass, not a bit
+// that survives an override, and every caller short-circuits on HasAdmin before
+// reaching this. Keeping the bypass at the call site means a channel override
+// can still strip ADMINISTRATOR from a non-admin's computed mask (it never
+// grants it) without this function quietly re-granting it.
+//
+// This is the single resolution formula: Checker.HasChannelPerm,
+// Checker.HasChannelPermBatch (and through it VisibleChannelIDs) and
+// service.PermissionService all route through it, so no call site can be left
+// resolving only the role layer.
+func EffectiveChannelPerms(basePerms int64, o ChannelOverride) int64 {
+	roleLayer := EffectivePerms(basePerms, o.Allow, o.Deny)
+	return EffectivePerms(roleLayer, o.UserAllow, o.UserDeny)
 }

@@ -461,7 +461,10 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
     "category": "Text Channels",
     "position": 0,
     "slow_mode": 0,
-    "archived": false
+    "archived": false,
+    "nsfw": false,
+    "voice_max_users": 0,
+    "voice_max_video": 0
   }
 ]
 ```
@@ -476,6 +479,21 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 | `position` | int | Sort order within category |
 | `slow_mode` | int | Slow-mode delay in seconds (0 = disabled) |
 | `archived` | bool | Whether the channel is archived |
+| `nsfw` | bool | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
+| `voice_max_users` | int | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`) |
+| `voice_max_video` | int | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`) |
+
+#### The `nsfw` flag
+
+`nsfw` is metadata and nothing else. The server stores it, ships it in `ready`
+and in the `channel_create` / `channel_update` broadcasts, and audits an
+operator flipping it — and does **not** filter content, check anyone's age, or
+restrict who may read or post in a flagged channel. Every consequence is the
+client's: the desktop client shows a one-time-per-session "may contain
+sensitive content" gate before rendering a flagged channel's messages
+(remembered in `sessionStorage`, so a new session asks again) and marks the
+channel in its sidebar. A client that ignores the field behaves exactly as it
+did before the field existed.
 
 ---
 
@@ -1148,7 +1166,8 @@ Authorization is two-layered:
 | `GET /admin/api/users` | perimeter only |
 | `PATCH /admin/api/users/{id}` | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
 | `DELETE /admin/api/users/{id}/sessions` | `KICK_MEMBERS` |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`) | `MANAGE_CHANNELS` |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS` |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`) | `MANAGE_ROLES` |
 | `GET /admin/api/audit-log` | `VIEW_AUDIT_LOG` |
 | `GET/PATCH /admin/api/settings` | `MANAGE_SERVER` |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream` | `ADMINISTRATOR` |
@@ -1179,6 +1198,277 @@ Every route still re-checks its bit server-side.
   "is_owner": false
 }
 ```
+
+---
+
+## Role Management
+
+Create, edit, delete and reorder roles. The whole group requires
+`MANAGE_ROLES`; `RoleService` then enforces the hierarchy rules below, so a
+principal that clears the bit still cannot escalate through it.
+
+**Rules, all measured against the *actor's* role position:**
+
+- You may only create, edit, delete or reorder roles positioned **strictly
+  below** your own. Equal rank is refused too, so a role cannot rewrite itself.
+  Nothing sits above position 100, which makes the seeded Owner role
+  immutable and undeletable for everyone, owner included.
+- You may never **grant** a permission bit your own role lacks. Removing one is
+  allowed — de-escalation is always safe. `ADMINISTRATOR` bypasses this check
+  entirely (it is what lets the owner hand out anything).
+- The default role (`is_default = 1`) cannot be deleted: every member falls
+  back to it.
+- Deleting a role moves its members onto the default role in one `UPDATE`,
+  drops the role's `channel_overrides` rows, invalidates the moved members'
+  cached permissions, and broadcasts a `member_update` per member.
+- Names are unique **case-insensitively** (migration `023`), matching the
+  case-insensitive lookup the desktop client does. Max 32 characters.
+- Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
+  color. Anything else is `400`.
+- Unknown permission bits are masked off rather than rejected.
+- Every mutation writes an audit row (`role_create`, `role_update`,
+  `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
+  `docs/protocol.md`) carrying the full new list.
+
+### GET /admin/api/roles
+
+Roles ordered by position descending, each with its member count.
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647, "position": 100, "is_default": false, "member_count": 1 },
+  { "id": 4, "name": "Member", "color": null, "permissions": 1635, "position": 40, "is_default": true, "member_count": 12 }
+]
+```
+
+### POST /admin/api/roles
+
+#### Request
+
+```json
+{
+  "name": "Helper",
+  "color": "#5865F2",
+  "permissions": 3,
+  "position": 50
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | 1–32 characters, unique case-insensitively |
+| `color` | string | No | `#rgb`/`#rrggbb`, or `""` for none |
+| `permissions` | integer | No | Bitfield; defaults to `0` |
+| `position` | integer | No | Defaults to one below the actor's own position |
+
+#### Response 201 Created
+
+The created role (`id`, `name`, `color`, `permissions`, `position`,
+`is_default` — always `false`; the default role is seeded, never created).
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
+
+### PATCH /admin/api/roles/{id}
+
+Partial update — every field is optional and an omitted one is left alone.
+Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
+Editing a role at or above your own position is `403`.
+
+A permission change additionally invalidates the cached permissions of that
+role's members and re-syncs their channel visibility (the server sends targeted
+`channel_create`/`channel_delete`), because a role's mask is the base every
+channel's effective permission derives from.
+
+#### Response 200 OK
+
+The updated role.
+
+### DELETE /admin/api/roles/{id}
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | The role is the default role, or is the seeded Owner role |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or the role is at or above your own position |
+| 404 | `NOT_FOUND` | No such role |
+
+### PATCH /admin/api/roles/reorder
+
+#### Request
+
+```json
+{ "role_ids": [2, 9, 3, 4] }
+```
+
+`role_ids` is highest-rank-first and must name **exactly** the set of roles
+strictly below your own position — a partial list is refused rather than
+silently leaving the omitted roles at positions that now collide. Positions are
+normalized to `N…1`, so they stay unique, stay below the actor, and never
+collide with the untouched roles above.
+
+#### Response 200 OK
+
+The full role list after the reorder, position descending.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Wrong number of ids, or a duplicate id |
+| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or an id that is unknown or not below your rank |
+
+---
+
+## Channel Management (admin)
+
+`POST /admin/api/channels` takes `{name, type, category, topic, position}`;
+`PATCH /admin/api/channels/{id}` takes `{name, topic, category, slow_mode,
+position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
+omitted field from the current row, so a partial body is safe.
+
+The numeric fields are bounds-checked before anything is written, and an
+out-of-range value is refused with `400 INVALID_INPUT` rather than clamped —
+a caller that sent `-1` meant something, and storing `0` would hide it. A
+refused body writes nothing at all:
+
+| Field | Range | Meaning |
+|-------|-------|---------|
+| `slow_mode` | 0…21600 | Cooldown in seconds; 0 = off (6-hour ceiling, as Discord) |
+| `voice_max_users` | 0…99 | Voice capacity; 0 = unlimited |
+| `voice_max_video` | 0…99 | Simultaneous cameras/screen shares; 0 = unlimited |
+
+`nsfw` is a bool and is stored, broadcast and audited only — the server applies
+no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
+audit detail names the transition: `updated #foo (marked NSFW)` /
+`(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
+
+The voice limits are stored on a channel of any type but are only meaningful on
+a voice one; the desktop client offers them for voice channels alone and omits
+the keys entirely elsewhere, so a text-channel edit cannot wipe limits the row
+happens to hold.
+
+`type` must be `text`, `voice` or `announcement` (`400 INVALID_INPUT`
+otherwise). **`category` constrains nothing.** Categories are free text and a
+channel of any type may live under any of them — a voice channel under
+"Gaming", a text channel under "Voice Channels". Grouping is a display concern:
+the desktop client groups by whatever category a channel carries and falls back
+to a synthetic "Voice" group only for voice channels with no category at all.
+(Before phase 5 the server refused any non-voice channel under a category
+literally named "Voice Channels", and any voice channel outside it.)
+
+`PATCH` accepts `category`, so moving a channel between categories is an edit
+rather than a delete-and-recreate. An empty string makes it uncategorized.
+
+---
+
+## Channel Permission Overrides
+
+Two override layers per channel, both gated on `MANAGE_CHANNELS` and both
+audit-logged. They resolve in Discord's order:
+
+```
+base role permissions -> role override -> user override
+```
+
+The later, narrower layer wins: a **user** deny beats a **role** allow, a user
+allow beats a role deny, and within one layer allow beats deny. `ADMINISTRATOR`
+bypasses both layers entirely. See `docs/schema.md` ("Permission Checking
+Logic") for the formula and `permissions.EffectiveChannelPerms` for the single
+implementation.
+
+Denying `READ_MESSAGES` hides the channel outright — from the WS `ready`
+payload, from `GET /api/v1/channels`, from reconnect replay and from live
+broadcasts. Every write below invalidates the affected permission cache entries
+and then re-syncs connected clients with targeted `channel_create` /
+`channel_delete` messages, so sidebars converge without a reconnect.
+
+DM channels have no override surface: `400 INVALID_INPUT`.
+
+### GET /admin/api/channels/{id}/permissions
+
+Both layers for one channel. `roles` lists **every** role (zero masks when it
+carries no override) so the panel can render a complete grid; `users` lists
+**only** members who actually have an override row.
+
+#### Response 200 OK
+
+```json
+{
+  "channel_id": 4,
+  "roles": [
+    { "role_id": 1, "role_name": "Owner", "position": 100, "permissions": 2147483647, "allow": 0, "deny": 0 },
+    { "role_id": 4, "role_name": "Member", "position": 40, "permissions": 1635, "allow": 0, "deny": 514 }
+  ],
+  "users": [
+    { "user_id": 12, "username": "alice", "role_id": 4, "allow": 2, "deny": 0 }
+  ]
+}
+```
+
+### PUT /admin/api/channels/{id}/permissions/{roleId}
+
+### PUT /admin/api/channels/{id}/user-permissions/{userId}
+
+Write one override row. Same body for both layers:
+
+```json
+{ "allow": 2, "deny": 1 }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `allow` | integer | Bits granted in this channel |
+| `deny` | integer | Bits refused in this channel |
+
+Bits outside `permissions.AllPerms` are masked off rather than rejected, so an
+unknown bit can never be persisted. A row with both masks `0` is meaningless —
+the admin panel sends `DELETE` for that case instead.
+
+#### Response 200 OK
+
+The stored row: `{role_id, role_name, position, permissions, allow, deny}` for
+the role layer, `{user_id, username, role_id, allow, deny}` for the user layer.
+
+#### Cache and fan-out
+
+- Role layer: `InvalidateAll` (any member of that role is affected), then
+  `RefreshChannelVisibility`.
+- User layer: `InvalidateUser(userId)` only — a per-user override cannot change
+  anyone else's verdict, and dropping the whole cache for one member would cost
+  every connected client a repopulate — then `RefreshChannelVisibility`, which
+  resolves visibility per user through the full order.
+
+#### Audit
+
+`channel_perms_update` / `channel_user_perms_update`, target `channel`.
+
+#### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `BAD_REQUEST` | Unparseable id or body |
+| 400 | `INVALID_INPUT` | The channel is a DM |
+| 403 | `FORBIDDEN` | Missing `MANAGE_CHANNELS` |
+| 404 | `NOT_FOUND` | Unknown channel, role or user |
+
+### DELETE /admin/api/channels/{id}/permissions/{roleId}
+
+### DELETE /admin/api/channels/{id}/user-permissions/{userId}
+
+Clear the override row, returning the target to the layer above it. `204 No
+Content`; deleting a row that does not exist is a no-op, not a `404`. Same
+cache/fan-out behavior as the writes; audits as `channel_perms_clear` /
+`channel_user_perms_clear`.
 
 ---
 

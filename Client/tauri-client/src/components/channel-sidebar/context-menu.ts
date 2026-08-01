@@ -1,14 +1,18 @@
 /**
  * Channel context menu — right-click on a channel for Mark as Read/Edit/Delete/
  * Purge. Mark as Read is offered to everyone (it only touches the caller's own
- * read state); Edit and Delete are admin/owner-only; Purge follows the server's
- * gate and appears for any role holding MANAGE_MESSAGES.
+ * read state); Edit and Delete follow the server's MANAGE_CHANNELS gate; Purge
+ * follows its MANAGE_MESSAGES gate.
+ *
+ * Both gates are permission bits, not role names: a custom role granted
+ * MANAGE_CHANNELS could edit a channel through the API while the client hid
+ * the menu item, because the old check asked whether the role was literally
+ * called "owner" or "admin".
  */
 
 import { createElement } from "@lib/dom";
 import type { Channel } from "@stores/channels.store";
-import { getCurrentUser } from "@stores/auth.store";
-import { hasPermission, currentUserPermissions } from "@lib/permissions";
+import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { markChannelRead, hasUnread } from "@lib/read-state";
 import { appendPurgeSection } from "@components/purge-prompt";
@@ -22,9 +26,7 @@ export function attachChannelContextMenu(
   onDelete?: (channel: Channel) => void,
   onPurge?: (channel: Channel, count: number) => Promise<void>,
 ): void {
-  const user = getCurrentUser();
-  const role = user?.role?.toLowerCase() ?? "";
-  const isChannelAdmin = role === "owner" || role === "admin";
+  const canManage = canManageChannels();
 
   // Voice channels hold no messages, and the server rejects a purge in a DM,
   // so the section is offered only where it can succeed.
@@ -33,8 +35,8 @@ export function attachChannelContextMenu(
     channel.type !== "voice" &&
     hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES);
 
-  const showEdit = isChannelAdmin && onEdit !== undefined;
-  const showDelete = isChannelAdmin && onDelete !== undefined;
+  const showEdit = canManage && onEdit !== undefined;
+  const showDelete = canManage && onDelete !== undefined;
   // Mark as Read touches only the caller's own read state, so it needs no
   // permission — but a voice channel holds no messages to read.
   const showMarkRead = channel.type !== "voice";

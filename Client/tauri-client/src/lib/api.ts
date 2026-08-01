@@ -601,9 +601,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name?: string;
         topic?: string;
+        // Moving a channel between categories is a rename of free text; an
+        // omitted field keeps the channel's current category server-side.
+        category?: string;
         slow_mode?: number;
         position?: number;
         archived?: boolean;
+        /**
+         * Age-restriction label. Stored, broadcast and audited by the server,
+         * which applies no content behaviour of its own to a flagged channel.
+         */
+        nsfw?: boolean;
+        /**
+         * Voice capacity limits (0 = unlimited), enforced by the server on
+         * join. Omit them on a text channel rather than sending 0 — every
+         * field the body leaves out keeps its stored value.
+         */
+        voice_max_users?: number;
+        voice_max_video?: number;
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {

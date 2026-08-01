@@ -82,6 +82,15 @@ type memberBanPayload struct {
 	UserID int64 `json:"user_id"`
 }
 
+// rolesUpdatePayload carries the whole role list rather than a delta. The
+// client's role state is a flat list keyed by id that drives name colors and
+// permission gating; replacing it wholesale is both smaller to reason about
+// than a patch protocol and immune to a dropped intermediate event leaving a
+// deleted role on screen.
+type rolesUpdatePayload struct {
+	Roles []db.Role `json:"roles"`
+}
+
 type chatSendOKPayload struct {
 	MessageID int64  `json:"message_id"`
 	Timestamp string `json:"timestamp"`
@@ -204,6 +213,33 @@ type channelPayload struct {
 	// instead of accepting a message the server will refuse with SLOW_MODE.
 	// Seconds; 0 means off.
 	SlowMode int `json:"slow_mode"`
+	// NSFW marks the channel as possibly carrying sensitive content. It is
+	// shipped so clients can gate or label it; the server applies no content
+	// behaviour of its own to a flagged channel.
+	NSFW bool `json:"nsfw"`
+	// Voice capacity limits (0 = unlimited), the same values the voice-join
+	// path enforces with CHANNEL_FULL / VIDEO_LIMIT. Sent so the sidebar can
+	// show "3/5" and the client can explain a refusal it could have predicted.
+	VoiceMaxUsers int `json:"voice_max_users"`
+	VoiceMaxVideo int `json:"voice_max_video"`
+}
+
+// channelPayloadFrom narrows a channel row to the wire shape shared by the
+// channel_create and channel_update broadcasts. One constructor so the two
+// events can never disagree about which fields a client is told about.
+func channelPayloadFrom(ch *db.Channel) channelPayload {
+	return channelPayload{
+		ID:            ch.ID,
+		Name:          ch.Name,
+		Type:          ch.Type,
+		Category:      ch.Category,
+		Topic:         ch.Topic,
+		Position:      ch.Position,
+		SlowMode:      ch.SlowMode,
+		NSFW:          ch.NSFW,
+		VoiceMaxUsers: ch.VoiceMaxUsers,
+		VoiceMaxVideo: ch.VoiceMaxVideo,
+	}
 }
 
 type channelDeletePayload struct {
@@ -392,6 +428,21 @@ func buildMemberBan(userID int64) []byte {
 	})
 }
 
+// buildRolesUpdate constructs a roles_update broadcast carrying the full role
+// list, ordered highest position first exactly like the ready payload's.
+func buildRolesUpdate(roles []*db.Role) []byte {
+	flat := make([]db.Role, 0, len(roles))
+	for _, r := range roles {
+		if r != nil {
+			flat = append(flat, *r)
+		}
+	}
+	return buildJSON(wsMsg{
+		Type:    MsgTypeRolesUpdate,
+		Payload: rolesUpdatePayload{Roles: flat},
+	})
+}
+
 // buildChatSendOK constructs a chat_send_ok ack.
 func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
 	return buildJSON(wsMsg{
@@ -571,32 +622,16 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 // buildChannelCreate constructs a channel_create broadcast.
 func buildChannelCreate(ch *db.Channel) []byte {
 	return buildJSON(wsMsg{
-		Type: MsgTypeChannelCreate,
-		Payload: channelPayload{
-			ID:       ch.ID,
-			Name:     ch.Name,
-			Type:     ch.Type,
-			Category: ch.Category,
-			Topic:    ch.Topic,
-			Position: ch.Position,
-			SlowMode: ch.SlowMode,
-		},
+		Type:    MsgTypeChannelCreate,
+		Payload: channelPayloadFrom(ch),
 	})
 }
 
 // buildChannelUpdate constructs a channel_update broadcast.
 func buildChannelUpdate(ch *db.Channel) []byte {
 	return buildJSON(wsMsg{
-		Type: MsgTypeChannelUpdate,
-		Payload: channelPayload{
-			ID:       ch.ID,
-			Name:     ch.Name,
-			Type:     ch.Type,
-			Category: ch.Category,
-			Topic:    ch.Topic,
-			Position: ch.Position,
-			SlowMode: ch.SlowMode,
-		},
+		Type:    MsgTypeChannelUpdate,
+		Payload: channelPayloadFrom(ch),
 	})
 }
 

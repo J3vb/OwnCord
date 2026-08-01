@@ -12,26 +12,35 @@ import (
 
 const adminUpdateChannel = `-- name: AdminUpdateChannel :exec
 UPDATE channels
-SET name = ?, topic = ?, slow_mode = ?, position = ?, archived = ?
+SET name = ?, topic = ?, category = ?, slow_mode = ?, position = ?, archived = ?,
+    nsfw = ?, voice_max_users = ?, voice_max_video = ?
 WHERE id = ?
 `
 
 type AdminUpdateChannelParams struct {
-	Name     string  `json:"name"`
-	Topic    *string `json:"topic"`
-	SlowMode int64   `json:"slowMode"`
-	Position int64   `json:"position"`
-	Archived int64   `json:"archived"`
-	ID       int64   `json:"id"`
+	Name          string  `json:"name"`
+	Topic         *string `json:"topic"`
+	Category      *string `json:"category"`
+	SlowMode      int64   `json:"slowMode"`
+	Position      int64   `json:"position"`
+	Archived      int64   `json:"archived"`
+	Nsfw          int64   `json:"nsfw"`
+	VoiceMaxUsers int64   `json:"voiceMaxUsers"`
+	VoiceMaxVideo int64   `json:"voiceMaxVideo"`
+	ID            int64   `json:"id"`
 }
 
 func (q *Queries) AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error {
 	_, err := q.db.ExecContext(ctx, adminUpdateChannel,
 		arg.Name,
 		arg.Topic,
+		arg.Category,
 		arg.SlowMode,
 		arg.Position,
 		arg.Archived,
+		arg.Nsfw,
+		arg.VoiceMaxUsers,
+		arg.VoiceMaxVideo,
 		arg.ID,
 	)
 	return err
@@ -82,13 +91,28 @@ func (q *Queries) DeleteChannelPermission(ctx context.Context, arg DeleteChannel
 	return err
 }
 
+const deleteChannelUserPermission = `-- name: DeleteChannelUserPermission :exec
+DELETE FROM channel_user_overrides WHERE channel_id = ? AND user_id = ?
+`
+
+type DeleteChannelUserPermissionParams struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error {
+	_, err := q.db.ExecContext(ctx, deleteChannelUserPermission, arg.ChannelID, arg.UserID)
+	return err
+}
+
 const getChannel = `-- name: GetChannel :one
 SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
        position, slow_mode, archived, created_at,
        COALESCE(voice_max_users, 0) AS voice_max_users,
        voice_quality,
        mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video
+       COALESCE(voice_max_video, 0) AS voice_max_video,
+       nsfw
 FROM channels WHERE id = ?
 `
 
@@ -106,6 +130,7 @@ type GetChannelRow struct {
 	VoiceQuality    *string `json:"voiceQuality"`
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
+	Nsfw            int64   `json:"nsfw"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -125,6 +150,7 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.VoiceQuality,
 		&i.MixingThreshold,
 		&i.VoiceMaxVideo,
+		&i.Nsfw,
 	)
 	return i, err
 }
@@ -183,6 +209,60 @@ func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermis
 	return i, err
 }
 
+const getChannelUserOverrides = `-- name: GetChannelUserOverrides :many
+SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = ?
+`
+
+type GetChannelUserOverridesRow struct {
+	UserID int64 `json:"userId"`
+	Allow  int64 `json:"allow"`
+	Deny   int64 `json:"deny"`
+}
+
+func (q *Queries) GetChannelUserOverrides(ctx context.Context, channelID int64) ([]GetChannelUserOverridesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getChannelUserOverrides, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetChannelUserOverridesRow{}
+	for rows.Next() {
+		var i GetChannelUserOverridesRow
+		if err := rows.Scan(&i.UserID, &i.Allow, &i.Deny); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getChannelUserPermission = `-- name: GetChannelUserPermission :one
+SELECT allow, deny FROM channel_user_overrides WHERE channel_id = ? AND user_id = ?
+`
+
+type GetChannelUserPermissionParams struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
+}
+
+type GetChannelUserPermissionRow struct {
+	Allow int64 `json:"allow"`
+	Deny  int64 `json:"deny"`
+}
+
+func (q *Queries) GetChannelUserPermission(ctx context.Context, arg GetChannelUserPermissionParams) (GetChannelUserPermissionRow, error) {
+	row := q.db.QueryRowContext(ctx, getChannelUserPermission, arg.ChannelID, arg.UserID)
+	var i GetChannelUserPermissionRow
+	err := row.Scan(&i.Allow, &i.Deny)
+	return i, err
+}
+
 const getRoleChannelPermissions = `-- name: GetRoleChannelPermissions :many
 SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?
 `
@@ -216,13 +296,47 @@ func (q *Queries) GetRoleChannelPermissions(ctx context.Context, roleID int64) (
 	return items, nil
 }
 
+const getUserChannelPermissions = `-- name: GetUserChannelPermissions :many
+SELECT channel_id, allow, deny FROM channel_user_overrides WHERE user_id = ?
+`
+
+type GetUserChannelPermissionsRow struct {
+	ChannelID int64 `json:"channelId"`
+	Allow     int64 `json:"allow"`
+	Deny      int64 `json:"deny"`
+}
+
+func (q *Queries) GetUserChannelPermissions(ctx context.Context, userID int64) ([]GetUserChannelPermissionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUserChannelPermissions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUserChannelPermissionsRow{}
+	for rows.Next() {
+		var i GetUserChannelPermissionsRow
+		if err := rows.Scan(&i.ChannelID, &i.Allow, &i.Deny); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannels = `-- name: ListChannels :many
 SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
        position, slow_mode, archived, created_at,
        COALESCE(voice_max_users, 0) AS voice_max_users,
        voice_quality,
        mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video
+       COALESCE(voice_max_video, 0) AS voice_max_video,
+       nsfw
 FROM channels ORDER BY position ASC, id ASC
 `
 
@@ -240,6 +354,7 @@ type ListChannelsRow struct {
 	VoiceQuality    *string `json:"voiceQuality"`
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
+	Nsfw            int64   `json:"nsfw"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -265,6 +380,7 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.VoiceQuality,
 			&i.MixingThreshold,
 			&i.VoiceMaxVideo,
+			&i.Nsfw,
 		); err != nil {
 			return nil, err
 		}
@@ -347,6 +463,31 @@ func (q *Queries) UpsertChannelPermission(ctx context.Context, arg UpsertChannel
 	_, err := q.db.ExecContext(ctx, upsertChannelPermission,
 		arg.ChannelID,
 		arg.RoleID,
+		arg.Allow,
+		arg.Deny,
+	)
+	return err
+}
+
+const upsertChannelUserPermission = `-- name: UpsertChannelUserPermission :exec
+INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(channel_id, user_id) DO UPDATE SET
+    allow = excluded.allow,
+    deny  = excluded.deny
+`
+
+type UpsertChannelUserPermissionParams struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
+	Allow     int64 `json:"allow"`
+	Deny      int64 `json:"deny"`
+}
+
+func (q *Queries) UpsertChannelUserPermission(ctx context.Context, arg UpsertChannelUserPermissionParams) error {
+	_, err := q.db.ExecContext(ctx, upsertChannelUserPermission,
+		arg.ChannelID,
+		arg.UserID,
 		arg.Allow,
 		arg.Deny,
 	)

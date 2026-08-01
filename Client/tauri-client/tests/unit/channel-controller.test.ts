@@ -87,6 +87,25 @@ vi.mock("@components/MessageInput", () => ({
   }),
 }));
 
+// The gate component itself is covered by nsfw-gate.test.ts; what the
+// controller owns is WHETHER and with what it is mounted.
+const { mockNsfwGateMount, mockNsfwGateDestroy, mockCreateNsfwGate, capturedNsfwOpts } = vi.hoisted(
+  () => ({
+    mockNsfwGateMount: vi.fn(),
+    mockNsfwGateDestroy: vi.fn(),
+    mockCreateNsfwGate: vi.fn(),
+    capturedNsfwOpts: { value: null as any },
+  }),
+);
+
+vi.mock("@components/NsfwGate", () => ({
+  createNsfwGate: (opts: any) => {
+    capturedNsfwOpts.value = opts;
+    mockCreateNsfwGate(opts);
+    return { mount: mockNsfwGateMount, destroy: mockNsfwGateDestroy };
+  },
+}));
+
 vi.mock("@components/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({
     mount: mockTypingMount,
@@ -185,6 +204,7 @@ import { createChannelController } from "../../src/pages/main-page/ChannelContro
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore, setChannels, setActiveChannel, setRoles } from "@stores/channels.store";
+import { acknowledgeNsfw } from "@lib/nsfw-gate";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1103,6 +1123,99 @@ describe("createChannelController", () => {
       vi.clearAllMocks();
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
       expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+  });
+  // ─── NSFW age gate ────────────────────────────────────────────────────────
+
+  describe("NSFW age gate", () => {
+    function seedChannel(nsfw: boolean): void {
+      setChannels([
+        {
+          id: 42,
+          name: "spicy",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          nsfw,
+        },
+      ]);
+    }
+
+    beforeEach(() => {
+      sessionStorage.clear();
+      mockCreateNsfwGate.mockClear();
+      mockNsfwGateMount.mockClear();
+      mockNsfwGateDestroy.mockClear();
+      capturedNsfwOpts.value = null;
+    });
+
+    it("is not mounted for an unflagged channel", () => {
+      seedChannel(false);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+      expect(mockCreateNsfwGate).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("mounts over the message area for a flagged channel", () => {
+      seedChannel(true);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "spicy");
+
+      expect(mockCreateNsfwGate).toHaveBeenCalledTimes(1);
+      expect(capturedNsfwOpts.value.channelId).toBe(42);
+      expect(capturedNsfwOpts.value.channelName).toBe("spicy");
+      // Over the messages, not over the whole app: the sidebar stays usable.
+      expect(mockNsfwGateMount).toHaveBeenCalledWith(opts.slots.messagesSlot);
+      ctrl.destroyChannel();
+    });
+
+    it("tears the gate down when Continue is accepted", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      capturedNsfwOpts.value.onContinue();
+
+      expect(mockNsfwGateDestroy).toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("leaves the channel when the reader declines", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      capturedNsfwOpts.value.onCancel();
+
+      expect(ctrl.currentChannelId).toBeNull();
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+    });
+
+    // Once per session: the stored acknowledgement (written by the gate's
+    // Continue button, which is stubbed out here) is what suppresses the second
+    // ask, so switching away and back must not re-prompt.
+    it("does not mount for a channel already acknowledged this session", () => {
+      acknowledgeNsfw(42);
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+
+      ctrl.mountChannel(42, "spicy");
+
+      expect(mockCreateNsfwGate).not.toHaveBeenCalled();
+      ctrl.destroyChannel();
+    });
+
+    it("destroys an unaccepted gate when the channel unmounts", () => {
+      seedChannel(true);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "spicy");
+
+      ctrl.destroyChannel();
+
+      expect(mockNsfwGateDestroy).toHaveBeenCalled();
     });
   });
 });

@@ -224,9 +224,9 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user 
 	if role != nil {
 		var overrides map[int64]db.ChannelOverride
 		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetAllChannelPermissionsForRole(ctx, role.ID)
+			overrides, err = database.GetChannelOverridesFor(ctx, role.ID, user.ID)
 			if err != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", err)
+				return nil, fmt.Errorf("computeAllowedChannels GetChannelOverridesFor: %w", err)
 			}
 		}
 		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))

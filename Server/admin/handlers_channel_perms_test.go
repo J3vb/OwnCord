@@ -29,7 +29,7 @@ func (m *mockPermInvalidator) InvalidateAll() {
 
 func TestGetChannelPermissions_ReturnsAllRoles(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
@@ -67,7 +67,7 @@ func TestGetChannelPermissions_ReturnsAllRoles(t *testing.T) {
 
 func TestGetChannelPermissions_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/channels/9999/permissions", token, nil)
@@ -78,7 +78,7 @@ func TestGetChannelPermissions_NotFound(t *testing.T) {
 
 func TestGetChannelPermissions_DMRejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
@@ -99,7 +99,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
@@ -147,7 +147,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 
 func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret2", "text", "", "", 0)
@@ -177,7 +177,7 @@ func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 
 func TestPutChannelPermission_UnknownRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret3", "text", "", "", 0)
@@ -194,7 +194,7 @@ func TestPutChannelPermission_UnknownRole(t *testing.T) {
 
 func TestPutChannelPermission_NonAdminForbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
 	_ = createAdminUser(t, database)
 	memberToken := createMemberUser(t, database)
 
@@ -216,7 +216,7 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret5", "text", "", "", 0)

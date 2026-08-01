@@ -132,6 +132,21 @@ export interface ReadyChannel {
    * via @everyone/@here). Always ≤ unread_count. Absent from older servers.
    */
   readonly mention_count?: number;
+  /**
+   * Whether the channel is flagged as possibly carrying sensitive content.
+   * A pure label: the server stores and ships it but applies no content
+   * behaviour of its own, so what it means is entirely this client's choice
+   * (a one-time-per-session age gate and a sidebar marker). Absent from older
+   * servers, which is read as "not flagged".
+   */
+  readonly nsfw?: boolean;
+  /**
+   * Voice capacity limits (0 = unlimited), the same values the server enforces
+   * on join with CHANNEL_FULL / VIDEO_LIMIT. Shipped so the sidebar can show
+   * "3/5"; the client enforces nothing. Absent from older servers.
+   */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 /** Member object in the ready payload. */
@@ -156,12 +171,21 @@ export interface ReadyVoiceState {
   readonly server_deafened?: boolean;
 }
 
-/** Role object in the ready payload. */
+/** Role object in the ready payload and in roles_update. */
 export interface ReadyRole {
   readonly id: number;
   readonly name: string;
   readonly color: string | null;
   readonly permissions: number;
+  /**
+   * Hierarchy rank — higher outranks lower. Optional because servers predating
+   * role management shipped the list without it; nothing in the client sorts
+   * on it yet, but role management makes positions mutable, so a stale copy
+   * must be replaceable rather than inferred from list order.
+   */
+  readonly position?: number;
+  /** True for the fallback role members land on when their role is deleted. */
+  readonly is_default?: boolean;
 }
 
 // -----------------------------------------------------------------------------
@@ -298,14 +322,30 @@ export interface ChannelCreatePayload {
   readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
+  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  readonly nsfw?: boolean;
+  /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 export interface ChannelUpdatePayload {
   readonly id: number;
   readonly name?: string;
   readonly topic?: string;
+  /**
+   * The category the channel now sits under ("" = uncategorized). Moving a
+   * channel between categories is an edit, so the broadcast carries it and
+   * the sidebar regroups without a reconnect.
+   */
+  readonly category?: string | null;
   readonly position?: number;
   readonly slow_mode?: number;
+  /** See ReadyChannel.nsfw — a label the server never acts on. */
+  readonly nsfw?: boolean;
+  /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
+  readonly voice_max_users?: number;
+  readonly voice_max_video?: number;
 }
 
 export interface ChannelDeletePayload {
@@ -393,6 +433,15 @@ export interface MemberJoinPayload {
 
 export interface MemberLeavePayload {
   readonly user_id: number;
+}
+
+/**
+ * Full role list after any role mutation. The server sends the whole list
+ * rather than a delta, so the store is replaced wholesale — a dropped
+ * intermediate event can never leave a deleted role on screen.
+ */
+export interface RolesUpdatePayload {
+  readonly roles: readonly ReadyRole[];
 }
 
 export interface MemberUpdatePayload {
@@ -598,6 +647,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })

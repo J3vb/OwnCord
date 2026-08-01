@@ -50,11 +50,18 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// permOverrides maps a db override map to the checker's override map.
+// permOverrides maps a db override map to the checker's override map, carrying
+// BOTH layers — the role override and the per-user override — so the checker
+// resolves the full order (base -> role -> user) rather than half of it.
 func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
 	out := make(map[int64]permissions.ChannelOverride, len(overrides))
 	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny}
+		out[id] = permissions.ChannelOverride{
+			Allow:     o.Allow,
+			Deny:      o.Deny,
+			UserAllow: o.UserAllow,
+			UserDeny:  o.UserDeny,
+		}
 	}
 	return out
 }
@@ -70,7 +77,9 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 	if permissions.HasAdmin(role.Permissions) {
 		return true
 	}
-	eff := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+	eff := permissions.EffectiveChannelPerms(role.Permissions, permissions.ChannelOverride{
+		Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny,
+	})
 	need := permissions.ReadMessages | permissions.SendMessages
 	if eff&need != need {
 		return false
@@ -108,9 +117,9 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	overrides := map[int64]db.ChannelOverride{}
 	if role != nil && !permissions.HasAdmin(role.Permissions) {
 		var oErr error
-		overrides, oErr = database.GetAllChannelPermissionsForRole(ctx, role.ID)
+		overrides, oErr = database.GetChannelOverridesFor(ctx, role.ID, userID)
 		if oErr != nil {
-			return nil, fmt.Errorf("buildReady GetAllChannelPermissionsForRole: %w", oErr)
+			return nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
 		}
 	}
 	var visibleChannels []db.Channel
@@ -154,6 +163,14 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			// for the window instead of accepting a send the server refuses
 			// with SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
+			// Age-gate flag. Shipped so a client can label or gate the
+			// channel; the server applies no content behaviour of its own to
+			// a flagged channel (migration 025).
+			"nsfw": visibleChannels[i].NSFW,
+			// Voice capacity limits (0 = unlimited) — the same values the
+			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
+			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
+			"voice_max_video": visibleChannels[i].VoiceMaxVideo,
 		}
 		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {

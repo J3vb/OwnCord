@@ -98,6 +98,11 @@ type Channel struct {
 	VoiceQuality    *string `json:"voice_quality,omitempty"`
 	MixingThreshold *int    `json:"mixing_threshold,omitempty"`
 	VoiceMaxVideo   int     `json:"voice_max_video"`
+	// NSFW marks the channel as possibly carrying sensitive content. It is
+	// metadata only: the server stores, ships and audits it but imposes no
+	// content behaviour of its own (see migration 025). Clients decide what
+	// to do with it — the desktop client shows a per-session age gate.
+	NSFW bool `json:"nsfw"`
 }
 
 // Message represents a row in the messages table.

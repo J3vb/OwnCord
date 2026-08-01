@@ -54,12 +54,13 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	}
 
 	// Admins skip the override fetch (they bypass all channel checks anyway).
+	// Non-admins get both layers — role and per-user — in one batched fetch.
 	var overrides map[int64]db.ChannelOverride
 	if !permissions.HasAdmin(role.Permissions) {
-		overrides, err = s.st.GetAllChannelPermissionsForRole(ctx, role.ID)
+		overrides, err = s.st.GetChannelOverridesFor(ctx, role.ID, userID)
 		if err != nil {
 			// Fail closed — an empty map would return every denied channel.
-			slog.Error("ChannelService.ListVisibleChannels GetAllChannelPermissionsForRole", "err", err, "user_id", userID, "role_id", role.ID)
+			slog.Error("ChannelService.ListVisibleChannels GetChannelOverridesFor", "err", err, "user_id", userID, "role_id", role.ID)
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
 		}
 	}
@@ -85,11 +86,18 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// permOverrides maps a db override map to the checker's override map.
+// permOverrides maps a db override map to the checker's override map, carrying
+// BOTH layers — the role override and the per-user override — so the checker
+// resolves the full order (base -> role -> user) rather than half of it.
 func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
 	out := make(map[int64]permissions.ChannelOverride, len(overrides))
 	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny}
+		out[id] = permissions.ChannelOverride{
+			Allow:     o.Allow,
+			Deny:      o.Deny,
+			UserAllow: o.UserAllow,
+			UserDeny:  o.UserDeny,
+		}
 	}
 	return out
 }

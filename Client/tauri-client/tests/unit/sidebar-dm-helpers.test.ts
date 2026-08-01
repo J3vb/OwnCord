@@ -123,6 +123,9 @@ describe("SidebarDmHelpers", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -151,6 +154,9 @@ describe("SidebarDmHelpers", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next };
       });
@@ -185,6 +191,9 @@ describe("SidebarDmHelpers", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -212,6 +221,9 @@ describe("SidebarDmHelpers", () => {
           canSend: true,
           topic: "",
           slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });

@@ -26,7 +26,7 @@ import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore } from "@stores/members.store";
-import { roleHasPermission } from "@lib/permissions";
+import { roleHasPermission, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 
@@ -188,6 +188,39 @@ function pickAvatarColor(username: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
+/**
+ * The marker on an age-restricted channel row.
+ *
+ * A glyph plus a title rather than a coloured name: the flag is information
+ * about the channel, and recolouring the name would collide with the unread
+ * and mention states the row already encodes that way.
+ */
+function nsfwIndicator(channelId: number): HTMLSpanElement {
+  const badge = createElement("span", {
+    class: "ch-nsfw",
+    "data-testid": `channel-nsfw-${channelId}`,
+    "aria-label": "Age restricted",
+  });
+  badge.title = "Age-restricted channel";
+  badge.appendChild(createIcon("shield-alert", 13));
+  return badge;
+}
+
+/**
+ * "3/5" for a voice channel that has a user limit, or null when it is
+ * unlimited (0) — a count with no ceiling is already shown by the participant
+ * rows underneath, and "3/0" would read as a bug.
+ *
+ * Purely a readout: the server owns capacity and refuses a join over the limit
+ * with CHANNEL_FULL. The client never blocks the click, because its copy of
+ * the participant list can lag and a join it refused locally would be a
+ * mistake nobody could correct.
+ */
+function voiceCapacityLabel(channel: Channel, connected: number): string | null {
+  if (channel.voiceMaxUsers <= 0) return null;
+  return `${connected}/${channel.voiceMaxUsers}`;
+}
+
 function renderTextChannelItem(
   channel: Channel,
   isActive: boolean,
@@ -214,6 +247,13 @@ function renderTextChannelItem(
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
   appendChildren(item, prefix, name);
+
+  // Age-restricted marker. Next to the name rather than replacing the "#", so
+  // the channel still reads as a channel and the mark is visible whether or
+  // not the reader has already accepted the gate this session.
+  if (channel.nsfw) {
+    item.appendChild(nsfwIndicator(channel.id));
+  }
 
   // A mention badge outranks the plain unread badge: only one is shown, and
   // it counts the mentions, not the messages.
@@ -296,6 +336,22 @@ function renderVoiceChannelItem(
 
   appendChildren(item, prefix, name);
 
+  if (channel.nsfw) {
+    item.appendChild(nsfwIndicator(channel.id));
+  }
+
+  const voiceUsers = getChannelVoiceUsers(channel.id);
+  const capacity = voiceCapacityLabel(channel, voiceUsers.length);
+  if (capacity !== null) {
+    const badge = createElement(
+      "span",
+      { class: "ch-capacity", "data-testid": `channel-capacity-${channel.id}` },
+      capacity,
+    );
+    badge.title = `${voiceUsers.length} of ${channel.voiceMaxUsers} connected`;
+    item.appendChild(badge);
+  }
+
   item.addEventListener(
     "click",
     () => {
@@ -313,7 +369,6 @@ function renderVoiceChannelItem(
   wrapper.appendChild(item);
 
   // Render connected voice users below the channel
-  const voiceUsers = getChannelVoiceUsers(channel.id);
   if (voiceUsers.length > 0) {
     const usersContainer = createElement("div", { class: "voice-users-list" });
     for (const user of voiceUsers) {
@@ -536,14 +591,11 @@ function renderCategoryGroup(
     appendChildren(header, arrow, label);
 
     if (onCreateChannel !== undefined) {
-      const user = getCurrentUser();
-      const role = user?.role?.toLowerCase() ?? "";
       // MANAGE_CHANNELS is enforced server-side on /admin/api/channels*, so
       // gate on the bit; the role-name check only stands in when the `ready`
-      // role list has no entry for this role.
-      const canManageChannels = roleHasPermission(role, Permission.MANAGE_CHANNELS);
-
-      if (canManageChannels) {
+      // role list has no entry for this role. Same derivation as the channel
+      // context menu's Edit/Delete items.
+      if (canManageChannels()) {
         const addBtn = createElement(
           "span",
           {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/owncord/server/db"
@@ -227,15 +228,84 @@ func (s *MessageService) mentionReaders(ctx context.Context, channelID int64, is
 	}
 
 	readRoles := make([]int64, 0, len(roles))
+	adminRoles := make(map[int64]bool, len(roles))
 	for _, r := range roles {
 		if r == nil {
 			continue
 		}
 		o := overrides[r.ID]
 		eff := permissions.EffectivePerms(r.Permissions, o.Allow, o.Deny)
+		if permissions.HasAdmin(r.Permissions) {
+			adminRoles[r.ID] = true
+		}
 		if permissions.HasAdmin(r.Permissions) || eff&permissions.ReadMessages != 0 {
 			readRoles = append(readRoles, r.ID)
 		}
 	}
-	return s.st.ListMentionTargetsByRoles(ctx, readRoles)
+	targets, err := s.st.ListMentionTargetsByRoles(ctx, readRoles)
+	if err != nil {
+		return nil, err
+	}
+	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles)
+}
+
+// applyUserOverridesToReaders folds the per-user override layer into a reader
+// set the role walk produced. The layer is last in the resolution order, so it
+// moves members in both directions:
+//
+//   - a user DENY of READ_MESSAGES drops a member their role admitted (unless
+//     they hold ADMINISTRATOR, which bypasses every override), and
+//   - a user ALLOW of READ_MESSAGES adds a member their role excluded.
+//
+// A user allow also beats a user deny on the same bit, matching
+// permissions.EffectiveChannelPerms.
+func (s *MessageService) applyUserOverridesToReaders(
+	ctx context.Context, channelID int64, targets []db.MentionTarget, adminRoles map[int64]bool,
+) ([]db.MentionTarget, error) {
+	userOv, err := s.st.GetChannelUserOverrides(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if len(userOv) == 0 {
+		return targets, nil
+	}
+
+	granted := make([]int64, 0, len(userOv))
+	revoked := make(map[int64]bool, len(userOv))
+	for uid, o := range userOv {
+		switch {
+		case o.UserAllow&permissions.ReadMessages != 0:
+			granted = append(granted, uid)
+		case o.UserDeny&permissions.ReadMessages != 0:
+			revoked[uid] = true
+		}
+	}
+
+	kept := make([]db.MentionTarget, 0, len(targets))
+	present := make(map[int64]bool, len(targets))
+	for _, t := range targets {
+		if revoked[t.UserID] && !adminRoles[t.RoleID] {
+			continue
+		}
+		present[t.UserID] = true
+		kept = append(kept, t)
+	}
+
+	missing := make([]int64, 0, len(granted))
+	for _, uid := range granted {
+		if !present[uid] {
+			missing = append(missing, uid)
+		}
+	}
+	if len(missing) == 0 {
+		return kept, nil
+	}
+	// Deterministic order so the fan-out (and its tests) do not depend on map
+	// iteration order.
+	slices.Sort(missing)
+	added, err := s.st.ListMentionTargetsByUserIDs(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	return append(kept, added...), nil
 }

@@ -12,51 +12,25 @@ import (
 	"github.com/owncord/server/db"
 )
 
-// ─── Category-Type Validation ────────────────────────────────────────────────
+// ─── Channel Type Validation ─────────────────────────────────────────────────
 
-// voiceCategoryNames is the set of canonical category names treated as voice
-// sections. Matching is case-insensitive but requires an exact name match
-// (not a substring) to prevent false positives like "Invoice Channels".
-var voiceCategoryNames = []string{
-	"Voice Channels",
-}
+// validChannelTypes is the set of channel types a create request may name.
+// A channel's CATEGORY deliberately constrains nothing: categories are free
+// text, and pinning "only voice channels live under a category whose name
+// matches 'Voice Channels'" made every other category name a second-class one —
+// a voice channel could not be created under "Gaming", and renaming the
+// category silently changed what could be created there. Grouping is a display
+// concern (the client groups by whatever category a channel carries), so the
+// server validates the type alone.
+var validChannelTypes = []string{"text", "voice", "announcement"}
 
-// isVoiceCategory returns true if the category name is an exact
-// (case-insensitive) match for a known voice category name.
-func isVoiceCategory(category string) bool {
-	for _, name := range voiceCategoryNames {
-		if strings.EqualFold(category, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// allowedChannelTypes returns the set of channel types valid for a category.
-func allowedChannelTypes(category string) []string {
-	if category == "" {
-		return []string{"text", "voice", "announcement"}
-	}
-	if isVoiceCategory(category) {
-		return []string{"voice"}
-	}
-	return []string{"text", "announcement"}
-}
-
-// validateCategoryType checks that the channel type is allowed under the given
-// category. Returns an error message if invalid, or empty string if OK.
-func validateCategoryType(channelType, category string) string {
-	if category == "" {
+// validateChannelType returns an error message when the type is not one of the
+// three real channel types, or an empty string when it is.
+func validateChannelType(channelType string) string {
+	if slices.Contains(validChannelTypes, channelType) {
 		return ""
 	}
-	allowed := allowedChannelTypes(category)
-	if slices.Contains(allowed, channelType) {
-		return ""
-	}
-	if isVoiceCategory(category) {
-		return "only voice channels can be created under a voice category"
-	}
-	return "voice channels can only be created under a voice category"
+	return "type must be one of text, voice, announcement"
 }
 
 // ─── Channel Handlers ────────────────────────────────────────────────────────
@@ -97,7 +71,7 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			req.Type = "text"
 		}
 
-		if msg := validateCategoryType(req.Type, req.Category); msg != "" {
+		if msg := validateChannelType(req.Type); msg != "" {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
 			return
 		}
@@ -124,13 +98,62 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	}
 }
 
+// Bounds for the numeric channel settings a PATCH may set.
+//
+// They are validated here rather than left to the database because SQLite
+// would happily store a slow mode of six years or a user limit of -3, and the
+// only place that would surface is a client rendering nonsense. The values
+// match what the clients offer: Discord's 6-hour slow-mode ceiling, and a
+// two-digit voice capacity (0 = unlimited in both voice cases).
+const (
+	maxSlowModeSeconds = 21600
+	maxVoiceLimit      = 99
+)
+
 // updateChannelRequest is the JSON body for PATCH /admin/api/channels/{id}.
 type updateChannelRequest struct {
 	Name     string `json:"name"`
 	Topic    string `json:"topic"`
+	Category string `json:"category"`
 	SlowMode int    `json:"slow_mode"`
 	Position int    `json:"position"`
 	Archived bool   `json:"archived"`
+	// NSFW is stored, broadcast and audited; it changes no server-side content
+	// behaviour (see migration 025). Clients decide how to present it.
+	NSFW bool `json:"nsfw"`
+	// Voice capacity limits, enforced on voice join by the ws layer.
+	// 0 = unlimited.
+	VoiceMaxUsers int `json:"voice_max_users"`
+	VoiceMaxVideo int `json:"voice_max_video"`
+}
+
+// validate reports the first out-of-range numeric field, or "" when the
+// request is acceptable. Negative values are rejected rather than clamped: a
+// caller sending -1 meant something, and silently storing 0 would hide it.
+func (r updateChannelRequest) validate() string {
+	switch {
+	case r.SlowMode < 0 || r.SlowMode > maxSlowModeSeconds:
+		return fmt.Sprintf("slow_mode must be between 0 and %d seconds", maxSlowModeSeconds)
+	case r.VoiceMaxUsers < 0 || r.VoiceMaxUsers > maxVoiceLimit:
+		return fmt.Sprintf("voice_max_users must be between 0 and %d", maxVoiceLimit)
+	case r.VoiceMaxVideo < 0 || r.VoiceMaxVideo > maxVoiceLimit:
+		return fmt.Sprintf("voice_max_video must be between 0 and %d", maxVoiceLimit)
+	}
+	return ""
+}
+
+// nsfwAuditSuffix names an NSFW transition in the audit detail, or returns ""
+// when the flag did not move. An age-gate flag flipping is the one part of a
+// channel edit an operator may need to answer for later, and "updated #foo"
+// alone would not record it.
+func nsfwAuditSuffix(before, after bool) string {
+	if before == after {
+		return ""
+	}
+	if after {
+		return " (marked NSFW)"
+	}
+	return " (unmarked NSFW)"
 }
 
 func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
@@ -153,26 +176,45 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 		// Start from existing values so a partial body is safe.
 		req := updateChannelRequest{
-			Name:     existing.Name,
-			Topic:    existing.Topic,
-			SlowMode: existing.SlowMode,
-			Position: existing.Position,
-			Archived: existing.Archived,
+			Name:          existing.Name,
+			Topic:         existing.Topic,
+			Category:      existing.Category,
+			SlowMode:      existing.SlowMode,
+			Position:      existing.Position,
+			Archived:      existing.Archived,
+			NSFW:          existing.NSFW,
+			VoiceMaxUsers: existing.VoiceMaxUsers,
+			VoiceMaxVideo: existing.VoiceMaxVideo,
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
 
-		if err := database.AdminUpdateChannel(r.Context(), id, req.Name, req.Topic, req.SlowMode, req.Position, req.Archived); err != nil {
+		if msg := req.validate(); msg != "" {
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
+			return
+		}
+
+		if err := database.AdminUpdateChannel(r.Context(), id, db.ChannelUpdate{
+			Name:          req.Name,
+			Topic:         req.Topic,
+			Category:      strings.TrimSpace(req.Category),
+			SlowMode:      req.SlowMode,
+			Position:      req.Position,
+			Archived:      req.Archived,
+			NSFW:          req.NSFW,
+			VoiceMaxUsers: req.VoiceMaxUsers,
+			VoiceMaxVideo: req.VoiceMaxVideo,
+		}); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update channel")
 			return
 		}
 
 		actor := actorFromContext(r)
-		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name)
+		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name, "nsfw", req.NSFW)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_update", "channel", id,
-			fmt.Sprintf("updated #%s", req.Name))
+			fmt.Sprintf("updated #%s%s", req.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW)))
 
 		updated, err := database.GetChannel(r.Context(), id)
 		if err != nil || updated == nil {

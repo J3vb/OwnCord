@@ -1,52 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  isVoiceCategory,
-  allowedTypesForCategory,
+  CHANNEL_TYPES,
+  defaultTypeForCategory,
   createCreateChannelModal,
 } from "@components/CreateChannelModal";
 import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
+import { setChannels, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
 
 // ---------------------------------------------------------------------------
 // Pure function tests
 // ---------------------------------------------------------------------------
 
-describe("isVoiceCategory", () => {
-  it("returns true for 'Voice Channels'", () => {
-    expect(isVoiceCategory("Voice Channels")).toBe(true);
+describe("defaultTypeForCategory", () => {
+  it("defaults to voice only in the synthetic uncategorized-voice group", () => {
+    expect(defaultTypeForCategory(UNCATEGORIZED_VOICE_CATEGORY)).toBe("voice");
   });
 
-  it("returns true for uppercase 'VOICE CHANNELS'", () => {
-    expect(isVoiceCategory("VOICE CHANNELS")).toBe(true);
-  });
-
-  it("returns true for 'voice'", () => {
-    expect(isVoiceCategory("voice")).toBe(true);
-  });
-
-  it("returns false for 'Text Channels'", () => {
-    expect(isVoiceCategory("Text Channels")).toBe(false);
-  });
-
-  it("returns false for 'Chat'", () => {
-    expect(isVoiceCategory("Chat")).toBe(false);
-  });
-
-  it("returns false for empty string", () => {
-    expect(isVoiceCategory("")).toBe(false);
+  it("defaults to text everywhere else, voice-sounding names included", () => {
+    for (const category of ["Voice Channels", "VOICE CHANNELS", "Text Channels", "Chat", ""]) {
+      expect(defaultTypeForCategory(category)).toBe("text");
+    }
   });
 });
 
-describe("allowedTypesForCategory", () => {
-  it("returns only voice for voice categories", () => {
-    expect(allowedTypesForCategory("Voice Channels")).toEqual(["voice"]);
-  });
-
-  it("returns text and announcement for text categories", () => {
-    expect(allowedTypesForCategory("Text Channels")).toEqual(["text", "announcement"]);
-  });
-
-  it("returns text and announcement for 'Chat'", () => {
-    expect(allowedTypesForCategory("Chat")).toEqual(["text", "announcement"]);
+describe("CHANNEL_TYPES", () => {
+  it("offers every channel type, regardless of category", () => {
+    expect([...CHANNEL_TYPES]).toEqual(["text", "voice", "announcement"]);
   });
 });
 
@@ -86,32 +65,76 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("shows only text and announcement types for text categories", () => {
+  it("offers every channel type under a text-sounding category", () => {
     const { modal } = makeModal("Text Channels");
     const select = container.querySelector(
       "[data-testid='channel-type-select']",
     ) as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toEqual(["text", "announcement"]);
-    expect(options).not.toContain("voice");
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "text",
+      "voice",
+      "announcement",
+    ]);
     modal.destroy?.();
   });
 
-  it("shows only voice type for voice categories", () => {
+  it("offers every channel type under a voice-sounding category too", () => {
     const { modal } = makeModal("Voice Channels");
     const select = container.querySelector(
       "[data-testid='channel-type-select']",
     ) as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toEqual(["voice"]);
-    expect(options).not.toContain("text");
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "text",
+      "voice",
+      "announcement",
+    ]);
     modal.destroy?.();
   });
 
-  it("displays the category name as read-only", () => {
-    const { modal } = makeModal("Voice Channels");
-    const overlay = container.querySelector("[data-testid='create-channel-modal']");
-    expect(overlay?.textContent).toContain("Voice Channels");
+  it("pre-fills the category as editable text", () => {
+    const { modal } = makeModal("Gaming");
+    const input = container.querySelector(
+      "[data-testid='channel-category-input']",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("Gaming");
+    expect(input.hasAttribute("disabled")).toBe(false);
+    modal.destroy?.();
+  });
+
+  it("suggests the categories already in use via a datalist", () => {
+    setChannels([
+      { id: 1, name: "general", type: "text", category: "Chat", position: 0 },
+      { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
+      { id: 3, name: "loose", type: "text", category: null, position: 2 },
+    ]);
+    const { modal } = makeModal("Chat");
+    const list = container.querySelector("#create-channel-categories");
+    const values = Array.from(list?.querySelectorAll("option") ?? []).map((o) =>
+      o.getAttribute("value"),
+    );
+    expect(values).toEqual(["Chat", "Gaming"]);
+    modal.destroy?.();
+  });
+
+  it("submits an edited category rather than the one it opened on", async () => {
+    const onCreate = vi.fn(async () => {});
+    const { modal } = makeModal("Chat", { onCreate });
+
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "lounge";
+    (container.querySelector("[data-testid='channel-category-input']") as HTMLInputElement).value =
+      "  Gaming  ";
+    (container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement).value =
+      "voice";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith({
+        name: "lounge",
+        type: "voice",
+        category: "Gaming",
+      });
+    });
     modal.destroy?.();
   });
 

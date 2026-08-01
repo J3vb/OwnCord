@@ -56,12 +56,20 @@ type Channel struct {
 	VoiceQuality    *string `json:"voiceQuality"`
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
+	Nsfw            int64   `json:"nsfw"`
 }
 
 type ChannelOverride struct {
 	ID        int64 `json:"id"`
 	ChannelID int64 `json:"channelId"`
 	RoleID    int64 `json:"roleId"`
+	Allow     int64 `json:"allow"`
+	Deny      int64 `json:"deny"`
+}
+
+type ChannelUserOverride struct {
+	ChannelID int64 `json:"channelId"`
+	UserID    int64 `json:"userId"`
 	Allow     int64 `json:"allow"`
 	Deny      int64 `json:"deny"`
 }
