@@ -79,7 +79,11 @@ export function setMembers(members: readonly ReadyMember[]): void {
   }));
 }
 
-/** Add a member from a member_join event. */
+/** Add a member from a member_join event.
+ *  status comes from the payload's viewer-safe field, never assumed —
+ *  an invisible user's join broadcasts "offline", and a server old enough to
+ *  omit the field entirely must fail safe the same way rather than flash the
+ *  member online. */
 export function addMember(payload: MemberJoinPayload): void {
   membersStore.setState((prev) => {
     const next = new Map(prev.members);
@@ -88,7 +92,7 @@ export function addMember(payload: MemberJoinPayload): void {
       username: payload.user.username,
       avatar: payload.user.avatar,
       role: payload.user.role,
-      status: "online",
+      status: payload.status ?? "offline",
       displayName: payload.user.display_name ?? null,
       // member_join carries no custom status; a presence event follows it and
       // is what fills this in.

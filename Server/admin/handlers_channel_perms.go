@@ -85,6 +85,22 @@ type putChannelPermissionRequest struct {
 	Deny  int64 `json:"deny"`
 }
 
+// requireGrantableOverride refuses to write a channel override whose allow or
+// deny mask contains a bit the actor's own role does not hold. Without this,
+// any MANAGE_CHANNELS holder could grant themselves or another user a
+// permission (e.g. MANAGE_SERVER) they were never assigned by writing a
+// channel-scoped override. ADMINISTRATOR bypasses, mirroring
+// service.requireGrantable's escalation rule for role permission masks.
+func requireGrantableOverride(actorRole *db.Role, allow, deny int64) error {
+	if permissions.HasAdmin(actorRole.Permissions) {
+		return nil
+	}
+	if escalated := (allow | deny) &^ actorRole.Permissions; escalated != 0 {
+		return fmt.Errorf("cannot grant a permission your own role lacks (%s)", permissions.Name(escalated&-escalated))
+	}
+	return nil
+}
+
 func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ch := getPermChannel(database, w, r)
@@ -114,6 +130,24 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		// Drop unknown bits so garbage input cannot persist undefined perms.
 		allow := req.Allow & permissions.AllPerms
 		deny := req.Deny & permissions.AllPerms
+
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Escalation guard: a MANAGE_CHANNELS holder without ADMINISTRATOR
+		// cannot grant bits their own role lacks via a channel override.
+		if err := requireGrantableOverride(actorRole, allow, deny); err != nil {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
+		// Hierarchy guard: a role override can only target a role strictly
+		// below the actor's own position, mirroring service.requireBelowActor.
+		if role.Position >= actorRole.Position {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "cannot manage a role at or above your own rank")
+			return
+		}
 
 		if err := database.UpsertChannelOverride(r.Context(), ch.ID, roleID, allow, deny); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save channel permission")
@@ -227,6 +261,18 @@ func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInv
 		// Drop unknown bits so garbage input cannot persist undefined perms.
 		allow := req.Allow & permissions.AllPerms
 		deny := req.Deny & permissions.AllPerms
+
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Escalation guard: a MANAGE_CHANNELS holder without ADMINISTRATOR
+		// cannot grant bits their own role lacks via a per-user override.
+		if err := requireGrantableOverride(actorRole, allow, deny); err != nil {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
 
 		if err := database.UpsertChannelUserOverride(r.Context(), ch.ID, user.ID, allow, deny); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save channel user permission")

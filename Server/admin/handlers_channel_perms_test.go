@@ -210,6 +210,97 @@ func TestPutChannelPermission_NonAdminForbidden(t *testing.T) {
 	}
 }
 
+// A MANAGE_CHANNELS holder without ADMINISTRATOR must not be able to grant a
+// permission bit their own role lacks (e.g. MANAGE_SERVER) by writing it into
+// a channel override — the escalation this override endpoint must refuse.
+func TestPutChannelPermission_ModeratorCannotEscalate(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	// Target a role below the Moderator's own position (Member, position 40)
+	// so only the escalation guard, not the hierarchy guard, is exercised.
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/permissions/3", modToken,
+		map[string]any{"allow": permissions.ManageServer, "deny": 0})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 3)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != 0 {
+		t.Errorf("forbidden grant persisted: (%#x, %#x)", allow, deny)
+	}
+}
+
+// An ADMINISTRATOR-holding actor (e.g. Owner) can still grant any bit through
+// a channel override, since ADMINISTRATOR bypasses the escalation guard.
+func TestPutChannelPermission_AdministratorCanGrantAnyBit(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	chID, err := database.CreateChannel(context.Background(), "admin-grant", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/permissions/3", token,
+		map[string]any{"allow": permissions.ManageServer, "deny": 0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, _, err := database.GetChannelPermissions(context.Background(), chID, 3)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != permissions.ManageServer {
+		t.Errorf("allow = %#x, want %#x", allow, permissions.ManageServer)
+	}
+}
+
+// The role-layer endpoint must refuse to write an override for a role at or
+// above the actor's own position, even when the requested bits are within
+// the actor's own mask — mirroring service.requireBelowActor.
+func TestPutChannelPermission_RefusesEqualOrHigherRole(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
+
+	chID, err := database.CreateChannel(context.Background(), "hierarchy", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		roleID string
+	}{
+		{"higher role (Admin, position 80)", "2"},
+		{"own role (Moderator, position 60)", "10"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doRequest(t, handler, http.MethodPut,
+				"/channels/"+itoa(chID)+"/permissions/"+tc.roleID, modToken,
+				map[string]any{"allow": permissions.ReadMessages, "deny": 0})
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // ─── DELETE /channels/{id}/permissions/{roleId} ──────────────────────────────
 
 func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {

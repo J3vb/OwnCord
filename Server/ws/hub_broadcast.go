@@ -114,6 +114,42 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 	}
 	h.mu.RUnlock()
 
+	// A DM channel carries no channel_overrides rows, so every connected
+	// user whose base role holds READ_MESSAGES would otherwise pass the role
+	// scan below — leaking a private DM call's voice_state/voice_leave
+	// events to the whole server. Resolve the DM's real audience (its
+	// participants, intersected with who is actually connected) instead,
+	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
+	if h.db != nil {
+		ch, err := h.db.GetChannel(ctx, channelID)
+		if err != nil {
+			// Fail closed: an unresolvable channel must not fall through to
+			// the role scan, which would treat it as a readable non-DM channel.
+			slog.Error("ws: channelReadAudience GetChannel failed, denying",
+				"channel_id", channelID, "err", err)
+			return []int64{}
+		}
+		if ch != nil && ch.Type == "dm" {
+			participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)
+			if err != nil {
+				slog.Error("ws: channelReadAudience GetDMParticipantIDs failed, denying",
+					"channel_id", channelID, "err", err)
+				return []int64{}
+			}
+			connected := make(map[int64]struct{}, len(userIDs))
+			for _, uid := range userIDs {
+				connected[uid] = struct{}{}
+			}
+			audience := make([]int64, 0, len(participantIDs))
+			for _, uid := range participantIDs {
+				if _, ok := connected[uid]; ok {
+					audience = append(audience, uid)
+				}
+			}
+			return audience
+		}
+	}
+
 	audience := make([]int64, 0, len(userIDs))
 	if h.perms != nil {
 		for _, uid := range userIDs {

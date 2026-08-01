@@ -35,6 +35,9 @@ const MAX_DEPTH = 6;
 /** Bare-URL shape, kept in sync with URL_REGEX in content-parser. */
 const URL_START = /^https?:\/\//i;
 
+/** Shared empty map for `parseInline` calls with nothing to bracket-match. */
+const EMPTY_MATCHES: ReadonlyMap<number, number> = new Map();
+
 interface DelimSpec {
   readonly marker: string;
   /** Outermost style first; `***x***` is bold wrapping italic. */
@@ -153,42 +156,38 @@ function scanClose(src: string, from: number, marker: string): number {
   return -1;
 }
 
-/** Matching `]` for the `[` at `open`, or -1. */
-function bracketEnd(src: string, open: number): number {
-  let depth = 0;
-  for (let j = open; j < src.length; j++) {
+/**
+ * Matches for every `openCh` in `src` to its balanced `closeCh`, computed in
+ * one linear pass with a stack (an opener that never closes just never gets
+ * an entry). A run's mismatched openers therefore cost O(1) each to look up
+ * instead of a fresh O(n) rescan apiece — the same semantics as calling a
+ * depth-counting scan from every individual opener (nesting balances the
+ * same way, escapes swallow the following character unconditionally, and a
+ * bare newline strands whatever is still open across it), just computed once
+ * per `parseInline` invocation instead of once per opener.
+ */
+function buildMatches(src: string, openCh: string, closeCh: string): ReadonlyMap<number, number> {
+  const matches = new Map<number, number>();
+  const stack: number[] = [];
+  for (let j = 0; j < src.length; j++) {
     const c = src[j]!;
     if (c === "\\") {
       j++;
       continue;
     }
-    if (c === "\n") return -1;
-    if (c === "[") depth++;
-    else if (c === "]") {
-      depth--;
-      if (depth === 0) return j;
-    }
-  }
-  return -1;
-}
-
-/** Matching `)` for the `(` at `open`, or -1. Nested parens are balanced. */
-function parenEnd(src: string, open: number): number {
-  let depth = 0;
-  for (let j = open; j < src.length; j++) {
-    const c = src[j]!;
-    if (c === "\\") {
-      j++;
+    if (c === "\n") {
+      // Nothing left open can span a newline; abandon it rather than let it
+      // match something on a later line.
+      stack.length = 0;
       continue;
     }
-    if (c === "\n") return -1;
-    if (c === "(") depth++;
-    else if (c === ")") {
-      depth--;
-      if (depth === 0) return j;
+    if (c === openCh) stack.push(j);
+    else if (c === closeCh) {
+      const open = stack.pop();
+      if (open !== undefined) matches.set(open, j);
     }
   }
-  return -1;
+  return matches;
 }
 
 /** Parse `[text](url)` at `i`. The URL is *not* validated here — that is the
@@ -197,10 +196,12 @@ function parseLink(
   src: string,
   i: number,
   depth: number,
+  bracketMatches: ReadonlyMap<number, number>,
+  parenMatches: ReadonlyMap<number, number>,
 ): { node: InlineNode; end: number } | null {
-  const close = bracketEnd(src, i);
+  const close = bracketMatches.get(i) ?? -1;
   if (close < 0 || src[close + 1] !== "(") return null;
-  const urlClose = parenEnd(src, close + 1);
+  const urlClose = parenMatches.get(close + 1) ?? -1;
   if (urlClose < 0) return null;
   const url = src.slice(close + 2, urlClose).trim();
   if (url.length === 0 || /\s/.test(url)) return null;
@@ -229,6 +230,12 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
       buf = "";
     }
   };
+
+  // Built once per invocation (not once per `[`) — see buildMatches. Skipped
+  // entirely when the substring has nothing to match, which is the common
+  // case for recursive calls into styled/link text.
+  const bracketMatches = src.includes("[") ? buildMatches(src, "[", "]") : EMPTY_MATCHES;
+  const parenMatches = src.includes("(") ? buildMatches(src, "(", ")") : EMPTY_MATCHES;
 
   let i = 0;
   while (i < src.length) {
@@ -261,7 +268,7 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
     }
 
     if (depth < MAX_DEPTH && c === "[") {
-      const link = parseLink(src, i, depth);
+      const link = parseLink(src, i, depth, bracketMatches, parenMatches);
       if (link !== null) {
         flush();
         out.push(link.node);

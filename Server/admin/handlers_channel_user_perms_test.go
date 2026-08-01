@@ -226,6 +226,65 @@ func TestChannelUserPermission_NonAdminForbidden(t *testing.T) {
 	}
 }
 
+// A MANAGE_CHANNELS holder without ADMINISTRATOR must not be able to grant a
+// permission bit their own role lacks (e.g. MANAGE_SERVER) to a member by
+// writing it into a per-user channel override.
+func TestPutChannelUserPermission_ModeratorCannotEscalate(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
+	target := seedOverrideTarget(t, database, "escalate-target")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), modToken,
+		map[string]any{"allow": permissions.ManageServer, "deny": 0})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetUserChannelPermissions(context.Background(), chID, target)
+	if err != nil {
+		t.Fatalf("GetUserChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != 0 {
+		t.Errorf("forbidden grant persisted: (%#x, %#x)", allow, deny)
+	}
+}
+
+// An ADMINISTRATOR-holding actor can still grant any bit through a per-user
+// override, since ADMINISTRATOR bypasses the escalation guard.
+func TestPutChannelUserPermission_AdministratorCanGrantAnyBit(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+	target := seedOverrideTarget(t, database, "admin-grant-target")
+
+	chID, err := database.CreateChannel(context.Background(), "admin-grant", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), token,
+		map[string]any{"allow": permissions.ManageServer, "deny": 0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, _, err := database.GetUserChannelPermissions(context.Background(), chID, target)
+	if err != nil {
+		t.Fatalf("GetUserChannelPermissions: %v", err)
+	}
+	if allow != permissions.ManageServer {
+		t.Errorf("allow = %#x, want %#x", allow, permissions.ManageServer)
+	}
+}
+
 func TestDeleteChannelUserPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}

@@ -55,6 +55,15 @@ type memberUserPayload struct {
 
 type memberJoinPayload struct {
 	User memberUserPayload `json:"user"`
+	// Status is the viewer-safe presence the connecting user comes online as
+	// (db.BroadcastStatus of the ConnectStatus-mapped value): an invisible
+	// connector reports "offline" here, never their true chosen status. This
+	// is BroadcastToAll, not the channel-scoped presence path, so every
+	// connected client — invisible or not — receives it; the client MUST
+	// render members from this field rather than assuming "online" just
+	// because a member_join arrived, or an invisible user renders online
+	// until the (droppable, low-priority) presence correction catches up.
+	Status string `json:"status"`
 }
 
 type chatMessagePayload struct {
@@ -365,7 +374,12 @@ func buildPresenceMsg(userID int64, status string, customStatus *string) []byte 
 	})
 }
 
-// buildMemberJoin constructs a member_join broadcast for when a user comes online.
+// buildMemberJoin constructs a member_join broadcast for when a user comes
+// online. user.Status is expected to already carry the ConnectStatus-mapped
+// value the caller settled the session on (see serve.go's applyConnectStatus,
+// which runs before this); Status here applies the BroadcastStatus collapse
+// so an invisible connector's member_join reports "offline" like every other
+// payload another user can see, instead of the raw chosen status.
 func buildMemberJoin(user *db.User, roleName string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
@@ -378,6 +392,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 				DisplayName:       user.DisplayName,
 				IdentityPublicKey: user.IdentityPublicKey,
 			},
+			Status: db.BroadcastStatus(user.Status),
 		},
 	})
 }

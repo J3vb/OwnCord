@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "1.1.0-alpha.5"
+version = "1.2.0-alpha.1"
 edition = "2021"
 # Effective minimum: tauri 2.11 declares rust-version = "1.77.2", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver

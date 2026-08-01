@@ -126,6 +126,12 @@ type MessageService struct {
 	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
+	// bg runs mention-badge bookkeeping off the send path so a mention or
+	// @everyone message does not wait on the full reader-resolution chain
+	// before it is delivered to the rest of the channel. Defaults to `go fn()`;
+	// tests swap it for an inline runner via RunBackgroundInlineForTest so they
+	// can read the counts deterministically right after a send.
+	bg func(fn func())
 }
 
 // NewMessageService creates a MessageService.
@@ -134,7 +140,16 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 		st:      st,
 		perms:   perms,
 		limiter: limiter,
+		bg:      func(fn func()) { go fn() },
 	}
+}
+
+// RunBackgroundInlineForTest makes deferred bookkeeping (mention counts) run
+// synchronously on the calling goroutine instead of in a background goroutine,
+// so tests can assert on the results immediately after SendMessage returns.
+// Test-only.
+func (s *MessageService) RunBackgroundInlineForTest() {
+	s.bg = func(fn func()) { fn() }
 }
 
 // sanitizeContent validates and sanitizes message content.

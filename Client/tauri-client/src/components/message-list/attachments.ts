@@ -353,6 +353,10 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
 const mediaObjectUrls = new Map<string, string>();
 /** In-flight media fetches, deduplicated the same way images are. */
 const mediaInFlight = new Map<string, Promise<string | null>>();
+/** FIFO cap mirroring memoryCache's CACHE_MAX, kept far lower: each entry
+ *  pins a whole video/audio Blob (not a small base64 thumbnail string), so an
+ *  unbounded map here quietly holds every clip ever viewed in the session. */
+const MEDIA_CACHE_MAX = 20;
 
 function createObjectUrl(blob: Blob): string | null {
   // jsdom (and any non-browser host) may not implement the object-URL API.
@@ -399,6 +403,14 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
       if (generation !== attachmentCacheGeneration) {
         revokeObjectUrl(objectUrl);
         return null;
+      }
+      if (mediaObjectUrls.size >= MEDIA_CACHE_MAX) {
+        const firstKey = mediaObjectUrls.keys().next().value;
+        if (firstKey !== undefined) {
+          const evicted = mediaObjectUrls.get(firstKey);
+          mediaObjectUrls.delete(firstKey);
+          if (evicted !== undefined) revokeObjectUrl(evicted);
+        }
       }
       mediaObjectUrls.set(url, objectUrl);
       return objectUrl;

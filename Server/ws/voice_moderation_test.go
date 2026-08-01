@@ -235,6 +235,59 @@ func TestVoiceMod_Kick_Self_BadRequest(t *testing.T) {
 	}
 }
 
+// voice_mod_kick and friends carry no channel id for the target, so
+// MUTE_MEMBERS alone let a moderator reach into a private DM call they are
+// not a participant of by targeting a user id. The refusal must look exactly
+// like "target not in voice" — a VOICE_ERROR, not FORBIDDEN — so the actor
+// cannot use the response to learn the target is in a DM call at all.
+func TestVoiceMod_Mute_TargetInDMCallActorNotParticipant_VoiceError(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	alice := seedVoiceUserWithRole(t, database, "dm-alice", 4)     // Member, DM participant
+	bob := seedVoiceUserWithRole(t, database, "dm-bob", 4)         // Member, DM participant (target)
+	mallory := seedVoiceUserWithRole(t, database, "dm-mallory", 2) // Admin: has MUTE_MEMBERS, not a participant
+	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	joinVoice(t, hub, bob, dmID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMuteMsg(dmID, bob.ID, true))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+		t.Fatalf("error code = %q, want VOICE_ERROR (must not disclose the DM call via FORBIDDEN)", code)
+	}
+	state, _ := database.GetVoiceState(context.Background(), bob.ID)
+	if state == nil || state.ServerMuted {
+		t.Error("target in a DM call the actor is not part of must not be server muted")
+	}
+}
+
+// A MUTE_MEMBERS holder who genuinely IS a participant of the DM call may
+// still moderate it, same as any other voice channel.
+func TestVoiceMod_Mute_TargetInDMCallActorIsParticipant_Allowed(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	admin := seedVoiceUserWithRole(t, database, "dm-admin", 2)   // Admin: MUTE_MEMBERS, DM participant
+	member := seedVoiceUserWithRole(t, database, "dm-member", 4) // Member (target)
+	dmID := seedDMChannel(t, database, admin.ID, member.ID)
+
+	joinVoice(t, hub, member, dmID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, admin, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMuteMsg(dmID, member.ID, true))
+
+	state, err := database.GetVoiceState(context.Background(), member.ID)
+	if err != nil || state == nil || !state.ServerMuted {
+		t.Fatalf("expected target to be server muted, state=%+v err=%v", state, err)
+	}
+}
+
 // ─── happy paths ──────────────────────────────────────────────────────────────
 
 func TestVoiceMod_Mute_SetsServerMutedAndBroadcasts(t *testing.T) {
@@ -339,6 +392,52 @@ func TestVoiceMod_Deafen_SetsServerDeafenedAndMutes(t *testing.T) {
 	}
 	if !slices.Contains(auditActions(t, database), "voice_mod_deafen") {
 		t.Error("voice_mod_deafen audit entry missing")
+	}
+}
+
+// Lifting a server deafen must also lift the mute it implied, or the target
+// stays SFU-muted (and refused their own unmute) after the deafen is gone.
+func TestVoiceMod_Deafen_ClearingRestoresSelfUnmute(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-undeafen")
+	actor := seedVoiceUserWithRole(t, database, "admin-undeafen", 2)
+	target := seedVoiceUserWithRole(t, database, "member-undeafen", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, chanID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// Server-deafen the target: implies a server mute too.
+	hub.HandleMessageForTest(c, voiceModDeafenMsg(chanID, target.ID, true))
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	state, err := database.GetVoiceState(context.Background(), target.ID)
+	if err != nil || state == nil || !state.ServerDeafened || !state.ServerMuted {
+		t.Fatalf("precondition: expected server_deafened and server_muted both set, state=%+v err=%v", state, err)
+	}
+
+	// Lift the deafen.
+	hub.HandleMessageForTest(c, voiceModDeafenMsg(chanID, target.ID, false))
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	state, err = database.GetVoiceState(context.Background(), target.ID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ServerDeafened {
+		t.Error("ServerDeafened = true after clearing, want false")
+	}
+	if state.ServerMuted {
+		t.Error("ServerMuted = true after clearing the deafen that implied it, want false")
+	}
+
+	// The target must now be able to self-unmute without SERVER_MUTED.
+	hub.HandleMessageForTest(targetClient, voiceMuteMsg(false))
+	if code := receiveErrorCode(targetSend, 200*time.Millisecond); code != "" {
+		t.Fatalf("self-unmute refused with %q after deafen was cleared, want no error", code)
 	}
 }
 

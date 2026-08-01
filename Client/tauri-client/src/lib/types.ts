@@ -453,6 +453,13 @@ export interface VoiceE2EEOfferPayload {
 
 export interface MemberJoinPayload {
   readonly user: UserWithRole;
+  /** Viewer-safe presence the connecting user comes online as (broadcast
+   *  collapse of their real status — an invisible connector reports
+   *  "offline" here, never their true chosen status). Optional only for
+   *  compatibility with an older server that omits it; a caller MUST treat a
+   *  missing value as "offline", not assume "online", so a hidden user does
+   *  not render visible just because the field wasn't sent yet. */
+  readonly status?: UserStatus;
 }
 
 export interface MemberLeavePayload {

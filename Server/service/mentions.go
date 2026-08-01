@@ -177,11 +177,17 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, auth
 			recipients[r.UserID] = struct{}{}
 		}
 	}
-	for _, uid := range set.UserIDs {
+	if len(set.UserIDs) > 0 {
+		// Build the reader set once instead of scanning readers per mentioned
+		// uid: that nested loop was O(mentions x readers), which gets
+		// expensive on a channel with many readers.
+		readerIDs := make(map[int64]struct{}, len(readers))
 		for _, r := range readers {
-			if r.UserID == uid {
+			readerIDs[r.UserID] = struct{}{}
+		}
+		for _, uid := range set.UserIDs {
+			if _, ok := readerIDs[uid]; ok {
 				recipients[uid] = struct{}{}
-				break
 			}
 		}
 	}

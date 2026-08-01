@@ -164,10 +164,18 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		}
 	}
 
-	// Mention badges. The message is committed, so this runs on a ctx detached
-	// from cancellation for the same reason audit writes do: a client that hangs
-	// up mid-request must not silently drop the recipients' badges.
-	s.applyMentionCounts(context.WithoutCancel(ctx), p.ChannelID, p.UserID, mentions, isDM, result.ParticipantIDs)
+	// Mention badges run off the send path: the message is already committed, so
+	// the recipients' badge bookkeeping (the full reader-resolution chain plus
+	// the batched increment) must not delay delivering the message to the rest
+	// of the channel. The ctx is detached from cancellation — for the same
+	// reason audit writes are — so a client hanging up mid-request cannot drop
+	// the badges. The count is advisory: if a reader's channel_focus clears it
+	// in the tiny window before the increment lands, the badge simply does not
+	// reappear, which matches Discord's eventual-consistency behaviour.
+	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
+	s.bg(func() {
+		s.applyMentionCounts(context.WithoutCancel(ctx), channelID, authorID, mentions, isDM, participantIDs)
+	})
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil

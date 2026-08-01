@@ -586,6 +586,26 @@ describe("parseInline", () => {
     const deep = "*".repeat(20) + "x" + "*".repeat(20);
     expect(() => parseInline(deep)).not.toThrow();
   });
+
+  it("parses a long run of unmatched brackets to literal text quickly", () => {
+    // Pathological input for a naive per-opener rescan: every "[" would
+    // otherwise trigger its own O(n) scan of the remaining string, making
+    // this O(n^2). At the 4000-rune server cap that is ~16M ops; budget the
+    // test generously so it still fails loudly on a real regression.
+    const src = "[".repeat(4000);
+    const start = performance.now();
+    const nodes = parseInline(src);
+    const elapsed = performance.now() - start;
+    expect(nodes).toEqual([{ type: "text", value: src }]);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("still renders a valid link after a long run of unmatched brackets", () => {
+    const src = "[".repeat(2000) + "[real](https://example.com)";
+    const nodes = parseInline(src);
+    const last = nodes[nodes.length - 1];
+    expect(last).toMatchObject({ type: "link", url: "https://example.com" });
+  });
 });
 
 describe("parseBlocks", () => {

@@ -17,6 +17,9 @@ import (
 // have to re-guess them from the content.
 func TestChatSend_BroadcastCarriesMentions(t *testing.T) {
 	hub, database := newCoverageHub(t)
+	// Mention counts are written on a background goroutine in production; run
+	// them inline so this test can read GetMentionCount right after the send.
+	hub.RunMentionCountsInlineForTest()
 	ctx := context.Background()
 
 	author := seedCoverageOwner(t, database, "mention-author") // owner role holds MENTION_EVERYONE
