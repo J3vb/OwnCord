@@ -345,3 +345,68 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 		t.Errorf("second delete status = %d, want 204", w.Code)
 	}
 }
+
+// Deleting an override is a permission mutation: removing a deny row restores
+// exactly the access the PUT path refuses to grant. The DELETE handler must
+// therefore refuse targets at or above the actor's own position, mirroring
+// TestPutChannelPermission_RefusesEqualOrHigherRole (A-2026-08-01).
+func TestDeleteChannelPermission_RefusesEqualOrHigherRole(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
+
+	chID, err := database.CreateChannel(context.Background(), "hierarchy-del", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		roleID int64
+	}{
+		{"higher role (Admin, position 80)", 2},
+		{"own role (Moderator, position 60)", 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Seed the override the attacker wants gone (e.g. the deny that
+			// keeps a private channel hidden from their role).
+			if err := database.UpsertChannelOverride(context.Background(), chID, tc.roleID, 0, permissions.ReadMessages); err != nil {
+				t.Fatalf("UpsertChannelOverride: %v", err)
+			}
+
+			w := doRequest(t, handler, http.MethodDelete,
+				"/channels/"+itoa(chID)+"/permissions/"+itoa(tc.roleID), modToken, nil)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+			}
+
+			allow, deny, err := database.GetChannelPermissions(context.Background(), chID, tc.roleID)
+			if err != nil {
+				t.Fatalf("GetChannelPermissions: %v", err)
+			}
+			if allow != 0 || deny != permissions.ReadMessages {
+				t.Errorf("override mutated by forbidden delete: (%#x, %#x)", allow, deny)
+			}
+		})
+	}
+}
+
+// A missing role must 404 before any deletion happens, matching the PUT twin
+// (TestPutChannelPermission_UnknownRole).
+func TestDeleteChannelPermission_UnknownRole(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	chID, err := database.CreateChannel(context.Background(), "hierarchy-del-404", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete,
+		"/channels/"+itoa(chID)+"/permissions/999", token, nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+}
