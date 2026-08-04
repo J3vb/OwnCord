@@ -220,17 +220,20 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		return
 	}
 
-	// Clean up DB state and LiveKit for each participant.
+	// Clean up DB state and LiveKit for each participant. Both the row delete
+	// and the client-state clear are conditional on the participant still
+	// being in THIS channel: a user who moved to another voice channel
+	// between the snapshot above and this loop must not be clobbered.
 	for _, vs := range states {
-		if err := h.db.LeaveVoiceChannel(ctx, vs.UserID); err != nil {
-			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveVoiceChannelIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
 		// Clear client voice state and its voice-topic subscription.
 		h.mu.RLock()
 		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()
-		if ok {
+		if ok && client.getVoiceChID() == channelID {
 			h.clearVoiceAndUnsubscribe(client)
 		}
 
@@ -242,7 +245,21 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Broadcast voice_leave for each participant. All leaves target the same
 	// channel, so resolve the READ audience once and reuse it per message.
+	// The evicted participants themselves must always be in it (their client
+	// state is already cleared, so broadcastVoiceEvent's participant union
+	// cannot see them): the voice_leave is what drives their own E2EE
+	// teardown, and voice membership never required READ_MESSAGES.
 	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience))
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	for _, vs := range states {
+		if _, ok := seen[vs.UserID]; !ok {
+			seen[vs.UserID] = struct{}{}
+			audience = append(audience, vs.UserID)
+		}
+	}
 	for _, vs := range states {
 		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
 	}

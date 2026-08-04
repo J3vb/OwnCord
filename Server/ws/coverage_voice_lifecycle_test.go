@@ -232,6 +232,39 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	}
 }
 
+// A user who moved to another voice channel between the cleanup's DB snapshot
+// and its per-participant loop must not be clobbered: the deleted channel's
+// stale row goes away, but the live client state and the new channel's
+// voice-topic subscription are untouched.
+func TestCleanupVoiceForChannel_DoesNotClobberMovedParticipant(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "cvfc-moved")
+	oldVC := seedVoiceChannel(t, database, "cvfc-moved-old")
+	newVC := seedVoiceChannel(t, database, "cvfc-moved-new")
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// DB row still on the old channel (the snapshot the cleanup reads), but
+	// the client has already moved on to the new channel.
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, oldVC); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c, newVC)
+	hub.SubscribeVoiceTopicForTest(c, newVC)
+
+	hub.CleanupVoiceForChannel(oldVC)
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != newVC {
+		t.Errorf("moved participant's client voiceChID = %d, want %d", got, newVC)
+	}
+	if !hub.SubscribedToVoiceTopicForTest(c, newVC) {
+		t.Error("moved participant lost the new channel's voice-topic subscription")
+	}
+}
+
 func TestCleanupVoiceForChannel_EmptyChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	vcID := seedVoiceChannel(t, database, "cvfc-empty-vc")

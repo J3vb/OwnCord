@@ -66,6 +66,11 @@ type HubBroadcaster interface {
 	// after a role mutation, so name colors and permission-gated affordances
 	// converge without a reconnect.
 	BroadcastRolesUpdate(roles []*db.Role)
+	// CleanupVoiceForChannel evicts a channel's voice participants (DB row,
+	// client state, LiveKit, voice_leave broadcast). Must run BEFORE the
+	// channel row is deleted: the voice_states FK cascade wipes the rows the
+	// cleanup reads.
+	CleanupVoiceForChannel(channelID int64)
 	ClientCount() int
 }
 
