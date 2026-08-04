@@ -904,16 +904,6 @@ export interface EmojiResponse {
   readonly url: string;
 }
 
-/** Single sound object from GET /api/sounds. */
-export interface SoundResponse {
-  readonly id: number;
-  readonly name: string;
-  readonly filename: string;
-  readonly duration_ms: number;
-  readonly uploaded_by: number;
-  readonly created_at: string;
-}
-
 /** Single invite object from GET/POST /api/invites. */
 export interface InviteResponse {
   readonly id: number;

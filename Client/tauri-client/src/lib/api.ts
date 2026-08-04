@@ -17,7 +17,6 @@ import type {
   ChannelType,
   ChannelResponse,
   EmojiResponse,
-  SoundResponse,
   InviteResponse,
   SessionResponse,
   UploadResponse,
@@ -587,16 +586,6 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/emoji/${emojiId}`, undefined, signal);
-    },
-
-    // ── Sounds ────────────────────────────────────────────
-
-    getSounds(signal?: AbortSignal): Promise<SoundResponse[]> {
-      return request<SoundResponse[]>("GET", "/sounds", undefined, signal);
-    },
-
-    deleteSound(soundId: number, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", `/sounds/${soundId}`, undefined, signal);
     },
 
     // ── Direct Messages ─────────────────────────────────────
