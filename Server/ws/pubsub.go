@@ -106,51 +106,50 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 func (ps *PubSub) Unsubscribe(client *Client, topic Topic) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.unsubscribeLocked(client.userID, topic)
+	ps.unsubscribeLocked(client, topic)
 }
 
-// unsubscribeLocked removes userID from topic. Caller must hold ps.mu (write).
-func (ps *PubSub) unsubscribeLocked(userID int64, topic Topic) {
+// unsubscribeLocked removes client from topic. Caller must hold ps.mu (write).
+//
+// Both indexes are keyed by userID, but a reconnect registers a *new* *Client
+// under that same userID. Unsubscribing a client that has already been replaced
+// must be a no-op: the replacement stays in h.clients and keeps answering
+// ping/pong, so if its subscriptions were stripped it would never reconnect —
+// it would just silently stop receiving every broadcast.
+func (ps *PubSub) unsubscribeLocked(client *Client, topic Topic) {
 	// Forward index
 	if subs, ok := ps.topics[topic]; ok {
-		delete(subs, userID)
+		if cur, ok := subs[client.userID]; ok && cur != client {
+			return // replaced by a newer connection; leave it alone
+		}
+		delete(subs, client.userID)
 		if len(subs) == 0 {
 			delete(ps.topics, topic)
 		}
 	}
 
 	// Reverse index
-	if ts, ok := ps.clients[userID]; ok {
+	if ts, ok := ps.clients[client.userID]; ok {
 		delete(ts, topic)
 		if len(ts) == 0 {
-			delete(ps.clients, userID)
+			delete(ps.clients, client.userID)
 		}
 	}
 }
 
 // UnsubscribeAll removes client from every topic it is subscribed to.
 // Called when a client disconnects.
+//
+// Topics already taken over by a newer connection for the same user are left
+// in place — see unsubscribeLocked. Deleting a key during range is defined, and
+// unsubscribeLocked drops the reverse-index entry once the last topic goes.
 func (ps *PubSub) UnsubscribeAll(client *Client) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	ts, ok := ps.clients[client.userID]
-	if !ok {
-		return
+	for topic := range ps.clients[client.userID] {
+		ps.unsubscribeLocked(client, topic)
 	}
-
-	// Remove from every topic's subscriber set.
-	for topic := range ts {
-		if subs, ok := ps.topics[topic]; ok {
-			delete(subs, client.userID)
-			if len(subs) == 0 {
-				delete(ps.topics, topic)
-			}
-		}
-	}
-
-	// Remove the reverse-index entry entirely.
-	delete(ps.clients, client.userID)
 }
 
 // Priority levels for pub/sub delivery.
