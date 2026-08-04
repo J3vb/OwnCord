@@ -21,8 +21,9 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case SequencedDMEvent:
-			// High priority: DMs are time-sensitive.
-			h.sendSequencedToUsersHigh(e.ChannelID(), e.ParticipantIDs(), e.Payload())
+			// Normal priority: sequenced frames must share the per-client FIFO
+			// so the max-seq ack watermark never passes an undelivered event.
+			h.sendSequencedToUsers(e.ChannelID(), e.ParticipantIDs(), e.Payload())
 		case VoiceChannelGuardedEvent:
 			h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.TargetUserID(), e.Payload())
 		case VoiceChannelEvent:

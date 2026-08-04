@@ -540,10 +540,17 @@ func (h *Hub) BroadcastToAllLow(msg []byte) {
 	h.pubsub.PublishGlobalLow(msg)
 }
 
-// sendSequencedToUsersHigh stamps msg with a monotonic seq, stores it in the
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
 // replay buffer under channelID, and fans the wrapped payload out to the
-// provided users with high-priority delivery.
-func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+// provided users on the normal-priority queue.
+//
+// Sequenced frames must all share one per-client FIFO: writePump drains
+// sendHigh before send, so a seq-stamped frame on the high queue would reach
+// the socket ahead of lower-seq frames still queued in send. The client acks
+// max(seq) and replay is strictly seq > last_seq, so a disconnect in that
+// window would silently lose the overtaken events. The high queue remains for
+// unsequenced targeted messages only.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
 
@@ -553,7 +560,7 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
-		h.SendToUserHigh(userID, wrapped)
+		h.SendToUser(userID, wrapped)
 	}
 }
 
