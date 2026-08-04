@@ -344,6 +344,13 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	if !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
 	}
+	// A ring is a DM interaction like any other sink: without this check a
+	// blocked user could still make the blocker's client ring (A-2026-08-03).
+	// Group DMs are exempt inside requireDMNotBlocked, matching every other
+	// sink — blocks are enforced at group creation instead.
+	if err := requireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+		return nil, err
+	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
