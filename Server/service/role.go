@@ -305,6 +305,20 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		if err := validatePosition(actor, position); err != nil {
 			return nil, false, err
 		}
+		// Positions must stay unique (see CreateRole): tied positions read
+		// as equal rank in every >=/<= hierarchy comparison. Moving onto a
+		// slot another role holds is refused; re-stating our own is fine.
+		if position != role.Position {
+			existing, err := s.st.ListRoles(ctx)
+			if err != nil {
+				return nil, false, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+			}
+			for _, rl := range existing {
+				if rl.ID != role.ID && rl.Position == position {
+					return nil, false, fmt.Errorf("%w: position %d is already used by another role", ErrBadRequest, position)
+				}
+			}
+		}
 	}
 
 	if err := s.st.UpdateRole(ctx, role.ID, name, color, perms, position); err != nil {
