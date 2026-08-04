@@ -136,11 +136,11 @@ Two main components:
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.1.0-alpha.3" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.1.0-alpha.3" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 
 # Client
 cd Client/tauri-client
@@ -206,7 +206,9 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 - [docs/port-forwarding.md](docs/port-forwarding.md)
 - [docs/tailscale.md](docs/tailscale.md)
 - [docs/architecture/](docs/architecture/README.md) — system blueprints (diagrams + flows)
-- [docs/audit-2026-07-19.md](docs/audit-2026-07-19.md) — latest architecture & spec-conformance audit
+- [docs/audit-2026-08-04-docs-and-coverage.md](docs/audit-2026-08-04-docs-and-coverage.md) — latest full audit (docs accuracy, UX flow coverage, test runs)
+- [docs/audit-2026-08-04.md](docs/audit-2026-08-04.md) — latest security review
+- [docs/audit-2026-07-19.md](docs/audit-2026-07-19.md) — architecture & spec-conformance audit
 - [docs/api.md](docs/api.md)
 - [docs/protocol.md](docs/protocol.md)
 - [docs/schema.md](docs/schema.md)

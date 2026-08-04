@@ -55,11 +55,11 @@ Full Docker details: [Deployment Guide](deployment.md#docker-linux).
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 
 # Client
 cd Client/tauri-client

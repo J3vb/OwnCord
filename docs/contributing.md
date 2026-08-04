@@ -37,8 +37,10 @@ How to set up the development environment and contribute to OwnCord.
 | Command | Description |
 |---------|-------------|
 | `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
-| `make sqlc-generate` | Regenerate type-safe Go for both SQLite (`db/dbgen/`) and PostgreSQL (`db/pgdbgen/`) engines |
-| `make sqlc-verify` | Fail if committed `dbgen` / `pgdbgen` output is stale (used by CI) |
+| `make sqlc-generate` | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine) |
+| `make sqlc-verify` | Fail if the committed `dbgen` output is stale (used by CI) |
+| `make protocol-generate` | Regenerate the WS message-type constants (Go + TS) from `docs/protocol-schema.json` |
+| `make protocol-verify` | Fail if the committed protocol constants are stale (used by CI) |
 | `make otel-up` | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
 | `make otel-down` | Stop and remove the OTel dev containers |
 

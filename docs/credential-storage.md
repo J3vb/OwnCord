@@ -103,7 +103,8 @@ served it, touching no real credential:
 
 ```js
 await invoke("probe_credential_store")
-// { ok: true, backend: "keyring", error: null }
+// { ok: true, backend: "Keyring", error: null }
+// (Backend enum variants serialize verbatim: "Keyring" | "DpapiFile" | "EncryptedFile")
 ```
 
 ### From Windows directly
