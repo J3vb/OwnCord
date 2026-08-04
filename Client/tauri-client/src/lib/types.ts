@@ -1,7 +1,7 @@
 // =============================================================================
 // OwnCord Protocol Types
 // All WebSocket message types, REST response types, and permission definitions.
-// Source of truth: PROTOCOL.md, API.md, SCHEMA.md
+// Source of truth: docs/protocol.md, docs/api.md, docs/schema.md
 // =============================================================================
 
 // -----------------------------------------------------------------------------

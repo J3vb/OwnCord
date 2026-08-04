@@ -4,15 +4,14 @@ Security guidelines and vulnerability reporting for OwnCord.
 
 ## Reporting Vulnerabilities
 
-Use GitHub Security Advisories to report vulnerabilities: go to Settings > Security > Advisories and create a new advisory.
+Report privately via GitHub Security Advisories:
+[github.com/J3vb/OwnCord/security/advisories/new](https://github.com/J3vb/OwnCord/security/advisories/new).
 
 **Do NOT open public issues for security bugs.**
 
-## Response Timeline
-
-- **Acknowledgment:** Within 48 hours
-- **Critical fixes:** Within 7 days
-- **Non-critical fixes:** Included in the next release
+The repository-root [SECURITY.md](../SECURITY.md) is the canonical reporting
+policy — what to include and the response timeline (initial response within
+7 days) live there, so the two files cannot disagree.
 
 ## Two-Factor Authentication
 
@@ -91,7 +90,7 @@ The Tauri desktop client implements the following security measures:
 
 ## Known Limitations
 
-- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
+- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
 - CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time). Because of this, narrowing the Tauri `http:allow-fetch` scope alone would not bound exfiltration from a compromised renderer — the webview's own `fetch` reaches the same hosts without going through the plugin. Closing that requires narrowing `connect-src` and moving the link-preview fetch into Rust in the same change
 
 ## Security Hardening Checklist for Operators

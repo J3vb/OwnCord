@@ -163,7 +163,9 @@ ring buffer that backs the admin panel's live log view.
 
 Every config key can be overridden via environment variables using the prefix `OWNCORD_`.
 
-**Format:** `OWNCORD_<SECTION>_<KEY>`
+**Format:** `OWNCORD_<SECTION>_<KEY>` — the first `_` after the prefix maps to
+the section/key dot; the scheme covers **every** key in the file, including ones
+absent from the table below (it is a representative subset, not the full list).
 
 | Environment Variable | Config Path |
 |---------------------|-------------|

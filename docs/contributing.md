@@ -27,7 +27,6 @@ How to set up the development environment and contribute to OwnCord.
 | `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
 | `go build -tags otel .` | Build with OpenTelemetry SDK (requires `go get` first — see Phase B) |
 | `go build -tags wazero .` | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
-| `go build -tags postgres .` | Build with PostgreSQL backend (requires pgx in go.mod) |
 | `go test ./...` | Run all server tests |
 | `go test ./... -cover` | Run server tests with coverage |
 | `go test -race ./...` | Run server tests with race detection |
@@ -36,6 +35,10 @@ How to set up the development environment and contribute to OwnCord.
 
 | Command | Description |
 |---------|-------------|
+| `make test` | Run the test suite the way CI does (`-race`, 20 min timeout) |
+| `make test-deadlock` | Run the deadlock-detection pass CI also runs (`-tags deadlock`) |
+| `make cover` | Per-package coverage (what CI uploads) + a function summary |
+| `make cover-all` | Cross-package coverage — the honest number (also lists 0.0% functions) |
 | `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
 | `make sqlc-generate` | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine) |
 | `make sqlc-verify` | Fail if the committed `dbgen` output is stale (used by CI) |
@@ -146,18 +149,21 @@ ci: add lint step to GitHub Actions
 
 ## Pull Request Process
 
-1. Branch from `main`
-2. PRs target `main`; releases are cut from tagged commits on `main`
+1. Branch from `dev` (the active development branch)
+2. PRs target `dev`; `dev` is merged to `main` for releases, which are cut from tagged commits on `main`
 3. CI must pass (build + test + lint)
 4. Request code review
 5. Squash merge preferred
 
 ## Testing
 
-Target **80%+ coverage**. Follow test-driven development workflow.
+The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;
+the Go suite has deliberately no floor (T-2026-07-25-19) — use `make cover-all`
+to see the honest cross-package number. Follow a test-driven workflow and never
+lower a threshold to make a change fit.
 
 ## Code Style
 
-- **TypeScript**: See [Client Architecture](client-architecture.md)
+- **TypeScript**: See [Client Architecture](architecture/client.md)
 - **Go**: `gofmt` + `golangci-lint`, standard library preferred
 - **Rust**: `cargo fmt` + `cargo clippy`, minimal code (native APIs only)

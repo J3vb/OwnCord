@@ -39,7 +39,7 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 | Core chat flow | Working in alpha |
 | Voice/video | Working in alpha |
 | Admin panel | Working in alpha |
-| Security hardening | First full review pass landed in v1.1.0-alpha.2; further review passes since; ongoing |
+| Security hardening | Ongoing review passes; findings and their statuses are tracked in the dated audits in [docs/](docs/) (see the Docs Index below) |
 
 ## Platform Support (Current Releases)
 
@@ -90,6 +90,8 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 - File uploads and inline media rendering
 - TOTP 2FA support and API rate limiting
 - Desktop client auto-update with signature verification
+- WASM plugin system (slash commands; sandboxed, default-disabled — enable via
+  `plugins.enabled` and build with `-tags wazero`)
 - GIF picker — off by default; each server supplies its own
   [Klipy](https://partner.klipy.com) key via `gif.api_key`
   ([setup](docs/server-configuration.md#gif-picker-gif))
@@ -214,14 +216,20 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 - [docs/schema.md](docs/schema.md)
 - [docs/architecture/client.md](docs/architecture/client.md) — client architecture (replaces client-architecture.md)
 - [docs/architecture/ux/](docs/architecture/ux/README.md) — client UX specification (target-state flows, per-view states, event→reaction maps)
+- [docs/server-configuration.md](docs/server-configuration.md)
+- [docs/credential-storage.md](docs/credential-storage.md)
+- [docs/mcp-introspect.md](docs/mcp-introspect.md) — dev-only MCP server for introspecting a running instance
+- [docs/audit-test-coverage-2026-07-25.md](docs/audit-test-coverage-2026-07-25.md) — test-coverage audit
+- [docs/audit-2026-04-07.md](docs/audit-2026-04-07.md) — first comprehensive audit
+- [docs/plans/](docs/plans/) — design plans and decision records (each carries a verified status header)
 - [docs/contributing.md](docs/contributing.md)
 - [docs/security.md](docs/security.md)
 
 ## Contributing
 
-1. Create a branch from `main`.
+1. Create a branch from `dev` (the active development branch).
 2. Keep changes focused and tested.
-3. Open a PR targeting `main`.
+3. Open a PR targeting `dev` — `dev` is merged to `main` for releases.
 
 See [docs/contributing.md](docs/contributing.md) for the full process.
 
