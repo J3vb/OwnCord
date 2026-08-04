@@ -589,9 +589,14 @@ export class LiveKitSession {
     return proxyPath;
   }
 
-  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit. */
+  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit.
+   *
+   *  Always invokes start_livekit_proxy — never cache the port here. Only the
+   *  Rust side can compare the running proxy's TOFU pin against certs.json,
+   *  so after the user accepts a rotated cert a JS port cache would keep
+   *  every voice rejoin tunneling into the stale pin until logout. The Rust
+   *  reuse branch dedups unchanged host+pin, so the repeat call is cheap. */
   private async ensureLiveKitProxy(): Promise<number> {
-    if (this.liveKitProxyPort !== null) return this.liveKitProxyPort;
     if (this.serverHost === null) throw new Error("no server host for LiveKit proxy");
     // Ensure host:port format — default to 443 (standard HTTPS) when the
     // server is behind a reverse proxy. Without an explicit port, the Rust

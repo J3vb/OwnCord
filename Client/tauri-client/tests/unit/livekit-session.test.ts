@@ -1668,7 +1668,7 @@ describe("LiveKitSession", () => {
   });
 
   describe("ensureLiveKitProxy", () => {
-    it("invokes start_livekit_proxy on first call and caches port", async () => {
+    it("invokes start_livekit_proxy on every call so a re-pinned cert is picked up", async () => {
       session.setServerHost("example.com:443");
       const port1 = await (session as any).ensureLiveKitProxy();
       expect(port1).toBe(7881);
@@ -1677,10 +1677,15 @@ describe("LiveKitSession", () => {
         remoteHost: "example.com:443",
       });
 
+      // A later join must invoke again: only the Rust side can compare the
+      // running proxy's pin against certs.json after the user accepts a
+      // rotated cert. A JS port cache would keep every voice rejoin tunneling
+      // into the stale pin until logout. The Rust reuse branch dedups, so the
+      // repeat call is cheap.
       mockInvoke.mockClear();
       const port2 = await (session as any).ensureLiveKitProxy();
       expect(port2).toBe(7881);
-      expect(mockInvoke).not.toHaveBeenCalled();
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
     });
 
     it("appends :443 when serverHost has no port", async () => {

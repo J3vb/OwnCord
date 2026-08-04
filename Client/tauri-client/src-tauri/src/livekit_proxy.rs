@@ -18,7 +18,9 @@
 // - Certificate validation uses the TOFU-pinned fingerprint from ws_proxy.
 //   The WebSocket proxy must connect first to establish trust; the LiveKit
 //   proxy then pins to that same certificate. If the cert changes between
-//   WS and LiveKit connections, the LiveKit handshake will fail.
+//   WS and LiveKit connections, the LiveKit handshake will fail (fail
+//   closed) until the user accepts the new cert — each start call reloads
+//   the stored pin and restarts the listener when it changed.
 // - Only one proxy instance runs at a time (per remote host). Connecting to
 //   a different server replaces the proxy. Stale proxy ports are not reused.
 // - If the TcpListener errors (extremely unlikely on loopback), the cached
@@ -45,6 +47,9 @@ struct ProxyInner {
     port: Option<u16>,
     /// The remote host:port we're proxying to.
     remote_host: String,
+    /// The TOFU fingerprint the running listener pins. Baked into the proxy
+    /// loop at spawn, so a re-pin in the cert store requires a restart.
+    pinned_fingerprint: String,
     /// Shutdown signal sender.
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -55,6 +60,7 @@ impl LiveKitProxyState {
             inner: Mutex::new(ProxyInner {
                 port: None,
                 remote_host: String::new(),
+                pinned_fingerprint: String::new(),
                 shutdown_tx: None,
             }),
         }
@@ -121,6 +127,21 @@ pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String 
     modified
 }
 
+/// Decide whether an already-running proxy can serve a new start request:
+/// only when both the remote host AND the TOFU-pinned fingerprint are
+/// unchanged. The listener bakes its fingerprint in at spawn, so after the
+/// user accepts a rotated cert (which rewrites the store), reusing the old
+/// listener would fail every TLS handshake against the stale pin until
+/// logout — the caller must tear down and restart instead.
+pub(crate) fn can_reuse_proxy(
+    running_host: &str,
+    running_fingerprint: &str,
+    requested_host: &str,
+    stored_fingerprint: &str,
+) -> bool {
+    running_host == requested_host && running_fingerprint == stored_fingerprint
+}
+
 /// Extract the TLS server name from a `host[:port]` string.
 ///
 /// IPv6 literals arrive bracketed (`[::1]:8443`); the brackets are stripped and
@@ -162,30 +183,35 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
     info!("[livekit_proxy] start requested for {}", remote_host);
 
-    // Reuse existing proxy for same host.
-    if let Some(port) = inner.port {
-        if inner.remote_host == remote_host {
-            debug!("[livekit_proxy] reusing existing proxy on port {} for {}", port, remote_host);
-            return Ok(port);
-        }
-        // Different host — tear down old proxy.
-        info!("[livekit_proxy] stopping old proxy for {} (switching to {})", inner.remote_host, remote_host);
-        if let Some(tx) = inner.shutdown_tx.take() {
-            let _ = tx.send(());
-        }
-        inner.port = None;
-    }
-
-    // Load the TOFU-pinned fingerprint from the cert store. The ws_proxy must
-    // have connected first (establishing the TOFU trust), so the fingerprint
-    // should already be stored. If not, reject — we refuse to connect without
-    // a pinned cert.
+    // Load the TOFU-pinned fingerprint from the cert store BEFORE the reuse
+    // check — a running listener bakes its pin in at spawn, so a re-pin
+    // (user accepted a rotated cert) must force a restart, not a reuse. The
+    // ws_proxy must have connected first (establishing the TOFU trust), so
+    // the fingerprint should already be stored. If not, reject — we refuse
+    // to connect without a pinned cert.
     let store_key = tofu::cert_store_key(&remote_host);
     let fingerprint = tofu::load_stored_fingerprint(&app, &store_key)?
         .ok_or_else(|| format!(
             "no trusted certificate fingerprint for {remote_host}. \
              Connect via WebSocket first to establish TOFU trust."
         ))?;
+
+    // Reuse the existing proxy only when host AND pin are unchanged.
+    if let Some(port) = inner.port {
+        if can_reuse_proxy(&inner.remote_host, &inner.pinned_fingerprint, &remote_host, &fingerprint) {
+            debug!("[livekit_proxy] reusing existing proxy on port {} for {}", port, remote_host);
+            return Ok(port);
+        }
+        // Different host or re-pinned cert — tear down the old proxy.
+        info!(
+            "[livekit_proxy] stopping old proxy for {} (restarting for {})",
+            inner.remote_host, remote_host
+        );
+        if let Some(tx) = inner.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        inner.port = None;
+    }
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -198,7 +224,7 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let host = remote_host.clone();
-    let loop_handle = tokio::spawn(run_proxy_loop(listener, host, fingerprint, shutdown_rx));
+    let loop_handle = tokio::spawn(run_proxy_loop(listener, host, fingerprint.clone(), shutdown_rx));
     // Watch the loop so a panic is logged instead of vanishing silently.
     tokio::spawn(async move {
         match loop_handle.await {
@@ -212,6 +238,7 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
     inner.port = Some(port);
     inner.remote_host = remote_host;
+    inner.pinned_fingerprint = fingerprint;
     inner.shutdown_tx = Some(shutdown_tx);
 
     Ok(port)
@@ -228,6 +255,7 @@ pub async fn stop_livekit_proxy(
     }
     inner.port = None;
     inner.remote_host.clear();
+    inner.pinned_fingerprint.clear();
     Ok(())
 }
 
@@ -455,6 +483,27 @@ mod tests {
         // Empty passes the character checks; the subsequent TCP connect is what
         // fails. Pinned so a future tightening is a deliberate change.
         assert!(validate_remote_host("").is_ok());
+    }
+
+    // ── can_reuse_proxy ─────────────────────────────────────────────────────
+
+    #[test]
+    fn reuses_proxy_only_when_host_and_pin_are_unchanged() {
+        assert!(can_reuse_proxy("example.com:443", "aa:bb", "example.com:443", "aa:bb"));
+    }
+
+    #[test]
+    fn restarts_proxy_when_host_changes() {
+        assert!(!can_reuse_proxy("old.example:443", "aa:bb", "new.example:443", "aa:bb"));
+    }
+
+    #[test]
+    fn restarts_proxy_when_pin_changes() {
+        // The user accepted a rotated cert (accept_cert_fingerprint rewrote the
+        // store). The running listener still pins the old fingerprint, so every
+        // connection through it would fail the TLS handshake — reuse must be
+        // refused so the caller tears down and restarts with the new pin.
+        assert!(!can_reuse_proxy("example.com:443", "aa:bb", "example.com:443", "cc:dd"));
     }
 
     // ── rewrite_proxy_headers ───────────────────────────────────────────────
