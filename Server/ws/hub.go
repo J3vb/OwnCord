@@ -386,6 +386,18 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 				// joiners' key exchanges time out.
 				c.setE2EEPubKey(oldE2EEKey, oldE2EESig)
 			}
+			// The focused channel must transfer too: the client never
+			// re-sends channel_focus on a resume (mountChannel early-returns
+			// on the same channel), so without it the ChannelTopic
+			// re-subscribe below is a no-op and the message stream dies
+			// silently. READ-gated like every ChannelTopic subscription;
+			// a nil set denies (fail closed).
+			if oldChID := old.getChannelID(); oldChID != 0 &&
+				c.getChannelID() == 0 && readableChannelIDs[oldChID] {
+				c.mu.Lock()
+				c.channelID = oldChID
+				c.mu.Unlock()
+			}
 		}
 		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
 		// Stale voice cleanup (DB + broadcast + LiveKit) is owned entirely
