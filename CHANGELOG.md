@@ -5,6 +5,20 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## Unreleased
+
+- **fix(client):** the user profile popup is styled correctly again
+  (`a308f81`).
+- **fix(client):** Vite no longer watches `src-tauri/`, so a running dev
+  server does not rebuild the frontend when Rust sources or build artifacts
+  change (`cdcfc03`).
+- **fix(release):** the stripped Linux AppImage is signed from the
+  environment-provided key instead of a temporary key file (`9d75890`) —
+  release-pipeline only, no operator action needed.
+- **docs:** full documentation audit against `5630aa1` — reference docs,
+  architecture pages, and UX specs corrected; plans and prior audits given
+  verified statuses; see `docs/audit-2026-08-04-docs-and-coverage.md`.
+
 ## v1.2.0-alpha.1 — Discord feature parity
 
 > **Project reset note:** OwnCord has re-entered alpha. The `v1.0.0` release is
@@ -256,6 +270,6 @@ claimed behaviour — no product code changed and no assertion weakened.
 The project is under a feature freeze until the beta reset completes.
 Explicitly deferred (not abandoned unless noted): real OpenTelemetry SDK
 wiring, the Postgres backend (scaffolding removed pending real demand),
-the slash-command dispatcher (`docs/plans/slash-commands.md`), and the
-Solid.js migration (abandoned — the experiment is being removed in favor
-of the established vanilla component pattern).
+and the slash-command dispatcher (`docs/plans/slash-commands.md`). The
+Solid.js migration was abandoned and its experiment fully removed
+(2026-07-19) in favor of the established vanilla component pattern.
