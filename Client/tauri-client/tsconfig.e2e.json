@@ -1,0 +1,14 @@
+{
+  // Typechecks the Playwright layer (47 spec files + fixtures + the three
+  // playwright configs), which the main tsconfig deliberately excludes from
+  // the app graph. "exclude": [] is required to clear the inherited
+  // "tests/e2e" exclusion — same trick tsconfig.build.json uses.
+  "extends": "./tsconfig.json",
+  "include": [
+    "tests/e2e",
+    "playwright.config.ts",
+    "playwright.config.prod.ts",
+    "playwright.config.native.ts"
+  ],
+  "exclude": []
+}

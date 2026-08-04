@@ -34,6 +34,8 @@ async function mockTotpFailure(page: import("@playwright/test").Page): Promise<v
           body: { error: "INVALID_CODE", message: "Invalid verification code" },
         },
       ],
+      // The verify call fails, so no post-auth WS flow follows.
+      simulateWsFlow: false,
     }),
   );
 }
