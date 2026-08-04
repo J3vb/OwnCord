@@ -175,6 +175,50 @@ describe("E2EEManager", () => {
     expect(mgr.peerPublicKeys.size).toBe(0);
   });
 
+  it("stops rotating once it accepts an offer, so a re-elected holder is not fought", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // We joined first, so the server elected us key holder.
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    // A lower-userID participant then joined; the server re-elected them and
+    // they sent us the room key. Accepting an offer proves they are the
+    // server-authoritative holder (the server gates offers on IsVoiceKeyHolder).
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+    const epochAfterOffer = mgr.epoch;
+    ws.send.mockClear();
+
+    // The stale rotation timer must no longer rotate: the server rejects those
+    // offers with NOT_KEY_HOLDER, but only after we have already applied the new
+    // key locally — leaving us deaf and mute until the real holder rotates again.
+    await mgr.rotateKeyPeriodically();
+
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+    expect(mgr.epoch).toBe(epochAfterOffer);
+  });
+
+  it("keeps peer public keys across a reconnect so a later offer can still be unwrapped", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+    await mgr.reannounceForReconnect();
+
+    // Nothing repopulates this map after an SFU-level reconnect: handleAnnounce
+    // replies with an offer rather than a counter-announce, and the server
+    // relays stored peer keys only on voice_join. Peers' public keys stay valid
+    // when we regenerate our own pair, so dropping them only strands us on the
+    // pre-reconnect key.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+    mockSetKey.mockClear();
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+  });
+
   it("rotateKeyPeriodically advances the epoch and redistributes the key to peers", async () => {
     const ws = { send: vi.fn() };
     const mgr = createManager(ws);

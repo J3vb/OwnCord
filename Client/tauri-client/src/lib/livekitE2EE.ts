@@ -210,8 +210,13 @@ export class E2EEManager {
    */
   async reannounceForReconnect(): Promise<void> {
     this._ecdhKeyPair = await generateECDHKeyPair();
-    this._peerPublicKeys.clear();
-    clearPeerVerifications();
+    // Peers' ECDH public keys and their TOFU verifications survive: they are
+    // unaffected by regenerating OUR pair, and ECDH still works (our new
+    // private key against their existing public key). Clearing them here would
+    // be permanent — handleAnnounce replies with an offer rather than a
+    // counter-announce, and the server relays stored peer keys only on
+    // voice_join — so handleOffer's unknown-peer guard would drop every
+    // subsequent rotation, stranding us on the pre-reconnect key.
     if (this._roomKey) {
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
     }
@@ -483,6 +488,21 @@ export class E2EEManager {
       this._roomKey = unwrapped;
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
       log.info("E2EE: room key received and applied", { fromUserId });
+
+      // Accepting an offer proves the sender is the server-authoritative key
+      // holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
+      // still think we hold the key, we have been re-elected away — a lower
+      // userID joined. Stand down: our rotations would be rejected with
+      // NOT_KEY_HOLDER, but only after we applied the new key locally, leaving
+      // us deaf and mute until the real holder rotates again.
+      // handleParticipantLeft can still re-promote us later.
+      if (this._isKeyHolder) {
+        this._isKeyHolder = false;
+        this.clearKeyRotationTimer();
+        log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
+          fromUserId,
+        });
+      }
 
       // Resolve the pending connect promise if we were waiting for the key.
       if (this._roomKeyResolver) {
