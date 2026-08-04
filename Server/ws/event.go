@@ -338,7 +338,7 @@ type PluginBroadcastEvent struct {
 	payload   []byte
 }
 
-func (e PluginBroadcastEvent) EventType() string { return "plugin_broadcast" }
+func (e PluginBroadcastEvent) EventType() string { return MsgTypePluginBroadcast }
 func (e PluginBroadcastEvent) ChannelID() int64  { return e.channelID }
 func (e PluginBroadcastEvent) Payload() []byte   { return e.payload }
 

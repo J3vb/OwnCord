@@ -1385,7 +1385,7 @@ from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
-### Client -> Server (26 types)
+### Client -> Server (27 types)
 
 | Type | Rate Limit | Notes |
 |------|-----------|-------|
@@ -1414,9 +1414,10 @@ tables below add per-type behavioral notes.
 | `voice_e2ee_offer` | 64/sec | Wrapped room key to target (budgeted per key rotation) |
 | `call_ring` | 1/3sec | DM participants only; fans out as `call_incoming` |
 | `call_decline` | None | DM participants only; fans out as `call_declined` |
+| `chat_command` | None | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping` | None | Heartbeat |
 
-### Server -> Client (37 types)
+### Server -> Client (39 types)
 
 | Type | Has seq? | Delivery |
 |------|----------|----------|
@@ -1457,15 +1458,15 @@ tables below add per-type behavioral notes.
 | `server_restart` | Yes | All clients |
 | `error` | No | Direct to requester |
 | `pong` | No | Direct to pinger |
+| `command_reply` | No | Direct to invoking client (ephemeral plugin reply) |
+| `plugin_broadcast` | No | Channel (plugin output posted as a broadcast) |
 
-### Plugin command types (outside the generated schema)
+### Plugin command types
 
-Three additional wire types exist for the WASM plugin system. They are
-**not** listed in `protocol-schema.json` — `chat_command` is declared by hand
-in `Server/ws/handlers_command.go`, and its two reply envelopes are built
-inline there — so they bypass the `make protocol-verify` codegen gate.
-Extending the schema to cover them is tracked as an open recommendation (see
-`docs/audit-2026-08-04-docs-and-coverage.md`).
+Three wire types exist for the WASM plugin system. Since 2026-08-04 they are
+listed in `protocol-schema.json` like every other type (closing DC-01), so
+the generated constants cover them and `make protocol-verify` plus the
+`ws` package's protocol-contract test gate them against drift.
 
 | Type | Direction | Notes |
 |------|-----------|-------|

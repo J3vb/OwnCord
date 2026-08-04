@@ -49,6 +49,8 @@ export const ServerMessageType = {
   CALL_DECLINED: "call_declined",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
+  COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
+  PLUGIN_BROADCAST: "plugin_broadcast", // plugin channel broadcast, gated by the sender's SEND_MESSAGES
 } as const;
 
 export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];
@@ -84,6 +86,7 @@ export const ClientMessageType = {
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
   CALL_RING: "call_ring",
   CALL_DECLINE: "call_decline",
+  CHAT_COMMAND: "chat_command", // plugin slash-command dispatch (Phase C)
 } as const;
 
 export type ClientMessageTypeValue = (typeof ClientMessageType)[keyof typeof ClientMessageType];
