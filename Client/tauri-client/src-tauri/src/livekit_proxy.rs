@@ -282,6 +282,35 @@ async fn run_proxy_loop(
     }
 }
 
+/// Bound on the outbound dial and TLS handshake, matching http_proxy.rs.
+const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Dial `remote_host` and complete the TLS handshake, bounding each step by
+/// `limit`.
+///
+/// Both steps must be bounded. A peer that accepts the TCP connection and then
+/// never answers the ClientHello blocks the handshake forever, and the calling
+/// task holds `local` without polling it — so the LiveKit SDK closing its side
+/// never cancels it. Those tasks and their sockets accumulate on every SDK
+/// retry and survive stop_livekit_proxy, whose shutdown oneshot only stops the
+/// accept loop; the per-connection tasks are detached.
+async fn connect_tls(
+    connector: &tokio_rustls::TlsConnector,
+    server_name: ServerName<'static>,
+    remote_host: &str,
+    limit: Duration,
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Box<dyn std::error::Error + Send + Sync>> {
+    debug!("[livekit_proxy] connecting TCP to {}", remote_host);
+    let tcp = timeout(limit, TcpStream::connect(remote_host))
+        .await
+        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
+    debug!("[livekit_proxy] starting TLS handshake with {}", remote_host);
+    let tls = timeout(limit, connector.connect(server_name, tcp))
+        .await
+        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out"))??;
+    Ok(tls)
+}
+
 /// Handle a single proxied connection:
 /// 1. Read the HTTP request headers from the local (plain) side
 /// 2. Rewrite Host/Origin so the remote server accepts the connection
@@ -344,10 +373,7 @@ async fn handle_connection(
 
     let server_name = parse_server_name(remote_host)?;
 
-    debug!("[livekit_proxy] connecting TCP to {}", remote_host);
-    let tcp = TcpStream::connect(remote_host).await?;
-    debug!("[livekit_proxy] starting TLS handshake with {}", remote_host);
-    let mut tls = connector.connect(server_name, tcp).await?;
+    let mut tls = connect_tls(&connector, server_name, remote_host, PROXY_CONNECT_TIMEOUT).await?;
     debug!("[livekit_proxy] TLS handshake complete, forwarding traffic");
 
     // ── 4. Forward request + bidirectional copy ──────────────────────────
@@ -557,5 +583,49 @@ mod tests {
     #[test]
     fn rejects_an_invalid_dns_name() {
         assert!(parse_server_name("not a hostname").is_err());
+    }
+
+    // A peer that accepts the TCP connection and then answers nothing must not
+    // hang the connection task forever — see connect_tls.
+    #[tokio::test]
+    async fn tls_handshake_is_bounded_by_its_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        tokio::spawn(async move {
+            let _accepted = listener.accept().await.expect("accept");
+            // Hold the connection open, answering nothing.
+            std::future::pending::<()>().await;
+        });
+
+        let tls_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(tofu::PinnedVerifier::new(
+                "aa:bb:cc".to_string(),
+            )))
+            .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+        let server_name = ServerName::try_from("localhost").expect("server name");
+
+        // The outer bound exists only so a regression fails fast instead of
+        // hanging the suite; the assertion is that the inner limit fired.
+        let outcome = timeout(
+            Duration::from_secs(5),
+            connect_tls(
+                &connector,
+                server_name,
+                &addr.to_string(),
+                Duration::from_millis(100),
+            ),
+        )
+        .await;
+
+        assert!(
+            outcome.is_ok(),
+            "connect_tls hung: the TLS handshake is not bounded by its own timeout"
+        );
+        assert!(
+            outcome.expect("bounded").is_err(),
+            "a silent peer must produce an error, not a usable TLS stream"
+        );
     }
 }
