@@ -202,6 +202,12 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 					}
 				}
 
+				// This participant is out of voice, so the E2EE key holder may
+				// need to move. Without this the map keeps naming the departed
+				// user and the real lowest-uid participant's rekey offers are
+				// rejected with NOT_KEY_HOLDER. Safe here: no locks are held.
+				h.updateKeyHolder(channelID)
+
 				h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
 				slog.Info("livekit webhook: cleaned up stale voice state",
 					"user_id", userID,

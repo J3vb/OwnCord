@@ -365,9 +365,14 @@ type clientEvent struct {
 // as computed by the handshake (serve.go). It gates the inherited voice-channel
 // subscription only; a nil set denies it (fail closed).
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
+	// Voice channel the replaced connection was in, if any. Re-elected below,
+	// after the hub lock is released.
+	var replacedVoiceChID int64
+
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
 		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		replacedVoiceChID = oldVoiceChID
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
@@ -392,6 +397,17 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 	h.mu.Unlock()
+
+	// A fresh connect (lastSeq == 0) drops the replaced connection's voice state
+	// without transferring it, so that channel just lost a participant and the
+	// E2EE key holder may need to move. handleVoiceLeave never runs on this path
+	// — readPump skips it when replaced, and it early-returns on already-cleared
+	// state — so re-elect here. Must be outside h.mu: updateKeyHolder takes
+	// keyHolderMu and then h.mu.RLock. The recompute reads live client voice
+	// state, so it is idempotent and also correct when the state was transferred.
+	if replacedVoiceChID != 0 {
+		h.updateKeyHolder(replacedVoiceChID)
+	}
 
 	// Subscribe the new client to default pub/sub topics.
 	h.pubsub.Subscribe(c, TopicGlobal)
