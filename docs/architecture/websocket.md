@@ -1,18 +1,21 @@
 # WebSocket / Real-time Engine
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
-The `Server/ws` package (~6.9k LOC, the largest in the server) implements the
-real-time engine: a single `Hub` owning all client connections, a topic-based
-pub/sub, a monotonic sequence counter, a 3-tier reconnect replay pipeline, and a
-single typed (V2) command dispatch. Message-type constants live in
-`Server/ws/message_types.go` (client↔server) and mirror
-`Client/tauri-client/src/lib/protocolTypes.ts`.
+The `Server/ws` package (~9.5k LOC production code, the largest in the server)
+implements the real-time engine: a single `Hub` owning all client connections,
+a topic-based pub/sub, a monotonic sequence counter, a 3-tier reconnect replay
+pipeline, and a single typed (V2) command dispatch.
 
-> Both files claim to be "Generated from docs/protocol-schema.json — single
-> source of truth", but **no such file exists in the repository** — the
-> constants are maintained by hand on both sides. See
-> [audit-2026-07-19.md §3](../audit-2026-07-19.md).
+Message-type constants are **generated**: `docs/protocol-schema.json` is the
+single source of truth, and `Server/scripts/genprotocol` emits both
+`Server/ws/message_types.go` and
+`Client/tauri-client/src/lib/protocolTypes.ts` from it
+(`make protocol-generate`; CI fails on drift via `make protocol-verify`).
+The one exception is the plugin command family (`chat_command`,
+`command_reply`, `plugin_broadcast`), declared by hand in
+`Server/ws/handlers_command.go` outside the schema — see
+[protocol.md](../protocol.md).
 
 ## D4a — Connect, authenticate, replay
 

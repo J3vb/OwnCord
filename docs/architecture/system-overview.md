@@ -1,6 +1,6 @@
 # System Overview
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
 OwnCord is a self-hosted chat stack: one Go server binary per community, a Tauri
 desktop client that can hold profiles for many servers (one active connection at
