@@ -386,3 +386,7 @@ func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
 	h.broadcastVoiceEvent(context.Background(), channelID, msg)
 }
+
+// MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed
+// exactly enough events to hit it.
+const MaxColdReplayForTest = maxColdReplay
