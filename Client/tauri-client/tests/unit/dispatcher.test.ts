@@ -1705,6 +1705,54 @@ describe("WS Dispatcher", () => {
 
       (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(false);
     });
+
+    it("increments the DM mention badge for an incoming @mention", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+
+      mock.dispatch("chat_message", {
+        id: 504,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "hey @me",
+        mentions: [5],
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      // The badge must fire live: dmStore's mentionCount is what DmSidebar
+      // renders (mute-immune), and channelsStore's incrementMention no-ops
+      // for DM ids. Without this, the badge appears only after a reconnect.
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.mentionCount).toBe(1);
+      expect(dm?.unreadCount).toBe(1);
+    });
+
+    it("does not badge a DM mention in the focused DM", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+
+      mock.dispatch("chat_message", {
+        id: 505,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "hey @me",
+        mentions: [5],
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.mentionCount).toBe(0);
+    });
   });
 
   // ── DM events ─────────────────────────────────────────
