@@ -132,7 +132,9 @@ jobs:
         run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
 
       - name: Knip (unused code & deps)
-        run: npx knip || true
+        # Blocking since the 2026-08-04 remediation: the '|| true' era let a
+        # real unused-export finding sit invisible in every green run.
+        run: npx knip
 
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
