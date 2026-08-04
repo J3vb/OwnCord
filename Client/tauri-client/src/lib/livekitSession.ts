@@ -333,7 +333,18 @@ export class LiveKitSession {
 
   // --- Room factory ---
 
+  /** The current room's E2EE worker. livekit never terminates it, so the
+   *  session must — a leaked worker keeps receiving every future room key
+   *  through the process-lifetime key provider's setKey fan-out. */
+  private _e2eeWorker: Worker | null = null;
+
   private createRoom(): Room {
+    // livekit's per-room E2EEManager registers a SetKey listener on the
+    // shared key provider and never removes it; only those managers
+    // subscribe, so clear them all before the new Room re-registers.
+    this._e2ee.keyProvider.removeAllListeners();
+    this._e2eeWorker?.terminate();
+    this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
     const quality = getStreamQuality();
     const isSource = quality === "source";
     const newRoom = new Room({
@@ -363,7 +374,7 @@ export class LiveKitSession {
       // per-channel symmetric key. The SFU only sees encrypted frames.
       e2ee: {
         keyProvider: this._e2ee.keyProvider,
-        worker: new Worker(new URL("livekit-client/e2ee-worker", import.meta.url)),
+        worker: this._e2eeWorker,
       },
     });
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
@@ -1194,8 +1205,11 @@ export class LiveKitSession {
       room.removeAllListeners();
       room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
-    // Clear client-side E2EE state (ECDH keypair, room key, peer keys).
+    // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and
+    // kill the E2EE worker so the last room key does not stay resident in it.
     this._e2ee.clearState();
+    this._e2eeWorker?.terminate();
+    this._e2eeWorker = null;
     // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
     // pendingJoin, and the joinGeneration (idle has none). Any in-flight
     // connectAndSetup() will detect the state type change at its next checkpoint.

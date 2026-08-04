@@ -61,6 +61,7 @@ vi.mock("livekit-client", () => ({
   ExternalE2EEKeyProvider: vi.fn(() => ({
     setKey: vi.fn(),
     getKeys: vi.fn().mockReturnValue([]),
+    removeAllListeners: vi.fn(),
   })),
   createLocalVideoTrack: vi.fn(async () => ({
     kind: "video",
@@ -160,8 +161,11 @@ vi.mock("@lib/identity", () => ({
   storeIdentityPin: vi.fn(async () => true),
 }));
 
-// Stub Worker for E2EE web worker (not available in Node/vitest)
-globalThis.Worker = vi.fn() as unknown as typeof Worker;
+// Stub Worker for E2EE web worker (not available in Node/vitest). Instances
+// carry a terminate() mock so worker-lifecycle assertions can observe teardown.
+globalThis.Worker = vi.fn(function (this: { terminate: () => void }) {
+  this.terminate = vi.fn();
+}) as unknown as typeof Worker;
 
 // Now import
 import { parseUserId, LiveKitSession, getRoomForStats } from "../../src/lib/livekitSession";
@@ -1874,6 +1878,35 @@ describe("LiveKitSession", () => {
 
       const lastCall = mockRoom.connect.mock.calls[mockRoom.connect.mock.calls.length - 1]!;
       expect(lastCall[1]).toBe("token-3");
+    });
+  });
+
+  describe("E2EE worker lifecycle", () => {
+    // The key provider lives for the whole process while livekit registers a
+    // new SetKey listener on it per Room — with no matching removal — and the
+    // per-room E2EE Worker is never terminated. Without explicit teardown,
+    // every join/switch/reconnect-attempt leaks a running worker that keeps
+    // receiving every future room key via setKey fan-out.
+    it("clears stale provider listeners and terminates the previous worker on createRoom", () => {
+      (session as any).createRoom();
+      const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
+      const worker1 = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
+
+      (session as any).createRoom();
+
+      expect(worker1.terminate).toHaveBeenCalled();
+      const provider = (session as any)._e2ee.keyProvider;
+      expect(provider.removeAllListeners).toHaveBeenCalled();
+    });
+
+    it("terminates the current worker on leaveVoice so the last room key does not stay resident", () => {
+      (session as any).createRoom();
+      const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
+      const worker = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
+
+      session.leaveVoice(false);
+
+      expect(worker.terminate).toHaveBeenCalled();
     });
   });
 
