@@ -423,7 +423,12 @@ func (h *Hub) unregisterNow(c *Client) bool {
 		return false // not replaced
 	}
 	h.mu.Unlock()
-	return true // different client registered = was replaced
+	// exists means a *different* client holds the slot — a genuine replacement,
+	// whose teardown must not mark the live connection's user offline. An absent
+	// entry means this client was already kicked (every kick path deletes it via
+	// kickClient), which is a real disconnect and still needs the offline
+	// presence broadcast and voice cleanup in readPump's defer.
+	return exists
 }
 
 // ClientCount returns the number of currently registered clients (test helper).
