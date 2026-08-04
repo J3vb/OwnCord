@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
+	"github.com/owncord/server/ws"
 )
 
 // DMBroadcaster is the interface needed to send WebSocket events from REST
@@ -165,7 +166,7 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 
 		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
-			closeMsg := fmt.Appendf(nil, `{"type":"dm_channel_close","payload":{"channel_id":%d}}`, channelID)
+			closeMsg := fmt.Appendf(nil, `{"type":%q,"payload":{"channel_id":%d}}`, ws.MsgTypeDMChannelClose, channelID)
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}

@@ -32,7 +32,7 @@ func TestHandleWAFInterruption_WritesJSONAndStatus(t *testing.T) {
 
 func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
 	called := false
-	middleware := NewWAFMiddleware(2)
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusNoContent)
@@ -53,7 +53,7 @@ func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
 
 func TestWAFMiddleware_InvalidParanoiaLevelStillAllowsBenignRequest(t *testing.T) {
 	called := false
-	middleware := NewWAFMiddleware(99)
+	middleware := NewWAFMiddlewareCRS(99, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusNoContent)
@@ -73,7 +73,7 @@ func TestWAFMiddleware_InvalidParanoiaLevelStillAllowsBenignRequest(t *testing.T
 }
 
 func TestWAFMiddleware_BlocksScannerUserAgent(t *testing.T) {
-	middleware := NewWAFMiddleware(2)
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream handler should not be called for blocked scanner request")
 	}))
@@ -91,7 +91,7 @@ func TestWAFMiddleware_BlocksScannerUserAgent(t *testing.T) {
 
 func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
 	const requestBody = `{"message":"hello world"}`
-	middleware := NewWAFMiddleware(2)
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {

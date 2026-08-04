@@ -1,8 +1,10 @@
 // Phase C Step 9 — `ui` host capability.
 //
 // A plugin that declares the `ui` capability ships HTML/CSS/JS assets and a
-// list of tabs. The host serves those assets at /api/v1/plugins/<name>/ui/...
-// and the Solid.js client bridge renders each tab inside a sandboxed iframe.
+// list of tabs. This file is the host-side half only: AssetHandler and
+// RegisterUI are implemented and tested, but no route is mounted for them
+// yet and no client bridge exists — wiring them up is part of the pending
+// host-function work tracked in sandbox_wazero.go.
 
 package plugin
 
