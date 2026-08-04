@@ -415,8 +415,12 @@ export class LiveKitSession {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
+      // Aliased outside the try so the catch can tear down the attempt's own
+      // room: this._room is null while state is "reconnecting".
+      let attemptRoom: Room | null = null;
       try {
         const newRoom = this.createRoom();
+        attemptRoom = newRoom;
         const cleanupAbortedReconnect = async (): Promise<void> => {
           newRoom.removeAllListeners();
           try {
@@ -518,10 +522,13 @@ export class LiveKitSession {
         return;
       } catch (err) {
         log.warn("Auto-reconnect failed", { attempt, url, error: err });
-        const failedRoom = this._room;
-        if (failedRoom !== null) {
-          failedRoom.removeAllListeners();
-          failedRoom
+        // Tear down this attempt's room (this._room is null in "reconnecting"
+        // state) — a leaked room keeps its listeners, and its synchronous
+        // Disconnected event would spawn a second, uncancellable reconnect
+        // loop. null only if createRoom() itself threw.
+        if (attemptRoom !== null) {
+          attemptRoom.removeAllListeners();
+          attemptRoom
             .disconnect()
             .catch((disconnectErr) =>
               log.warn("Failed to disconnect room after reconnect failure", disconnectErr),

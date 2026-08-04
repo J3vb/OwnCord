@@ -1961,6 +1961,42 @@ describe("LiveKitSession", () => {
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
     });
 
+    it("disconnects the failed attempt's room instead of leaking it", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const ac = new AbortController();
+
+      mockRoom.connect
+        .mockRejectedValueOnce(new Error("first attempt failed"))
+        .mockResolvedValueOnce(undefined);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      // The room whose connect failed must be torn down — in "reconnecting"
+      // state this._room is null, so the cleanup must target the attempt's
+      // own room. A leaked room keeps its listeners and its synchronous
+      // Disconnected event spawns a second, uncancellable reconnect loop.
+      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
+      expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
+    });
+
     it("calls leaveVoice, leaveVoiceChannel, and error callback after all attempts fail", async () => {
       (session as any)._state = {
         type: "reconnecting",
