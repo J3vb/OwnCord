@@ -341,11 +341,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier)
+  # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier).
+  #
+  # Skipped for Dependabot: its PRs run under the separate `dependabot` secrets
+  # scope, so TAURI_SIGNING_PRIVATE_KEY arrives empty and `npm run tauri build`
+  # always aborts with "failed to decode secret key" while signing the updater
+  # artifact — after a successful compile and bundle. That burned ~50 min of
+  # runner time per dependency PR to produce a red check that never carried any
+  # signal. Granting Dependabot the signing key would fix the symptom but hands
+  # a release key to workflows triggered by third-party dependency updates.
+  #
+  # What still covers Dependabot PRs: the required `rust-tests` job compiles the
+  # crate (cargo clippy --all-targets + cargo test --lib), so a dependency bump
+  # that breaks the Rust build is still caught.
+  # What this gives up on those PRs: bundling (NSIS/AppImage/deb), Windows and
+  # ARM-specific compilation, and the `cargo audit` step below — that last one
+  # overlaps with Dependabot's own cargo scanning, which is what opens these PRs
+  # in the first place.
   tauri-build:
     name: Tauri Full Build (${{ matrix.os }})
     needs: client-check
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.base_ref == 'main'
+      && github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
