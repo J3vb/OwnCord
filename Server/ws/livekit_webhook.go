@@ -193,7 +193,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 			// Double-check voice state to guard against a concurrent voice_join
 			// that updated the state between the read above and clearVoiceState (L8).
 			if reChID, reJT := c.getVoiceState(); reChID == channelID && reJT == joinToken {
-				c.clearVoiceState()
+				h.clearVoiceAndUnsubscribe(c)
 
 				if h.db != nil {
 					if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {

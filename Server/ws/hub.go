@@ -371,6 +371,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
+		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID
 		if c.lastSeq > 0 {
@@ -378,6 +379,12 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 			// in voice during brief WS drops.
 			if c.getVoiceChID() == 0 {
 				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+				// The announced ECDH key must survive with the voice state:
+				// the client keeps its keypair across a WS blip and only
+				// re-announces on a LiveKit-room reconnect, so without the
+				// transfer voice_join replays nothing for this user and new
+				// joiners' key exchanges time out.
+				c.setE2EEPubKey(oldE2EEKey, oldE2EESig)
 			}
 		}
 		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
@@ -418,13 +425,20 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	if chID := c.getChannelID(); chID != 0 {
 		h.pubsub.Subscribe(c, ChannelTopic(chID))
 	}
-	// If the client is already in a voice channel (e.g. reconnect), re-subscribe
-	// to that channel's topic so the message stream keeps flowing without a new
-	// channel_focus. Voice membership is gated on CONNECT_VOICE alone, so it must
-	// not by itself grant a channel's message stream: subscribe only when the
-	// handshake confirmed READ_MESSAGES on that channel.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 && readableChannelIDs[voiceChID] {
-		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+	// If the client is already in a voice channel (e.g. reconnect), restore its
+	// subscriptions without a new voice_join (a same-channel rejoin is rejected
+	// with ALREADY_JOINED) or channel_focus.
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		// VoiceTopic is the only transport for voice_e2ee_announce relays and
+		// carries nothing else, for a channel the user already joined via the
+		// CONNECT_VOICE-gated voice_join — so no READ gate.
+		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
+		// Voice membership is gated on CONNECT_VOICE alone, so it must not by
+		// itself grant a channel's message stream: subscribe only when the
+		// handshake confirmed READ_MESSAGES on that channel.
+		if readableChannelIDs[voiceChID] {
+			h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+		}
 	}
 }
 

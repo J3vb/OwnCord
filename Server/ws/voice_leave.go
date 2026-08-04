@@ -6,12 +6,26 @@ import (
 	"time"
 )
 
+// clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic
+// subscription, returning the cleared channel ID and join token. Every path
+// that takes a client out of voice while its WS stays up must use this pair:
+// clearing state without unsubscribing leaves the socket receiving that room's
+// voice_e2ee_announce relays (which carry no channel_id to filter on) for the
+// connection's lifetime, polluting a later session's peer-key store.
+func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
+	oldChID, oldJoinToken := c.clearVoiceState()
+	if oldChID != 0 {
+		h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
+	}
+	return oldChID, oldJoinToken
+}
+
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
-// 1. Gets old voiceChID from clearVoiceChID().
+// 1. Gets old voiceChID from clearVoiceAndUnsubscribe.
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
 func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
-	oldChID, oldJoinToken := c.clearVoiceState()
+	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
 		return
@@ -27,9 +41,6 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		"channel_id", oldChID,
 		"remote", c.remoteAddr,
 	)
-
-	// Unsubscribe from voice topic.
-	h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
 
 	if err := leaveVoiceChannelWithRetry(ctx, h, c.userID, oldChID, oldJoinToken); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))

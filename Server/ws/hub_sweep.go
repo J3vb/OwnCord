@@ -226,12 +226,13 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
-		// Clear client voice state.
+		// Clear client voice state and its voice-topic subscription.
 		h.mu.RLock()
-		if client, ok := h.clients[vs.UserID]; ok {
-			client.clearVoiceChID()
-		}
+		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()
+		if ok {
+			h.clearVoiceAndUnsubscribe(client)
+		}
 
 		// Remove from LiveKit (best-effort).
 		if h.livekit != nil {
