@@ -1,5 +1,12 @@
 # sqlc Adoption (D2) — Progress & Plan
 
+> **Status (verified 2026-08-04): Shipped.** `db.DB` delegates to the
+> sqlc-generated `db/dbgen` layer (`Server/db/db.go`), CI verifies generated
+> output (`make sqlc-verify`), and the documented remainder of raw queries
+> (variable `IN` lists, FTS, multi-statement transactions, PRAGMA/VACUUM) is
+> intentional. The "out of scope: `store/` SQL" note below is moot — the
+> `store` package was deleted (D3).
+
 **Decision:** D2 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md) — adopt
 sqlc as the real query layer; **Closes:** audit finding A-2026-07-05 (dead `db/dbgen`).
 

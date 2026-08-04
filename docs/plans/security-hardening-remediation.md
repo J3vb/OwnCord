@@ -1,6 +1,6 @@
 # Plan: Remediate security-hardening review regressions
 
-**Status:** COMPLETE — verified 2026-07-23 (branch `feat/e2ee-identity-tofu`): every item
+**Status:** COMPLETE — verified 2026-07-23, re-confirmed 2026-08-04 (branch `feat/e2ee-identity-tofu`): every item
 has been implemented or superseded. W2-4 and both halves of W3-3 are the last to land.
 **W2-4:** DONE 2026-07-23 — `Server/db/attachment_queries.go:111`
 `LinkAttachmentsToMessage` links atomically and skips (not fails) already-linked,

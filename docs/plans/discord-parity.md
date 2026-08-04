@@ -1,5 +1,18 @@
 # Discord feature parity — gap analysis and plan
 
+> **Status (verified 2026-08-04): Shipped — phases 1–6 complete.** Phase 1's
+> table below was written as a gap list and never re-marked; all six rows have
+> since shipped (block/unblock UI `SidebarMemberSection.ts:177-186`; topics in
+> `ready` via `channelPayloadFrom`; role colors from the server list with
+> seeded-name fallback `formatting.ts:158-175`; profile popup mounted from
+> `MemberList.ts`; temp bans `BanDurationHours` in `PATCH /admin/api/users/{id}`;
+> archived channels hidden by the unified predicate
+> `permissions/checker.go:116-121`). Named leftovers remain open and are listed
+> in-line: role hoist/mentionable flags + `@RoleName` mentions (Phase 5),
+> categories as real entities (Phase 5), and the §"still-dead code" cleanup
+> list (`sounds` table, `voice_speakers`, `voice_config.bitrate`, macOS PTT
+> stub).
+
 Status: phase 6 complete (2026-08-01)
 
 This is a depth audit of features OwnCord already has, compared against what
