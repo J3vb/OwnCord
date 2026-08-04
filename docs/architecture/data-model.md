@@ -2,14 +2,14 @@
 
 **Verified against:** commit `5630aa1`, 2026-08-04
 
-The canonical schema is the ordered migration set `Server/migrations/001–028`
+The canonical schema is the ordered migration set `Server/migrations/001–029`
 (embedded via `go:embed`, applied by the custom runner in `Server/db/migrate.go`,
 tracked in the `schema_versions` table). SQLite is the only supported engine —
 `Server/main.go` rejects any other `database.type` at startup.
 
 ## D5 — Entity-relationship overview
 
-All 26 application tables, grouped by domain. Junction/leaf detail columns are
+All 25 application tables, grouped by domain. Junction/leaf detail columns are
 elided; the goal is the relationship graph, not full DDL — see
 [`docs/schema.md`](../schema.md) for per-table DDL (current through
 migration 028).
@@ -59,7 +59,6 @@ erDiagram
     login_attempts
     rate_lockouts
     emoji
-    sounds
 
     users {
         int id PK
@@ -109,7 +108,7 @@ erDiagram
 | Voice | `voice_states` | One row per user (`user_id` is the PK) — a user occupies at most one voice channel. |
 | Real-time replay | `events` | Cold tier of the 3-tier reconnect replay ([websocket.md](websocket.md)); written by the async `EventPersister`, pruned by retention. Hub seq counter is seeded from `MAX(events.seq)` at startup so seqs stay monotonic across restarts. |
 | Plugins | `plugins`, `plugin_kv` | 015. `plugin_kv` is per-plugin namespaced KV via composite PK `(plugin_id, key)`. |
-| Ops | `settings`, `audit_log`, `sounds` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. `sounds` is **dead schema** — the soundboard feature was removed but the table remains. |
+| Ops | `settings`, `audit_log` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. (The dead `sounds` table was dropped by migration 029, closing A-2026-07-13.) |
 
 ### How the schema is accessed
 

@@ -11,7 +11,7 @@ import (
 )
 
 // DeleteAccount anonymises and disables a user account within a single
-// transaction.  Because the messages, invites, emoji, and sounds tables
+// transaction.  Because the messages, invites, and emoji tables
 // reference users(id) with no ON DELETE CASCADE, we cannot simply DELETE
 // the row.  Instead we:
 //
