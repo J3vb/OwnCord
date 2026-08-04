@@ -59,7 +59,25 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // The audience is resolved here, on the caller's goroutine, so the hub's
 // dispatch loop never blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
-	h.broadcastChannelScoped(ctx, channelID, msg, "voice event")
+	// A room's own participants must always receive its voice_state /
+	// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
+	// READ filter can exclude a live participant — whose client then keeps a
+	// stale E2EE key holder, stalling rotation and locking new joiners out
+	// until e2ee_timeout. Union the READ audience with the room's current
+	// participants; what outsiders may observe is unchanged.
+	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience))
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, c := range h.clients {
+		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
 }
 
 // broadcastChannelScoped enqueues msg for exactly the connected clients whose
