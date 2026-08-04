@@ -84,6 +84,16 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
+	// A dying connection must not (re-)take a topic: its replacement's own
+	// unsubscribes would skip the entry (unsubscribeLocked's identity guard)
+	// and publishes would go to the closed connection. registerNow closes the
+	// old client's send BEFORE stripping it under this same lock, so a late
+	// Subscribe either sees sendClosed here and is refused, or slipped in
+	// earlier and is removed by the subsequent UnsubscribeAll.
+	if client.isSendClosed() {
+		return
+	}
+
 	// Forward index
 	subs, ok := ps.topics[topic]
 	if !ok {

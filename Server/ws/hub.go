@@ -404,14 +404,17 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 		// by the handshake path in serve.go, which runs before registerNow.
 		// registerNow only handles in-memory client replacement.
 
-		// Remove the old client from all pub/sub topics before replacing.
-		h.pubsub.UnsubscribeAll(old)
-
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
+		// closeSend MUST precede UnsubscribeAll: Subscribe refuses clients
+		// whose send is closed, so this ordering leaves the old connection's
+		// in-flight handlers no window to re-take a stripped topic.
 		slog.Warn("hub: kicking stale connection for re-registering user",
 			"user_id", c.userID, "last_seq", c.lastSeq)
 		old.closeSend()
+
+		// Remove the old client from all pub/sub topics before replacing.
+		h.pubsub.UnsubscribeAll(old)
 	}
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))

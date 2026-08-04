@@ -55,6 +55,33 @@ func TestRegisterNow_ResumeFocusedChannelStaysReadGated(t *testing.T) {
 	}
 }
 
+// A dying connection's in-flight handler (e.g. a channel_focus mid DB
+// round-trip in its readPump) can call Subscribe after registerNow stripped
+// the old client via UnsubscribeAll — stealing the topic from the
+// replacement: the replacement's own unsubscribes then skip the entry
+// (unsubscribeLocked's identity guard) while publishes go to the closed
+// connection. Subscribe must refuse a client whose send is already closed.
+func TestSubscribe_RefusesReplacedClientWithClosedSend(t *testing.T) {
+	h := newEmitTestHub()
+
+	old := NewTestClient(h, 1, make(chan []byte, 8))
+	h.clients[1] = old
+
+	replacement := NewTestClient(h, 1, make(chan []byte, 8))
+	replacement.lastSeq = 1
+	h.registerNow(replacement, nil) // closes old's send channels
+
+	// The old connection's handler completes its Subscribe late.
+	h.pubsub.Subscribe(old, ChannelTopic(7))
+
+	h.pubsub.mu.RLock()
+	sub := h.pubsub.topics[ChannelTopic(7)][1]
+	h.pubsub.mu.RUnlock()
+	if sub == old {
+		t.Error("closed connection stole the topic subscription from its replacement")
+	}
+}
+
 // A fresh connect (lastSeq == 0, e.g. F5) reloads the client app, which mounts
 // its channel and sends channel_focus itself — the focused channel must not be
 // inherited server-side, matching the voice-state semantics on this path.

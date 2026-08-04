@@ -253,6 +253,13 @@ func (c *Client) closeSend() {
 	c.closeAllSendLocked()
 }
 
+// isSendClosed reports whether the client's send channels have been closed.
+func (c *Client) isSendClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sendClosed
+}
+
 // closeAllSendLocked closes all three send channels. Caller must hold c.mu.
 func (c *Client) closeAllSendLocked() {
 	if !c.sendClosed {
