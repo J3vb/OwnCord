@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -376,5 +377,93 @@ func TestPatchChannel_FeatureFlagsRequireManageChannels(t *testing.T) {
 	})
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// ─── DM exclusion (A-2026-08-02) ─────────────────────────────────────────────
+//
+// DMs and group DMs share the channels table and id space with guild channels,
+// but they belong to their participants. The admin channel surface must not
+// enumerate them (membership-graph oracle), rename them, or cascade-delete
+// them. Mutations answer 404 rather than 403 so the surface does not confirm
+// which ids are private conversations.
+
+func TestListChannels_ExcludesDMs(t *testing.T) {
+	handler, token, database := newChannelTestAPI(t)
+
+	textID := newChannel(t, handler, token, "general", "text")
+	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel dm: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var channels []struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &channels); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	sawText := false
+	for _, ch := range channels {
+		if ch.ID == dmID || ch.Type == "dm" {
+			t.Errorf("DM channel %d leaked into admin channel list", ch.ID)
+		}
+		if ch.ID == textID {
+			sawText = true
+		}
+	}
+	if !sawText {
+		t.Errorf("guild channel %d missing from admin channel list", textID)
+	}
+}
+
+func TestPatchChannel_RefusesDM(t *testing.T) {
+	handler, token, database := newChannelTestAPI(t)
+
+	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel dm: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", dmID), token, map[string]any{
+		"name": "renamed-by-admin",
+	})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+
+	ch, err := database.GetChannel(context.Background(), dmID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel after refused patch: ch=%v err=%v", ch, err)
+	}
+	if ch.Name != "dm-chan" {
+		t.Errorf("DM renamed by refused patch: %q", ch.Name)
+	}
+}
+
+func TestDeleteChannel_RefusesDM(t *testing.T) {
+	handler, token, database := newChannelTestAPI(t)
+
+	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel dm: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete, fmt.Sprintf("/channels/%d", dmID), token, nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+
+	ch, err := database.GetChannel(context.Background(), dmID)
+	if err != nil {
+		t.Fatalf("GetChannel after refused delete: %v", err)
+	}
+	if ch == nil {
+		t.Error("DM channel destroyed by refused delete")
 	}
 }
