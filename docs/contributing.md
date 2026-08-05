@@ -167,3 +167,29 @@ lower a threshold to make a change fit.
 - **TypeScript**: See [Client Architecture](architecture/client.md)
 - **Go**: `gofmt` + `golangci-lint`, standard library preferred
 - **Rust**: `cargo fmt` + `cargo clippy`, minimal code (native APIs only)
+
+## Dependency Policy
+
+The policy behind what the lockfiles already enforce (decided 2026-08-05,
+closing audit findings 2026-04-07 #8 / DC-11):
+
+- **Lockfiles are authoritative.** `package-lock.json`, `go.sum` and
+  `Cargo.lock` pin every transitive dependency; CI installs only from them
+  (`npm ci`, module/registry verification — never a bare `npm install` in CI
+  or hooks). `package.json` keeps ordinary caret ranges: exact-pinning it
+  would duplicate what the lockfile does while making every security patch a
+  manual edit.
+- **Upgrades arrive as reviewed PRs, not ambient drift.** Dependabot runs
+  weekly per ecosystem (`.github/dependabot.yml`) with semver-major updates
+  ignored across the board — majors are adopted deliberately, by a human,
+  reading the changelog. Peer-coupled groups (`vitest`/`@vitest/*`,
+  `@stryker-mutator/*`) update as one PR so exact peer pins cannot wedge.
+- **Security gates run on every PR:** `npm audit --omit=dev
+  --audit-level=high` (shipped deps only — dev-tooling advisories are
+  triaged in the workflow comment instead of blocking on unfixable pins),
+  `govulncheck` for Go, `cargo audit` for Rust, and `knip` refuses unused
+  client dependencies outright.
+- **Version skew is pinned at the toolchain level** too: `.nvmrc` + CI both
+  say Node 20, `Server/sqlc.version` pins sqlc, Go pins via `go.mod`
+  (`GOTOOLCHAIN=auto`), and GitHub Actions are SHA-pinned with Dependabot
+  bumping the pins.
