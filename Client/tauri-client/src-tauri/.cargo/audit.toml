@@ -8,4 +8,28 @@ ignore = [
     # Drop both entries when the notification chain moves to quick-xml >= 0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+
+    # glib 0.18.5 is pinned by the whole Linux GTK stack: wry (even 0.56)
+    # requires `webkit2gtk =2.0.2`, which requires `glib ^0.18.0`. The fix
+    # landed in glib 0.20.0 and was never backported (0.18.5 is the last 0.18
+    # release; 0.19.x is still in range), so no semver-compatible route exists.
+    # The unsoundness is only reachable through `Variant::array_iter_str()` —
+    # nothing in the dependency tree or in src-tauri/src/ calls it, and the
+    # crate is Linux-only here (see the cfg(target_os = "linux") block in
+    # Cargo.toml). Drop this entry when webkit2gtk moves to gtk-rs 0.20.
+    "RUSTSEC-2024-0429",
+
+    # rand 0.7.3 arrives only as a BUILD dependency, three levels down:
+    # tauri-utils -> kuchikiki 0.8.8-speedreader -> selectors 0.24.0, whose
+    # build.rs uses phf_codegen -> phf_generator 0.8.0 (which requires
+    # rand ^0.7). It runs at codegen time and never links into a shipped
+    # binary. The advisory needs `ThreadRng` reseeding under a custom logger
+    # with rand's `log` feature on; phf_generator instead uses a fixed-seed
+    # `SmallRng::seed_from_u64(1234567890)` and never enables `log` — and no
+    # other crate here depends on rand 0.7, so feature unification cannot
+    # turn it on. Not upgradable: kuchikiki 0.8.9-speedreader would drop this
+    # chain, but cargo will not match a pre-release across patch versions
+    # (`^0.8.8-speedreader` rejects 0.8.9-speedreader) and tauri-utils 2.9.3
+    # is the latest release. Drop this entry when tauri-utils bumps kuchikiki.
+    "RUSTSEC-2026-0097",
 ]

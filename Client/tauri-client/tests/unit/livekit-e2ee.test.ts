@@ -80,6 +80,7 @@ vi.mock("@lib/logger", () => ({
 // Now import
 import { E2EEManager } from "../../src/lib/livekitE2EE";
 import { setPeerVerification } from "@stores/voice.store";
+import { unwrapRoomKey, roomKeyToBase64 } from "@lib/e2eeCrypto";
 
 const PEER_ID = 42;
 
@@ -100,6 +101,7 @@ describe("E2EEManager", () => {
     vi.clearAllMocks();
     mockMembers.clear();
     mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
+    mockVoiceState.voiceUsers.clear();
   });
 
   it("setupKeyExchange as key holder generates the room key and sends a signed announce", async () => {
@@ -126,18 +128,21 @@ describe("E2EEManager", () => {
 
     await mgr.setupKeyExchange(true, 1);
 
-    // Drained through the verifying receive path and stored. No offer yet:
-    // the drain runs before the room key is generated.
+    // Drained through the verifying receive path and stored. The room key is
+    // generated BEFORE the drain, so each drained peer gets its offer right
+    // here — mid-call peers never re-announce, and the only other delivery
+    // is the 5-minute rotation timer, which would strand them on a dead key
+    // whenever a new key holder joins an ongoing call.
     expect(mgr.pendingAnnounces).toHaveLength(0);
     expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
     expect(setPeerVerification).toHaveBeenCalledWith(
       expect.objectContaining({ userId: PEER_ID, status: "verified" }),
     );
-    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
 
     // A repeat announce after keying (dedupe path) re-sends the room-key offer.
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
-    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(2);
   });
 
   it("setupKeyExchange as non-key-holder resolves once the key holder's offer arrives", async () => {
@@ -173,6 +178,109 @@ describe("E2EEManager", () => {
     await expect(setupPromise).resolves.toBe(false);
     expect(mgr.epoch).toBe(0);
     expect(mgr.peerPublicKeys.size).toBe(0);
+  });
+
+  it("elects a still-connecting client when the holder leaves mid-setup, instead of stranding it", async () => {
+    const ws = { send: vi.fn() };
+    // The session publishes no channel id for the whole "connecting" phase,
+    // which spans the entire key-exchange wait.
+    const mgr = new E2EEManager({
+      getWs: () => ws as never,
+      getServerHost: () => "localhost:7880",
+      getCurrentChannelId: () => null,
+    });
+    // After the old holder (PEER_ID) leaves, we (uid 1) are the only participant.
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+
+    const setupPromise = mgr.setupKeyExchange(false, 1);
+    await vi.waitFor(() => {
+      expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
+    });
+
+    // The holder leaves before offering, while we are still inside
+    // setupKeyExchange. The re-election must use the channel id the exchange
+    // was started with (getCurrentChannelId is still null) and must unblock
+    // the wait — the offer we were waiting for will never arrive.
+    await mgr.handleParticipantLeft(PEER_ID);
+
+    await expect(setupPromise).resolves.toBe(true);
+    expect(mgr.epoch).toBe(1); // became holder and generated a fresh key
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+  });
+
+  it("applies concurrent offers in arrival order, not completion order", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // known peer
+    mockSetKey.mockClear();
+
+    // The first offer's unwrap stalls (WebCrypto gives no cross-operation
+    // ordering guarantee); the second resolves immediately. Delivery order
+    // must still win — otherwise the receiver ends on the first (dead) key.
+    let releaseFirst!: () => void;
+    const firstUnwrap = new Promise<Uint8Array>((resolve) => {
+      releaseFirst = () => resolve(new Uint8Array(32).fill(1));
+    });
+    vi.mocked(unwrapRoomKey)
+      .mockReturnValueOnce(firstUnwrap)
+      .mockResolvedValueOnce(new Uint8Array(32).fill(2));
+    vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
+    try {
+      const first = mgr.handleOffer(PEER_ID, "enc1", "iv1");
+      const second = mgr.handleOffer(PEER_ID, "enc2", "iv2");
+      releaseFirst();
+      await Promise.all([first, second]);
+
+      // The second (newer) key must be the one left applied.
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-2");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+    }
+  });
+
+  it("stops rotating once it accepts an offer, so a re-elected holder is not fought", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // We joined first, so the server elected us key holder.
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    // A lower-userID participant then joined; the server re-elected them and
+    // they sent us the room key. Accepting an offer proves they are the
+    // server-authoritative holder (the server gates offers on IsVoiceKeyHolder).
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+    const epochAfterOffer = mgr.epoch;
+    ws.send.mockClear();
+
+    // The stale rotation timer must no longer rotate: the server rejects those
+    // offers with NOT_KEY_HOLDER, but only after we have already applied the new
+    // key locally — leaving us deaf and mute until the real holder rotates again.
+    await mgr.rotateKeyPeriodically();
+
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+    expect(mgr.epoch).toBe(epochAfterOffer);
+  });
+
+  it("keeps peer public keys across a reconnect so a later offer can still be unwrapped", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+    await mgr.reannounceForReconnect();
+
+    // Nothing repopulates this map after an SFU-level reconnect: handleAnnounce
+    // replies with an offer rather than a counter-announce, and the server
+    // relays stored peer keys only on voice_join. Peers' public keys stay valid
+    // when we regenerate our own pair, so dropping them only strands us on the
+    // pre-reconnect key.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+    mockSetKey.mockClear();
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
   it("rotateKeyPeriodically advances the epoch and redistributes the key to peers", async () => {

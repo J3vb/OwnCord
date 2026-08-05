@@ -66,6 +66,20 @@ func SetClientVoiceChID(c *Client, channelID int64) {
 	SetVoiceChIDForTest(c, channelID)
 }
 
+// SubscribedToVoiceTopicForTest reports whether c itself (identity compare,
+// not just its userID) holds the subscription to channelID's voice topic.
+func (h *Hub) SubscribedToVoiceTopicForTest(c *Client, channelID int64) bool {
+	h.pubsub.mu.RLock()
+	defer h.pubsub.mu.RUnlock()
+	return h.pubsub.topics[VoiceTopic(channelID)][c.userID] == c
+}
+
+// SubscribeVoiceTopicForTest subscribes c to channelID's voice topic, as the
+// production voice_join flow does.
+func (h *Hub) SubscribeVoiceTopicForTest(c *Client, channelID int64) {
+	h.pubsub.Subscribe(c, VoiceTopic(channelID))
+}
+
 // SetClientVoiceStateForTest sets both the voice channel and join token.
 func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
 	c.voiceMu.Lock()
@@ -386,3 +400,7 @@ func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
 func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
 	h.broadcastVoiceEvent(context.Background(), channelID, msg)
 }
+
+// MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed
+// exactly enough events to hit it.
+const MaxColdReplayForTest = maxColdReplay

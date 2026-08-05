@@ -58,6 +58,11 @@ export class E2EEManager {
   private _identityKeyPair: CryptoKeyPair | null = null;
   /** True if this client is the key holder (longest-present participant). */
   private _isKeyHolder = false;
+  /** Channel this exchange runs in, set at setupKeyExchange entry. The session
+   *  facade publishes its channel id only once "connected", which is after the
+   *  whole key-exchange wait — key-holder re-elections arriving in that window
+   *  must not be dropped for lack of a channel id. */
+  private _channelId: number | null = null;
   /** Resolver/rejector for non-key-holders waiting to receive the room key via offer. */
   private _roomKeyResolver: (() => void) | null = null;
   private _roomKeyRejector: ((err: Error) => void) | null = null;
@@ -123,6 +128,7 @@ export class E2EEManager {
    * surfaces the "e2ee_timeout" error and leaves voice.
    */
   async setupKeyExchange(isKeyHolder: boolean, channelId: number): Promise<boolean> {
+    this._channelId = channelId;
     // Generate a fresh ECDH keypair for this session.
     this._ecdhKeyPair = await generateECDHKeyPair();
     this._peerPublicKeys.clear();
@@ -136,6 +142,21 @@ export class E2EEManager {
     // Use server-authoritative is_key_holder from voice_token payload.
     this._isKeyHolder = isKeyHolder;
 
+    if (this._isKeyHolder) {
+      // Generate the room key BEFORE draining queued announces, so the
+      // drain's handleAnnounce calls hit the wrap-and-offer branch and every
+      // drained peer receives the fresh key immediately. Mid-call peers never
+      // re-announce (handleAnnounce replies with an offer, not a
+      // counter-announce), so the only later delivery would be the 5-minute
+      // rotation timer — stranding them on a dead key whenever a new key
+      // holder joins an ongoing call.
+      this._e2eeEpoch++;
+      this._roomKey = generateRoomKey();
+      await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
+      log.info("E2EE: key holder — generated room key", { channelId });
+      this.startKeyRotationTimer();
+    }
+
     // Drain any announces that arrived before our keypair was ready. These
     // are existing participants whose keys the server relayed during
     // voice_join sync — run them through the normal verifying receive path
@@ -148,12 +169,6 @@ export class E2EEManager {
     }
 
     if (this._isKeyHolder) {
-      // We're the first participant — generate the room key.
-      this._e2eeEpoch++;
-      this._roomKey = generateRoomKey();
-      await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
-      log.info("E2EE: key holder — generated room key", { channelId });
-      this.startKeyRotationTimer();
       // Announce our (signed) key so existing participants can see us.
       this.deps.getWs()?.send({ type: "voice_e2ee_announce", payload: announcePayload });
     } else {
@@ -210,8 +225,13 @@ export class E2EEManager {
    */
   async reannounceForReconnect(): Promise<void> {
     this._ecdhKeyPair = await generateECDHKeyPair();
-    this._peerPublicKeys.clear();
-    clearPeerVerifications();
+    // Peers' ECDH public keys and their TOFU verifications survive: they are
+    // unaffected by regenerating OUR pair, and ECDH still works (our new
+    // private key against their existing public key). Clearing them here would
+    // be permanent — handleAnnounce replies with an offer rather than a
+    // counter-announce, and the server relays stored peer keys only on
+    // voice_join — so handleOffer's unknown-peer guard would drop every
+    // subsequent rotation, stranding us on the pre-reconnect key.
     if (this._roomKey) {
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
     }
@@ -439,11 +459,29 @@ export class E2EEManager {
     }
   }
 
+  /** Serializes offer application. The offer payload carries no epoch or
+   *  sequence and WebCrypto gives no cross-operation ordering guarantee, so
+   *  two in-flight offers could complete out of order — applying the older
+   *  key last and stranding this receiver on a dead key until the next
+   *  rotation. Chaining applies offers strictly in WS delivery order. */
+  private _offerChain: Promise<void> = Promise.resolve();
+
   /**
    * Handle a voice_e2ee_offer from the server — the key holder has sent us
    * the encrypted room key. Unwrap it and apply to the E2EE key provider.
+   * Offers are applied one at a time, in delivery order.
    */
-  async handleOffer(
+  handleOffer(fromUserId: number, encryptedKeyBase64: string, ivBase64: string): Promise<void> {
+    // handleOfferInner never rejects (it catches internally), so the chain
+    // cannot wedge on a failed offer.
+    const run = this._offerChain.then(() =>
+      this.handleOfferInner(fromUserId, encryptedKeyBase64, ivBase64),
+    );
+    this._offerChain = run;
+    return run;
+  }
+
+  private async handleOfferInner(
     fromUserId: number,
     encryptedKeyBase64: string,
     ivBase64: string,
@@ -484,6 +522,21 @@ export class E2EEManager {
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
       log.info("E2EE: room key received and applied", { fromUserId });
 
+      // Accepting an offer proves the sender is the server-authoritative key
+      // holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
+      // still think we hold the key, we have been re-elected away — a lower
+      // userID joined. Stand down: our rotations would be rejected with
+      // NOT_KEY_HOLDER, but only after we applied the new key locally, leaving
+      // us deaf and mute until the real holder rotates again.
+      // handleParticipantLeft can still re-promote us later.
+      if (this._isKeyHolder) {
+        this._isKeyHolder = false;
+        this.clearKeyRotationTimer();
+        log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
+          fromUserId,
+        });
+      }
+
       // Resolve the pending connect promise if we were waiting for the key.
       if (this._roomKeyResolver) {
         this._roomKeyResolver();
@@ -517,7 +570,7 @@ export class E2EEManager {
     this._peerPublicKeys.delete(userId);
     clearPeerVerification(userId);
 
-    const channelId = this.deps.getCurrentChannelId();
+    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
     if (!channelId) return;
 
     const state = voiceStore.getState();
@@ -549,6 +602,15 @@ export class E2EEManager {
         this._roomKey = generateRoomKey();
         await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
         log.info("E2EE: rotated room key", { channelId, epoch: this._e2eeEpoch });
+
+        // A client elected while still waiting inside setupKeyExchange has a
+        // pending resolver — the offer it is waiting for will never arrive
+        // (we are the holder now), so unblock it with the key just generated.
+        if (this._roomKeyResolver) {
+          this._roomKeyResolver();
+          this._roomKeyResolver = null;
+          this._roomKeyRejector = null;
+        }
 
         // Snapshot peers before async loop — new peers that arrive during
         // wrapping are handled by the post-rotation check below.
@@ -642,7 +704,7 @@ export class E2EEManager {
   /** Rotate the room key on a timer tick (forward secrecy improvement). */
   async rotateKeyPeriodically(): Promise<void> {
     if (!this._isKeyHolder || this._rotatingKey) return;
-    const channelId = this.deps.getCurrentChannelId();
+    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
     if (!channelId) return;
 
     this._rotatingKey = true;
@@ -696,6 +758,8 @@ export class E2EEManager {
    *  keypair is intentionally NOT cleared here — it persists across calls to
    *  the same host (cleared only on host change / cleanupAll). */
   clearState(): void {
+    this._channelId = null;
+    this._offerChain = Promise.resolve();
     this._ecdhKeyPair = null;
     this._roomKey = null;
     this._peerPublicKeys.clear();

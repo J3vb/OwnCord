@@ -233,6 +233,30 @@ func TestCreateRole_CannotGrantUnheldBit(t *testing.T) {
 
 // ─── Update ──────────────────────────────────────────────────────────────────
 
+// An explicit position already held by ANOTHER role is refused on update just
+// as on create: tied positions read as equal rank in every >=/<= hierarchy
+// comparison, silently breaking one role's authority over the other's members.
+func TestUpdateRole_RejectsExplicitPositionCollision(t *testing.T) {
+	svc, _ := newRoleCRUDService(t)
+
+	// Owner moves Moderator (60) onto Member's slot (40).
+	_, _, err := svc.UpdateRole(context.Background(), 1, permissions.ModeratorRoleID,
+		RoleInput{Position: new(40)})
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("collision err = %v, want ErrBadRequest", err)
+	}
+}
+
+// Re-stating a role's own current position is not a collision.
+func TestUpdateRole_AllowsKeepingOwnPosition(t *testing.T) {
+	svc, _ := newRoleCRUDService(t)
+
+	if _, _, err := svc.UpdateRole(context.Background(), 1, permissions.ModeratorRoleID,
+		RoleInput{Position: new(60)}); err != nil {
+		t.Fatalf("same-position update: %v", err)
+	}
+}
+
 func TestUpdateRole_PartialBodyLeavesOtherFields(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 

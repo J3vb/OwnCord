@@ -98,6 +98,59 @@ func TestPubSub_UnsubscribeAllEmpty(t *testing.T) {
 	ps.UnsubscribeAll(c)
 }
 
+// A reconnect registers a new *Client under the same userID. A kick of the
+// replaced connection (sweepRevokedSessions, sweepStaleClients, the handlers.go
+// kicks) must not strip the live connection's subscriptions: it stays in
+// h.clients and keeps passing ping/pong, so it never reconnects — it just
+// silently stops receiving every broadcast.
+func TestPubSub_UnsubscribeAllKeepsReplacementClientSubscribed(t *testing.T) {
+	ps := newTestPubSub()
+	stale := makeTestClient(1)
+	live := makeTestClient(1)
+
+	ps.Subscribe(stale, TopicGlobal)
+	ps.Subscribe(stale, "channel:5")
+
+	// Reconnect: the new client re-subscribes, replacing the forward-index
+	// entries for the topics it shares with the old connection.
+	ps.Subscribe(live, TopicGlobal)
+	ps.Subscribe(live, "channel:7")
+
+	ps.UnsubscribeAll(stale)
+
+	if n := ps.SubscriberCount(TopicGlobal); n != 1 {
+		t.Errorf("global SubscriberCount = %d after kicking replaced client, want 1", n)
+	}
+	if n := ps.SubscriberCount("channel:7"); n != 1 {
+		t.Errorf("channel:7 SubscriberCount = %d, want 1", n)
+	}
+	// channel:5 was only ever the stale connection's, so it should be gone.
+	if n := ps.SubscriberCount("channel:5"); n != 0 {
+		t.Errorf("channel:5 SubscriberCount = %d, want 0 (stale client's own topic)", n)
+	}
+	if topics := ps.TopicsForClient(1); len(topics) != 2 {
+		t.Errorf("TopicsForClient = %v, want the live client's 2 topics", topics)
+	}
+}
+
+// Same hazard on the single-topic path: voice_leave.go and the
+// revokeUnreadableChannels sweep both call Unsubscribe with a *Client that may
+// already have been replaced.
+func TestPubSub_UnsubscribeKeepsReplacementClientSubscribed(t *testing.T) {
+	ps := newTestPubSub()
+	stale := makeTestClient(1)
+	live := makeTestClient(1)
+
+	ps.Subscribe(stale, "voice:7")
+	ps.Subscribe(live, "voice:7")
+
+	ps.Unsubscribe(stale, "voice:7")
+
+	if n := ps.SubscriberCount("voice:7"); n != 1 {
+		t.Errorf("voice:7 SubscriberCount = %d after unsubscribing replaced client, want 1", n)
+	}
+}
+
 // ─── Publish ─────────────────────────────────────────────────────────────────
 
 func TestPubSub_Publish(t *testing.T) {

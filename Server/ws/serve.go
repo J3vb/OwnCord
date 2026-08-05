@@ -24,6 +24,11 @@ const (
 	// wsReadLimitBytes is the maximum size of a single inbound WebSocket
 	// message. Must match the client-side upload cap.
 	wsReadLimitBytes = config.MaxMessageBytes
+
+	// maxColdReplay caps how many persisted events a single cold-tier reconnect
+	// replay may return. A gap that reaches the cap cannot be replayed correctly
+	// and falls back to a full ready — see handleReconnect.
+	maxColdReplay = 5000
 )
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
@@ -140,12 +145,21 @@ func (h *Hub) handleReconnect(
 			for cid := range allowedChannelIDs {
 				channelIDs = append(channelIDs, cid)
 			}
-			const maxColdReplay = 5000
 			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
-			if dbErr != nil {
+			switch {
+			case dbErr != nil:
 				slog.Warn("ws handleReconnect: cold-tier replay query failed",
 					"user_id", c.userID, "err", dbErr)
-			} else if len(persisted) > 0 {
+			case len(persisted) >= maxColdReplay:
+				// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
+				// result means the gap exceeds the cap and the NEWEST events were
+				// dropped. Replaying it would look like a complete resume to the
+				// client — it tracks only max(seq) and cannot detect the hole —
+				// silently losing state events that REST history never repairs.
+				// Leave events nil so the fall-through forces a full ready.
+				slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
+					"user_id", c.userID, "last_seq", lastSeq, "cap", maxColdReplay)
+			case len(persisted) > 0:
 				events = make([][]byte, 0, len(persisted))
 				for _, p := range persisted {
 					events = append(events, p.Payload)

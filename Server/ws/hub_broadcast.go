@@ -59,7 +59,25 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // The audience is resolved here, on the caller's goroutine, so the hub's
 // dispatch loop never blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
-	h.broadcastChannelScoped(ctx, channelID, msg, "voice event")
+	// A room's own participants must always receive its voice_state /
+	// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
+	// READ filter can exclude a live participant — whose client then keeps a
+	// stale E2EE key holder, stalling rotation and locking new joiners out
+	// until e2ee_timeout. Union the READ audience with the room's current
+	// participants; what outsiders may observe is unchanged.
+	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience))
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, c := range h.clients {
+		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
 }
 
 // broadcastChannelScoped enqueues msg for exactly the connected clients whose
@@ -540,10 +558,17 @@ func (h *Hub) BroadcastToAllLow(msg []byte) {
 	h.pubsub.PublishGlobalLow(msg)
 }
 
-// sendSequencedToUsersHigh stamps msg with a monotonic seq, stores it in the
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
 // replay buffer under channelID, and fans the wrapped payload out to the
-// provided users with high-priority delivery.
-func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+// provided users on the normal-priority queue.
+//
+// Sequenced frames must all share one per-client FIFO: writePump drains
+// sendHigh before send, so a seq-stamped frame on the high queue would reach
+// the socket ahead of lower-seq frames still queued in send. The client acks
+// max(seq) and replay is strictly seq > last_seq, so a disconnect in that
+// window would silently lose the overtaken events. The high queue remains for
+// unsequenced targeted messages only.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
 
@@ -553,7 +578,7 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
-		h.SendToUserHigh(userID, wrapped)
+		h.SendToUser(userID, wrapped)
 	}
 }
 

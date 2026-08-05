@@ -365,14 +365,38 @@ type clientEvent struct {
 // as computed by the handshake (serve.go). It gates the inherited voice-channel
 // subscription only; a nil set denies it (fail closed).
 func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
+	// Voice channel the replaced connection was in, if any. Re-elected below,
+	// after the hub lock is released.
+	var replacedVoiceChID int64
+
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
+		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		replacedVoiceChID = oldVoiceChID
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
 			if c.getVoiceChID() == 0 {
 				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+				// The announced ECDH key must survive with the voice state:
+				// the client keeps its keypair across a WS blip and only
+				// re-announces on a LiveKit-room reconnect, so without the
+				// transfer voice_join replays nothing for this user and new
+				// joiners' key exchanges time out.
+				c.setE2EEPubKey(oldE2EEKey, oldE2EESig)
+			}
+			// The focused channel must transfer too: the client never
+			// re-sends channel_focus on a resume (mountChannel early-returns
+			// on the same channel), so without it the ChannelTopic
+			// re-subscribe below is a no-op and the message stream dies
+			// silently. READ-gated like every ChannelTopic subscription;
+			// a nil set denies (fail closed).
+			if oldChID := old.getChannelID(); oldChID != 0 &&
+				c.getChannelID() == 0 && readableChannelIDs[oldChID] {
+				c.mu.Lock()
+				c.channelID = oldChID
+				c.mu.Unlock()
 			}
 		}
 		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
@@ -380,18 +404,32 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 		// by the handshake path in serve.go, which runs before registerNow.
 		// registerNow only handles in-memory client replacement.
 
-		// Remove the old client from all pub/sub topics before replacing.
-		h.pubsub.UnsubscribeAll(old)
-
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
+		// closeSend MUST precede UnsubscribeAll: Subscribe refuses clients
+		// whose send is closed, so this ordering leaves the old connection's
+		// in-flight handlers no window to re-take a stripped topic.
 		slog.Warn("hub: kicking stale connection for re-registering user",
 			"user_id", c.userID, "last_seq", c.lastSeq)
 		old.closeSend()
+
+		// Remove the old client from all pub/sub topics before replacing.
+		h.pubsub.UnsubscribeAll(old)
 	}
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 	h.mu.Unlock()
+
+	// A fresh connect (lastSeq == 0) drops the replaced connection's voice state
+	// without transferring it, so that channel just lost a participant and the
+	// E2EE key holder may need to move. handleVoiceLeave never runs on this path
+	// — readPump skips it when replaced, and it early-returns on already-cleared
+	// state — so re-elect here. Must be outside h.mu: updateKeyHolder takes
+	// keyHolderMu and then h.mu.RLock. The recompute reads live client voice
+	// state, so it is idempotent and also correct when the state was transferred.
+	if replacedVoiceChID != 0 {
+		h.updateKeyHolder(replacedVoiceChID)
+	}
 
 	// Subscribe the new client to default pub/sub topics.
 	h.pubsub.Subscribe(c, TopicGlobal)
@@ -402,13 +440,20 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	if chID := c.getChannelID(); chID != 0 {
 		h.pubsub.Subscribe(c, ChannelTopic(chID))
 	}
-	// If the client is already in a voice channel (e.g. reconnect), re-subscribe
-	// to that channel's topic so the message stream keeps flowing without a new
-	// channel_focus. Voice membership is gated on CONNECT_VOICE alone, so it must
-	// not by itself grant a channel's message stream: subscribe only when the
-	// handshake confirmed READ_MESSAGES on that channel.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 && readableChannelIDs[voiceChID] {
-		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+	// If the client is already in a voice channel (e.g. reconnect), restore its
+	// subscriptions without a new voice_join (a same-channel rejoin is rejected
+	// with ALREADY_JOINED) or channel_focus.
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		// VoiceTopic is the only transport for voice_e2ee_announce relays and
+		// carries nothing else, for a channel the user already joined via the
+		// CONNECT_VOICE-gated voice_join — so no READ gate.
+		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
+		// Voice membership is gated on CONNECT_VOICE alone, so it must not by
+		// itself grant a channel's message stream: subscribe only when the
+		// handshake confirmed READ_MESSAGES on that channel.
+		if readableChannelIDs[voiceChID] {
+			h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+		}
 	}
 }
 
@@ -423,7 +468,12 @@ func (h *Hub) unregisterNow(c *Client) bool {
 		return false // not replaced
 	}
 	h.mu.Unlock()
-	return true // different client registered = was replaced
+	// exists means a *different* client holds the slot — a genuine replacement,
+	// whose teardown must not mark the live connection's user offline. An absent
+	// entry means this client was already kicked (every kick path deletes it via
+	// kickClient), which is a real disconnect and still needs the offline
+	// presence broadcast and voice cleanup in readPump's defer.
+	return exists
 }
 
 // ClientCount returns the number of currently registered clients (test helper).

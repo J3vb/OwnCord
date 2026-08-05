@@ -61,6 +61,7 @@ vi.mock("livekit-client", () => ({
   ExternalE2EEKeyProvider: vi.fn(() => ({
     setKey: vi.fn(),
     getKeys: vi.fn().mockReturnValue([]),
+    removeAllListeners: vi.fn(),
   })),
   createLocalVideoTrack: vi.fn(async () => ({
     kind: "video",
@@ -160,8 +161,11 @@ vi.mock("@lib/identity", () => ({
   storeIdentityPin: vi.fn(async () => true),
 }));
 
-// Stub Worker for E2EE web worker (not available in Node/vitest)
-globalThis.Worker = vi.fn() as unknown as typeof Worker;
+// Stub Worker for E2EE web worker (not available in Node/vitest). Instances
+// carry a terminate() mock so worker-lifecycle assertions can observe teardown.
+globalThis.Worker = vi.fn(function (this: { terminate: () => void }) {
+  this.terminate = vi.fn();
+}) as unknown as typeof Worker;
 
 // Now import
 import { parseUserId, LiveKitSession, getRoomForStats } from "../../src/lib/livekitSession";
@@ -1668,7 +1672,7 @@ describe("LiveKitSession", () => {
   });
 
   describe("ensureLiveKitProxy", () => {
-    it("invokes start_livekit_proxy on first call and caches port", async () => {
+    it("invokes start_livekit_proxy on every call so a re-pinned cert is picked up", async () => {
       session.setServerHost("example.com:443");
       const port1 = await (session as any).ensureLiveKitProxy();
       expect(port1).toBe(7881);
@@ -1677,10 +1681,15 @@ describe("LiveKitSession", () => {
         remoteHost: "example.com:443",
       });
 
+      // A later join must invoke again: only the Rust side can compare the
+      // running proxy's pin against certs.json after the user accepts a
+      // rotated cert. A JS port cache would keep every voice rejoin tunneling
+      // into the stale pin until logout. The Rust reuse branch dedups, so the
+      // repeat call is cheap.
       mockInvoke.mockClear();
       const port2 = await (session as any).ensureLiveKitProxy();
       expect(port2).toBe(7881);
-      expect(mockInvoke).not.toHaveBeenCalled();
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
     });
 
     it("appends :443 when serverHost has no port", async () => {
@@ -1872,6 +1881,35 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("E2EE worker lifecycle", () => {
+    // The key provider lives for the whole process while livekit registers a
+    // new SetKey listener on it per Room — with no matching removal — and the
+    // per-room E2EE Worker is never terminated. Without explicit teardown,
+    // every join/switch/reconnect-attempt leaks a running worker that keeps
+    // receiving every future room key via setKey fan-out.
+    it("clears stale provider listeners and terminates the previous worker on createRoom", () => {
+      (session as any).createRoom();
+      const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
+      const worker1 = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
+
+      (session as any).createRoom();
+
+      expect(worker1.terminate).toHaveBeenCalled();
+      const provider = (session as any)._e2ee.keyProvider;
+      expect(provider.removeAllListeners).toHaveBeenCalled();
+    });
+
+    it("terminates the current worker on leaveVoice so the last room key does not stay resident", () => {
+      (session as any).createRoom();
+      const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
+      const worker = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
+
+      session.leaveVoice(false);
+
+      expect(worker.terminate).toHaveBeenCalled();
+    });
+  });
+
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
@@ -1954,6 +1992,42 @@ describe("LiveKitSession", () => {
       await reconnectPromise;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+    });
+
+    it("disconnects the failed attempt's room instead of leaking it", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const ac = new AbortController();
+
+      mockRoom.connect
+        .mockRejectedValueOnce(new Error("first attempt failed"))
+        .mockResolvedValueOnce(undefined);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      // The room whose connect failed must be torn down — in "reconnecting"
+      // state this._room is null, so the cleanup must target the attempt's
+      // own room. A leaked room keeps its listeners and its synchronous
+      // Disconnected event spawns a second, uncancellable reconnect loop.
+      expect(mockRoom.removeAllListeners).toHaveBeenCalled();
+      expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
     });
 
     it("calls leaveVoice, leaveVoiceChannel, and error callback after all attempts fail", async () => {

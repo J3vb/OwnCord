@@ -161,3 +161,108 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 		t.Fatalf("expected db tier count=1, got %d", dbTier)
 	}
 }
+
+// TestReconnect_ColdTierAtRowLimit_ForcesFullReady locks the truncation guard.
+//
+// GetEventsSinceForChannels is "ORDER BY seq ASC LIMIT n", so a gap larger than
+// the cap returns the OLDEST n rows and silently drops the newest. Replaying
+// that as a successful resume looks complete to the client — it tracks only
+// max(seq) and cannot detect the hole — so the dropped range is lost until some
+// later full resync. State events (channel/role/member changes) in that range
+// are never repaired by REST history fetches.
+//
+// Setup mirrors TestReconnect_BufferMiss_FallsBackToDBTier, but seeds 100 more
+// events than the cap so the query comes back exactly full.
+func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+
+	userID, err := database.CreateUser(context.Background(), "reconnect-overflow-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Seed seqs 501..(500+cap+100): the query caps at `cap` rows, so the newest
+	// 100 are dropped — the exact overflow condition.
+	eventStore := openEventStoreDB(t)
+	bgCtx := context.Background()
+	const overflow = 100
+	events := make([]db.PersistedEvent, 0, ws.MaxColdReplayForTest+overflow)
+	for i := range ws.MaxColdReplayForTest + overflow {
+		seq := int64(501 + i)
+		events = append(events, db.PersistedEvent{
+			Seq:       seq,
+			EventType: "broadcast",
+			ChannelID: 0,
+			Payload:   fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq),
+		})
+	}
+	if n, err := eventStore.PersistEvents(bgCtx, events); err != nil || n != len(events) {
+		t.Fatalf("PersistEvents: persisted %d/%d, err=%v", n, len(events), err)
+	}
+
+	hub := ws.NewHub(database, limiter, nil)
+	hub.SetEventStore(eventStore)
+	go hub.Run()
+	defer hub.Stop()
+
+	// Ring buffer holds 501..1500, so last_seq=500 misses it and the cold tier
+	// is consulted.
+	rb := hub.ReplayBuffer()
+	dummyPayload := []byte(`{"type":"broadcast"}`)
+	for seq := uint64(501); seq <= 1500; seq++ {
+		rb.Push(seq, 0, dummyPayload)
+	}
+	if oldest := rb.OldestSeq(); oldest != 501 {
+		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	dialCtx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
+	defer cancel()
+
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	authMsg := map[string]any{
+		"type": "auth",
+		"payload": map[string]any{
+			"token":    token,
+			"last_seq": uint64(500),
+		},
+	}
+	raw, _ := json.Marshal(authMsg)
+	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+
+	// Reading the first frame guarantees the handshake picked a tier.
+	if _, _, err := conn.Read(dialCtx); err != nil {
+		t.Fatalf("read handshake response: %v", err)
+	}
+
+	_, dbTier, fullTier := hub.ReconnectTierStats()
+	if dbTier != 0 {
+		t.Errorf("db tier count = %d, want 0: a truncated cold-tier replay was delivered as a complete resume", dbTier)
+	}
+	if fullTier != 1 {
+		t.Errorf("full tier count = %d, want 1: an over-cap gap must force a full ready re-sync", fullTier)
+	}
+}

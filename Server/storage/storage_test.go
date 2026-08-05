@@ -449,6 +449,38 @@ func (f *failReader) Read([]byte) (int, error) {
 	return 0, errors.New("simulated read error")
 }
 
+// midCopyFailReader serves a valid header, then fails — reaching the
+// copy-phase error branch after the destination file already exists
+// (a write-side disk error like ENOSPC fails at the same branch).
+type midCopyFailReader struct{ served bool }
+
+func (r *midCopyFailReader) Read(p []byte) (int, error) {
+	if !r.served {
+		r.served = true
+		return copy(p, "plaintext"), nil
+	}
+	return 0, errors.New("simulated mid-copy failure")
+}
+
+// A Save that fails after creating the file must not leave a partial file
+// behind: the orphan sweep is DB-row-driven and nothing walks the storage
+// dir, so a row-less file would be leaked forever. TestSave_ExceedsMaxSize
+// locks the same contract for the oversize branch.
+func TestSave_MidCopyError_RemovesPartialFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	s, err := storage.New(tmpDir, 10)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err = s.Save("partial-file", &midCopyFailReader{}); err == nil {
+		t.Fatal("Save with mid-copy failure should return error")
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "partial-file")); !os.IsNotExist(statErr) {
+		t.Error("partial file should be removed after a failed save")
+	}
+}
+
 // ─── resolvedPath edge case (via Save with dot prefix) ──────────────────────
 
 func TestSave_HiddenFilename(t *testing.T) {

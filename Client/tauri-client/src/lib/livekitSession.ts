@@ -333,7 +333,18 @@ export class LiveKitSession {
 
   // --- Room factory ---
 
+  /** The current room's E2EE worker. livekit never terminates it, so the
+   *  session must — a leaked worker keeps receiving every future room key
+   *  through the process-lifetime key provider's setKey fan-out. */
+  private _e2eeWorker: Worker | null = null;
+
   private createRoom(): Room {
+    // livekit's per-room E2EEManager registers a SetKey listener on the
+    // shared key provider and never removes it; only those managers
+    // subscribe, so clear them all before the new Room re-registers.
+    this._e2ee.keyProvider.removeAllListeners();
+    this._e2eeWorker?.terminate();
+    this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
     const quality = getStreamQuality();
     const isSource = quality === "source";
     const newRoom = new Room({
@@ -363,7 +374,7 @@ export class LiveKitSession {
       // per-channel symmetric key. The SFU only sees encrypted frames.
       e2ee: {
         keyProvider: this._e2ee.keyProvider,
-        worker: new Worker(new URL("livekit-client/e2ee-worker", import.meta.url)),
+        worker: this._e2eeWorker,
       },
     });
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
@@ -415,8 +426,12 @@ export class LiveKitSession {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
+      // Aliased outside the try so the catch can tear down the attempt's own
+      // room: this._room is null while state is "reconnecting".
+      let attemptRoom: Room | null = null;
       try {
         const newRoom = this.createRoom();
+        attemptRoom = newRoom;
         const cleanupAbortedReconnect = async (): Promise<void> => {
           newRoom.removeAllListeners();
           try {
@@ -518,10 +533,13 @@ export class LiveKitSession {
         return;
       } catch (err) {
         log.warn("Auto-reconnect failed", { attempt, url, error: err });
-        const failedRoom = this._room;
-        if (failedRoom !== null) {
-          failedRoom.removeAllListeners();
-          failedRoom
+        // Tear down this attempt's room (this._room is null in "reconnecting"
+        // state) — a leaked room keeps its listeners, and its synchronous
+        // Disconnected event would spawn a second, uncancellable reconnect
+        // loop. null only if createRoom() itself threw.
+        if (attemptRoom !== null) {
+          attemptRoom.removeAllListeners();
+          attemptRoom
             .disconnect()
             .catch((disconnectErr) =>
               log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
@@ -589,9 +607,14 @@ export class LiveKitSession {
     return proxyPath;
   }
 
-  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit. */
+  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit.
+   *
+   *  Always invokes start_livekit_proxy — never cache the port here. Only the
+   *  Rust side can compare the running proxy's TOFU pin against certs.json,
+   *  so after the user accepts a rotated cert a JS port cache would keep
+   *  every voice rejoin tunneling into the stale pin until logout. The Rust
+   *  reuse branch dedups unchanged host+pin, so the repeat call is cheap. */
   private async ensureLiveKitProxy(): Promise<number> {
-    if (this.liveKitProxyPort !== null) return this.liveKitProxyPort;
     if (this.serverHost === null) throw new Error("no server host for LiveKit proxy");
     // Ensure host:port format — default to 443 (standard HTTPS) when the
     // server is behind a reverse proxy. Without an explicit port, the Rust
@@ -1182,8 +1205,11 @@ export class LiveKitSession {
       room.removeAllListeners();
       room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
-    // Clear client-side E2EE state (ECDH keypair, room key, peer keys).
+    // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and
+    // kill the E2EE worker so the last room key does not stay resident in it.
     this._e2ee.clearState();
+    this._e2eeWorker?.terminate();
+    this._e2eeWorker = null;
     // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
     // pendingJoin, and the joinGeneration (idle has none). Any in-flight
     // connectAndSetup() will detect the state type change at its next checkpoint.

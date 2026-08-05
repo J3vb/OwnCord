@@ -53,6 +53,7 @@ import {
   removeDmChannel,
   updateDmLastMessage,
   updateDmLastMessagePreview,
+  incrementDmMention,
   dmDisplayName,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -296,15 +297,15 @@ export function wireDispatcher(
       // DM channel IDs are not in channelsStore (they use dmStore), so
       // incrementUnread is a no-op for DMs, but the own-message guard is
       // applied here for defence-in-depth.
+      const isMention = highlightsCurrentUser(payload.content, {
+        mentions: payload.mentions,
+        mentionsEveryone: payload.mentions_everyone,
+      });
+
       if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
         incrementUnread(payload.channel_id);
         // A mention is an unread too — the mention badge just outranks it.
-        if (
-          highlightsCurrentUser(payload.content, {
-            mentions: payload.mentions,
-            mentionsEveryone: payload.mentions_everyone,
-          })
-        ) {
+        if (isMention) {
           incrementMention(payload.channel_id);
         }
       }
@@ -323,6 +324,12 @@ export function wireDispatcher(
           );
         } else {
           updateDmLastMessage(payload.channel_id, payload.id, payload.content, payload.timestamp);
+          // The DM badge reads dmStore's mentionCount (mute-immune, rendered
+          // by DmSidebar) — incrementMention above no-ops for DM ids, which
+          // are absent from channelsStore. Same guards as the unread bump.
+          if (isMention) {
+            incrementDmMention(payload.channel_id);
+          }
         }
       }
 

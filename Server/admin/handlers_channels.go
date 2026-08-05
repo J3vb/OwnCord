@@ -269,6 +269,13 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		id := existing.ID
 
+		// Evict voice participants BEFORE deleting the row: the voice_states
+		// FK cascade wipes the rows the cleanup reads, and the stale sweeper
+		// cannot recover participants of a channel that no longer exists.
+		if hub != nil {
+			hub.CleanupVoiceForChannel(id)
+		}
+
 		if err := database.AdminDeleteChannel(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
 			return
