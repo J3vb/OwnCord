@@ -380,35 +380,43 @@ specified, and every suite is green.
 
 **P1 — significant risk or misleading state**
 
-- **DC-01** Extend `docs/protocol-schema.json` with `chat_command`,
-  `command_reply`, `plugin_broadcast` so the codegen gate covers them (the
-  hand-written `MsgTypeChatCommand` constant must move/be removed in the same
-  change — that is why this was *not* done in this docs-only branch).
-- **DC-02** The three open security findings A-2026-08-01/02/03 (already
-  tracked in the security review; listed here so the two audits stay linked).
-- **DC-03** Three native e2e specs (`dm-system`, `reconnection`,
-  `theme-persistence`) are matched by **no** Playwright project — add to
-  `native-authenticated` or delete (`playwright.config.native.ts:52-68`).
+- **DC-01** ~~Extend `docs/protocol-schema.json` with `chat_command`,
+  `command_reply`, `plugin_broadcast` so the codegen gate covers them~~
+  **RESOLVED 2026-08-04 (remediation pass, this branch)** — schema at 27/39,
+  constants regenerated both sides, hand-rolled declarations replaced, and
+  the contract test's exception list is empty now.
+- **DC-02** ~~The three open security findings A-2026-08-01/02/03~~
+  **RESOLVED 2026-08-04 (remediation pass)** — all three fixed with pinning
+  tests; statuses closed in [audit-2026-08-04.md](audit-2026-08-04.md).
+- **DC-03** ~~Three native e2e specs matched by **no** Playwright project~~
+  **RESOLVED 2026-08-04 (remediation pass)** — all three joined
+  `native-authenticated` (they use the persistent fixture + `ensureLoggedIn`).
 - **DC-04** E2E-coverage headline gaps: cert-TOFU flow, E2EE verification,
-  admin panel, updater (matrix rows 5/38/48/49). The TOFU and E2EE flows
-  guard the product's core security promises and have zero journey-level
-  coverage.
+  admin panel, updater (matrix rows 5/38/48/49). **PARTIALLY RESOLVED
+  2026-08-04 (remediation pass)** — the cert-TOFU ceremony now has six e2e
+  tests (`cert-tofu.spec.ts`: first-use content/trust/cancel/non-stacking,
+  mismatch rows/disconnect). E2EE verification, admin panel and updater
+  journeys remain open.
 
 **P2 — hygiene with real cost**
 
-- **DC-05** Dead-module deletion decision: `ServerStrip.ts`, `FileUpload.ts`,
-  `lib/reconcile.ts`, `src/generated/**` + their test files + the CI typegen
-  step (or alternatively adopt the generated bindings for the 8 missing
-  commands and use them). Also the `incrementDmMention` export.
+- **DC-05** ~~Dead-module deletion decision~~ **RESOLVED 2026-08-04
+  (remediation pass, decision: delete)** — `ServerStrip.ts`, `FileUpload.ts`,
+  `lib/reconcile.ts`, `public/rnnoise-worklet.ts`, `src/generated/**`, the
+  orphan `getSounds`/`deleteSound` API methods, `incrementDmMention`, their
+  test files, and the entire typegen pipeline (CI steps, tauri.conf.json
+  plugin block, Cargo build-dep) are gone; knip is blocking in CI. The dead
+  `sounds` table fell in the same pass (migration 029, A-2026-07-13).
 - **DC-06** `go test -tags wazero` / `-tags otel` run nowhere
   (T-2026-07-25-16) — ~598 lines of tests permanently dark.
 - **DC-07** Flip `client-e2e` to blocking after a soak (it has been green
   since the mock repair; 270/270 in this session).
 - **DC-08** `getIdentityPin` fail-open on transient keyring errors
   (`identity.ts:106-118`, F3 follow-up 3).
-- **DC-09** Stale code comment `serve_ready.go:141` contradicts the actual
-  ready payload; backup restore writes no audit row (§8, §5-security-review
-  adjacency); `handleApplyUpdate` TODO for container builds.
+- **DC-09** **PARTIALLY RESOLVED 2026-08-04 (remediation pass)** — the
+  `serve_ready.go` comment now cites `docs/protocol.md` (and `host_ui.go`'s
+  phantom-route comment fell in the same sweep). Still open: backup restore
+  writes no audit row; `handleApplyUpdate` TODO for container builds.
 - **DC-10** Node version skew: CI pins 20, no `.nvmrc`, this session ran 22
   (everything passed, but the skew is unmanaged — one `.nvmrc` file closes
   2026-04-07 #11's remainder).
@@ -424,10 +432,16 @@ specified, and every suite is green.
   `aria-modal`, screen-reader labels) — nothing tracks this today.
 - **DC-14** `voice_speakers` is documented "Reserved — not currently
   emitted"; either emit or drop from the schema at the next protocol rev.
+  (Remediation-pass decision: kept reserved — same treatment as
+  `member_leave`; dropping either is a protocol rev, not dead-code cleanup.)
 - **DC-15** Anchor-drift hygiene: several UX-spec `file:line` anchors were
   200-700 lines stale within 3 weeks; consider symbol-based references.
 
 ### Recommended next steps (ordered)
+
+*(Original list, kept for the record — items 2-6 landed in the same-branch
+remediation pass below, except the DC-07 soak decision and the E2EE-journey
+half of item 4.)*
 
 1. Land this branch (docs are the record everything else keys off).
 2. DC-03 + DC-07 (two-line CI/config changes, immediate coverage payback).
@@ -438,6 +452,76 @@ specified, and every suite is green.
 5. DC-05 dead-code deletion PR.
 6. The security review's A-2026-08-01/02/03 remediation (separate track,
    already specified there).
+
+---
+
+## 11. Remediation addendum (2026-08-04, same branch)
+
+**Method:** the pass above was read-only about code; this addendum records the
+remediation commits that followed on the same branch, executing the gap list.
+Every closure is stamped in place in the sections above and in the sibling
+audits' closure tables; this section is the narrative summary.
+
+### What shipped
+
+| Area | Change | Closes |
+|------|--------|--------|
+| Security | Hierarchy guard on channel-override DELETE; DM exclusion across the admin channel surface; block check on DM rings — each with pinning tests | A-2026-08-01/02/03 (DC-02) |
+| Dead code (client) | `ServerStrip.ts`, `FileUpload.ts`, `lib/reconcile.ts`, `public/rnnoise-worklet.ts`, orphan `getSounds`/`deleteSound` + `SoundResponse`, `incrementDmMention`, their test files; `server-strip.spec.ts` renamed `sidebar-header.spec.ts` to say what it tests | DC-05 |
+| Dead code (typegen) | `src/generated/**` and its entire feeding pipeline: CI patch/generate steps, `tauri.conf.json` plugin block, inert `Cargo.toml` build-dep (lockfile shrinks by exactly the typegen subtree) | DC-05 |
+| Dead schema | Migration `029_drop_sounds_table.sql`; sqlc model regenerated; schema.md / data-model.md / 07-19 closure table updated in the same commit | A-2026-07-13 |
+| Server hygiene | `NewWAFMiddleware` wrapper deleted; `MsgTypeAuth` / `MsgTypeDMChannelClose` constants now used at their call sites; stale comments fixed (`config.go` Postgres claim, `host_ui.go` phantom route, `serve_ready.go` PROTOCOL.md) | DC-09 (partial) |
+| Protocol | Plugin command family added to `protocol-schema.json` (27 c2s / 39 s2c), constants regenerated Go+TS, hand-rolled declarations replaced, contract-test exception list emptied, protocol.md tables updated | DC-01 |
+| Tests | 3 orphaned native specs wired into `native-authenticated` (+14 tests); `tsconfig.e2e.json` + `typecheck:e2e` + CI step (47 spec files were typechecked nowhere; 1 real error found and fixed); `modalFactory.ts` 57.6% → 100%; cert-TOFU ceremony e2e (6 tests, race-free via exposed listener registry) | DC-03, DC-04 (TOFU half) |
+| CI/process | knip blocking (its `\|\| true` was masking a real unused-export finding); `claude.yml` actions SHA-pinned like every other workflow; PR template gains the docs-maintenance checkbox A-2026-07-03 recommended | DC-06's sibling gap, A-2026-07-03 |
+| Docs | contributing.md (dead postgres row, missing Make targets, tombstone link, coverage claim, branch flow), docs/security.md (broken link, 48h-vs-7d contradiction → SECURITY.md canonical), audit-2026-04-07 closure table (#6/#7/#10/#11), README (branch flow, Docs Index +6, plugin feature row, de-anchored security row), server-configuration env-var subset note, mcp-introspect line count, types.ts header | §5's misses |
+
+### Decisions taken (and why)
+
+- **Plugin host-capability API kept.** `HTTPDo`/`RegisterUI`/`Storage*`/`Emit`/
+  `UITabBindings` are unwired but tested scaffolding for the announced
+  host-function work (`sandbox_wazero.go` gate comment); deleting them would
+  be de-scoping a roadmap feature, not cleaning dead code. The false comments
+  around them were fixed instead.
+- **`voice_speakers` and `member_leave` kept as reserved protocol entries.**
+  Both are documented "Reserved — not currently emitted" in protocol.md;
+  removing them is a protocol rev for the owner to schedule (DC-14).
+- **`client-e2e` stays non-blocking (DC-07).** Flipping it is explicitly a
+  soak-length call for the owner; this pass adds green evidence (full suite
+  including the new TOFU spec) but does not shortcut the soak.
+- **DELETE `.../permissions/{roleId}` on a nonexistent role now answers 404**
+  (was 204) — the cost of resolving the role for the hierarchy guard, and it
+  matches the PUT twin. The delete-again idempotency contract on an *existing*
+  role is unchanged.
+
+### Verification (this session, remediation HEAD)
+
+| Suite | Result |
+|-------|--------|
+| Go `go test -race ./...` | all 14 test packages ok (admin 32.5s, api 126.6s, db 262.3s, service 163.3s, ws 166.2s, …) |
+| Go `-tags deadlock` pass | all packages ok (ws 54.1s) |
+| Go tag-variant builds (`otel`, `wazero`, `otel,wazero`) | all build clean (plus the default build) |
+| `make sqlc-verify` + `make protocol-verify` | both pass |
+| Client typecheck + typecheck:e2e + oxlint/eslint + prettier | all pass (two pre-existing oxlint style warnings, non-blocking) |
+| knip | exits 0 (blocking in CI now) |
+| Client unit/integration (vitest) | 164 files, **4360/4360 passed**; coverage 95.35% stmts / 92.04% branches / 93.89% funcs |
+| Playwright web suite | **276/276 passed**, 8.9 min (270 baseline + 6 new TOFU tests) |
+| Playwright `@parity` subset | 15/15 passed, 33.4s |
+
+Environment notes: Linux container, Node 22 (CI pins 20 — DC-10 remains),
+Go via `GOTOOLCHAIN=auto`; Rust/Tauri compile not attempted here (webkit2gtk
+system deps absent) — `rust-tests`' clippy pass and the `tauri-build` job
+cover the (inert) `Cargo.toml` change in CI. golangci-lint and the
+windows-latest legs are likewise CI-only.
+
+### Still open after this pass
+
+DC-04 (E2EE-verification, admin-panel and updater journeys), DC-06
+(tag-gated Go tests dark in CI), DC-07 (soak decision), DC-08
+(`getIdentityPin` fail-open), DC-09's backup-restore audit row and
+`handleApplyUpdate` TODO, DC-10 (`.nvmrc`), DC-11 (npm pinning policy),
+DC-12/13/15 (UX gaps, a11y pass, anchor hygiene), and the 2026-04-07
+carryovers #5 (accepted), #8, #9.
 
 ---
 

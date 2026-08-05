@@ -1,15 +1,23 @@
 # E2E Test Status — 2026-08-04
 
-**Verified against:** commit `5630aa1` by an actual local run.
+**Verified against:** the 2026-08-04 remediation HEAD (commit `914cdac`) by an
+actual local run.
 **Command:** `CI=1 npx playwright test --config=playwright.config.ts`
 (headless Chromium, 1 worker, retries 2, the same knobs CI uses).
 
-## Current status: 270 web tests, 270 passed (100%)
+## Current status: 276 web tests, 276 passed (100%)
 
 | Run | Result | Wall time |
 | --- | ------ | --------- |
-| Full web suite (`playwright.config.ts`) | **270 / 270 passed**, 0 flaky retries observed | 8.6 min |
+| Full web suite (`playwright.config.ts`) | **276 / 276 passed**, 0 flaky retries observed | 8.9 min |
 | `@parity` subset (`--grep "@parity"` — mirrors the **blocking** `client-e2e-parity` CI job) | **15 / 15 passed** | 33 s |
+
+Changes since the `5630aa1` run: `cert-tofu.spec.ts` added (6 tests covering
+the TOFU first-use/mismatch ceremony — DC-04), `server-strip.spec.ts` renamed
+`sidebar-header.spec.ts` (it tests the unified header that replaced the
+deleted ServerStrip component), and the mock now exposes its event-listener
+registry (`window.__tauriEventListeners`) so specs can wait for async listener
+registration instead of racing it.
 
 Flake accounting rule used here: a spec is *flaky* only if it failed and then
 passed on retry within a run; a spec failing every attempt is *failing*, named
@@ -17,14 +25,15 @@ by file. This run had neither.
 
 ## Suite inventory
 
-- **Web (mocked Tauri):** 37 spec files under `tests/e2e/`, 270 tests. Runs
+- **Web (mocked Tauri):** 37 spec files under `tests/e2e/`, 276 tests. Runs
   against the Vite dev server (`playwright.config.ts`) or the production
   bundle (`playwright.config.prod.ts`). Fifteen tests across
   `emoji-voicemod.parity.spec.ts`, `gating-badges.parity.spec.ts` and
   `social.parity.spec.ts` carry the `@parity` tag and gate CI.
 - **Native (real Tauri binary via CDP):** 11 spec files under
   `tests/e2e/native/`, run by `playwright.config.native.ts` on Windows
-  (WebView2). **Deliberately not wired to CI.**
+  (WebView2) — all 11 matched by a project since 2026-08-04.
+  **Deliberately not wired to CI.**
 
 ## CI wiring (`.github/workflows/ci.yml`)
 
@@ -36,15 +45,18 @@ by file. This run had neither.
 
 ## Known issues (open)
 
-1. **Three native specs are never executed.** `playwright.config.native.ts`
-   matches 8 of the 11 native spec files; `dm-system.spec.ts`,
-   `reconnection.spec.ts` and `theme-persistence.spec.ts` are in neither
-   project's `testMatch`, so they run under no configuration at all. Either
-   add them to `native-authenticated` or delete them.
-2. **`client-e2e` is still non-blocking.** The suite has been green since the
+1. **`client-e2e` is still non-blocking.** The suite has been green since the
    mock repair that closed audit finding T-2026-07-25-21 (a `start_http_proxy`
    stub plus the voice-premise rewrite); promoting the job to blocking after a
-   soak period is the remaining step.
+   soak period is the remaining step (owner's call — this file just keeps
+   adding green evidence).
+
+## Resolved (2026-08-04 remediation)
+
+- ~~Three native specs are never executed.~~ `dm-system.spec.ts`,
+  `reconnection.spec.ts` and `theme-persistence.spec.ts` (14 tests) joined
+  `native-authenticated`'s `testMatch` — all three use the persistent
+  fixture + `ensureLoggedIn`, so the shared-exe project is where they belong.
 
 ## History (dispositions of the old contents of this file)
 

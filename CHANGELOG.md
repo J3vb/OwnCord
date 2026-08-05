@@ -18,6 +18,30 @@ behavioural changes operators must know about.
 - **docs:** full documentation audit against `5630aa1` — reference docs,
   architecture pages, and UX specs corrected; plans and prior audits given
   verified statuses; see `docs/audit-2026-08-04-docs-and-coverage.md`.
+- **security(server):** closed the three 2026-08-04 review findings — the
+  channel role-override **DELETE** now enforces the same hierarchy guard as
+  PUT (A-2026-08-01); the admin channel list/edit/delete surface no longer
+  sees DM channels, answering 404 for their ids (A-2026-08-02); DM call
+  rings respect blocks like every other DM interaction (A-2026-08-03).
+  Behavioural note: deleting a channel override for a *nonexistent* role now
+  returns 404 (was 204), matching PUT.
+- **server:** migration **029** drops the never-used `sounds` table (dead
+  since the initial schema; A-2026-07-13). Applies automatically on first
+  start; no operator action.
+- **protocol:** the plugin command family (`chat_command`, `command_reply`,
+  `plugin_broadcast`) is now part of `protocol-schema.json` and the
+  generated constants (27 client→server / 39 server→client). Wire strings
+  are unchanged — no client or plugin impact.
+- **chore(client):** dead modules deleted (`ServerStrip`, `FileUpload`,
+  `reconcile`, a stray worklet copy, orphan sounds API methods) and the
+  unused tauri-typegen pipeline retired (`src/generated/**`, its CI steps,
+  config block, and build-dependency).
+- **ci:** knip is now blocking; Playwright specs are typechecked
+  (`typecheck:e2e`); three orphaned native e2e specs run again;
+  `claude.yml` actions are SHA-pinned; the PR template asks for docs
+  updates per the architecture maintenance rule.
+- **tests(client):** the TOFU certificate ceremony has e2e coverage
+  (first-use + mismatch journeys), and `modalFactory` is fully covered.
 
 ## v1.2.0-alpha.1 — Discord feature parity
 
