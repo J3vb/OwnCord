@@ -22,8 +22,11 @@ async function mockUpdaterSession(
 ): Promise<void> {
   await mockTauriFullSession(page);
   await page.addInitScript((cfg) => {
-    const t = (window as unknown as { __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> } })
-      .__TAURI_INTERNALS__;
+    const t = (
+      window as unknown as {
+        __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+      }
+    ).__TAURI_INTERNALS__;
     const orig = t.invoke.bind(t);
     const w = window as unknown as {
       __resolveInstall: (() => void) | null;
@@ -33,8 +36,8 @@ async function mockUpdaterSession(
     w.__rejectInstall = null;
     t.invoke = async (cmd: string, args?: unknown) => {
       if (cmd === "check_client_update") {
-        // Recorded by the base mock's __invokeLog via the orig call below? No —
-        // wrapped commands short-circuit, so log them here for parity.
+        // Short-circuits before the base mock, so this command never appears
+        // in __invokeLog — assertions below only rely on logged base commands.
         return cfg.available
           ? { available: true, version: cfg.version, body: "release notes" }
           : { available: false, version: null, body: null };
@@ -62,7 +65,11 @@ async function emitProgress(page: Page, received: number, total: number | null):
         .__tauriEventListeners["update-progress"]?.length ?? 0) > 0,
   );
   await page.evaluate(
-    (p) => (window as unknown as { __tauriEmitEvent: (e: string, d: unknown) => void }).__tauriEmitEvent("update-progress", p),
+    (p) =>
+      (window as unknown as { __tauriEmitEvent: (e: string, d: unknown) => void }).__tauriEmitEvent(
+        "update-progress",
+        p,
+      ),
     { received, total },
   );
 }
@@ -113,7 +120,9 @@ test.describe("Updater journey", () => {
 
     // Install completes → the app relaunches itself (spec: "applied — App
     // relaunches automatically"; there is no separate restart prompt).
-    await page.evaluate(() => (window as unknown as { __resolveInstall: () => void }).__resolveInstall());
+    await page.evaluate(() =>
+      (window as unknown as { __resolveInstall: () => void }).__resolveInstall(),
+    );
     await page.waitForFunction(() =>
       (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
         (e) => e.cmd === "plugin:process|restart",

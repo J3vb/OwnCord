@@ -237,4 +237,3 @@ export function attachDragHandlers(
     { signal },
   );
 }
-

@@ -182,7 +182,9 @@ async function emitPeerAnnounce(
 async function invokesOf(page: Page, cmd: string): Promise<Array<Record<string, unknown>>> {
   return page.evaluate(
     (c) =>
-      (window as unknown as { __invokeLog: Array<{ cmd: string; args: Record<string, unknown> }> }).__invokeLog
+      (
+        window as unknown as { __invokeLog: Array<{ cmd: string; args: Record<string, unknown> }> }
+      ).__invokeLog
         .filter((e) => e.cmd === c)
         .map((e) => e.args),
     cmd,
