@@ -58,7 +58,9 @@ test.describe("Cert TOFU — first use", () => {
     await emitCertTofu(page, FIRST_USE);
 
     await expect(page.locator("h3", { hasText: "New Server Certificate" })).toBeVisible();
-    await expect(page.locator(".cert-fingerprint", { hasText: FIRST_USE.fingerprint })).toBeVisible();
+    await expect(
+      page.locator(".cert-fingerprint", { hasText: FIRST_USE.fingerprint }),
+    ).toBeVisible();
     await expect(page.locator(".cert-details")).toContainText(FIRST_USE.host);
   });
 
