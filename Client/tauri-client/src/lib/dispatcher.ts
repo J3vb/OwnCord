@@ -23,6 +23,7 @@ import {
   deleteMessage,
   bulkDeleteMessages,
   updateReaction,
+  rollbackReaction,
   confirmSend,
   markSendFailed,
   messagesStore,
@@ -414,6 +415,9 @@ export function wireDispatcher(
           .toSorted((a, b) => a.position - b.position);
         const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
         setActiveChannel(firstTextId);
+        // The redirect alone reads as the app spontaneously changing channels;
+        // say why (ux/channels-members-dms §1.2).
+        showToast("This channel was deleted", "info");
         log.info("Active channel deleted, redirected", { deletedId: payload.id });
       }
     }),
@@ -637,13 +641,15 @@ export function wireDispatcher(
 
   // Local transport failures (proxy not open, outbound channel full/closed):
   // fail the matching optimistic row exactly like a server error reply would.
-  // Fire-and-forget sends (typing, presence, voice) have no pendingSends entry
-  // and stay logged-only.
+  // An optimistic reaction toggle rolls back the same way. Fire-and-forget
+  // sends (typing, presence, voice) have no pending entry and stay logged-only.
   unsubs.push(
     ws.onSendFailure((id, code) => {
       if (messagesStore.getState().pendingSends.has(id)) {
         markSendFailed(id, code);
+        return;
       }
+      rollbackReaction(id);
     }),
   );
 
@@ -678,6 +684,11 @@ export function wireDispatcher(
           if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
         }
         markSendFailed(id, payload.code);
+        return;
+      }
+      // A failed optimistic reaction toggle: the pill reverting is the
+      // feedback the spec asks for (ux/messaging §5) — no toast on top.
+      if (id !== undefined && rollbackReaction(id)) {
         return;
       }
       // Voice capacity refusals. The server owns the limits (voice_max_users /

@@ -67,8 +67,9 @@ sequenceDiagram
   state for uncached history ([messaging.md §1](messaging.md)), never a global block.
 - If the active channel is **deleted** server-side (`channel_delete`), redirect to
   the first text channel by position and toast "This channel was deleted."
-  (redirect already exists, `dispatcher.ts:406-420`; the toast is still
-  missing — open gap).
+  (**✓ implemented 2026-08** — the `channel_delete` handler in
+  `wireDispatcher()`, `lib/dispatcher.ts`, redirects and toasts; a non-active
+  deletion stays silent).
 
 ### 1.3 Reorder & CRUD (admin)
 

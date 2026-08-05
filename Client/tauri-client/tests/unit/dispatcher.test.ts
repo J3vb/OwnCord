@@ -787,6 +787,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires channel_delete and redirects to first text channel when active is deleted", () => {
+    mockShowToast.mockClear();
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(10, {
@@ -828,6 +829,54 @@ describe("WS Dispatcher", () => {
 
     expect(channelsStore.getState().channels.has(10)).toBe(false);
     expect(channelsStore.getState().activeChannelId).toBe(20);
+    // The redirect must say why it happened (ux/channels-members-dms §1.2).
+    expect(mockShowToast).toHaveBeenCalledWith("This channel was deleted", "info");
+  });
+
+  it("wires channel_delete without a toast when a non-active channel is deleted", () => {
+    mockShowToast.mockClear();
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(10, {
+        id: 10,
+        name: "active-ch",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      ch.set(20, {
+        id: 20,
+        name: "background",
+        type: "text" as const,
+        category: null,
+        position: 1,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 10 };
+    });
+
+    mock.dispatch("channel_delete", { id: 20 });
+
+    expect(channelsStore.getState().channels.has(20)).toBe(false);
+    expect(channelsStore.getState().activeChannelId).toBe(10);
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("wires channel_delete sets active to null when no text channels remain", () => {

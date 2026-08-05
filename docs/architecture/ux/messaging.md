@@ -70,8 +70,9 @@ stateDiagram-v2
 > `Channel.canSend`; `MessageInput.setDisabled(reason)` disables the composer
 > with a visible reason, and `ChannelController` derives that reason from
 > `can_send` + channel type + connection status. Older servers that omit
-> `can_send` default permissive. Remaining: slow-mode countdown (see §8) and DM
-> block-state gating (handled today via the failed-row path in §3).
+> `can_send` default permissive. The slow-mode countdown has since shipped too
+> (see §8); DM block-state gating is handled via `dmComposerBlockReason` in the
+> same composer-reason derivation.
 
 ---
 
@@ -151,9 +152,16 @@ so surrounding context and reply references stay intact.
 | Add/remove reaction | Optimistic pill toggle + count adjustment, reflecting `me`; `reaction_update` echo reconciles; failure rolls the pill back |
 | Emoji picker | `EmojiPicker` with recent-emoji memory (`owncord:recent-emoji`) |
 
-> Current: reactions render only from the server `reaction_update` echo
-> (`messages.store.ts:282`); there is no local optimistic toggle. Target adds the
-> optimistic toggle for immediacy, consistent with §3.
+> **✓ Implemented (2026-08).** The pill toggles on the click:
+> `ReactionController.sendReaction` applies the toggle locally
+> (`addOptimisticReaction`, `stores/messages.store.ts`) under the send's WS
+> envelope id — the same correlation scheme as §3's optimistic rows.
+> `updateReaction` consumes the matching self-echo instead of re-applying it
+> (the delta arithmetic would double-count), other users' echoes apply
+> normally, and an error reply or transport failure rolls back exactly that
+> toggle (`rollbackReaction`, wired in the dispatcher's error and
+> send-failure handlers). The pill reverting is the failure feedback — no
+> toast on top.
 
 **Who reacted (✓ implemented 2026-08):** hovering (or focusing) a reaction pill
 for 300 ms fetches the reactor list and shows a tooltip reading
@@ -338,11 +346,16 @@ channel's `slow_mode` seconds) and re-enable at zero; on a WS `SLOW_MODE`
 rejection, snap the composer to the countdown state without dropping the drafted
 text.
 
-> **Partially implemented (2026-07).** `SLOW_MODE` errors are now surfaced: they
-> mark the optimistic row failed with a "Slow mode — wait before sending again"
-> reason and a **Retry** (via the request-id error correlation in §3). The live
-> **countdown** in the composer is still outstanding — it needs the channel's
-> `slow_mode` seconds, which the ready payload does not yet carry.
+> **✓ Implemented (2026-07/08).** `SLOW_MODE` errors mark the optimistic row
+> failed with a "Slow mode — wait before sending again" reason and a **Retry**
+> (via the request-id error correlation in §3). The live countdown exists too:
+> the ready payload carries per-channel `slow_mode` seconds
+> (`Channel.slowMode` in `channels.store`), and `ChannelController`'s
+> `startSlowMode`/`computeComposerReason` disable the composer with a ticking
+> "Slow mode — Ns" reason after each accepted send (`chat_send_ok`) and snap
+> to the full window on a `SLOW_MODE` rejection — without dropping the drafted
+> text (the draft stays in the textarea). Moderators (`canManageMessages`)
+> bypass the client gate exactly as they bypass the server's limiter.
 
 ---
 
