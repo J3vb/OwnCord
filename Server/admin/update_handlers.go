@@ -13,7 +13,9 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// handleCheckUpdate returns the current update status.
+// handleCheckUpdate returns the current update status. can_apply tells the
+// admin SPA whether POST /updates/apply is usable in this deployment (false
+// in containers, where upgrades are image pulls).
 func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
@@ -26,14 +28,25 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
-		writeJSON(w, http.StatusOK, info)
+		writeJSON(w, http.StatusOK, struct {
+			updater.UpdateInfo
+			CanApply bool `json:"can_apply"`
+		}{info, !updater.RunningInContainer()})
 	}
 }
 
 // handleApplyUpdate downloads and applies a server update.
 func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
-	// TODO: maybe disable this endpoint in future docker build type?
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// In a container the running binary is image content: the staged
+		// replacement dies with the container and the restart comes back as
+		// the old image. Refuse before any nil/availability logic so the
+		// answer does not depend on updater configuration.
+		if updater.RunningInContainer() {
+			writeErr(w, http.StatusServiceUnavailable, "CONTAINER_DEPLOYMENT",
+				"in-place self-update is disabled in container deployments — upgrade by pulling the new image")
+			return
+		}
 		if u == nil {
 			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
 			return

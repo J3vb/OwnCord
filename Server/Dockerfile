@@ -31,6 +31,10 @@ VOLUME ["/app/data"]
 # Server listens on this port by default (configurable via config.yaml).
 EXPOSE 8443
 
+# Refuses the in-place self-update endpoint (the binary is image content;
+# upgrades are image pulls). See Server/updater/container.go.
+ENV OWNCORD_CONTAINER=1
+
 # Run as non-root (distroless provides uid 65532 = "nonroot").
 USER 65532:65532
 
