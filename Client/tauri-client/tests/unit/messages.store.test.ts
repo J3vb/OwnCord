@@ -9,6 +9,8 @@ import {
   bulkDeleteMessages,
   setMessagePinned,
   updateReaction,
+  addOptimisticReaction,
+  rollbackReaction,
   addPendingSend,
   confirmSend,
   addOptimisticMessage,
@@ -795,6 +797,99 @@ describe("messages store", () => {
       expect(msg.reactions).toHaveLength(1);
       expect(msg.reactions[0]!.emoji).toBe("❤️");
       expect(msg.reactions[0]!.count).toBe(1);
+    });
+  });
+
+  // 13b. optimistic reactions (ux/messaging §5)
+  describe("optimistic reactions", () => {
+    const toggle = (action: "add" | "remove") => ({
+      channelId: 1,
+      messageId: 100,
+      emoji: "👍",
+      action,
+    });
+
+    it("applies an optimistic add immediately as the current user's pill", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+    });
+
+    it("consumes the self-echo instead of double-counting it", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      // The server broadcasts the toggle back to its sender too.
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
+    });
+
+    it("still applies another user's identical reaction while one is pending", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 2, me: true }]);
+      // The pending toggle is NOT consumed by someone else's echo.
+      expect(messagesStore.getState().pendingReactions?.size).toBe(1);
+    });
+
+    it("rolls back a failed optimistic add (pill disappears)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      expect(rollbackReaction("corr-1")).toBe(true);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(0);
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
+    });
+
+    it("rolls back a failed optimistic remove (pill restored)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      // Someone else's reaction plus mine.
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      addOptimisticReaction("corr-1", toggle("remove"));
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 1, me: false }]);
+
+      expect(rollbackReaction("corr-1")).toBe(true);
+
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 2, me: true }]);
+    });
+
+    it("rollback of an unknown correlation id reports false and changes nothing", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      const before = messagesStore.getState();
+
+      expect(rollbackReaction("nope")).toBe(false);
+
+      expect(messagesStore.getState()).toBe(before);
+    });
+
+    it("a late error after the echo was consumed cannot roll back (no ghost revert)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      expect(rollbackReaction("corr-1")).toBe(false);
+
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+    });
+
+    it("does not register a pending toggle for an unloaded channel", () => {
+      addOptimisticReaction("corr-1", { channelId: 99, messageId: 1, emoji: "👍", action: "add" });
+
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
     });
   });
 

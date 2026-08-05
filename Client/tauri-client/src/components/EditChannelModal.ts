@@ -16,6 +16,7 @@
  * shown as its own option rather than being silently rounded to a neighbour.
  */
 
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -159,6 +160,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
   const isVoice = channelType === "voice";
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
 
   function mount(container: Element): void {
     overlay = createElement("div", {
@@ -167,13 +169,17 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
 
     const modal = createElement("div", { class: "modal" });
+    applyDialogSemantics(modal, { labelledBy: "edit-channel-title" });
+    trapFocus(modal, ac.signal);
 
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Edit Channel");
+    const title = createElement("h3", { id: "edit-channel-title" }, "Edit Channel");
+    // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
+      "aria-label": "Close",
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -395,7 +401,25 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       { signal: ac.signal },
     );
 
+    // Escape cancels — never saves. Document-level so it works wherever focus
+    // sits; guarded on the overlay still being attached because the listener
+    // lives until destroy() aborts it.
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && overlay?.isConnected === true) {
+          onClose();
+        }
+      },
+      { signal: ac.signal },
+    );
+
     container.appendChild(overlay);
+
+    // Capture where focus came from before anything inside the dialog takes
+    // it, so destroy() can hand it back to the opener.
+    restoreFocus = focusDialog(modal);
+
     nameInput.focus();
     nameInput.select();
   }
@@ -406,6 +430,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       overlay.remove();
       overlay = null;
     }
+    // Every close path (X, Cancel, backdrop, Escape) funnels through the
+    // caller's onClose, which calls destroy() — the single place focus
+    // returns to the opener.
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };

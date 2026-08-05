@@ -3,6 +3,7 @@
 // innerHTML with user content.
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 import type { GifApi, GifResult } from "@lib/gifProvider";
@@ -67,9 +68,15 @@ export function createGifPicker(options: GifPickerOptions): {
 
   root.appendChild(header);
 
-  // Grid area (scrollable)
-  const gridArea = createElement("div", { class: "gp-grid-area" });
+  // Grid area (scrollable). Announced as a flat listbox of GIF options with
+  // roving tabindex (DC-13); the inner .gp-grid is layout only.
+  const gridArea = createElement("div", {
+    class: "gp-grid-area",
+    role: "listbox",
+    "aria-label": "GIFs",
+  });
   root.appendChild(gridArea);
+  enableRovingNavigation(gridArea, ".gp-item", signal);
 
   // Loading indicator
   const loadingEl = createElement("div", { class: "gp-loading" });
@@ -92,7 +99,13 @@ export function createGifPicker(options: GifPickerOptions): {
     const grid = createElement("div", { class: "gp-grid" });
 
     for (const gif of gifs) {
-      const item = createElement("div", { class: "gp-item" });
+      const item = createElement("div", {
+        class: "gp-item",
+        role: "option",
+        // Same fallback as the img alt below — an untitled GIF still needs a
+        // pronounceable accessible name.
+        "aria-label": gif.title || "GIF",
+      });
       const img = createElement("img", {
         class: "gp-img",
         src: gif.url,
@@ -114,6 +127,9 @@ export function createGifPicker(options: GifPickerOptions): {
     }
 
     gridArea.appendChild(grid);
+
+    // Each render replaces the cell set, so re-establish the single Tab stop.
+    setRovingTabindex(gridArea, ".gp-item");
   }
 
   function showLoading(): void {

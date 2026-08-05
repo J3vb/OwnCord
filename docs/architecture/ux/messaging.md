@@ -18,8 +18,8 @@ The list renders from `messages.store` (`messagesByChannel`, capped 500/channel)
 |-------|---------|-----------------|
 | `loading` | Channel opened, history fetch in flight, nothing cached | **In-region loading placeholder** in the message area |
 | `ready` | Messages present | Virtualized list |
-| `empty` | Loaded, zero messages | "This is the beginning of #channel." welcome state (already `MessageList.ts:109-125`) |
-| `loading older` | Scroll-to-top with `hasMore` | Top spinner while `prependMessages` resolves (already `MessageList.ts:459-468`) |
+| `empty` | Loaded, zero messages | "This is the beginning of #channel." welcome state (already `renderEmptyState()`, `components/MessageList.ts`) |
+| `loading older` | Scroll-to-top with `hasMore` | Top spinner while `prependMessages` resolves (already the scroll-top `hasMore` branch of `handleScroll()`, `components/MessageList.ts`) |
 | `error` | History fetch failed | **Inline section error + Retry** in the message area |
 
 > **✓ Implemented (2026-07).** `messages.store` tracks a per-channel
@@ -61,7 +61,7 @@ stateDiagram-v2
 | `no-permission` | Disabled bar | "You don't have permission to send messages here." |
 | `offline` | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected | connection status (README §3) |
 | `slow-mode` | Disabled with a live countdown | "Slow mode: wait Ns." |
-| `uploading` | Send disabled until uploads settle (already `MessageInput.ts:138-141`) | per-attachment spinner |
+| `uploading` | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner |
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -70,8 +70,9 @@ stateDiagram-v2
 > `Channel.canSend`; `MessageInput.setDisabled(reason)` disables the composer
 > with a visible reason, and `ChannelController` derives that reason from
 > `can_send` + channel type + connection status. Older servers that omit
-> `can_send` default permissive. Remaining: slow-mode countdown (see §8) and DM
-> block-state gating (handled today via the failed-row path in §3).
+> `can_send` default permissive. The slow-mode countdown has since shipped too
+> (see §8); DM block-state gating is handled via `dmComposerBlockReason` in the
+> same composer-reason derivation.
 
 ---
 
@@ -136,7 +137,7 @@ existing pending/sent row for that id and replace-in-place rather than append.
 | Action | Target UX |
 |--------|-----------|
 | Edit (own message) | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast |
-| Delete (own / moderator) | **Two-click confirm** on the row (`PendingDeleteManager`, `MessageController.ts:32-54`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
+| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
 | Delete (no permission) | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES |
 
 Deleted messages are soft-deleted (kept as a tombstone in the array, `deleted:true`)
@@ -151,9 +152,16 @@ so surrounding context and reply references stay intact.
 | Add/remove reaction | Optimistic pill toggle + count adjustment, reflecting `me`; `reaction_update` echo reconciles; failure rolls the pill back |
 | Emoji picker | `EmojiPicker` with recent-emoji memory (`owncord:recent-emoji`) |
 
-> Current: reactions render only from the server `reaction_update` echo
-> (`messages.store.ts:282`); there is no local optimistic toggle. Target adds the
-> optimistic toggle for immediacy, consistent with §3.
+> **✓ Implemented (2026-08).** The pill toggles on the click:
+> `ReactionController.sendReaction` applies the toggle locally
+> (`addOptimisticReaction`, `stores/messages.store.ts`) under the send's WS
+> envelope id — the same correlation scheme as §3's optimistic rows.
+> `updateReaction` consumes the matching self-echo instead of re-applying it
+> (the delta arithmetic would double-count), other users' echoes apply
+> normally, and an error reply or transport failure rolls back exactly that
+> toggle (`rollbackReaction`, wired in the dispatcher's error and
+> send-failure handlers). The pill reverting is the failure feedback — no
+> toast on top.
 
 **Who reacted (✓ implemented 2026-08):** hovering (or focusing) a reaction pill
 for 300 ms fetches the reactor list and shows a tooltip reading
@@ -175,8 +183,8 @@ upload state (already thorough — `MessageInput.ts`).
 | State | Presentation |
 |-------|--------------|
 | selected | Thumbnail/chip per file |
-| validating | Reject oversize/disallowed type inline via `showUploadError` (`MessageInput.ts:114-129`) |
-| uploading | Per-item spinner; **send disabled** until all settle (`MessageInput.ts:243-247`) |
+| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`) |
+| uploading | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
 | uploaded | Chip ready; ids attached to the `chat_send` payload |
 | failed | Inline error on the chip with remove/retry |
 
@@ -212,9 +220,9 @@ string and park it in the LRU + IndexedDB caches.
 | Feature | Target UX |
 |---------|-----------|
 | Reply | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview |
-| Pin/unpin | Optimistic (`setMessagePinned`, already optimistic `messages.store.ts:226-240`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `PinnedMessages.ts:87`) |
-| Search | Overlay with a status line cycling *type-N-chars → searching → results → no results → failed* (already thorough `SearchOverlay.ts:123-145`); abort in-flight on new query |
-| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented only for non-active, non-own, non-replay messages (`dispatcher.ts:195`); focus emits `channel_focus` for server read-state |
+| Pin/unpin | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`) |
+| Search | Overlay with a status line cycling *type-N-chars → searching → results → no results → failed* (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query |
+| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented only for non-active, non-own, non-replay messages (the `chat_message` handler in `wireDispatcher()`, `lib/dispatcher.ts`); focus emits `channel_focus` for server read-state |
 
 **Read-state target rule:** unread counts must be suppressed during reconnect
 replay (already handled via `isReplaying()`), so catching up 500 buffered
@@ -338,11 +346,16 @@ channel's `slow_mode` seconds) and re-enable at zero; on a WS `SLOW_MODE`
 rejection, snap the composer to the countdown state without dropping the drafted
 text.
 
-> **Partially implemented (2026-07).** `SLOW_MODE` errors are now surfaced: they
-> mark the optimistic row failed with a "Slow mode — wait before sending again"
-> reason and a **Retry** (via the request-id error correlation in §3). The live
-> **countdown** in the composer is still outstanding — it needs the channel's
-> `slow_mode` seconds, which the ready payload does not yet carry.
+> **✓ Implemented (2026-07/08).** `SLOW_MODE` errors mark the optimistic row
+> failed with a "Slow mode — wait before sending again" reason and a **Retry**
+> (via the request-id error correlation in §3). The live countdown exists too:
+> the ready payload carries per-channel `slow_mode` seconds
+> (`Channel.slowMode` in `channels.store`), and `ChannelController`'s
+> `startSlowMode`/`computeComposerReason` disable the composer with a ticking
+> "Slow mode — Ns" reason after each accepted send (`chat_send_ok`) and snap
+> to the full window on a `SLOW_MODE` rejection — without dropping the drafted
+> text (the draft stays in the textarea). Moderators (`canManageMessages`)
+> bypass the client gate exactly as they bypass the server's limiter.
 
 ---
 

@@ -157,4 +157,60 @@ describe("DeleteChannelModal", () => {
     expect(onClose).toHaveBeenCalled();
     modal.destroy?.();
   });
+
+  // ── dialog accessibility contract (DC-13) ──────────────────────────────────
+
+  it("stamps dialog semantics named by the header title", () => {
+    const { modal } = makeModal();
+    const dialog = container.querySelector(".modal") as HTMLElement;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-labelledby")).toBe("delete-channel-title");
+    expect(container.querySelector("#delete-channel-title")?.textContent).toBe("Delete Channel");
+    modal.destroy?.();
+  });
+
+  it("labels the icon-only close button", () => {
+    const { modal } = makeModal();
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+    modal.destroy?.();
+  });
+
+  it("Escape cancels without confirming the delete", () => {
+    const onConfirm = vi.fn(async () => {});
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onConfirm, onClose });
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("ignores Escape after destroy", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+    modal.destroy?.();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("moves focus into the dialog on open and restores it on destroy", () => {
+    const trigger = document.createElement("button");
+    container.appendChild(trigger);
+    trigger.focus();
+
+    const { modal } = makeModal();
+    // First focusable is the header's close button — safely away from the
+    // destructive confirm.
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+    expect(document.activeElement).toBe(closeBtn);
+
+    modal.destroy?.();
+    expect(document.activeElement).toBe(trigger);
+  });
 });

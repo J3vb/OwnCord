@@ -251,6 +251,82 @@ describe("createEmojiAutocomplete", () => {
     row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("stamps a stable id on the listbox and index ids on the rows", () => {
+    const { ac } = mount();
+    ac.setQuery("wa");
+    expect(ac.element.id).toBe("emoji-autocomplete");
+    const ids = [...ac.element.querySelectorAll(".ma-item")].map((r) => r.id);
+    expect(ids.length).toBeGreaterThan(1);
+    ids.forEach((id, i) => expect(id).toBe(`emoji-autocomplete-option-${i}`));
+    // A re-render rebuilds the rows, so the ids stay index-based, not stale.
+    ac.setQuery("flame");
+    expect(ac.element.querySelector(".ma-item")?.id).toBe("emoji-autocomplete-option-0");
+    ac.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Combobox wiring
+// ---------------------------------------------------------------------------
+
+describe("createEmojiAutocomplete combobox wiring", () => {
+  let ta: HTMLTextAreaElement;
+  let ac: ReturnType<typeof createEmojiAutocomplete>;
+
+  beforeEach(() => {
+    ta = document.createElement("textarea");
+    document.body.appendChild(ta);
+    ac = createEmojiAutocomplete({ onSelect: vi.fn(), onClose: vi.fn(), comboboxInput: ta });
+    document.body.appendChild(ac.element);
+  });
+
+  afterEach(() => {
+    ac.destroy();
+    ta.remove();
+  });
+
+  function key(k: string): KeyboardEvent {
+    return new KeyboardEvent("keydown", { key: k, cancelable: true });
+  }
+
+  it("stamps combobox semantics on the input, without an active row yet", () => {
+    expect(ta.getAttribute("role")).toBe("combobox");
+    expect(ta.getAttribute("aria-autocomplete")).toBe("list");
+    expect(ta.getAttribute("aria-expanded")).toBe("true");
+    expect(ta.getAttribute("aria-controls")).toBe("emoji-autocomplete");
+    // Emoji do not prime on create, so no row exists to point at yet.
+    expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("aims aria-activedescendant at the active row and follows the arrows", () => {
+    ac.setQuery("wa");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("emoji-autocomplete-option-0");
+    ac.handleKeydown(key("ArrowDown"));
+    expect(ta.getAttribute("aria-activedescendant")).toBe("emoji-autocomplete-option-1");
+    ac.handleKeydown(key("ArrowUp"));
+    expect(ta.getAttribute("aria-activedescendant")).toBe("emoji-autocomplete-option-0");
+  });
+
+  it("clears aria-activedescendant when nothing matches", () => {
+    ac.setQuery("wa");
+    ac.setQuery("zzzzqqq");
+    expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("removes every combobox attribute on destroy", () => {
+    ac.setQuery("wa");
+    ac.destroy();
+    for (const attr of [
+      "role",
+      "aria-autocomplete",
+      "aria-expanded",
+      "aria-controls",
+      "aria-activedescendant",
+    ]) {
+      expect(ta.hasAttribute(attr)).toBe(false);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -382,5 +458,40 @@ describe("composer :shortcode integration", () => {
       container.querySelector(".mention-autocomplete:not(.emoji-autocomplete)"),
     ).not.toBeNull();
     expect(popupEl()).toBeNull();
+  });
+
+  it("marks the textarea as a combobox while open and clears it on close", () => {
+    type(":wave");
+    const ta = textarea();
+    expect(ta.getAttribute("role")).toBe("combobox");
+    expect(ta.getAttribute("aria-expanded")).toBe("true");
+    expect(ta.getAttribute("aria-controls")).toBe("emoji-autocomplete");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("emoji-autocomplete-option-0");
+    press("Escape");
+    expect(ta.hasAttribute("role")).toBe(false);
+    expect(ta.hasAttribute("aria-expanded")).toBe(false);
+    expect(ta.hasAttribute("aria-controls")).toBe(false);
+    expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("hands the combobox state over when the @-mention popup takes the caret", () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          { id: 1, username: "wave_guy", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+    type(":wave");
+    expect(textarea().getAttribute("aria-controls")).toBe("emoji-autocomplete");
+    // The mention popup opens before the emoji popup is torn down, so the
+    // teardown must not wipe the state the mention popup just stamped.
+    type("@wa");
+    const ta = textarea();
+    expect(ta.getAttribute("role")).toBe("combobox");
+    expect(ta.getAttribute("aria-controls")).toBe("mention-autocomplete");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-0");
   });
 });

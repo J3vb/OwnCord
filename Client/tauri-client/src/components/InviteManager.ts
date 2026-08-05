@@ -3,6 +3,7 @@
  * Create, copy, and revoke invite codes.
  */
 
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -56,6 +57,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
   let root: HTMLDivElement | null = null;
   let listEl: HTMLDivElement | null = null;
   let emptyEl: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
   let invites: readonly InviteItem[] = options.invites;
 
   function renderList(): void {
@@ -161,11 +163,14 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     const modal = createElement("div", {
       class: "modal",
     });
+    applyDialogSemantics(modal, { labelledBy: "invite-manager-title" });
+    trapFocus(modal, ac.signal);
 
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Server Invites");
-    const closeBtn = createElement("button", { class: "modal-close" });
+    const title = createElement("h3", { id: "invite-manager-title" }, "Server Invites");
+    // Icon-only button: without a label a screen reader announces just "button".
+    const closeBtn = createElement("button", { class: "modal-close", "aria-label": "Close" });
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
     appendChildren(header, title, closeBtn);
@@ -236,6 +241,10 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     renderList();
 
     container.appendChild(root);
+
+    // Capture where focus came from before anything inside the dialog takes
+    // it, so destroy() can hand it back to the opener.
+    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
@@ -246,6 +255,10 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     }
     listEl = null;
     emptyEl = null;
+    // Every close path (X, backdrop, Escape) funnels through the caller's
+    // onClose, which calls destroy() — the single place focus returns.
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };

@@ -71,14 +71,14 @@ committed, the operation is a **success** even if the session-revocation step
 fails — the UI must never present a committed change as an error (that would walk
 the user into the confirm-lockout). The partial-success `200 {warning}` maps to a
 success message with a soft note, never a red error. (Server contract:
-`profile_handler.go:237-248`; client already toasts success, `MainPage.ts:280-283`.)
+`handleUpdateProfile()` in `Server/api/profile_handler.go`; client already toasts success, the `onUpdateProfile` handler in `pages/MainPage.ts`.)
 
 ### 2.3 Two-factor (TOTP)
 
 | Flow | Steps |
 |------|-------|
 | Enable | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true` |
-| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already `AccountTab.ts:442-451`) |
+| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
@@ -111,14 +111,17 @@ and (b) confirm destructive actions.
 | Invites | Invite manager modal | `GET/POST/DELETE /invites` | List with masked codes, copy, revoke; empty state "No active invites" |
 
 **Target rules:**
-- Destructive admin actions should show an **in-flight** state (today the
-  two-click label reverts immediately and only a toast reports the result —
-  `AdminActions.ts:99` `withConfirmation`; adding a pending state so a slow
-  ban doesn't look ignored is still an open gap).
+- **✓ Destructive admin actions show an in-flight state (2026-08).**
+  `withConfirmation` (`AdminActions.ts`) keeps the item in a pending
+  label/class while the promise settles and ignores further clicks, so a slow
+  ban no longer looks ignored; unblock, ban submit, purge, and the role-change
+  submenu carry their own equivalent guards (a role change in flight also
+  inerts the other role options — `currentRole` only updates when the
+  `member_update` echoes).
 - **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
-  reason input plus a duration choice (`AdminActions.ts:311` `appendBanFlow`),
+  reason input plus a duration choice (`appendBanFlow()` in `components/AdminActions.ts`),
   and the menu passes both through
-  (`SidebarMemberSection.ts:165-167` → `api.adminBanMember(userId, reason,
+  (the `onBan` handler in `createSidebarMemberSection()`, `pages/main-page/SidebarMemberSection.ts` → `api.adminBanMember(userId, reason,
   durationHours)`), so temporary bans and stored reasons work from the client.
 
 ### 3.1 What is *not* in the client (by design)
@@ -130,7 +133,7 @@ auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
 audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
 does have is a deep-link: `lib/admin-panel.ts` opens
 `https://{host}/admin#{section}` in the OS browser (wired from
-`SidebarArea.ts:189` for the audit log, gated by
+the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
 `lib/permissions.ts::canViewAuditLog`).
 
 > **Decision point.** If the target is for admins to manage the server from the
@@ -177,7 +180,7 @@ sequenceDiagram
 | State | Presentation |
 |-------|--------------|
 | checking | Silent (no UI until a result) |
-| available | Non-modal banner with version + Update Now / Later (already `UpdateNotifier.ts:30-62`) |
+| available | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`) |
 | downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known) |
 | applied | App relaunches automatically |
 | failed | "Update failed. Please try again later." + Dismiss |

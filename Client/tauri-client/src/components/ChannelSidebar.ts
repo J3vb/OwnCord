@@ -22,7 +22,7 @@ import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
-import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
+import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
@@ -34,10 +34,11 @@ import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto"
 const log = createLogger("ChannelSidebar");
 
 /** Icon, color, and tooltip for a peer's E2EE identity verification badge
- *  (F3 TOFU). The three states mirror the voice store's PeerVerification:
+ *  (F3 TOFU). The states mirror the voice store's PeerVerification:
  *  a green shield-check when the announce signature verified against the pinned
- *  key, a muted shield when the peer published no key (legacy), and a red
- *  shield-alert when the delivered key differs from the pinned one. */
+ *  key, a muted shield when the peer published no key (legacy), a red
+ *  shield-alert when the delivered key differs from the pinned one, and an
+ *  amber shield-question when the local pin store could not be read (DC-08). */
 function verifyPresentation(v: PeerVerification): {
   icon: IconName;
   color: string;
@@ -58,6 +59,15 @@ function verifyPresentation(v: PeerVerification): {
       icon: "shield-alert",
       color: "var(--red, #f23f43)",
       title: "Identity key changed — click to review and re-pin",
+    };
+  }
+  if (v.status === "unknown") {
+    return {
+      icon: "shield-question",
+      color: "var(--yellow, #f0b232)",
+      title:
+        "Could not check this participant's identity — key storage is unavailable, " +
+        "so they are blocked for E2EE until it recovers",
     };
   }
   // "unverified" — the remaining status: peer published no identity key (legacy).
@@ -907,8 +917,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   }
 
   function destroy(): void {
+    // ac.abort() also releases this sidebar's hold on the shared document-level
+    // drag listeners (drag-reorder.ts tracks owners by signal).
     ac.abort();
-    releaseGlobalDragListeners(channelList ?? undefined);
     for (const unsub of unsubscribers) {
       unsub();
     }

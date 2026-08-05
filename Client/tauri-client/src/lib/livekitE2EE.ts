@@ -313,7 +313,24 @@ export class E2EEManager {
     // Resolve the persisted pin FIRST — before any legacy shortcut. A server
     // must not be able to strip a pinned peer's published key (or swap it) to
     // force it back onto the legacy accept path (finding #2: TOFU pin bypass).
-    const pin = host ? await getIdentityPin(host, String(userId)) : null;
+    const lookup = host
+      ? await getIdentityPin(host, String(userId))
+      : ({ status: "unpinned" } as const);
+
+    // Fail closed when the pin store could not be read (DC-08): with the pin
+    // unknown, this peer might be pinned to a different key — proceeding down
+    // the first-sight path would verify against, and then RE-PIN, whatever key
+    // the server delivered. Reject the announce and surface the distinct
+    // "unknown" state; the peer stays blocked for E2EE until the store recovers.
+    if (lookup.status === "unavailable") {
+      setPeerVerification({ userId, status: "unknown", safetyNumber: null });
+      log.error("E2EE: identity pin store unreadable — rejecting announce (fail closed)", {
+        userId,
+      });
+      return false;
+    }
+
+    const pin = lookup.status === "pinned" ? lookup.pin : null;
 
     // Pinned peer whose delivered key is absent or differs from the pin —
     // possible server MITM. Block until the user re-pins.

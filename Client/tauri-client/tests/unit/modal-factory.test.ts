@@ -158,6 +158,67 @@ describe("createModal", () => {
     inst.close();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // ── dialog accessibility contract (DC-13) ─────────────────────────────────
+
+  it("stamps dialog semantics on the modal container", () => {
+    const content = document.createElement("div");
+    const inst = createModal({ content, ariaLabel: "Pick members" }, container);
+
+    expect(inst.modal.getAttribute("role")).toBe("dialog");
+    expect(inst.modal.getAttribute("aria-modal")).toBe("true");
+    expect(inst.modal.getAttribute("aria-label")).toBe("Pick members");
+    inst.destroy();
+  });
+
+  it("moves focus into the dialog on open and restores it on close", () => {
+    const trigger = document.createElement("button");
+    container.appendChild(trigger);
+    trigger.focus();
+
+    const content = document.createElement("div");
+    const btn = document.createElement("button");
+    content.appendChild(btn);
+    const inst = createModal({ content }, container);
+
+    expect(document.activeElement).toBe(btn);
+
+    inst.close();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("restores focus when torn down by the external signal", () => {
+    const trigger = document.createElement("button");
+    container.appendChild(trigger);
+    trigger.focus();
+
+    const externalAc = new AbortController();
+    const inst = createModal(
+      { content: document.createElement("div"), signal: externalAc.signal },
+      container,
+    );
+    expect(document.activeElement).toBe(inst.modal);
+
+    externalAc.abort();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("traps Tab inside the dialog (wraps last → first)", () => {
+    const content = document.createElement("div");
+    const first = document.createElement("button");
+    const last = document.createElement("button");
+    content.appendChild(first);
+    content.appendChild(last);
+    const inst = createModal({ content }, container);
+
+    last.focus();
+    const e = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    last.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+    inst.destroy();
+  });
 });
 
 describe("createPromptModal", () => {

@@ -4,15 +4,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockGetChannelMessages, createMockEmojiPickerElement, mockEmojiPickerDestroy } = vi.hoisted(
-  () => ({
-    mockGetChannelMessages: vi.fn(
-      (): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => [],
-    ),
-    createMockEmojiPickerElement: () => document.createElement("div"),
-    mockEmojiPickerDestroy: vi.fn(),
-  }),
-);
+const {
+  mockGetChannelMessages,
+  mockAddOptimisticReaction,
+  createMockEmojiPickerElement,
+  mockEmojiPickerDestroy,
+} = vi.hoisted(() => ({
+  mockGetChannelMessages: vi.fn(
+    (): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => [],
+  ),
+  mockAddOptimisticReaction: vi.fn(),
+  createMockEmojiPickerElement: () => document.createElement("div"),
+  mockEmojiPickerDestroy: vi.fn(),
+}));
 
 vi.mock("@lib/dom", () => ({
   createElement: vi.fn((tag: string, attrs?: Record<string, string>) => {
@@ -44,6 +48,7 @@ vi.mock("@components/EmojiPicker", () => ({
 
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
+  addOptimisticReaction: mockAddOptimisticReaction,
 }));
 
 // ---------------------------------------------------------------------------
@@ -58,7 +63,7 @@ import type { ReactionControllerOptions } from "../../src/pages/main-page/Reacti
 // ---------------------------------------------------------------------------
 
 function makeWs(): ReactionControllerOptions["ws"] {
-  return { send: vi.fn() } as unknown as ReactionControllerOptions["ws"];
+  return { send: vi.fn(() => "corr-1") } as unknown as ReactionControllerOptions["ws"];
 }
 
 function makeLimiter(allowed = true): ReactionControllerOptions["reactionsLimiter"] {
@@ -129,6 +134,35 @@ describe("createReactionController", () => {
 
       expect(opts.ws.send).not.toHaveBeenCalled();
       expect(opts.showError).toHaveBeenCalledWith("Slow down! Please wait before reacting again.");
+      expect(mockAddOptimisticReaction).not.toHaveBeenCalled();
+    });
+
+    it("registers the optimistic toggle under the send's correlation id", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "👍");
+
+      expect(mockAddOptimisticReaction).toHaveBeenCalledWith("corr-1", {
+        channelId: 42,
+        messageId: 1,
+        emoji: "👍",
+        action: "add",
+      });
+    });
+
+    it("registers an optimistic remove when toggling off", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [{ emoji: "👍", me: true }] }]);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "👍");
+
+      expect(mockAddOptimisticReaction).toHaveBeenCalledWith("corr-1", {
+        channelId: 42,
+        messageId: 1,
+        emoji: "👍",
+        action: "remove",
+      });
     });
   });
 

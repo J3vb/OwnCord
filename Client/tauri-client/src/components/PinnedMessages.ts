@@ -61,11 +61,17 @@ function renderPinnedItem(
 
   // Hover actions
   const actions = createElement("div", { class: "pinned-msg__actions" });
-  const jumpBtn = createElement("button", { title: "Jump to message" });
+  // Icon-only buttons: title= only tooltips for mouse users, so mirror it as
+  // an aria-label for screen readers.
+  const jumpBtn = createElement("button", {
+    title: "Jump to message",
+    "aria-label": "Jump to message",
+  });
   jumpBtn.appendChild(createIcon("external-link", 14));
   const unpinBtn = createElement("button", {
     class: "pinned-msg__unpin",
     title: "Unpin message",
+    "aria-label": "Unpin message",
   });
   unpinBtn.appendChild(createIcon("x", 14));
 
@@ -94,7 +100,13 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
   let root: HTMLDivElement | null = null;
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "pinned-panel" });
+    // A side panel, not a modal: complementary landmark (no aria-modal, no
+    // focus trap), matching DmProfileSidebar.
+    root = createElement("div", {
+      class: "pinned-panel",
+      role: "complementary",
+      "aria-label": "Pinned messages",
+    });
 
     // Header
     const header = createElement("div", { class: "pinned-panel__header" });
@@ -106,7 +118,10 @@ export function createPinnedMessages(options: PinnedMessagesOptions): MountableC
     const count = createElement("span", { class: "pinned-panel__count" });
     count.textContent = String(options.pinnedMessages.length);
 
-    const closeBtn = createElement("button", { class: "pinned-panel__close" });
+    const closeBtn = createElement("button", {
+      class: "pinned-panel__close",
+      "aria-label": "Close pinned messages",
+    });
     closeBtn.appendChild(createIcon("x", 16));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
 

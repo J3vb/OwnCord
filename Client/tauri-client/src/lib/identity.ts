@@ -102,18 +102,44 @@ export async function storeIdentityPin(
   }
 }
 
-/** Load a peer's pinned identity public key, or null if never pinned. */
-export async function getIdentityPin(host: string, userId: string): Promise<string | null> {
+/**
+ * Result of a peer identity-pin lookup. "unpinned" is a trust statement —
+ * the store was read and holds nothing for this peer (TOFU first sight) —
+ * while "unavailable" means the store could not be read at all, so NO trust
+ * statement can be made. Mirrors the Rust TLS-TOFU split (tofu.rs), where
+ * `load_stored_fingerprint` returns `Err` distinctly from `Ok(None)`.
+ */
+export type IdentityPinLookup =
+  | { readonly status: "pinned"; readonly pin: string }
+  | { readonly status: "unpinned" }
+  | { readonly status: "unavailable" };
+
+/**
+ * Look up a peer's pinned identity public key.
+ *
+ * A store read error is returned as "unavailable", NOT "unpinned" (DC-08,
+ * F3 follow-up 3): collapsing the two let a transient keyring error send a
+ * pinned peer down the first-sight path — silently verifying against, and
+ * then re-pinning, whatever key the server delivered. Callers must fail
+ * closed on "unavailable". In non-Tauri environments (tests, browser) there
+ * is no pin store by design, so the result is "unpinned" — consistent with
+ * every other wrapper in this module no-oping there.
+ */
+export async function getIdentityPin(host: string, userId: string): Promise<IdentityPinLookup> {
   const invoke = await getInvoke();
   if (!invoke) {
-    return null;
+    return { status: "unpinned" };
   }
   try {
     const result = await invoke("get_identity_pin", { host, userId });
-    return typeof result === "string" ? result : null;
+    return typeof result === "string" ? { status: "pinned", pin: result } : { status: "unpinned" };
   } catch (err) {
-    log.error("Failed to load identity pin", { host, userId, error: String(err) });
-    return null;
+    log.error("Failed to load identity pin — treating as unavailable, not unpinned", {
+      host,
+      userId,
+      error: String(err),
+    });
+    return { status: "unavailable" };
   }
 }
 

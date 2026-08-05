@@ -50,6 +50,11 @@ export interface EmojiAutocompleteOptions {
   /** Called with the text to insert (`:wave:` or a unicode character). */
   readonly onSelect: (insert: string) => void;
   readonly onClose: () => void;
+  /**
+   * Composer textarea the popup completes for; carries combobox semantics and
+   * aria-activedescendant while the popup is open (see inline-autocomplete).
+   */
+  readonly comboboxInput?: HTMLElement;
 }
 
 /** Same shape as the shared inline-autocomplete widget. */
@@ -153,5 +158,6 @@ export function createEmojiAutocomplete(
     // MIN_EMOJI_QUERY, so there is nothing to prime on create.
     onSelect: options.onSelect,
     onClose: options.onClose,
+    comboboxInput: options.comboboxInput,
   });
 }

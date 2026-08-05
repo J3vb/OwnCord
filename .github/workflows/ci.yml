@@ -75,6 +75,19 @@ jobs:
       - name: Run tests with deadlock detection
         run: go test -tags deadlock -count=1 ./...
 
+      # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
+      # only COMPILES the otel/wazero variants; the tests behind those tags
+      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go) ran
+      # nowhere until this step. Scoped to the two packages that carry tagged
+      # files — every other package is tag-invariant and already covered by the
+      # race run above. One leg is enough; no -race (the runtime under the tag
+      # is the concern, not new concurrency).
+      - name: Run tag-gated tests (-tags wazero, -tags otel)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test -tags wazero -count=1 ./plugin/...
+          go test -tags otel -count=1 ./telemetry/...
+
       - name: Upload Go coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

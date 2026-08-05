@@ -51,6 +51,15 @@ describe("TypingIndicator", () => {
     expect(container.querySelector(".typing-bar")).not.toBeNull();
   });
 
+  it("mounts as a polite live region so typing changes are announced", () => {
+    comp = createTypingIndicator({ channelId: 1, currentUserId: 100 });
+    comp.mount(container);
+
+    const bar = container.querySelector(".typing-bar") as HTMLDivElement;
+    expect(bar.getAttribute("role")).toBe("status");
+    expect(bar.getAttribute("aria-live")).toBe("polite");
+  });
+
   it("shows nothing when no one is typing", () => {
     comp = createTypingIndicator({ channelId: 1, currentUserId: 100 });
     comp.mount(container);

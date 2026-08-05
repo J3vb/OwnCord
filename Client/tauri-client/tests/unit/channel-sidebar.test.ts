@@ -1872,6 +1872,20 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(badge!.classList.contains("mismatch")).toBe(true);
   });
 
+  it("shows a distinct 'could not check' badge when the pin store was unreadable (DC-08)", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "unknown", null);
+    sidebar.mount(container);
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("unknown")).toBe(true);
+    // Must not read as the legacy "no key published" state — the message is
+    // about local storage failing, not about the peer.
+    expect(badge!.classList.contains("unverified")).toBe(false);
+    expect(badge!.getAttribute("title")).toContain("Could not check");
+  });
+
   it("shows no badge when the peer's verification is unresolved", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     sidebar.mount(container);

@@ -61,9 +61,9 @@ stateDiagram-v2
 | Status | Presentation | Notes |
 |--------|--------------|-------|
 | `joining` | Voice widget shows "Connecting…"; channel roster shows self pending | `handleVoiceToken` → `connectAndSetup` |
-| `securing` | "Securing connection…" indicator (lock, in-progress) | Non-key-holders block here until a room key arrives (10 s + 5 s retry, `livekitSession.ts:860-902`) |
+| `securing` | "Securing connection…" indicator (lock, in-progress) | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`lib/livekitSession.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`)) |
 | `connected` | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`) | E2EE active; per-user tiles live |
-| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down | Keypair regenerated for forward secrecy (`livekitSession.ts:451-468`) |
+| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`) |
 | `failed` | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires |
 
 **Target rules:**
@@ -95,8 +95,8 @@ All four are optimistic with rollback; each also emits a WS control message.
 |---------|-------------|-----------|----------|
 | **Mute** | `localMuted` (`setLocalMuted`) — fully unpublishes the mic track | `voice_mute{muted}` | n/a (local-authoritative) |
 | **Deafen** | `localDeafened` + forces mute — unsubscribes remote *voice* audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume) | `voice_deafen` + `voice_mute` | implies mute |
-| **Camera** | `localCamera` set optimistically, rolled back on device failure (`screenShare.ts:177,204`) | `voice_camera{enabled}` | revert on failure + toast |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`screenShare.ts:265,311`); rate-limited | `voice_screenshare{enabled}` | revert + toast |
+| **Camera** | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`) | `voice_camera{enabled}` | revert on failure + toast |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited | `voice_screenshare{enabled}` | revert + toast |
 
 | Control state | Presentation |
 |---------------|--------------|
@@ -110,7 +110,7 @@ All four are optimistic with rollback; each also emits a WS control message.
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
 "No microphone found") as a toast with a retry — already wired to
-`onErrorCallback` (`livekitSession.ts:734-743`); the spec makes the **Retry mic**
+`onErrorCallback` (the mic-unavailable branches of `restoreLocalVoiceState()`, `lib/livekitSession.ts`); the spec makes the **Retry mic**
 control a permanent part of the listen-only badge.
 
 ---
@@ -118,7 +118,7 @@ control a permanent part of the listen-only badge.
 ## 4. Push-to-talk
 
 PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
-`setMuted(!pressed)` only while in a channel (`ptt.ts:98-105`). **Target UX:**
+`setMuted(!pressed)` only while in a channel (the `ptt-state` listener inside `initPtt()`, `lib/ptt.ts`). **Target UX:**
 
 | State | Presentation |
 |-------|--------------|
@@ -137,7 +137,7 @@ reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 | Signal | Tile reaction |
 |--------|---------------|
 | `voice_state` | Add/update the participant with their flags |
-| `voice_leave` | Remove the tile; if it's us (kick/disconnect), clear local voice state (already `dispatcher.ts:364-367`) |
+| `voice_leave` | Remove the tile; if it's us (kick/disconnect), clear local voice state (already the `voice_leave` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
 | `voice_speakers` | Speaking ring on the listed users |
 | key-holder change | Invisible to users (re-election is automatic on leave); no UI churn |
 
@@ -161,14 +161,14 @@ Peer identity state lives in `voice.store` (per-participant
 `lib/livekitE2EE.ts` as announces are verified against the pinned identity
 keys (`lib/identity.ts`).
 
-| State | Roster badge (`ChannelSidebar.ts:45-60`) | Interaction |
+| State | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`) | Interaction |
 |-------|------------------------------------------|-------------|
 | `verified` | Green shield; title "Identity verified · Safety number: {n}" | none needed |
 | `unverified` | Neutral shield; no pinned key yet | none — pins on first verified announce |
 | `mismatch` | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal |
 
-The mismatch modal (`createIdentityMismatchModal`, `CertMismatchModal.ts:221`;
-opened from `ChannelSidebar.ts:84-135`) shows the **new key's fingerprint** so
+The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
+opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust New Key" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
 was displayed, not a fresh store read, so a malicious server cannot swap the
@@ -181,7 +181,7 @@ trust action entirely (a blind accept is refused).
 - **Noise suppression:** RNNoise WASM worklet (`lib/noise-suppression.ts`,
   assets `public/rnnoise.wasm` + `public/rnnoise-worklet.js`), toggled in
   Settings → Voice & Audio; falls back to a ScriptProcessorNode pipeline when
-  AudioWorklet is unavailable (`noise-suppression.ts:121-205`).
+  AudioWorklet is unavailable (`createScriptProcessorPipeline()` in `lib/noise-suppression.ts`).
 - **Input volume & VAD:** `lib/audioPipeline.ts` applies input gain and
   voice-activity gating ahead of publish.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device

@@ -56,7 +56,13 @@ export function createTypingIndicator(options: TypingIndicatorOptions): Mountabl
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "typing-bar" });
+    // Polite live region (DC-13): "X is typing" changes are announced without
+    // interrupting whatever the screen reader is currently speaking.
+    root = createElement("div", {
+      class: "typing-bar",
+      role: "status",
+      "aria-live": "polite",
+    });
 
     updateFromState();
 

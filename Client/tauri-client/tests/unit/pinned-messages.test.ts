@@ -151,6 +151,31 @@ describe("PinnedMessages", () => {
     panel.destroy?.();
   });
 
+  // ── accessibility (DC-13): landmark panel, not a modal ─────────────────────
+
+  it("exposes the panel as a labeled complementary landmark", () => {
+    const { panel } = makePanel();
+    const root = container.querySelector(".pinned-panel") as HTMLElement;
+    expect(root.getAttribute("role")).toBe("complementary");
+    expect(root.getAttribute("aria-label")).toBe("Pinned messages");
+    // A side panel is not modal — it must never claim aria-modal.
+    expect(root.getAttribute("aria-modal")).toBeNull();
+    panel.destroy?.();
+  });
+
+  it("labels the icon-only buttons for screen readers", () => {
+    const { panel } = makePanel();
+
+    const closeBtn = container.querySelector(".pinned-panel__close") as HTMLButtonElement;
+    expect(closeBtn.getAttribute("aria-label")).toBe("Close pinned messages");
+
+    const actionBtns = container.querySelectorAll(".pinned-msg__actions button");
+    // Jump is the first button in each action group, unpin the second
+    expect(actionBtns[0]!.getAttribute("aria-label")).toBe("Jump to message");
+    expect(actionBtns[1]!.getAttribute("aria-label")).toBe("Unpin message");
+    panel.destroy?.();
+  });
+
   it("destroy removes DOM", () => {
     const { panel } = makePanel();
     expect(container.querySelector(".pinned-panel")).not.toBeNull();

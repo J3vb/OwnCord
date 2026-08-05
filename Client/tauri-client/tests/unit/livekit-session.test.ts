@@ -157,7 +157,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
 vi.mock("@lib/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
-  getIdentityPin: vi.fn(async () => null),
+  getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
 }));
 
@@ -2218,7 +2218,7 @@ describe("LiveKitSession", () => {
 
     beforeEach(() => {
       // Restore TOFU mock defaults — persistent overrides survive clearAllMocks.
-      (getIdentityPin as any).mockResolvedValue(null);
+      (getIdentityPin as any).mockResolvedValue({ status: "unpinned" });
       (storeIdentityPin as any).mockResolvedValue(true);
       (verifyEphemeralKeySignature as any).mockResolvedValue(true);
     });
@@ -2255,7 +2255,7 @@ describe("LiveKitSession", () => {
 
     it("pins the peer identity key on first sight and marks it verified", async () => {
       seedPeer("peer-identity-b64");
-      (getIdentityPin as any).mockResolvedValue(null);
+      (getIdentityPin as any).mockResolvedValue({ status: "unpinned" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
       ws.send.mockClear();
@@ -2277,7 +2277,7 @@ describe("LiveKitSession", () => {
 
     it("blocks and emits identity-tofu when the pinned identity key changed", async () => {
       seedPeer("new-identity-b64");
-      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
       ws.send.mockClear();
@@ -2294,12 +2294,37 @@ describe("LiveKitSession", () => {
       expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
     });
 
+    it("fails closed when the pin store cannot be read (DC-08): rejects, never re-pins", async () => {
+      // A transient keyring error used to read as "no pin stored", sending the
+      // peer down the first-sight path — verifying against and RE-PINNING the
+      // server-delivered key. With the pin unknown, no trust decision is
+      // possible: reject the announce and surface the distinct "unknown" state.
+      seedPeer("peer-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "unavailable" });
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+      (storeIdentityPin as any).mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "unknown", safetyNumber: null }),
+      );
+      // Not treated as first sight: no signature check, no pin write, no key
+      // stored, no room-key offer.
+      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
+      expect(storeIdentityPin).not.toHaveBeenCalled();
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(offerSends(ws)).toHaveLength(0);
+    });
+
     it("blocks a pinned peer when the server strips its published identity key", async () => {
       // Peer was pinned before; the server now omits identity_public_key to
       // shove the peer onto the legacy accept path (finding #2). A pinned peer
       // must never fall back to legacy — this is an identity mismatch.
       seedPeer(null);
-      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
       ws.send.mockClear();
@@ -2341,7 +2366,7 @@ describe("LiveKitSession", () => {
       // Peer legitimately rotated its identity key (reinstall / new device).
       // Its pinned key mismatches the new published one → blocked.
       seedPeer("new-identity-b64");
-      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
       ws.send.mockClear();
@@ -2359,7 +2384,7 @@ describe("LiveKitSession", () => {
       expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
 
       // Store now holds the new pin; a fresh valid announce verifies.
-      (getIdentityPin as any).mockResolvedValue("new-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "new-identity-b64" });
       (storeIdentityPin as any).mockClear();
       ws.send.mockClear();
       await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");

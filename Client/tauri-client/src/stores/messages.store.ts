@@ -60,11 +60,26 @@ export interface Message {
   readonly mentionsEveryone?: boolean;
 }
 
+/** A reaction toggle applied optimistically, awaiting its server echo. Keyed
+ *  by the WS envelope id so an error reply (or local transport failure) can
+ *  roll back exactly this toggle — the same correlation scheme pendingSends
+ *  uses for optimistic message rows. */
+export interface PendingReaction {
+  readonly channelId: number;
+  readonly messageId: number;
+  readonly emoji: string;
+  readonly action: "add" | "remove";
+}
+
 export interface MessagesState {
   /** Messages per channel: channelId -> ordered array of Message */
   readonly messagesByChannel: ReadonlyMap<number, readonly Message[]>;
   /** Pending send confirmations: correlationId -> channelId */
   readonly pendingSends: ReadonlyMap<string, number>;
+  /** Optimistic reaction toggles awaiting their echo: correlationId -> toggle.
+   *  The store always sets it; optional only so the many inline MessagesState
+   *  test fixtures need not restate it. */
+  readonly pendingReactions?: ReadonlyMap<string, PendingReaction>;
   /** Whether we've loaded initial messages for a channel */
   readonly loadedChannels: ReadonlySet<number>;
   /** Whether more messages exist above for a channel */
@@ -140,6 +155,7 @@ const MAX_MESSAGES_PER_CHANNEL = 500;
 const INITIAL_STATE: MessagesState = {
   messagesByChannel: new Map(),
   pendingSends: new Map(),
+  pendingReactions: new Map(),
   loadedChannels: new Set(),
   hasMore: new Map(),
   historyLoadState: new Map(),
@@ -605,43 +621,125 @@ export function clearChannelMessages(channelId: number): void {
   });
 }
 
+/**
+ * Apply a single reaction count/me delta to a channel's message list, or null
+ * when the message is not loaded (nothing to update). Shared by the
+ * server-echo path, the optimistic apply, and its rollback (which applies the
+ * inverse action) so the three can never disagree about the arithmetic.
+ */
+function applyReactionDelta(
+  prev: MessagesState,
+  { channelId, messageId, emoji, action }: PendingReaction,
+  isMe: boolean,
+): ReadonlyMap<number, readonly Message[]> | null {
+  const channelMessages = prev.messagesByChannel.get(channelId);
+  if (!channelMessages) return null;
+
+  const updatedList = channelMessages.map((msg) => {
+    if (msg.id !== messageId) return msg;
+
+    const existing = msg.reactions;
+    if (action === "add") {
+      const found = existing.find((r) => r.emoji === emoji);
+      if (found !== undefined) {
+        const updatedReactions = existing.map((r) =>
+          r.emoji === emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
+        );
+        return { ...msg, reactions: updatedReactions };
+      }
+      return { ...msg, reactions: [...existing, { emoji, count: 1, me: isMe }] };
+    }
+
+    // action === "remove"
+    const updatedReactions = existing
+      .map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r))
+      .filter((r) => r.count > 0);
+    return { ...msg, reactions: updatedReactions };
+  });
+
+  const updatedMessages = new Map(prev.messagesByChannel);
+  updatedMessages.set(channelId, updatedList);
+  return updatedMessages;
+}
+
+/**
+ * Apply the user's own reaction toggle locally before the server confirms it —
+ * the pill reacts to the click, not to the round-trip (ux/messaging §5) — and
+ * register it under the send's correlation id. updateReaction consumes the
+ * matching self-echo (instead of re-applying it), and rollbackReaction
+ * reverts the toggle when the send errors.
+ */
+export function addOptimisticReaction(correlationId: string, toggle: PendingReaction): void {
+  messagesStore.setState((prev) => {
+    const updatedMessages = applyReactionDelta(prev, toggle, true);
+    if (updatedMessages === null) return prev;
+    const updatedPending = new Map(prev.pendingReactions ?? []);
+    updatedPending.set(correlationId, toggle);
+    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
+  });
+}
+
+/**
+ * Roll back an optimistic reaction toggle whose send failed (server error
+ * reply or local transport failure) by applying the inverse delta. Returns
+ * whether the correlation id matched a pending toggle, so the dispatcher's
+ * error handler knows the failed envelope was a reaction's.
+ */
+export function rollbackReaction(correlationId: string): boolean {
+  let found = false;
+  messagesStore.setState((prev) => {
+    const toggle = prev.pendingReactions?.get(correlationId);
+    if (toggle === undefined) return prev;
+    found = true;
+    const updatedPending = new Map(prev.pendingReactions);
+    updatedPending.delete(correlationId);
+    const inverse: PendingReaction = {
+      ...toggle,
+      action: toggle.action === "add" ? "remove" : "add",
+    };
+    const updatedMessages = applyReactionDelta(prev, inverse, true);
+    if (updatedMessages === null) {
+      return { ...prev, pendingReactions: updatedPending };
+    }
+    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
+  });
+  return found;
+}
+
 /** Update reactions on a message from a reaction_update WS event. */
 export function updateReaction(payload: ReactionUpdatePayload, currentUserId: number): void {
   messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
-    if (!channelMessages) return prev;
+    const isMe = payload.user_id === currentUserId;
 
-    const updatedList = channelMessages.map((msg) => {
-      if (msg.id !== payload.message_id) return msg;
-
-      const isMe = payload.user_id === currentUserId;
-      const existing = msg.reactions;
-
-      if (payload.action === "add") {
-        const found = existing.find((r) => r.emoji === payload.emoji);
-        if (found !== undefined) {
-          const updatedReactions = existing.map((r) =>
-            r.emoji === payload.emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
-          );
-          return { ...msg, reactions: updatedReactions };
+    // The echo of an optimistic toggle: consume it instead of re-applying —
+    // the delta arithmetic above would double-count otherwise. Matched by
+    // content, not envelope id (broadcasts carry no request correlation).
+    if (isMe) {
+      for (const [cid, t] of prev.pendingReactions ?? []) {
+        if (
+          t.channelId === payload.channel_id &&
+          t.messageId === payload.message_id &&
+          t.emoji === payload.emoji &&
+          t.action === payload.action
+        ) {
+          const updatedPending = new Map(prev.pendingReactions);
+          updatedPending.delete(cid);
+          return { ...prev, pendingReactions: updatedPending };
         }
-        return {
-          ...msg,
-          reactions: [...existing, { emoji: payload.emoji, count: 1, me: isMe }],
-        };
       }
+    }
 
-      // action === "remove"
-      const updatedReactions = existing
-        .map((r) =>
-          r.emoji === payload.emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r,
-        )
-        .filter((r) => r.count > 0);
-      return { ...msg, reactions: updatedReactions };
-    });
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(payload.channel_id, updatedList);
+    const updatedMessages = applyReactionDelta(
+      prev,
+      {
+        channelId: payload.channel_id,
+        messageId: payload.message_id,
+        emoji: payload.emoji,
+        action: payload.action,
+      },
+      isMe,
+    );
+    if (updatedMessages === null) return prev;
     return { ...prev, messagesByChannel: updatedMessages };
   });
 }

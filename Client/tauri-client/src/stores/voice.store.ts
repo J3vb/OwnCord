@@ -51,12 +51,16 @@ export interface VoiceConfig {
  *   - "verified":   announce signature checked against the peer's pinned key.
  *   - "unverified": peer published no identity key (legacy) — pin-pending.
  *   - "mismatch":   the delivered identity key differs from the pinned one
- *                   (possible server MITM); the peer is blocked until re-pin. */
+ *                   (possible server MITM); the peer is blocked until re-pin.
+ *   - "unknown":    the local pin store could not be read (keyring error), so
+ *                   no trust decision was possible — the announce was rejected
+ *                   (fail closed, DC-08). Distinct from "unverified" so a
+ *                   storage fault never reads as "never pinned". */
 export interface PeerVerification {
   readonly userId: number;
-  readonly status: "verified" | "unverified" | "mismatch";
+  readonly status: "verified" | "unverified" | "mismatch" | "unknown";
   /** Safety number (identity-key fingerprint) for out-of-band verification;
-   *  null for legacy/unverified/mismatch peers. */
+   *  null for legacy/unverified/mismatch/unknown peers. */
   readonly safetyNumber: string | null;
 }
 

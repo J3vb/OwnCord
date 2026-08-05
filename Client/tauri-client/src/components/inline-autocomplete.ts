@@ -7,6 +7,13 @@
  * navigation, Enter/Tab/Escape handling, AbortController cleanup — lives here
  * once instead of being duplicated in each popup.
  *
+ * Accessibility-wise this is a WAI-ARIA combobox, not a menu: DOM focus stays
+ * in the composer textarea the whole time (moving it into the list would stop
+ * keystrokes from reaching the textarea, so the rows deliberately get no
+ * roving tabindex) and the "focused" row is conveyed purely through
+ * aria-activedescendant on the textarea, pointing at per-row ids stamped on
+ * every render.
+ *
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
@@ -40,6 +47,15 @@ export interface InlineAutocompleteConfig<T> {
   readonly onSelect: (value: string) => void;
   /** Called when the user dismisses the popup (Escape). */
   readonly onClose: () => void;
+  /**
+   * The composer control this popup completes for (the textarea). While the
+   * popup exists it carries combobox semantics — role="combobox",
+   * aria-autocomplete="list", aria-expanded="true", aria-controls={list id} —
+   * plus aria-activedescendant tracking the active row; destroy() removes
+   * them all again. DOM focus never moves here: it must stay in the textarea
+   * so typing keeps working, which is why the rows have no tabindex.
+   */
+  readonly comboboxInput?: HTMLElement;
 }
 
 export interface InlineAutocompleteComponent {
@@ -54,6 +70,15 @@ export interface InlineAutocompleteComponent {
   destroy(): void;
 }
 
+/** The combobox state a popup stamps on its input, removed again on destroy. */
+const COMBOBOX_ATTRS = [
+  "role",
+  "aria-autocomplete",
+  "aria-expanded",
+  "aria-controls",
+  "aria-activedescendant",
+] as const;
+
 export function createInlineAutocomplete<T>(
   cfg: InlineAutocompleteConfig<T>,
 ): InlineAutocompleteComponent {
@@ -63,13 +88,28 @@ export function createInlineAutocomplete<T>(
   let suggestions: T[] = [];
   let activeIndex = 0;
 
+  // The testid is already unique per widget, so it doubles as a stable DOM id
+  // for aria-controls / aria-activedescendant to point at.
+  const rootId = cfg.rootTestId;
+
   const root = createElement("div", {
     class: cfg.rootClass,
+    id: rootId,
     role: "listbox",
     "data-testid": cfg.rootTestId,
   });
   const list = createElement("div", { class: "ma-list" });
   root.appendChild(list);
+
+  const input = cfg.comboboxInput ?? null;
+  if (input !== null) {
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    // The popup only exists while it is open (the composer destroys it to
+    // close), so "expanded" holds for this component's whole lifetime.
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-controls", rootId);
+  }
 
   function choose(index: number): void {
     const picked = suggestions[index];
@@ -83,6 +123,7 @@ export function createInlineAutocomplete<T>(
       const s = suggestions[i]!;
       const row = createElement("div", {
         class: i === activeIndex ? "ma-item ma-item--active" : "ma-item",
+        id: `${rootId}-option-${i}`,
         role: "option",
         "aria-selected": i === activeIndex ? "true" : "false",
         "data-testid": cfg.rowTestId(s),
@@ -99,6 +140,15 @@ export function createInlineAutocomplete<T>(
         { signal },
       );
       list.appendChild(row);
+    }
+    // Rows are rebuilt with index-based ids, so the pointer must be re-aimed
+    // on every render, not just when activeIndex moves.
+    if (input !== null) {
+      if (suggestions.length > 0) {
+        input.setAttribute("aria-activedescendant", `${rootId}-option-${activeIndex}`);
+      } else {
+        input.removeAttribute("aria-activedescendant");
+      }
     }
   }
 
@@ -138,6 +188,12 @@ export function createInlineAutocomplete<T>(
 
   function destroy(): void {
     ac.abort();
+    // Another popup may have claimed the input between this one's open and
+    // close (the composer opens the mention popup before closing the emoji
+    // one), so only strip the combobox state while it still points here.
+    if (input !== null && input.getAttribute("aria-controls") === rootId) {
+      for (const attr of COMBOBOX_ATTRS) input.removeAttribute(attr);
+    }
     root.remove();
   }
 

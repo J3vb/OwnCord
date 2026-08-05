@@ -8,6 +8,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface CertMismatchModalOptions {
@@ -21,17 +22,27 @@ export interface CertMismatchModalOptions {
 export function createCertMismatchModal(options: CertMismatchModalOptions): MountableComponent {
   const { host, storedFingerprint, newFingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
   const ac = new AbortController();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
 
     const modal = createElement("div", { class: "modal" });
+    // Ids are unique per factory, not per instance — these three trust prompts
+    // never stack with each other in practice.
+    applyDialogSemantics(modal, { labelledBy: "cert-mismatch-title" });
+    trapFocus(modal, ac.signal);
 
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Certificate Warning");
-    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    const title = createElement("h3", { id: "cert-mismatch-title" }, "Certificate Warning");
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      type: "button",
+      // Icon-only control — the aria-label is its entire accessible name.
+      "aria-label": "Close",
+    });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onReject, { signal: ac.signal });
@@ -94,7 +105,18 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       { signal: ac.signal },
     );
 
+    // Escape maps to reject because that is the fail-closed safe default
+    // (Disconnect) — dismissing a trust prompt must never grant trust.
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+      },
+      { signal: ac.signal },
+    );
+
     container.appendChild(overlay);
+    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
@@ -103,6 +125,8 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
       overlay.remove();
       overlay = null;
     }
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };
@@ -124,15 +148,24 @@ export interface CertFirstUseModalOptions {
 export function createCertFirstUseModal(options: CertFirstUseModalOptions): MountableComponent {
   const { host, fingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
   const ac = new AbortController();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
     const modal = createElement("div", { class: "modal" });
+    // Unique per factory, not per instance — the three trust prompts never
+    // stack with each other in practice.
+    applyDialogSemantics(modal, { labelledBy: "cert-first-use-title" });
+    trapFocus(modal, ac.signal);
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "New Server Certificate");
-    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    const title = createElement("h3", { id: "cert-first-use-title" }, "New Server Certificate");
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      type: "button",
+      "aria-label": "Close",
+    });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onReject, { signal: ac.signal });
@@ -187,7 +220,18 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
       { signal: ac.signal },
     );
 
+    // Escape rejects (Cancel) — the fail-closed default: never trust a
+    // certificate because the prompt was dismissed.
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+      },
+      { signal: ac.signal },
+    );
+
     container.appendChild(overlay);
+    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
@@ -196,6 +240,8 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
       overlay.remove();
       overlay = null;
     }
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };
@@ -223,15 +269,24 @@ export function createIdentityMismatchModal(
 ): MountableComponent {
   const { username, fingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
   const ac = new AbortController();
 
   function mount(container: Element): void {
     overlay = createElement("div", { class: "modal-overlay visible" });
     const modal = createElement("div", { class: "modal" });
+    // Unique per factory, not per instance — the three trust prompts never
+    // stack with each other in practice.
+    applyDialogSemantics(modal, { labelledBy: "identity-mismatch-title" });
+    trapFocus(modal, ac.signal);
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Identity Warning");
-    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    const title = createElement("h3", { id: "identity-mismatch-title" }, "Identity Warning");
+    const closeBtn = createElement("button", {
+      class: "modal-close",
+      type: "button",
+      "aria-label": "Close",
+    });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onReject, { signal: ac.signal });
@@ -287,7 +342,18 @@ export function createIdentityMismatchModal(
       { signal: ac.signal },
     );
 
+    // Escape rejects (Cancel) — the fail-closed default: dismissing the
+    // prompt must never re-pin the new identity key.
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+      },
+      { signal: ac.signal },
+    );
+
     container.appendChild(overlay);
+    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
@@ -296,6 +362,8 @@ export function createIdentityMismatchModal(
       overlay.remove();
       overlay = null;
     }
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };

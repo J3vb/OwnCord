@@ -655,6 +655,129 @@ describe("GifPicker", () => {
     });
   });
 
+  // ── Listbox semantics (DC-13) ─────────────────────────────────────────────
+
+  describe("listbox semantics", () => {
+    it("marks the grid area as a listbox named GIFs", () => {
+      const { picker } = makePicker();
+      const gridArea = picker.element.querySelector(".gp-grid-area");
+      expect(gridArea).not.toBeNull();
+      expect(gridArea!.getAttribute("role")).toBe("listbox");
+      expect(gridArea!.getAttribute("aria-label")).toBe("GIFs");
+      picker.destroy();
+    });
+
+    it("gives each item role=option with the gif title as aria-label", async () => {
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const items = picker.element.querySelectorAll(".gp-item");
+      expect(items.length).toBe(TRENDING_GIFS.length);
+      items.forEach((item, i) => {
+        expect(item.getAttribute("role")).toBe("option");
+        expect(item.getAttribute("aria-label")).toBe(TRENDING_GIFS[i]!.title);
+      });
+      picker.destroy();
+    });
+
+    it("aria-label falls back to 'GIF' when the title is empty", async () => {
+      const gifNoTitle: GifResult = {
+        id: "no-title",
+        title: "",
+        url: "https://media.klipy.com/preview/no-title.gif",
+        fullUrl: "https://media.klipy.com/full/no-title.gif",
+      };
+      vi.mocked(getTrendingGifs).mockResolvedValue([gifNoTitle]);
+
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const item = picker.element.querySelector(".gp-item");
+      expect(item!.getAttribute("aria-label")).toBe("GIF");
+      picker.destroy();
+    });
+
+    it("makes exactly one item tabbable (roving tabindex)", async () => {
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const items = Array.from(picker.element.querySelectorAll(".gp-item"));
+      const tabbable = items.filter((c) => c.getAttribute("tabindex") === "0");
+      expect(tabbable.length).toBe(1);
+      expect(tabbable[0]).toBe(items[0]);
+      expect(items.slice(1).every((c) => c.getAttribute("tabindex") === "-1")).toBe(true);
+      picker.destroy();
+    });
+
+    it("re-applies the roving tabindex when a search replaces the items", async () => {
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      input.value = "cats";
+      input.dispatchEvent(new Event("input"));
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const items = Array.from(picker.element.querySelectorAll(".gp-item"));
+      expect(items.length).toBe(SEARCH_GIFS.length);
+      const tabbable = items.filter((c) => c.getAttribute("tabindex") === "0");
+      expect(tabbable.length).toBe(1);
+      expect(tabbable[0]).toBe(items[0]);
+      picker.destroy();
+    });
+
+    it("ArrowRight moves focus and the tabbable item to the next gif", async () => {
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const items = picker.element.querySelectorAll(".gp-item") as NodeListOf<HTMLElement>;
+      expect(items.length).toBeGreaterThan(1);
+
+      items[0]!.focus();
+      items[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+
+      expect(document.activeElement).toBe(items[1]);
+      expect(items[0]!.getAttribute("tabindex")).toBe("-1");
+      expect(items[1]!.getAttribute("tabindex")).toBe("0");
+      picker.destroy();
+    });
+
+    it("Enter on a focused item fires the same onSelect/onClose as click", async () => {
+      const onSelect = vi.fn();
+      const onClose = vi.fn();
+      const { picker } = makePicker({ onSelect, onClose });
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const firstItem = picker.element.querySelector(".gp-item") as HTMLElement;
+      firstItem.focus();
+      firstItem.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      expect(onSelect).toHaveBeenCalledWith(TRENDING_GIFS[0]!.fullUrl);
+      expect(onClose).toHaveBeenCalledOnce();
+      picker.destroy();
+    });
+  });
+
   // ── destroy() ─────────────────────────────────────────────────────────────
 
   describe("destroy()", () => {

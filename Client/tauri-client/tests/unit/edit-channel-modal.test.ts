@@ -551,6 +551,64 @@ describe("EditChannelModal", () => {
     });
   });
 
+  // ─── Dialog accessibility contract (DC-13) ─────────────────────────────────
+
+  describe("dialog accessibility", () => {
+    it("stamps dialog semantics named by the header title", () => {
+      const { modal } = makeModal();
+      const dialog = container.querySelector(".modal") as HTMLElement;
+      expect(dialog.getAttribute("role")).toBe("dialog");
+      expect(dialog.getAttribute("aria-modal")).toBe("true");
+      expect(dialog.getAttribute("aria-labelledby")).toBe("edit-channel-title");
+      expect(container.querySelector("#edit-channel-title")?.textContent).toBe("Edit Channel");
+      modal.destroy?.();
+    });
+
+    it("labels the icon-only close button", () => {
+      const { modal } = makeModal();
+      const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+      expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+      modal.destroy?.();
+    });
+
+    it("Escape calls onClose without saving", () => {
+      const onSave = vi.fn(async () => {});
+      const onClose = vi.fn();
+      const { modal } = makeModal({ onSave, onClose });
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onSave).not.toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("ignores Escape after destroy", () => {
+      const onClose = vi.fn();
+      const { modal } = makeModal({ onClose });
+      modal.destroy?.();
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("focuses the name input on open and restores focus on destroy", () => {
+      const trigger = document.createElement("button");
+      container.appendChild(trigger);
+      trigger.focus();
+
+      const { modal } = makeModal();
+      const input = container.querySelector(
+        "[data-testid='edit-channel-name-input']",
+      ) as HTMLInputElement;
+      expect(document.activeElement).toBe(input);
+
+      modal.destroy?.();
+      expect(document.activeElement).toBe(trigger);
+    });
+  });
+
   // ─── Pure helpers ──────────────────────────────────────────────────────────
 
   describe("clampVoiceLimit", () => {
