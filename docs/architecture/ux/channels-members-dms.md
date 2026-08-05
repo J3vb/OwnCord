@@ -18,7 +18,7 @@ category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`)
 | State | Trigger | Target reaction |
 |-------|---------|-----------------|
 | `ready` | Channels loaded from `ready` | Grouped, collapsible category list |
-| `empty` | Zero channels | "No channels yet" + hint (already `ChannelSidebar.ts:749`) |
+| `empty` | Zero channels | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
 | category collapsed | User toggles | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state |
 | active channel | `setActiveChannel` | Highlighted; unread cleared |
 | unread | `chat_message` in a non-active channel | Unread pill; badge on the channel |
@@ -37,7 +37,7 @@ Each channel type gets a distinct icon and interaction:
 ### 1.1a Per-channel notification mutes
 
 The channel context menu offers "Mute Channel" / "Unmute Channel"
-(`channel-sidebar/context-menu.ts:102`, backed by `lib/channel-mutes.ts`).
+(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/channel-mutes.ts`).
 Discord semantics, deliberately: a mute silences the channel's *noise* — no
 desktop notification, no chime — while the unread badge still counts but
 renders dimmed, and a message that mentions you still notifies and shows the
@@ -88,10 +88,10 @@ role grouping.
 | State | Trigger | Target reaction |
 |-------|---------|-----------------|
 | `ready` | `ready.members` | Grouped by role, sorted; presence dot per member |
-| `empty` | No online members | "No members online" (already `MemberList.ts:335`) |
+| `empty` | No online members | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`) |
 | presence change | `presence` event | Live dot update; offline members styled distinctly |
 | role change | `member_update` | Re-group live |
-| profile change | `user_update` | Name/avatar update; if it's us, also patch `auth.store` (already `dispatcher.ts:334-341`) |
+| profile change | `user_update` | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
 | join/leave/ban | `member_join`/`member_leave`/`member_ban` | Add/remove with no reflow flash |
 
 ### 2.1 Typing indicator
@@ -99,7 +99,7 @@ role grouping.
 `typing` events populate `members.typingUsers` with a 5 s auto-clear timer.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
-`TypingIndicator.ts:20-25`). The client emits `typing_start` while composing
+`formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
 (debounced), never per-keystroke.
 
 ### 2.2 Member actions (context menu)
@@ -126,10 +126,10 @@ recipient, last-message preview, unread).
 |-------|---------|-----------------|
 | `ready` | `ready.dm_channels` | DM list sorted by recency |
 | `empty` | No DMs | "No direct messages yet" + "Start one from a member's profile" |
-| open DM | `dm_channel_open` | Prepend/move-to-top, dedup (already `dm.store.ts:71-83`) |
+| open DM | `dm_channel_open` | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`) |
 | close DM | `dm_channel_close` | Remove from list |
 | new DM message | `chat_message` in a DM | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active |
-| last-message empty | Never messaged | "No messages yet" fallback (already `SidebarDmHelpers.ts:227`) |
+| last-message empty | Never messaged | "No messages yet" fallback (already the `lastMessage` fallback in `buildDmConversations()`, `pages/main-page/SidebarDmHelpers.ts`) |
 
 ### 3.1 Opening a DM
 
@@ -152,12 +152,12 @@ sequenceDiagram
 One picker covers 1:1 and group creation
 (`pages/main-page/MemberPickerModal.ts`): selecting a single member opens a
 1:1 DM, selecting two or more creates a group (cap
-`MAX_GROUP_DM_PARTICIPANTS = 10`, `lib/constants.ts:9`) — "new conversation"
+the `MAX_GROUP_DM_PARTICIPANTS = 10` constant in `lib/constants.ts`) — "new conversation"
 is one intent, so the user is not asked to choose DM-vs-group up front. Group
 DMs are `channels` rows with `type='dm'` and `is_group=1` server-side
 (migration 028), so leaving a two-person group does not collapse it back into
 a 1:1. "Rename Group" / "Leave Group" affordances live in the DM row context
-menu (`DmSidebar.ts:240-251`; leave doubles as "Close DM" for 1:1s);
+menu (the contextmenu handler in `renderDmItem()`, `components/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
 ring/incoming calls work the same as 1:1 DMs (`call_ring` fans out to every
 other participant).
 
@@ -185,7 +185,7 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 >
 > **✓ Implemented (2026-07/08).** The in-client **Block/Unblock** affordance now
 > lives in the member context menu (`AdminActions.ts` renders the item;
-> `MemberList.ts` passes it through; `SidebarMemberSection.ts:177-186` calls
+> `MemberList.ts` passes it through; the `onToggleBlock` handler in `createSidebarMemberSection()` (`pages/main-page/SidebarMemberSection.ts`) calls
 > `api.blockUser`/`api.unblockUser`, updates `blocks.store` via
 > `setUserBlockedByMe` for an instant local un-gate, and confirms with a
 > success toast — or an error toast on failure).

@@ -159,7 +159,7 @@ and drives the ring state machine in `lib/call-ring.ts` +
 ## 5. Error & permission reaction matrix
 
 One canonical reaction per failure class, applied everywhere. Today error
-handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes only
+handling is per-call-site with no shared mapper (`doFetch()` in `lib/api.ts` centralizes only
 401); this matrix is the target contract.
 
 | Class | Source | Target reaction |
@@ -169,12 +169,12 @@ handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes onl
 | **403 Suspended/Banned** | login REST / WS `BANNED` | Transient-error store → connect page: "Your account has been suspended." Force logout, no reconnect |
 | **429 Rate-limited** | REST/WS `RATE_LIMITED` | Non-destructive toast "You're doing that too fast — try again in a moment." Keep the user's input; re-enable the control after a short cooldown |
 | **Slow-mode** | WS `SLOW_MODE` | Disable send with a live countdown in the composer; do not drop the drafted message |
-| **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars, `LoginForm.ts:598`; apply everywhere) |
+| **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars in the `handleFormSubmit()` catch block, `pages/connect-page/LoginForm.ts`; apply everywhere) |
 | **Conflict/Not-found (404/409)** | REST/WS | Contextual inline message + refresh the affected view (the target moved/vanished) |
 | **5xx / network** | REST | Inline section error + **Retry**; for one-shot actions, a toast "Couldn't reach the server." Never a silent drop |
 | **Transport backpressure** | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent) |
-| **Cert first-use** | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy *rejects* the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: `main.ts:146-175`) |
-| **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: `main.ts:177-207`) |
+| **Cert first-use** | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy *rejects* the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: the `ws.onCertFirstUse(...)` handler in `main.ts`) |
+| **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: the `ws.onCertMismatch(...)` handler in `main.ts`) |
 
 ---
 
