@@ -55,6 +55,19 @@ async function mockUpdaterSession(
   }, opts);
 }
 
+/** The install settle handles exist only once the app's
+ *  download_and_install_update invoke reaches the mock wrapper — wait for
+ *  them instead of racing it. Locally the invoke usually wins that race;
+ *  CI runners demonstrably lose it (the banner flips to "Downloading…"
+ *  synchronously on click, before the invoke's microtask runs). */
+async function waitForInstallHandles(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      typeof (window as unknown as { __rejectInstall: unknown }).__rejectInstall === "function" &&
+      typeof (window as unknown as { __resolveInstall: unknown }).__resolveInstall === "function",
+  );
+}
+
 /** Wait for the update-progress listener, then emit a RAW object payload —
  *  the Tauri event system delivers deserialized objects, and emitWsEvent's
  *  stringify would break `event.payload.received`. */
@@ -120,6 +133,7 @@ test.describe("Updater journey", () => {
 
     // Install completes → the app relaunches itself (spec: "applied — App
     // relaunches automatically"; there is no separate restart prompt).
+    await waitForInstallHandles(page);
     await page.evaluate(() =>
       (window as unknown as { __resolveInstall: () => void }).__resolveInstall(),
     );
@@ -139,6 +153,7 @@ test.describe("Updater journey", () => {
     await page.locator(".update-banner-install").click();
     await expect(bannerText(page)).toHaveText("Downloading update…");
 
+    await waitForInstallHandles(page);
     await page.evaluate(() =>
       (window as unknown as { __rejectInstall: (e: Error) => void }).__rejectInstall(
         new Error("signature verification failed"),
