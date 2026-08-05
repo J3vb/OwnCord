@@ -50,22 +50,28 @@ by file. This run had neither.
   `tests/e2e/native/`, run by `playwright.config.native.ts` on Windows
   (WebView2) — all 11 matched by a project since 2026-08-04.
   **Deliberately not wired to CI.**
+- **Admin panel (real server, no mocks):** 1 spec / 6 tests under
+  `tests/e2e/admin/`, run by `playwright.config.admin.ts` — a serial
+  journey (first-run wizard → dashboard → channel CRUD → audit log →
+  re-login) against a real Go server booted by
+  `tests/e2e/admin/start-server.sh`. Needs the Go toolchain
+  (`npm run test:e2e:admin`).
 
 ## CI wiring (`.github/workflows/ci.yml`)
 
 | Job | Blocking? | What it runs |
 | --- | --------- | ------------ |
-| `client-e2e` | No (`continue-on-error`, pending a flakiness soak) | Full web suite, every PR |
+| `client-e2e` | **Yes** (blocking since 2026-08-05, DC-07) | Full web suite, every PR |
 | `client-e2e-parity` | **Yes** | The `@parity` subset |
+| `admin-e2e` | No (`continue-on-error`, earning its soak) | The admin-panel journey vs a real server |
 | native config | not in CI | Windows-only; run manually |
 
 ## Known issues (open)
 
-1. **`client-e2e` is still non-blocking.** The suite has been green since the
-   mock repair that closed audit finding T-2026-07-25-21 (a `start_http_proxy`
-   stub plus the voice-premise rewrite); promoting the job to blocking after a
-   soak period is the remaining step (owner's call — this file just keeps
-   adding green evidence).
+1. **`admin-e2e` is non-blocking while it earns its soak** — the same
+   graduation convention `client-e2e` followed before its 2026-08-05
+   promotion (DC-07: green runs at 270/276/291 tests, and the one hard CI
+   failure in the soak window was a real spec bug, not flake).
 
 ## Resolved (2026-08-04 remediation)
 

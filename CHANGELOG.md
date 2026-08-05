@@ -70,6 +70,18 @@ behavioural changes operators must know about.
   the updater (banner → progress → auto-relaunch), plus an accessibility
   smoke; full web suite now 291 tests.
 
+- **server/admin:** in-place self-update is refused in container
+  deployments (503 `CONTAINER_DEPLOYMENT`; the shipped image sets
+  `OWNCORD_CONTAINER=1`, bind-mount operators can set `0` to opt back in).
+  Container upgrades are image pulls; `GET /admin/api/updates` now reports
+  `can_apply` and the admin panel says so instead of offering the button.
+- **ci:** the full client e2e suite now blocks merges (DC-07); a new
+  non-blocking `admin-e2e` job drives the admin panel against a real server
+  (first-run wizard, channel CRUD, audit log, re-login).
+- **docs:** the dependency pinning/review policy is written down in
+  `docs/contributing.md`, closing the last 2026-04 audit carryover that was
+  still undecided.
+
 ## v1.2.0-alpha.1 — Discord feature parity
 
 > **Project reset note:** OwnCord has re-entered alpha. The `v1.0.0` release is

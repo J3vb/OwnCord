@@ -426,8 +426,9 @@ specified, and every suite is green.
   leg) now runs `go test -tags wazero ./plugin/...` and
   `-tags otel ./telemetry/...`; both passed locally on their first-ever run
   (no latent failures were hiding behind the tags).
-- **DC-07** Flip `client-e2e` to blocking after a soak (it has been green
-  since the mock repair; 270/270 in this session).
+- **DC-07** ~~Flip `client-e2e` to blocking after a soak~~ **RESOLVED
+  2026-08-05 (§13)** — blocking, on the owner's direction, with the soak
+  evidence recorded in the job comment.
 - **DC-08** ~~`getIdentityPin` fail-open on transient keyring errors
   (`identity.ts:106-118`, F3 follow-up 3).~~ **RESOLVED 2026-08-05 (closure
   pass)** — `getIdentityPin` returns a three-state lookup
@@ -436,20 +437,15 @@ specified, and every suite is green.
   write and surfaces the distinct "unknown" badge state. Pinned by unit
   tests (pin present / no pin / store error, the rejection path, the badge)
   and an e2e case in `voice-e2ee-verify.spec.ts`.
-- **DC-09** **PARTIALLY RESOLVED 2026-08-04 (remediation pass)** — the
-  `serve_ready.go` comment now cites `docs/protocol.md` (and `host_ui.go`'s
-  phantom-route comment fell in the same sweep). **FURTHER RESOLVED
-  2026-08-05 (closure pass)** — backup restore now writes a `backup_restore`
-  audit row, synchronously and *before* the pre-restore safety copy so the
-  row survives inside `pre_restore_*.db` (the restore replaces the live DB
-  file); the restore test opens the safety copy and asserts the row is
-  there; docs/security.md updated. Still open: the `handleApplyUpdate` TODO
-  for container builds.
+- **DC-09** ~~stale comments; backup-restore audit row; `handleApplyUpdate`
+  container TODO~~ **RESOLVED 2026-08-05 — in three passes:** comments
+  (§11), restore audit row (§12), container-aware update refusal (§13).
 - **DC-10** Node version skew: CI pins 20, no `.nvmrc`, this session ran 22.
   **RESOLVED 2026-08-05 (remediation follow-up)** — `Client/tauri-client/.nvmrc`
   pins 20 to match CI, closing 2026-04-07 #11's remainder.
-- **DC-11** Resurfaced 2026-04-07 #8: adopt an explicit npm dependency
-  pinning/review policy (lockfile exists; the *policy* was never decided).
+- **DC-11** ~~Resurfaced 2026-04-07 #8: adopt an explicit npm dependency
+  pinning/review policy~~ **RESOLVED 2026-08-05 (§13)** — policy written in
+  `docs/contributing.md`.
 
 **P3 — polish**
 
@@ -604,11 +600,46 @@ actual local run.
 
 ### Still open after this pass
 
+*(Historical — superseded by §13's final closure below.)*
+
 DC-04's admin-panel journey (row 48 — the last flow with no browser
 automation), DC-07 (soak decision, owner's call), DC-09's
 `handleApplyUpdate` container TODO, DC-11 (npm pinning policy), DC-14
 (reserved protocol entries, owner's call), and the 2026-04-07 carryovers
 #5 (accepted), #8, #9.
+
+---
+
+## 13. Final closure (2026-08-05, owner-directed)
+
+The owner directed the remaining deferrals be executed ("do the remaining
+now"), converting the two owner's-call items into decisions:
+
+- **DC-07 RESOLVED** — `client-e2e` is **blocking**. Soak evidence: green
+  full-suite runs at 270/276/291 tests across the audit branches; the one
+  hard CI failure in the window was a real spec bug a non-blocking job
+  would have hidden.
+- **DC-09 RESOLVED (fully)** — the `handleApplyUpdate` container TODO is
+  code now: `updater.RunningInContainer` (env-authoritative, marker-file
+  fallback) refuses `POST /admin/api/updates/apply` with 503
+  `CONTAINER_DEPLOYMENT`, `GET /updates` gains `can_apply`, the SPA shows
+  an image-upgrade note instead of the button, and the shipped Dockerfile
+  sets `OWNCORD_CONTAINER=1`. The backup-restore audit row landed in §12.
+- **DC-11 RESOLVED** — the dependency pinning/review policy is written
+  down in `docs/contributing.md` (lockfiles authoritative, `npm ci`-only
+  installs, weekly Dependabot with deliberate majors, per-PR security
+  gates). Also closes 2026-04-07 #8.
+- **DC-04 RESOLVED (fully)** — the admin panel has a real-server e2e
+  journey: `tests/e2e/admin/` boots the Go server fresh and drives the
+  embedded SPA through the first-run wizard, dashboard stats, channel
+  create/rename, audit-log verification and sign-out/sign-in, with a
+  non-blocking `admin-e2e` CI job on the same graduation convention
+  `client-e2e` followed. Every matrix row now has automation.
+
+Still open, all deliberate: DC-14 (reserved protocol entries — a protocol
+rev, not cleanup), the `admin-e2e` soak graduation, and the 2026-04-07
+carryovers #5 (accepted residual risk) and #9 (service-layer
+consolidation, tracked by A-2026-07-10/11's backlog).
 
 ---
 
