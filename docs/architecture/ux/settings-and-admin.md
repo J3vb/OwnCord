@@ -111,10 +111,13 @@ and (b) confirm destructive actions.
 | Invites | Invite manager modal | `GET/POST/DELETE /invites` | List with masked codes, copy, revoke; empty state "No active invites" |
 
 **Target rules:**
-- Destructive admin actions should show an **in-flight** state (today the
-  two-click label reverts immediately and only a toast reports the result —
-  `AdminActions.ts:99` `withConfirmation`; adding a pending state so a slow
-  ban doesn't look ignored is still an open gap).
+- **✓ Destructive admin actions show an in-flight state (2026-08).**
+  `withConfirmation` (`AdminActions.ts`) keeps the item in a pending
+  label/class while the promise settles and ignores further clicks, so a slow
+  ban no longer looks ignored; unblock, ban submit, purge, and the role-change
+  submenu carry their own equivalent guards (a role change in flight also
+  inerts the other role options — `currentRole` only updates when the
+  `member_update` echoes).
 - **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
   reason input plus a duration choice (`AdminActions.ts:311` `appendBanFlow`),
   and the menu passes both through

@@ -62,6 +62,57 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
+    it("a role change in flight ignores further clicks (double-fire guard)", async () => {
+      let resolveChange: (() => void) | null = null;
+      const onChangeRole = vi.fn(
+        () =>
+          new Promise<void>((res) => {
+            resolveChange = res;
+          }),
+      );
+      const { result } = makeMenu({ onChangeRole });
+      const submenu = result.element.querySelector(".context-menu__submenu")!;
+      const adminOption = Array.from(submenu.querySelectorAll(".context-menu__item")).find(
+        (i) => i.textContent === "admin",
+      ) as HTMLElement;
+      const modOption = Array.from(submenu.querySelectorAll(".context-menu__item")).find(
+        (i) => i.textContent === "moderator",
+      ) as HTMLElement;
+
+      adminOption.click();
+      // `currentRole` only updates when member_update echoes, so both a
+      // double-click and a different option must be inert while in flight.
+      adminOption.click();
+      modOption.click();
+
+      expect(onChangeRole).toHaveBeenCalledTimes(1);
+      expect(adminOption.classList.contains("context-menu__item--pending")).toBe(true);
+
+      resolveChange!();
+      await vi.waitFor(() => {
+        expect(adminOption.classList.contains("context-menu__item--pending")).toBe(false);
+      });
+
+      // Settled: a new change may fire again.
+      modOption.click();
+      expect(onChangeRole).toHaveBeenCalledTimes(2);
+      result.destroy();
+    });
+
+    it("clicking the current role is a no-op", () => {
+      const onChangeRole = vi.fn(async () => {});
+      const { result } = makeMenu({ onChangeRole });
+      const submenu = result.element.querySelector(".context-menu__submenu")!;
+      const memberOption = Array.from(submenu.querySelectorAll(".context-menu__item")).find(
+        (i) => i.textContent === "member",
+      ) as HTMLElement;
+
+      memberOption.click();
+
+      expect(onChangeRole).not.toHaveBeenCalled();
+      result.destroy();
+    });
+
     it("marks current role as active in submenu", () => {
       const { result } = makeMenu();
       const submenu = result.element.querySelector(".context-menu__submenu");
