@@ -74,9 +74,9 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 		// (A-2026-08-02). Filtered in Go because the sqlc ListChannels query is
 		// shared with the ready path, which applies its own visibility rules.
 		guildChannels := make([]db.Channel, 0, len(channels))
-		for _, ch := range channels {
-			if ch.Type != "dm" {
-				guildChannels = append(guildChannels, ch)
+		for i := range channels {
+			if channels[i].Type != "dm" {
+				guildChannels = append(guildChannels, channels[i])
 			}
 		}
 		writeJSON(w, http.StatusOK, guildChannels)
