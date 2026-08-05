@@ -42,6 +42,33 @@ behavioural changes operators must know about.
   updates per the architecture maintenance rule.
 - **tests(client):** the TOFU certificate ceremony has e2e coverage
   (first-use + mismatch journeys), and `modalFactory` is fully covered.
+- **security(client):** the voice-E2EE identity pin lookup fails **closed**
+  on keyring errors (DC-08): a transient store failure used to read as
+  "never pinned", silently sending a pinned peer down the first-sight path
+  and re-pinning whatever key the server delivered. An unreadable pin store
+  now rejects the peer's announce, writes nothing, and shows a distinct
+  amber "could not check" badge until the store recovers.
+- **feat(client):** accessibility pass over the modal/overlay stack
+  (DC-13): every modal is a labelled `role="dialog"` with a focus trap and
+  focus restore, Escape maps to each dialog's safe action, the settings
+  sidebar is a keyboard-navigable tablist, the quick switcher and composer
+  autocompletes are wired as combobox/listbox, the emoji/GIF pickers are
+  keyboard-operable, and toasts/typing announce via polite live regions.
+- **feat(client):** UX polish (DC-12): deleting the active channel now
+  says so in a toast; reactions toggle optimistically with rollback on
+  failure; the role-change menu can no longer double-fire; a document-level
+  listener leak in channel drag-reorder is fixed.
+- **feat(admin):** restoring a backup now writes a `backup_restore`
+  audit-log row (DC-09). The row is written before the pre-restore safety
+  copy, so it lives inside the `pre_restore_*.db` backup — the restored
+  database itself cannot carry it (the restore replaces the file).
+- **ci:** the `-tags wazero` / `-tags otel` Go tests now actually run in CI
+  (DC-06) — previously those variants were only compiled, leaving ~600
+  lines of plugin/telemetry tests permanently dark.
+- **tests(client):** e2e journeys for voice-E2EE identity verification
+  (badge states + mismatch modal, driven through the real crypto path) and
+  the updater (banner → progress → auto-relaunch), plus an accessibility
+  smoke; full web suite now 291 tests.
 
 ## v1.2.0-alpha.1 — Discord feature parity
 

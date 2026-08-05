@@ -1,21 +1,37 @@
-# E2E Test Status — 2026-08-04
+# E2E Test Status — 2026-08-05
 
-**Verified against:** the 2026-08-04 remediation HEAD (commit `914cdac`) by an
-actual local run.
+**Verified against:** the 2026-08-05 closure-pass HEAD by an actual local run.
 **Command:** `CI=1 npx playwright test --config=playwright.config.ts`
 (headless Chromium, 1 worker, retries 2, the same knobs CI uses).
 
-## Current status: 276 web tests, 276 passed (100%)
+## Current status: 291 web tests, 291 passed (100%)
 
 | Run | Result | Wall time |
 | --- | ------ | --------- |
-| Full web suite (`playwright.config.ts`) | **276 / 276 passed**, 0 flaky retries observed | 8.9 min |
+| Full web suite (`playwright.config.ts`) | **291 / 291 passed**, 0 flaky retries observed | 9.2 min |
 | `@parity` subset (`--grep "@parity"` — mirrors the **blocking** `client-e2e-parity` CI job) | **15 / 15 passed** | 33 s |
 
-Changes since the `5630aa1` run: `cert-tofu.spec.ts` added (6 tests covering
-the TOFU first-use/mismatch ceremony — DC-04), `server-strip.spec.ts` renamed
-`sidebar-header.spec.ts` (it tests the unified header that replaced the
-deleted ServerStrip component), and the mock now exposes its event-listener
+Changes since the `914cdac` run (+15 tests, 3 new spec files — DC-04's last
+client journeys plus the DC-13 smoke):
+
+- `voice-e2ee-verify.spec.ts` (6): the voice E2EE identity-verification
+  surface, driven through the production crypto path — verified badge +
+  first-sight pin, legacy unverified, mismatch block, modal reject/trust,
+  and the DC-08 fail-closed "could not check" state. Needed two harness
+  additions: per-test identity-pin config on the mock
+  (`identityPins`/`identityPinError`) and a WebSocket shim that parks
+  LiveKit's `room.connect` so the voice session holds in "securing".
+- `updater.spec.ts` (4): banner → download progress (percentage + MB
+  fallback via real `update-progress` events) → automatic relaunch, the
+  failure state, and both dismissal paths.
+- `a11y-smoke.spec.ts` (5): axe-style structural checks for the DC-13 pass
+  (dialog roles, focus trap/restore, tablist, combobox, live regions).
+- The mock now records every IPC invoke in `window.__invokeLog`, so tests
+  can assert side effects with no DOM footprint (pin writes, relaunch).
+
+Earlier changes (2026-08-04 remediation): `cert-tofu.spec.ts` added (6 tests
+covering the TOFU first-use/mismatch ceremony — DC-04), `server-strip.spec.ts`
+renamed `sidebar-header.spec.ts`, and the mock exposes its event-listener
 registry (`window.__tauriEventListeners`) so specs can wait for async listener
 registration instead of racing it.
 
@@ -25,7 +41,7 @@ by file. This run had neither.
 
 ## Suite inventory
 
-- **Web (mocked Tauri):** 37 spec files under `tests/e2e/`, 276 tests. Runs
+- **Web (mocked Tauri):** 40 spec files under `tests/e2e/`, 291 tests. Runs
   against the Vite dev server (`playwright.config.ts`) or the production
   bundle (`playwright.config.prod.ts`). Fifteen tests across
   `emoji-voicemod.parity.spec.ts`, `gating-badges.parity.spec.ts` and

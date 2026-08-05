@@ -157,7 +157,7 @@ not do what the spec says (none found).
 | 8 | Reconnect banner + recovery | README §3 | `ServerBanner.ts`, `ws.ts` backoff | `ws-reconnect`, `ws-lifecycle`, `server-banner` | `reconnection.spec.ts` (6), `banners-toasts.spec.ts` (5) | covered |
 | 9 | Channel sidebar (list/switch/categories) | channels-members-dms §1 | `ChannelSidebar.ts` | `channel-sidebar*`, `channel-controller` | `channel-sidebar.spec.ts` (10), `channel-switch-messages.spec.ts` (4) + native `channel-navigation` | covered |
 | 10 | Channel create/edit/delete | settings-and-admin §3 | `Create/Edit/DeleteChannelModal.ts`, `SidebarArea.ts:16-18` | `create/edit/delete-channel-modal` | none dedicated | partial |
-| 11 | Channel reorder (drag) | channels-members-dms §1.3 | `channel-sidebar/drag-reorder.ts` | `drag-reorder` (pins a known listener-refcount bug) | none | partial |
+| 11 | Channel reorder (drag) | channels-members-dms §1.3 | `channel-sidebar/drag-reorder.ts` | `drag-reorder` (listener leak fixed 2026-08-05; the lifecycle tests now pin signal-ownership) | none | partial |
 | 12 | Per-channel mutes | channels-members-dms §1.1a | `lib/channel-mutes.ts`, context menu | `channel-mutes`, `channel-mute-ui` | `gating-badges.parity.spec.ts` | covered |
 | 13 | Message send (optimistic) | messaging §1-2 | `ChannelController.ts`, `messages.store.ts:225-279` | `messages.store`, `message-input`, `message-controller` | `message-send-flow` (5), `message-input` (8), `message-list` (6) + native `chat-operations` | covered |
 | 14 | Edit / delete (two-click) | messaging §4-5 | `MessageInput.ts:589`, `MessageController.ts:24` | store + controller units | `message-edit-delete.spec.ts` (5) | covered |
@@ -184,7 +184,7 @@ not do what the spec says (none found).
 | 35 | Push-to-talk | voice-and-e2ee §4 | `lib/ptt.ts` + `src-tauri/src/ptt.rs` | `ptt` + Rust `ptt.rs` (7) | none (needs native input) | partial |
 | 36 | Noise suppression / audio pipeline | voice-and-e2ee §8 | `lib/noise-suppression.ts`, `lib/audioPipeline.ts` | `rnnoise-worklet`, `audio-pipeline-*` (lib itself is coverage-excluded with rationale) | none | partial |
 | 37 | Video grid / screen share | voice-and-e2ee §5 | `VideoGrid.ts`, `lib/screenShare.ts` | `video-grid`, `screen-share-*`, `stream-preview` | camera/share cases in `voice-lifecycle.spec.ts` | partial |
-| 38 | **E2EE securing + identity verification** | voice-and-e2ee §7 | `lib/livekitE2EE.ts`, `ChannelSidebar.ts:45-135`, `CertMismatchModal.ts:221` | `e2eeCrypto`, `livekit-e2ee`, `identity`, `identity-mismatch-modal` | **none** | **partial — headline gap** |
+| 38 | **E2EE securing + identity verification** | voice-and-e2ee §7 | `lib/livekitE2EE.ts`, `ChannelSidebar.ts:45-135`, `CertMismatchModal.ts:221` | `e2eeCrypto`, `livekit-e2ee`, `identity`, `identity-mismatch-modal` | `voice-e2ee-verify.spec.ts` (6, added 2026-08-05) | covered *(was a headline gap)* |
 | 39 | DM calls (ring) | voice-and-e2ee §9 | `lib/call-ring.ts`, `IncomingCallBanner.ts`, `MainPage.ts:527` | `call-ring` | none | partial |
 | 40 | Quick switcher (Ctrl+K) | channels-members-dms §1 | `QuickSwitcher.ts`, `GlobalKeybinds.ts` | `quick-switcher`, `global-keybinds` | `overlays.spec.ts` (26) + native `overlays` | covered |
 | 41 | Context menus | README §2 | `lib/context-menu.ts:31`, `AdminActions.ts:163/412` | `context-menu`, `admin-actions` | role-change case in `social.parity.spec.ts` | covered |
@@ -195,7 +195,7 @@ not do what the spec says (none found).
 | 46 | Invites | settings-and-admin §3 | `InviteManager.ts` | `invite-manager` | invite cases in `overlays.spec.ts` | covered |
 | 47 | Inline moderation (kick/ban+reason/role) | settings-and-admin §3 | `AdminActions.ts:99-330`, `SidebarMemberSection.ts` | `admin-actions`, `admin-panel` | `social.parity.spec.ts` | covered |
 | 48 | **Admin panel (web, 14 sections)** | settings-and-admin §3.1 | `Server/admin/static/index.html` + `/admin/api` | Go: 23 `_test.go` files in `Server/admin/` | **none — no browser automation at all** | **partial — headline gap** |
-| 49 | **Updater UI** | settings-and-admin §5 | `UpdateNotifier.ts`, `lib/updater.ts`, `update_commands.rs` | `updater`, `update-notifier` + Rust (2) | **none** | **partial — headline gap** |
+| 49 | **Updater UI** | settings-and-admin §5 | `UpdateNotifier.ts`, `lib/updater.ts`, `update_commands.rs` | `updater`, `update-notifier` + Rust (2) | `updater.spec.ts` (4, added 2026-08-05) | covered *(was a headline gap)* |
 | 50 | System tray | settings-and-admin §6 | `src-tauri/src/tray.rs` | none (no Rust tests; TS side untestable without native menu) | none | **untested** |
 | 51 | Health status indicator | connection-and-auth §2.1 | connect-page health polling | `connect-page` units | `health-status.spec.ts` (2) | covered |
 | 52 | Logs tab / log purge | settings-and-admin §1 | `settings/LogsTab.ts`, `lib/logPersistence.ts`, `purge-prompt.ts` | `logs-tab`, `log-persistence` | none | partial |
@@ -211,24 +211,32 @@ a regression is least visible in day-to-day dev use.
   `ServerStrip.ts`, `FileUpload.ts`, `lib/reconcile.ts` and `src/generated/`
   are imported by nothing in `src/` yet keep green test files
   (`server-strip.spec.ts` even runs in every e2e pass). §7.
-- **No toast on active-channel deletion** — the redirect exists
-  (`dispatcher.ts:406-420`) but the spec'd "This channel was deleted" toast
-  does not (open gap, ux/channels-members-dms §1.2).
-- **No optimistic reaction toggle** — reactions render only from the server
-  echo (`messages.store.ts:609`); on a slow link the pill lags the click
-  (open gap, ux/messaging §6).
-- **No slow-mode countdown in the composer** (open gap, ux/messaging).
-- **No in-flight state on destructive admin actions** — a slow ban looks
-  ignored (`AdminActions.ts:99`, open gap, ux/settings-and-admin §3).
-- **Known bug (pinned by its own test):** `drag-reorder.ts` listener
-  ref-count never reaches zero (`ChannelSidebar.ts` takes N refs, returns 1)
-  — documented as `KNOWN BUG` since the 2026-07-25 audit, still present.
-- **Accessibility:** a real Accessibility settings tab exists (reduced
-  motion honoring `prefers-reduced-motion` via `lib/os-motion.ts`, unit
-  tested), and keyboard paths for the quick switcher/global keybinds are
-  covered; but there is no systematic focus-trap or screen-reader audit of
-  the modal stack (cert modals, member picker, settings overlay) — untracked
-  debt, recommended below (DC-13).
+- ~~**No toast on active-channel deletion**~~ **CLOSED 2026-08-05 (DC-12)** —
+  the `channel_delete` handler toasts "This channel was deleted" alongside
+  the redirect; non-active deletions stay silent.
+- ~~**No optimistic reaction toggle**~~ **CLOSED 2026-08-05 (DC-12)** — the
+  pill toggles on click under the send's correlation id; the self-echo is
+  consumed, an error reply or transport failure rolls back exactly that
+  toggle (`addOptimisticReaction`/`rollbackReaction`).
+- ~~**No slow-mode countdown in the composer**~~ **CLOSED — was already
+  implemented** (verified 2026-08-05): `ChannelController.startSlowMode`
+  drives a ticking composer reason from the ready payload's `slow_mode`;
+  the audit's gap note reflected a stale spec callout, now flipped.
+- ~~**No in-flight state on destructive admin actions**~~ **CLOSED
+  2026-08-05 (DC-12)** — `withConfirmation` already carried the pending
+  state; the residual double-fire (role-change submenu) is now guarded too.
+- ~~**Known bug (pinned by its own test):** `drag-reorder.ts` listener
+  ref-count~~ **FIXED 2026-08-05 (DC-12)** — the per-row ref-count is
+  replaced with per-sidebar AbortSignal ownership (idempotent per signal,
+  released on abort); the pinning test now pins the fixed contract.
+- ~~**Accessibility:** … untracked debt~~ **CLOSED 2026-08-05 (DC-13)** —
+  systematic pass shipped: `lib/a11y.ts` (dialog semantics, focus trap,
+  focus restore, roving tabindex) applied through `modalFactory` and every
+  hand-rolled modal/overlay, tablist semantics on SettingsOverlay,
+  combobox wiring on QuickSwitcher and the composer autocompletes,
+  listbox/option + roving tabindex on the pickers, and polite live regions
+  for toasts/typing; +71 unit cases and an axe-style e2e smoke
+  (`a11y-smoke.spec.ts`).
 
 ---
 
@@ -395,8 +403,13 @@ specified, and every suite is green.
   admin panel, updater (matrix rows 5/38/48/49). **PARTIALLY RESOLVED
   2026-08-04 (remediation pass)** — the cert-TOFU ceremony now has six e2e
   tests (`cert-tofu.spec.ts`: first-use content/trust/cancel/non-stacking,
-  mismatch rows/disconnect). E2EE verification, admin panel and updater
-  journeys remain open.
+  mismatch rows/disconnect). **FURTHER RESOLVED 2026-08-05 (closure pass)** —
+  the E2EE-verification journey (`voice-e2ee-verify.spec.ts`, 6 tests:
+  verified badge with safety number + first-sight pin, legacy unverified,
+  mismatch block, modal reject/trust, DC-08 fail-closed) and the updater
+  journey (`updater.spec.ts`, 4 tests: silence, banner/Later, progress →
+  auto-relaunch, failure/Dismiss) shipped. **Remaining: the admin panel
+  journey (row 48)** — the only flow still without browser automation.
 
 **P2 — hygiene with real cost**
 
@@ -407,16 +420,31 @@ specified, and every suite is green.
   test files, and the entire typegen pipeline (CI steps, tauri.conf.json
   plugin block, Cargo build-dep) are gone; knip is blocking in CI. The dead
   `sounds` table fell in the same pass (migration 029, A-2026-07-13).
-- **DC-06** `go test -tags wazero` / `-tags otel` run nowhere
-  (T-2026-07-25-16) — ~598 lines of tests permanently dark.
+- **DC-06** ~~`go test -tags wazero` / `-tags otel` run nowhere
+  (T-2026-07-25-16) — ~598 lines of tests permanently dark.~~
+  **RESOLVED 2026-08-05 (closure pass)** — CI's `server-build-test` (ubuntu
+  leg) now runs `go test -tags wazero ./plugin/...` and
+  `-tags otel ./telemetry/...`; both passed locally on their first-ever run
+  (no latent failures were hiding behind the tags).
 - **DC-07** Flip `client-e2e` to blocking after a soak (it has been green
   since the mock repair; 270/270 in this session).
-- **DC-08** `getIdentityPin` fail-open on transient keyring errors
-  (`identity.ts:106-118`, F3 follow-up 3).
+- **DC-08** ~~`getIdentityPin` fail-open on transient keyring errors
+  (`identity.ts:106-118`, F3 follow-up 3).~~ **RESOLVED 2026-08-05 (closure
+  pass)** — `getIdentityPin` returns a three-state lookup
+  (pinned/unpinned/unavailable, mirroring tofu.rs's Err-vs-Ok(None) split);
+  `verifyPeerAnnounce` rejects the announce on "unavailable" without any pin
+  write and surfaces the distinct "unknown" badge state. Pinned by unit
+  tests (pin present / no pin / store error, the rejection path, the badge)
+  and an e2e case in `voice-e2ee-verify.spec.ts`.
 - **DC-09** **PARTIALLY RESOLVED 2026-08-04 (remediation pass)** — the
   `serve_ready.go` comment now cites `docs/protocol.md` (and `host_ui.go`'s
-  phantom-route comment fell in the same sweep). Still open: backup restore
-  writes no audit row; `handleApplyUpdate` TODO for container builds.
+  phantom-route comment fell in the same sweep). **FURTHER RESOLVED
+  2026-08-05 (closure pass)** — backup restore now writes a `backup_restore`
+  audit row, synchronously and *before* the pre-restore safety copy so the
+  row survives inside `pre_restore_*.db` (the restore replaces the live DB
+  file); the restore test opens the safety copy and asserts the row is
+  there; docs/security.md updated. Still open: the `handleApplyUpdate` TODO
+  for container builds.
 - **DC-10** Node version skew: CI pins 20, no `.nvmrc`, this session ran 22.
   **RESOLVED 2026-08-05 (remediation follow-up)** — `Client/tauri-client/.nvmrc`
   pins 20 to match CI, closing 2026-04-07 #11's remainder.
@@ -425,17 +453,29 @@ specified, and every suite is green.
 
 **P3 — polish**
 
-- **DC-12** UX open gaps already carried in the specs: channel-delete toast,
+- **DC-12** ~~UX open gaps already carried in the specs: channel-delete toast,
   optimistic reactions, slow-mode countdown, admin action in-flight state,
-  drag-reorder listener leak.
-- **DC-13** Systematic a11y pass over the modal stack (focus traps,
-  `aria-modal`, screen-reader labels) — nothing tracks this today.
+  drag-reorder listener leak.~~ **RESOLVED 2026-08-05 (closure pass)** — see
+  the closed bullets in §4: toast + optimistic reactions shipped with tests;
+  slow-mode countdown and the in-flight states were verified already
+  implemented (stale spec notes flipped; the residual role-change
+  double-fire fixed); the drag-reorder leak replaced with signal ownership.
+- **DC-13** ~~Systematic a11y pass over the modal stack (focus traps,
+  `aria-modal`, screen-reader labels) — nothing tracks this today.~~
+  **RESOLVED 2026-08-05 (closure pass)** — see the closed a11y bullet in §4
+  (`lib/a11y.ts`, modalFactory + every hand-rolled modal, tablist, combobox
+  wiring, roving-tabindex pickers, live regions; +71 unit cases + e2e
+  smoke).
 - **DC-14** `voice_speakers` is documented "Reserved — not currently
   emitted"; either emit or drop from the schema at the next protocol rev.
   (Remediation-pass decision: kept reserved — same treatment as
   `member_leave`; dropping either is a protocol rev, not dead-code cleanup.)
-- **DC-15** Anchor-drift hygiene: several UX-spec `file:line` anchors were
-  200-700 lines stale within 3 weeks; consider symbol-based references.
+- **DC-15** ~~Anchor-drift hygiene: several UX-spec `file:line` anchors were
+  200-700 lines stale within 3 weeks; consider symbol-based references.~~
+  **RESOLVED 2026-08-05 (closure pass)** — all 55 remaining anchors across
+  the six UX specs rewritten as symbol references, each verified against the
+  code (15 were already pointing at entirely wrong lines and were re-aimed);
+  zero `file:line` references remain under `docs/architecture/ux/`.
 
 ### Recommended next steps (ordered)
 
@@ -516,12 +556,59 @@ windows-latest legs are likewise CI-only.
 
 ### Still open after this pass
 
+*(Historical — superseded by §12's closure pass, which resolved most of
+these; §12's own "still open" list is current.)*
+
 DC-04 (E2EE-verification, admin-panel and updater journeys), DC-06
 (tag-gated Go tests dark in CI), DC-07 (soak decision), DC-08
 (`getIdentityPin` fail-open), DC-09's backup-restore audit row and
 `handleApplyUpdate` TODO, DC-10 (`.nvmrc`), DC-11 (npm pinning policy),
 DC-12/13/15 (UX gaps, a11y pass, anchor hygiene), and the 2026-04-07
 carryovers #5 (accepted), #8, #9.
+
+---
+
+## 12. Closure addendum (2026-08-05, follow-up branch)
+
+**Method:** a second remediation pass off `dev` at `7b6d2b0`, executing the
+gap list's remaining P2/P3 items. Every closure is stamped in place in §4
+and §9 above; this section is the narrative summary. As before, every claim
+was verified against the code and every suite result below comes from an
+actual local run.
+
+### What shipped
+
+| Area | Change | Closes |
+|------|--------|--------|
+| CI | `server-build-test` (ubuntu) now RUNS the tag-gated tests it previously only compiled: `-tags wazero ./plugin/...`, `-tags otel ./telemetry/...` — verified green locally on their first-ever run before wiring | DC-06 / T-2026-07-25-16 |
+| Security (client) | `getIdentityPin` fail-open fixed: three-state lookup (pinned/unpinned/**unavailable**) mirroring tofu.rs's Err-vs-first-use split; `verifyPeerAnnounce` fails closed on "unavailable" (no verify, no re-pin) and surfaces a distinct amber "could not check" badge (new `unknown` PeerVerification state) | DC-08 (F3 follow-up 3) |
+| Server | `backup_restore` audit row, written synchronously *before* the pre-restore safety copy so it survives inside `pre_restore_*.db`; test opens the safety copy and asserts the row; docs/security.md documents where the row lives instead of the gap | DC-09 (restore half) |
+| UX polish | Active-channel-delete toast; optimistic reaction toggle with echo-consumption + correlated rollback; role-change submenu double-fire guard; drag-reorder document-listener leak fixed via per-sidebar AbortSignal ownership; slow-mode countdown and admin in-flight states verified already-shipped (stale spec notes flipped) | DC-12 |
+| Accessibility | `lib/a11y.ts` (dialog semantics, focus trap, focus restore, roving tabindex) applied through `modalFactory` and every hand-rolled modal/overlay; SettingsOverlay tablist + tabpanel + roving tabs; QuickSwitcher and composer autocompletes wired as combobox/listbox with `aria-activedescendant`; EmojiPicker/GifPicker as keyboard-operable listboxes; Toast/TypingIndicator polite live regions; Escape mapped to each modal's safe action | DC-13 |
+| E2E journeys | `voice-e2ee-verify.spec.ts` (6 tests, real ECDSA/ECDH crypto through the production verification path: verified/unverified/mismatch badges, modal reject/trust, DC-08 fail-closed) and `updater.spec.ts` (4 tests: banner → progress → auto-relaunch, failure, dismissals); harness gained per-test identity-pin config, an IPC invoke log, and a LiveKit WebSocket parking shim | DC-04 (rows 38 + 49) |
+| Docs | All 55 `file:line` anchors in the six UX specs rewritten as verified symbol references (15 had already rotted onto wrong code); spec gap callouts flipped for everything above | DC-15, spec hygiene |
+
+### Verification (this session, closure HEAD)
+
+| Suite | Result |
+|-------|--------|
+| Go `go test -race -timeout 20m ./...` | all packages ok (ws 125s) |
+| Go tag-gated tests (`-tags wazero ./plugin/...`, `-tags otel ./telemetry/...`) | **PASS** — first-ever runs, no latent failures |
+| `make sqlc-verify` + `make protocol-verify` | both pass, no generated drift |
+| gofmt + go vet | clean |
+| Client typecheck + typecheck:e2e | both pass |
+| oxlint + ESLint + Prettier | pass (same two pre-existing oxlint style warnings) |
+| knip | exits 0 |
+| Client unit/integration (vitest) | 165 files, **4474/4474** (+114 over the remediation HEAD) |
+| Playwright web suite | see `tests/e2e/E2E-ISSUES.md` for the recorded full-suite run at this HEAD (291 tests: 276 baseline + 6 E2EE + 4 updater + 5 a11y smoke) |
+
+### Still open after this pass
+
+DC-04's admin-panel journey (row 48 — the last flow with no browser
+automation), DC-07 (soak decision, owner's call), DC-09's
+`handleApplyUpdate` container TODO, DC-11 (npm pinning policy), DC-14
+(reserved protocol entries, owner's call), and the 2026-04-07 carryovers
+#5 (accepted), #8, #9.
 
 ---
 
