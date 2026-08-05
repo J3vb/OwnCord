@@ -96,6 +96,14 @@ docker compose up -d
 
 The named volume is preserved — no data loss.
 
+Pulling the image is the **only** upgrade path in Docker: the admin panel's
+in-place "Apply Update & Restart" is refused in container deployments (503
+`CONTAINER_DEPLOYMENT`), because the running binary is image content — a
+replacement written next to it would die with the container. The shipped
+image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the
+server binary into a container and genuinely want in-place self-update can
+set `OWNCORD_CONTAINER=0` to opt back in.
+
 ### LiveKit in Docker
 
 LiveKit runs as its own container (`livekit/livekit-server:v1`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.

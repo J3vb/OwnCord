@@ -1983,9 +1983,15 @@ Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
   "signature_url": "…",
   "manifest_url": "…",
   "manifest_signature_url": "…",
-  "release_notes": "…"
+  "release_notes": "…",
+  "can_apply": true
 }
 ```
+
+`can_apply` is `false` in container deployments (detected via
+`OWNCORD_CONTAINER`, which the shipped Dockerfile sets, or the engine marker
+files): checking still works, but `POST /updates/apply` will refuse — the
+admin SPA replaces the apply button with an image-upgrade note.
 
 #### Errors
 
@@ -2014,6 +2020,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 
 | Status | Code | Cause |
 | ------ | ---- | ----- |
+| 503 | `CONTAINER_DEPLOYMENT` | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
 | 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
 | 409 | `NO_UPDATE` | Already up to date |
 | 502 | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure |
