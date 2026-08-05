@@ -417,9 +417,9 @@ specified, and every suite is green.
   `serve_ready.go` comment now cites `docs/protocol.md` (and `host_ui.go`'s
   phantom-route comment fell in the same sweep). Still open: backup restore
   writes no audit row; `handleApplyUpdate` TODO for container builds.
-- **DC-10** Node version skew: CI pins 20, no `.nvmrc`, this session ran 22
-  (everything passed, but the skew is unmanaged — one `.nvmrc` file closes
-  2026-04-07 #11's remainder).
+- **DC-10** Node version skew: CI pins 20, no `.nvmrc`, this session ran 22.
+  **RESOLVED 2026-08-05 (remediation follow-up)** — `Client/tauri-client/.nvmrc`
+  pins 20 to match CI, closing 2026-04-07 #11's remainder.
 - **DC-11** Resurfaced 2026-04-07 #8: adopt an explicit npm dependency
   pinning/review policy (lockfile exists; the *policy* was never decided).
 
