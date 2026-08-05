@@ -270,6 +270,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       emojiPopup = createEmojiAutocomplete({
         onSelect: insertEmoji,
         onClose: closeEmojiPopup,
+        // The popup manages combobox/aria-activedescendant state on the
+        // textarea for as long as it is open.
+        comboboxInput: textarea ?? undefined,
       });
       root?.appendChild(emojiPopup.element);
     }
@@ -306,6 +309,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
         onClose: closeMentionPopup,
+        // The popup manages combobox/aria-activedescendant state on the
+        // textarea for as long as it is open.
+        comboboxInput: textarea ?? undefined,
       });
       root?.appendChild(mentionPopup.element);
     }

@@ -219,6 +219,85 @@ describe("createMentionAutocomplete", () => {
     popup.destroy();
     expect(popup.element.parentNode).toBeNull();
   });
+
+  it("stamps a stable id on the listbox and index ids on the rows", () => {
+    popup.setQuery("al");
+    expect(popup.element.id).toBe("mention-autocomplete");
+    const ids = Array.from(popup.element.querySelectorAll(".ma-item")).map((r) => r.id);
+    expect(ids).toEqual(["mention-autocomplete-option-0", "mention-autocomplete-option-1"]);
+    // A re-render rebuilds the rows, so the ids stay index-based, not stale.
+    popup.setQuery("bo");
+    expect(popup.element.querySelector(".ma-item")?.id).toBe("mention-autocomplete-option-0");
+  });
+});
+
+describe("createMentionAutocomplete combobox wiring", () => {
+  let ta: HTMLTextAreaElement;
+  let popup: ReturnType<typeof createMentionAutocomplete>;
+
+  beforeEach(() => {
+    ta = document.createElement("textarea");
+    document.body.appendChild(ta);
+    popup = createMentionAutocomplete({
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+      comboboxInput: ta,
+    });
+    document.body.appendChild(popup.element);
+  });
+
+  afterEach(() => {
+    popup.destroy();
+    ta.remove();
+  });
+
+  function key(k: string): KeyboardEvent {
+    return new KeyboardEvent("keydown", { key: k, cancelable: true });
+  }
+
+  it("stamps combobox semantics on the input while open", () => {
+    expect(ta.getAttribute("role")).toBe("combobox");
+    expect(ta.getAttribute("aria-autocomplete")).toBe("list");
+    expect(ta.getAttribute("aria-expanded")).toBe("true");
+    expect(ta.getAttribute("aria-controls")).toBe("mention-autocomplete");
+  });
+
+  it("aims aria-activedescendant at the active row and follows the arrows", () => {
+    popup.setQuery("al");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-0");
+    popup.handleKeydown(key("ArrowDown"));
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-1");
+    popup.handleKeydown(key("ArrowUp"));
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-0");
+  });
+
+  it("keeps DOM focus out of the list — activedescendant is the only focus", () => {
+    ta.focus();
+    popup.setQuery("al");
+    popup.handleKeydown(key("ArrowDown"));
+    expect(document.activeElement).toBe(ta);
+    expect(popup.element.querySelector("[tabindex]")).toBeNull();
+  });
+
+  it("clears aria-activedescendant when nothing matches", () => {
+    popup.setQuery("al");
+    popup.setQuery("zzz");
+    expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("removes every combobox attribute on destroy", () => {
+    popup.setQuery("al");
+    popup.destroy();
+    for (const attr of [
+      "role",
+      "aria-autocomplete",
+      "aria-expanded",
+      "aria-controls",
+      "aria-activedescendant",
+    ]) {
+      expect(ta.hasAttribute(attr)).toBe(false);
+    }
+  });
 });
 
 describe("composer integration", () => {
@@ -333,5 +412,26 @@ describe("composer integration", () => {
     type("@al");
     textarea().dispatchEvent(new FocusEvent("blur"));
     expect(popupEl()).toBeNull();
+  });
+
+  it("marks the textarea as a combobox while open and follows the arrows", () => {
+    type("@al");
+    const ta = textarea();
+    expect(ta.getAttribute("role")).toBe("combobox");
+    expect(ta.getAttribute("aria-expanded")).toBe("true");
+    expect(ta.getAttribute("aria-controls")).toBe("mention-autocomplete");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-0");
+    press("ArrowDown");
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-1");
+  });
+
+  it("drops the combobox state when the popup closes", () => {
+    type("@al");
+    press("Escape");
+    const ta = textarea();
+    expect(ta.hasAttribute("role")).toBe(false);
+    expect(ta.hasAttribute("aria-expanded")).toBe(false);
+    expect(ta.hasAttribute("aria-controls")).toBe(false);
+    expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
   });
 });

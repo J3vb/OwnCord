@@ -330,4 +330,60 @@ describe("CreateChannelModal", () => {
 
     modal.destroy?.();
   });
+
+  // ── dialog accessibility contract (DC-13) ──────────────────────────────────
+
+  it("stamps dialog semantics named by the header title", () => {
+    const { modal } = makeModal("Text Channels");
+    const dialog = container.querySelector(".modal") as HTMLElement;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-labelledby")).toBe("create-channel-title");
+    expect(container.querySelector("#create-channel-title")?.textContent).toBe("Create Channel");
+    modal.destroy?.();
+  });
+
+  it("labels the icon-only close button", () => {
+    const { modal } = makeModal("Text Channels");
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+    modal.destroy?.();
+  });
+
+  it("Escape calls onClose without creating", () => {
+    const onCreate = vi.fn(async () => {});
+    const onClose = vi.fn();
+    const { modal } = makeModal("Text Channels", { onCreate, onClose });
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCreate).not.toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("ignores Escape after destroy", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal("Text Channels", { onClose });
+    modal.destroy?.();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("focuses the name input on open and restores focus on destroy", () => {
+    const trigger = document.createElement("button");
+    container.appendChild(trigger);
+    trigger.focus();
+
+    const { modal } = makeModal("Text Channels");
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
+    expect(document.activeElement).toBe(nameInput);
+
+    modal.destroy?.();
+    expect(document.activeElement).toBe(trigger);
+  });
 });

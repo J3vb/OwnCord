@@ -145,4 +145,44 @@ describe("CertMismatchModal", () => {
     const title = container.querySelector(".cert-title");
     expect(title?.textContent).toBe("Certificate Changed");
   });
+
+  it("carries dialog semantics labelled by the h3 title", () => {
+    mountModal();
+    const modal = container.querySelector(".modal");
+    expect(modal?.getAttribute("role")).toBe("dialog");
+    expect(modal?.getAttribute("aria-modal")).toBe("true");
+    expect(modal?.getAttribute("aria-labelledby")).toBe("cert-mismatch-title");
+    const title = container.querySelector("#cert-mismatch-title");
+    expect(title?.textContent).toBe("Certificate Warning");
+  });
+
+  it("gives the icon-only close button an accessible name", () => {
+    mountModal();
+    const btn = container.querySelector(".modal-close");
+    expect(btn?.getAttribute("aria-label")).toBe("Close");
+  });
+
+  it("calls onReject when Escape is pressed", () => {
+    const { onReject } = mountModal();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onReject).toHaveBeenCalledOnce();
+  });
+
+  it("does not call onReject on Escape after destroy", () => {
+    const { modal, onReject } = mountModal();
+    modal.destroy?.();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("moves focus inside the modal on mount and restores it on destroy", () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const { modal } = mountModal();
+    expect(container.contains(document.activeElement)).toBe(true);
+    modal.destroy?.();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
 });

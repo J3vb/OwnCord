@@ -2,6 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
 
 // ---------------------------------------------------------------------------
@@ -559,11 +560,16 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   header.appendChild(searchInput);
   root.appendChild(header);
 
-  // Scrollable content area (holds category labels + grids)
+  // Scrollable content area (holds category labels + grids). Announced as a
+  // single flat listbox — the category grids are visual grouping only, and
+  // roving tabindex (DC-13) treats every .ep-emoji cell as one list.
   const scrollArea = createElement("div", {
     style: "overflow-y: auto; max-height: 320px;",
+    role: "listbox",
+    "aria-label": "Emoji",
   });
   root.appendChild(scrollArea);
+  enableRovingNavigation(scrollArea, ".ep-emoji", signal);
 
   // Build categories with recent + custom
   function getAllCategories(): readonly EmojiCategory[] {
@@ -596,6 +602,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     const span = createElement("span", {
       class: "ep-emoji",
       title: emoji,
+      role: "option",
+      // Mirrors the title (the character or :shortcode: token) — e2e specs
+      // select cells by title, so the accessible name must never diverge.
+      "aria-label": emoji,
     });
     // A `:shortcode:` entry shows its image; everything else is the character
     // itself. An unresolvable shortcode falls back to the text, which is what
@@ -652,6 +662,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       );
       scrollArea.appendChild(empty);
     }
+
+    // Every render rebuilds the cell set, so the single Tab stop must be
+    // re-established or filtering would leave zero tabbable cells.
+    setRovingTabindex(scrollArea, ".ep-emoji");
   }
 
   // Initial render

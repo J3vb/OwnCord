@@ -4,6 +4,7 @@
  * Subscribes to uiStore for settingsOpen state.
  */
 
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
@@ -73,6 +74,11 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Logs: "scroll-text",
 };
 
+/** Stable DOM id for a tab button (aria-labelledby target), e.g. "settings-tab-text-images". */
+function tabId(name: TabName): string {
+  return `settings-tab-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -83,11 +89,14 @@ export function createSettingsOverlay(
   const ac = new AbortController();
   const authenticated = options.isAuthenticated !== false;
   let root: HTMLDivElement | null = null;
+  let panel: HTMLDivElement | null = null;
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
   let activeTab: TabName = authenticated ? "Account" : "Appearance";
   /** False once the active tab's content has been torn down by `hide()`. */
   let contentLive = false;
+  /** Puts focus back on whatever opened the panel; null while closed. */
+  let restoreFocus: (() => void) | null = null;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
@@ -139,16 +148,25 @@ export function createSettingsOverlay(
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
       btn.setAttribute("aria-selected", name === tab ? "true" : "false");
+      // Roving tabindex: only the active tab sits in the page Tab order.
+      btn.setAttribute("tabindex", name === tab ? "0" : "-1");
     }
+    contentArea?.setAttribute("aria-labelledby", tabId(tab));
     renderActiveTab();
   }
 
   function show(): void {
+    const wasOpen = root?.classList.contains("open") ?? false;
     root?.classList.add("open");
     // Closing tore down the live parts of the active tab (mic meter, camera
     // preview, log listener). Rebuild it so a reopened panel shows live state
     // instead of a frozen snapshot — and so every tab re-reads current prefs.
     if (!contentLive) renderActiveTab();
+    // Move focus in only on the closed→open transition — a repeated show()
+    // would otherwise capture an element inside the panel as the "opener".
+    if (!wasOpen && panel !== null) {
+      restoreFocus = focusDialog(panel);
+    }
   }
 
   function hide(): void {
@@ -156,6 +174,9 @@ export function createSettingsOverlay(
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;
+    // Hand focus back to whatever opened the panel.
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   // ---- MountableComponent ---------------------------------------------------
@@ -163,8 +184,42 @@ export function createSettingsOverlay(
   function mount(container: Element): void {
     root = createElement("div", { class: "settings-overlay", "data-testid": "settings-overlay" });
 
-    // Sidebar
-    const sidebar = createElement("div", { class: "settings-sidebar" });
+    // Sidebar. It doubles as the tablist: the profile block, category headings
+    // ("User Settings" / "App Settings") and the Log Out button also live in
+    // here, and a tablist should own only tabs — but moving them out would
+    // change the structure the e2e selectors pin down, so we accept that the
+    // non-tab children are presentational noise inside the tablist (DC-13).
+    const sidebar = createElement("div", {
+      class: "settings-sidebar",
+      role: "tablist",
+      "aria-orientation": "vertical",
+      "aria-label": "Settings sections",
+    });
+
+    // Arrow-key navigation between tabs, activate-on-focus (the simpler
+    // conformant flavor of the WAI-ARIA tabs pattern). Vertical list, so only
+    // Up/Down move; Home/End jump to the edges; both directions wrap.
+    sidebar.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") {
+          return;
+        }
+        const order = [...tabButtons.keys()];
+        const current = order.findIndex((name) => tabButtons.get(name) === e.target);
+        if (current === -1) return; // e.g. the Log Out button — not a tab
+        e.preventDefault();
+        let next: number;
+        if (e.key === "ArrowDown") next = (current + 1) % order.length;
+        else if (e.key === "ArrowUp") next = (current - 1 + order.length) % order.length;
+        else if (e.key === "Home") next = 0;
+        else next = order.length - 1;
+        const name = order[next]!;
+        setActiveTab(name);
+        tabButtons.get(name)?.focus();
+      },
+      { signal: ac.signal },
+    );
 
     // User profile section at top of sidebar
     const user = authStore.getState().user;
@@ -213,8 +268,10 @@ export function createSettingsOverlay(
 
       const accountBtn = createElement("button", {
         class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
+        id: tabId("Account"),
         role: "tab",
         "aria-selected": activeTab === "Account" ? "true" : "false",
+        tabindex: activeTab === "Account" ? "0" : "-1",
       });
       accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
       accountBtn.appendChild(document.createTextNode("Account"));
@@ -240,8 +297,10 @@ export function createSettingsOverlay(
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
+        id: tabId(name),
         role: "tab",
         "aria-selected": name === activeTab ? "true" : "false",
+        tabindex: name === activeTab ? "0" : "-1",
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
       btn.appendChild(document.createTextNode(name));
@@ -263,8 +322,12 @@ export function createSettingsOverlay(
     // Page title (h1) at top of content area — created here, inserted in renderActiveTab
     pageTitle = createElement("h1", {}, activeTab);
 
-    // Content
-    contentArea = createElement("div", { class: "settings-content" });
+    // Content — the single tabpanel, renamed per switch via aria-labelledby
+    contentArea = createElement("div", {
+      class: "settings-content",
+      role: "tabpanel",
+      "aria-labelledby": tabId(activeTab),
+    });
 
     // Close button wrapped with ESC label
     const closeWrap = createElement("div", { class: "settings-close-wrap" });
@@ -292,7 +355,11 @@ export function createSettingsOverlay(
     );
 
     // Inner panel (Discord-style centered card)
-    const panel = createElement("div", { class: "settings-panel" });
+    panel = createElement("div", { class: "settings-panel" });
+    applyDialogSemantics(panel, { label: "Settings" });
+    // Arming the trap while hidden is safe: Tab can't land inside a
+    // display:none panel, so the handler only fires while the overlay is open.
+    trapFocus(panel, ac.signal);
     appendChildren(panel, sidebar, contentArea, closeWrap);
 
     // Click backdrop (outside panel) to close
@@ -343,10 +410,14 @@ export function createSettingsOverlay(
     logsTab.cleanup();
     voiceTab.cleanup();
     tabButtons.clear();
+    // Tearing down while open still hands focus back to the opener.
+    restoreFocus?.();
+    restoreFocus = null;
     if (root !== null) {
       root.remove();
       root = null;
     }
+    panel = null;
     contentArea = null;
     pageTitle = null;
   }
