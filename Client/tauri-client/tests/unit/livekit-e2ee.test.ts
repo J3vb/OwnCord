@@ -43,7 +43,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 
 vi.mock("@lib/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
-  getIdentityPin: vi.fn(async () => null),
+  getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
 }));
 

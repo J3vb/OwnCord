@@ -74,15 +74,33 @@ describe("identity pin wrappers", () => {
     });
   });
 
-  it("getIdentityPin returns the pinned key, or null when never pinned", async () => {
+  it("getIdentityPin returns the pinned key when one is stored", async () => {
     invokeMock.mockResolvedValueOnce("pubkey");
-    expect(await getIdentityPin("chat.example", "42")).toBe("pubkey");
-    invokeMock.mockResolvedValueOnce(null);
-    expect(await getIdentityPin("chat.example", "42")).toBeNull();
+    expect(await getIdentityPin("chat.example", "42")).toEqual({
+      status: "pinned",
+      pin: "pubkey",
+    });
     expect(invokeMock).toHaveBeenCalledWith("get_identity_pin", {
       host: "chat.example",
       userId: "42",
     });
+  });
+
+  it("getIdentityPin reports 'unpinned' when the store holds nothing (first sight)", async () => {
+    invokeMock.mockResolvedValueOnce(null);
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unpinned" });
+  });
+
+  it("getIdentityPin reports a store error as 'unavailable', never 'unpinned' (DC-08)", async () => {
+    // The distinction is the whole fix: a transient keyring failure must not
+    // masquerade as "never pinned", or verification silently falls through to
+    // the first-sight path and re-pins whatever key the server delivered.
+    invokeMock.mockRejectedValueOnce(new Error("keyring boom"));
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unavailable" });
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringContaining("unavailable"),
+      expect.objectContaining({ host: "chat.example", userId: "42" }),
+    );
   });
 });
 
