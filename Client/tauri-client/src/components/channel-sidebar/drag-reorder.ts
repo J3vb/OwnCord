@@ -16,17 +16,49 @@ interface DragState {
   containerEl: HTMLElement;
   channels: readonly Channel[];
   onReorder: (reorders: readonly ChannelReorderData[]) => void;
+  /** The signal of the sidebar that started this drag, so its teardown can
+   *  clear the in-flight visual state without touching another sidebar's. */
+  owner: AbortSignal;
 }
 let activeDrag: DragState | null = null;
 
-/** Global mousemove/mouseup handlers for drag reordering. Registered once.
- *  Reference-counted so multiple sidebar instances share the same listeners
- *  and only the last destroy tears them down. */
+/** Global mousemove/mouseup handlers for drag reordering, shared by every
+ *  sidebar instance. Ownership is tracked per AbortSignal — the sidebar's
+ *  lifetime controller — not per attached channel row: attachDragHandlers runs
+ *  once per row per render, and the per-row ref-count this replaced meant a
+ *  sidebar took N references its single destroy could never return, so the two
+ *  document listeners lived for the rest of the process (the KNOWN BUG
+ *  drag-reorder.test.ts pinned until this fix). An owner's release is its
+ *  signal's abort — the same AbortController teardown idiom as
+ *  {@link ../../lib/disposable} — so there is no separate release call to
+ *  forget or miscount. */
+const listenerOwners = new Set<AbortSignal>();
 let globalDragAc: AbortController | null = null;
-let globalDragRefCount = 0;
 
-export function ensureGlobalDragListeners(): void {
-  globalDragRefCount++;
+function releaseOwner(owner: AbortSignal): void {
+  listenerOwners.delete(owner);
+  // A sidebar destroyed mid-drag must not leave the row stuck in the dragging
+  // state or the body stuck in reorder mode.
+  if (activeDrag !== null && activeDrag.owner === owner) {
+    activeDrag.sourceEl.classList.remove("dragging");
+    document.body.classList.remove("channel-reordering");
+    activeDrag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
+      x.classList.remove("channel-drop-indicator");
+    });
+    activeDrag = null;
+  }
+  if (listenerOwners.size === 0 && globalDragAc !== null) {
+    globalDragAc.abort();
+    globalDragAc = null;
+  }
+}
+
+export function ensureGlobalDragListeners(owner: AbortSignal): void {
+  if (owner.aborted || listenerOwners.has(owner)) {
+    return;
+  }
+  listenerOwners.add(owner);
+  owner.addEventListener("abort", () => releaseOwner(owner), { once: true });
   if (globalDragAc !== null) {
     return;
   }
@@ -151,7 +183,7 @@ export function attachDragHandlers(
     return;
   }
 
-  ensureGlobalDragListeners();
+  ensureGlobalDragListeners(signal);
 
   el.classList.add("channel-draggable");
   el.dataset.dragChannelId = String(channel.id);
@@ -189,6 +221,7 @@ export function attachDragHandlers(
         containerEl,
         channels,
         onReorder: onReorderChannel,
+        owner: signal,
       };
       el.classList.add("dragging");
       document.body.classList.add("channel-reordering");
@@ -205,17 +238,3 @@ export function attachDragHandlers(
   );
 }
 
-/** Decrement global drag listener ref-count; tear down when no more sidebars. */
-export function releaseGlobalDragListeners(containerEl?: HTMLElement): void {
-  // Clear stale drag state if the destroyed sidebar owns the active drag
-  if (containerEl !== undefined && activeDrag?.containerEl === containerEl) {
-    activeDrag.sourceEl.classList.remove("dragging");
-    document.body.classList.remove("channel-reordering");
-    activeDrag = null;
-  }
-  globalDragRefCount = Math.max(0, globalDragRefCount - 1);
-  if (globalDragRefCount === 0 && globalDragAc !== null) {
-    globalDragAc.abort();
-    globalDragAc = null;
-  }
-}

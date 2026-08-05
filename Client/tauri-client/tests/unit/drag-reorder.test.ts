@@ -13,7 +13,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   attachDragHandlers,
   ensureGlobalDragListeners,
-  releaseGlobalDragListeners,
 } from "@components/channel-sidebar/drag-reorder";
 import type { ChannelReorderData } from "@components/ChannelSidebar";
 import { authStore } from "@stores/auth.store";
@@ -64,6 +63,10 @@ interface Rig {
   abort: AbortController;
 }
 
+/** Every rig's owner controller, aborted in afterEach so the shared document
+ *  listeners are fully torn down between tests. */
+const rigAborts: AbortController[] = [];
+
 /** Builds a container with one 20px-tall row per channel, stacked vertically. */
 function buildRig(channels: Channel[]): Rig {
   const container = document.createElement("div");
@@ -72,6 +75,7 @@ function buildRig(channels: Channel[]): Rig {
   const items = new Map<number, HTMLElement>();
   const onReorder = vi.fn();
   const abort = new AbortController();
+  rigAborts.push(abort);
 
   channels.forEach((ch, idx) => {
     const el = document.createElement("div");
@@ -132,16 +136,17 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // End any drag still in flight. `activeDrag` is module-level state and
-  // releaseGlobalDragListeners() only clears it when handed the owning
-  // container, so without this a half-finished drag leaks into the next test
-  // and blocks it from starting one. Re-arm the global handlers first: a test
-  // that drained the ref-count has aborted them, and the mouseup below needs a
-  // live listener to do the clearing.
-  ensureGlobalDragListeners();
+  // End any drag still in flight so it cannot leak into the next test.
+  // Re-arm the global handlers under a throwaway owner first: a test that
+  // aborted every owner tore them down, and the mouseup below needs a live
+  // listener to do the clearing.
+  const flush = new AbortController();
+  ensureGlobalDragListeners(flush.signal);
   document.dispatchEvent(mouse("mouseup", 0, -1000));
-  // Drain the ref-count so the document listeners do not leak between tests.
-  for (let i = 0; i < 50; i++) releaseGlobalDragListeners();
+  flush.abort();
+  // Abort every rig owner so the shared document listeners are torn down.
+  for (const ac of rigAborts) ac.abort();
+  rigAborts.length = 0;
   document.body.innerHTML = "";
   document.body.className = "";
 });
@@ -390,60 +395,59 @@ describe("drop indicator", () => {
 });
 
 // ── listener lifecycle ─────────────────────────────────────────────────────
+//
+// Ownership of the shared document listeners is per sidebar AbortSignal, not
+// per attached row. This block used to pin the old per-row ref-count's
+// asymmetry as a KNOWN BUG ("N rows take N refs, destroy returns 1, the
+// listeners live forever"); that bug is fixed, so the block now pins the
+// fixed contract: one owner registration no matter how many rows attach, and
+// the owner's abort is the release.
 
-describe("global listener ref-counting", () => {
-  it("keeps listeners alive until every ref is released", () => {
+describe("global listener ownership", () => {
+  it("attaching many rows under one owner is a single registration; one abort tears down", () => {
     signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]); // 2 channels → 2 refs
-    ensureGlobalDragListeners(); // a second sidebar → 3
-
-    releaseGlobalDragListeners(); // → 2
-
-    // Refs still outstanding, so a drag must still work.
-    drag(rig, 1, 1, "bottom");
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-  });
-
-  /**
-   * KNOWN BUG — the ref-count is asymmetric.
-   *
-   * `attachDragHandlers` calls `ensureGlobalDragListeners()` once per *channel
-   * element* (ChannelSidebar.ts:431, inside the per-channel render), but
-   * `releaseGlobalDragListeners` is called once per *sidebar destroy*
-   * (ChannelSidebar.ts:703). So a sidebar showing N channels takes N refs and
-   * gives back 1, and every re-render takes N more. In production the count
-   * never returns to 0, the AbortController never fires, and the two document
-   * listeners (plus the `activeDrag` closure they capture) live for the rest
-   * of the process.
-   *
-   * The leak is currently benign — both handlers return immediately while
-   * `activeDrag` is null, and re-registration is guarded — so this test pins
-   * the behaviour as it actually is rather than as the doc comment describes
-   * it ("only the last destroy tears them down"). If the ref-counting is
-   * fixed so one release per sidebar suffices, this test should change with it.
-   */
-  it("takes one ref per channel, so a single release does not tear down", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]); // 2 refs, not 1
-
-    releaseGlobalDragListeners(); // → 1, not 0
-
-    drag(rig, 1, 1, "bottom");
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-  });
-
-  it("tears listeners down once the ref-count reaches zero", () => {
-    signIn("owner");
+    // 2 channels, and a re-attach of the same rows (a sidebar re-render) —
+    // under the old ref-count this took 4 refs a single destroy never repaid.
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+    for (const [id, el] of rig.items) {
+      const ch = rig.channels.find((c) => c.id === id)!;
+      attachDragHandlers(el, ch, rig.container, rig.channels, rig.abort.signal, rig.onReorder);
+    }
 
-    releaseGlobalDragListeners();
-    releaseGlobalDragListeners(); // drops to 0 → AbortController fires
+    rig.abort.abort();
 
-    drag(rig, 1, 1, "bottom");
+    // The single owner is gone → listeners torn down; a drag no longer works.
+    // (The rig's own element listeners share the aborted signal, so drive the
+    // document handlers directly to prove they are dead.)
+    document.dispatchEvent(mouse("mousemove", 0, yInRow(1, "top")));
+    document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "top")));
     expect(rig.onReorder).not.toHaveBeenCalled();
   });
 
-  it("clears an in-flight drag owned by the released container", () => {
+  it("keeps the listeners alive while another sidebar still owns them", () => {
+    signIn("owner");
+    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+    const other = new AbortController(); // a second sidebar
+    ensureGlobalDragListeners(other.signal);
+
+    other.abort(); // the second sidebar goes away
+
+    // The first sidebar still owns the listeners, so its drag must work.
+    drag(rig, 1, 1, "bottom");
+    expect(rig.onReorder).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-registration after full teardown works (a new sidebar after all closed)", () => {
+    signIn("owner");
+    const first = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+    first.abort.abort(); // teardown
+
+    const second = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+    drag(second, 1, 1, "bottom");
+    expect(second.onReorder).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborting the owner mid-drag clears the in-flight visual state", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     const source = rig.items.get(1);
@@ -452,7 +456,7 @@ describe("global listener ref-counting", () => {
     source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
     expect(source?.classList.contains("dragging")).toBe(true);
 
-    releaseGlobalDragListeners(rig.container);
+    rig.abort.abort();
 
     // A sidebar destroyed mid-drag must not leave the row stuck in the
     // dragging state or the body stuck in reorder mode.
@@ -460,26 +464,28 @@ describe("global listener ref-counting", () => {
     expect(document.body.classList.contains("channel-reordering")).toBe(false);
   });
 
-  it("leaves a drag owned by a different container alone", () => {
+  it("leaves a drag owned by a different sidebar alone", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     const source = rig.items.get(1);
-    const otherContainer = document.createElement("div");
+    const other = new AbortController();
+    ensureGlobalDragListeners(other.signal);
 
     source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
     source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
 
-    ensureGlobalDragListeners(); // keep the count above zero
-    releaseGlobalDragListeners(otherContainer);
+    other.abort();
 
     expect(source?.classList.contains("dragging")).toBe(true);
   });
 
-  it("release is safe to over-call", () => {
+  it("an already-aborted owner is refused (no dead registration, abort is safe to repeat)", () => {
+    const ac = new AbortController();
+    ac.abort();
     expect(() => {
-      releaseGlobalDragListeners();
-      releaseGlobalDragListeners();
-      releaseGlobalDragListeners();
+      ensureGlobalDragListeners(ac.signal);
+      ac.abort();
+      ac.abort();
     }).not.toThrow();
   });
 });

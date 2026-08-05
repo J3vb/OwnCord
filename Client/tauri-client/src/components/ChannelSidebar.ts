@@ -22,7 +22,7 @@ import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
-import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
+import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
@@ -917,8 +917,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   }
 
   function destroy(): void {
+    // ac.abort() also releases this sidebar's hold on the shared document-level
+    // drag listeners (drag-reorder.ts tracks owners by signal).
     ac.abort();
-    releaseGlobalDragListeners(channelList ?? undefined);
     for (const unsub of unsubscribers) {
       unsub();
     }
