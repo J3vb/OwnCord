@@ -12,6 +12,7 @@ import (
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 )
 
 // chdirTemp changes the working directory to a fresh temp directory for the
@@ -308,14 +309,38 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir backups: %v", err)
 	}
-	found := false
+	preRestore := ""
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "pre_restore_") {
-			found = true
+			preRestore = filepath.Join(backupDir, e.Name())
 		}
 	}
-	if !found {
-		t.Error("no pre_restore_*.db safety backup was created")
+	if preRestore == "" {
+		t.Fatal("no pre_restore_*.db safety backup was created")
+	}
+
+	// The backup_restore audit row must be INSIDE the safety copy — the live
+	// DB file is replaced by the restore, so the pre_restore backup is that
+	// row's only durable home. Asserting against the reopened backup file (not
+	// the handler's DB, which is closed by now) proves both the write and its
+	// ordering before BackupTo.
+	restoredDB, err := db.Open(preRestore)
+	if err != nil {
+		t.Fatalf("db.Open(pre-restore backup): %v", err)
+	}
+	defer restoredDB.Close() //nolint:errcheck
+	audits, err := restoredDB.GetAuditLog(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog on pre-restore backup: %v", err)
+	}
+	foundAudit := false
+	for _, e := range audits {
+		if e.Action == "backup_restore" {
+			foundAudit = true
+		}
+	}
+	if !foundAudit {
+		t.Error("expected a backup_restore audit entry inside the pre-restore safety backup")
 	}
 }
 

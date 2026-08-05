@@ -176,6 +176,19 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		dbPath := filepath.Join("data", "chatserver.db")
 
+		actor := actorFromContext(r)
+		// Audit the restore BEFORE the pre-restore safety copy is taken, and
+		// synchronously (LogAudit, not WriteAudit): the restore overwrites the
+		// live database file, so the only durable home for this row is the
+		// pre_restore_* backup captured below — an entry enqueued on the async
+		// WriteAudit path could still be sitting in the writer's buffer when
+		// BackupTo snapshots the DB. Best-effort per policy D8: a failed write
+		// is logged, never a reason to refuse the restore.
+		if err := database.LogAudit(context.WithoutCancel(r.Context()), actor, "backup_restore", "server", 0,
+			fmt.Sprintf("restoring backup %s", name)); err != nil {
+			slog.Error("audit log write failed", "action", "backup_restore", "actor_id", actor, "error", err)
+		}
+
 		// Safety: create a pre-restore backup before overwriting. WithoutCancel:
 		// the restore proceeds regardless of client disconnect (Close/copyFile
 		// below are not ctx-aware), so the safety backup must not be skippable
@@ -205,7 +218,6 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
 		}
 
-		actor := actorFromContext(r)
 		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
 
 		if err := database.Close(); err != nil {

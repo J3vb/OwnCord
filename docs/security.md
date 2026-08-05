@@ -37,11 +37,12 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `ws_connect`
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
 
-Note: restoring a backup broadcasts a restart and is logged to the server log,
-but does **not** write an `audit_log` row (the database is closed as part of
-the restore).
+Note: `backup_restore` is written synchronously to the live database *before*
+the pre-restore safety copy is taken, so the row survives inside the
+`pre_restore_*.db` backup. The restored database itself will not contain it —
+the restore replaces the database file wholesale.
 
 ## Client Security Hardening
 
