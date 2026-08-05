@@ -230,24 +230,23 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
-  # Playwright e2e against the mocked-Tauri dev server. The suite is green
-  # since the mock repair (start_http_proxy stub + voice-premise rewrite):
-  # a full 255-test run passes locally in ~7.5 min at 1 worker. Runaway
-  # protection lives in playwright.config.ts (maxFailures: 20 aborts a
-  # systemic cascade early; globalTimeout: 20 min self-terminates with a
-  # usable report) with timeout-minutes below as the outer backstop.
+  # Playwright e2e against the mocked-Tauri dev server. Runaway protection
+  # lives in playwright.config.ts (maxFailures: 20 aborts a systemic cascade
+  # early; globalTimeout: 20 min self-terminates with a usable report) with
+  # timeout-minutes below as the outer backstop.
   #
-  # Still continue-on-error for now: a newly-revived 255-test browser suite
-  # may harbor rare flakes (retries: 2 covers them, but confidence needs a
-  # few green pushes first). Flip this job to blocking once it has been
-  # stably green across several pushes.
+  # BLOCKING since 2026-08-05 (DC-07): the post-repair soak recorded green
+  # full-suite runs at 270, 276 and 291 tests across the 08-04/08-05 audit
+  # branches, and the one hard CI failure in that window was a real spec bug
+  # (updater install-settle race), which a non-blocking job would have let
+  # rot. retries: 2 absorbs the known rare flake class (see E2E-ISSUES.md's
+  # flake accounting).
   # See docs/audit-test-coverage-2026-07-25.md T-2026-07-25-21.
   # The native config (playwright.config.native.ts) is deliberately not wired
   # up — it needs a real server and a built desktop binary.
   client-e2e:
-    name: Client E2E (Playwright, non-blocking)
+    name: Client E2E (Playwright)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 25
     defaults:
       run:
