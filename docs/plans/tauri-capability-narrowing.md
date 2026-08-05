@@ -1,9 +1,11 @@
 # Tauri HTTP Capability Narrowing — Design
 
-**Status:** implemented (2026-07-20) — the Decision below landed in
-`Client/tauri-client/src-tauri/capabilities/default.json`, guarded by
-`tests/unit/capabilities-scope.test.ts`. The follow-up at the end of this
-document is still open.
+**Status:** implemented (2026-07-20), re-verified 2026-08-04 — the Decision
+below landed in `Client/tauri-client/src-tauri/capabilities/default.json`,
+guarded by `tests/unit/capabilities-scope.test.ts`. The follow-up at the end
+of this document (move the link-preview fetch behind a Rust command that
+resolves DNS and rejects private/loopback IPs, closing DNS rebinding and
+allowing the `https://*` wildcard to be dropped) is **still open**.
 **Phase:** P3 "Client + plugin security parity"
 **Follows:** [http-tofu-proxy.md](http-tofu-proxy.md) (A-2026-07-02), which moved
 REST/health/attachment traffic onto a loopback origin and was expected to make

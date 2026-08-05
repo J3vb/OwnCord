@@ -17,6 +17,10 @@
 - [ ] Unit tests pass (`npm test` / `go test ./...`)
 - [ ] TypeScript check passes (`npx tsc --noEmit`)
 - [ ] Manual testing done (describe below)
+- [ ] Docs updated — anything under `docs/architecture/` (incl. `ux/`) whose
+      "Source of truth" files this PR touches is updated in the same PR
+      (their maintenance rule), and reference docs (`api.md`, `protocol.md`,
+      `schema.md`, `server-configuration.md`) reflect any surface changes
 
 ## Screenshots
 

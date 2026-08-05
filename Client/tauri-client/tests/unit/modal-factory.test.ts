@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createModal } from "../../src/lib/modalFactory";
+import { createModal, createPromptModal } from "../../src/lib/modalFactory";
 
 describe("createModal", () => {
   let container: HTMLDivElement;
@@ -139,6 +139,143 @@ describe("createModal", () => {
     inst.close();
     inst.close();
     inst.destroy();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("external abort removes the modal and fires onClose exactly once", () => {
+    const onClose = vi.fn();
+    const externalAc = new AbortController();
+    const content = document.createElement("div");
+    const inst = createModal({ content, onClose, signal: externalAc.signal }, container);
+
+    externalAc.abort();
+
+    expect(container.contains(inst.overlay)).toBe(false);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // A close() after the abort must not re-fire onClose or throw.
+    inst.close();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createPromptModal", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  });
+
+  function getInput(): HTMLInputElement {
+    const el = document.querySelector<HTMLInputElement>("[data-testid='prompt-input']");
+    if (el === null) throw new Error("prompt input not rendered");
+    return el;
+  }
+
+  function clickConfirm(): void {
+    document.querySelector<HTMLButtonElement>("[data-testid='prompt-confirm']")?.click();
+  }
+
+  function clickCancel(): void {
+    document.querySelector<HTMLButtonElement>("[data-testid='prompt-cancel']")?.click();
+  }
+
+  it("renders title, optional label, and defaults", () => {
+    createPromptModal({ title: "Rename group", label: "Group name", onSubmit: vi.fn() }, container);
+
+    expect(document.querySelector("h3")?.textContent).toBe("Rename group");
+    expect(document.body.textContent).toContain("Group name");
+    const input = getInput();
+    expect(input.placeholder).toBe("");
+    expect(input.getAttribute("maxlength")).toBe("100");
+    expect(
+      document.querySelector<HTMLButtonElement>("[data-testid='prompt-confirm']")?.textContent,
+    ).toBe("Save");
+  });
+
+  it("honors placeholder, maxLength, confirmLabel, testId, and initialValue", () => {
+    createPromptModal(
+      {
+        title: "t",
+        placeholder: "Type here",
+        maxLength: 32,
+        confirmLabel: "Rename",
+        testId: "rename-input",
+        initialValue: "old name",
+        onSubmit: vi.fn(),
+      },
+      container,
+    );
+
+    const input = document.querySelector<HTMLInputElement>("[data-testid='rename-input']");
+    expect(input).not.toBeNull();
+    expect(input?.placeholder).toBe("Type here");
+    expect(input?.getAttribute("maxlength")).toBe("32");
+    expect(input?.value).toBe("old name");
+    expect(
+      document.querySelector<HTMLButtonElement>("[data-testid='prompt-confirm']")?.textContent,
+    ).toBe("Rename");
+  });
+
+  it("confirm submits the trimmed value and closes", () => {
+    const onSubmit = vi.fn();
+    const inst = createPromptModal({ title: "t", onSubmit }, container);
+
+    getInput().value = "  spaced out  ";
+    clickConfirm();
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("spaced out");
+    expect(container.contains(inst.overlay)).toBe(false);
+  });
+
+  it("submits an empty value — clearing a name is a legitimate submission", () => {
+    const onSubmit = vi.fn();
+    createPromptModal({ title: "t", initialValue: "old", onSubmit }, container);
+
+    getInput().value = "   ";
+    clickConfirm();
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("");
+  });
+
+  it("Enter submits and prevents the default", () => {
+    const onSubmit = vi.fn();
+    createPromptModal({ title: "t", onSubmit }, container);
+
+    const input = getInput();
+    input.value = "via enter";
+    const ev = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    input.dispatchEvent(ev);
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("via enter");
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it("cancel closes without submitting and fires onClose", () => {
+    const onSubmit = vi.fn();
+    const onClose = vi.fn();
+    const inst = createPromptModal({ title: "t", onSubmit, onClose }, container);
+
+    getInput().value = "discarded";
+    clickCancel();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(container.contains(inst.overlay)).toBe(false);
+  });
+
+  it("onClose fires on submit too — close and submit are one gesture", () => {
+    const onClose = vi.fn();
+    createPromptModal({ title: "t", onSubmit: vi.fn(), onClose }, container);
+
+    clickConfirm();
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });

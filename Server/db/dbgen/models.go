@@ -204,15 +204,6 @@ type Setting struct {
 	Value string `json:"value"`
 }
 
-type Sound struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Filename   string `json:"filename"`
-	DurationMs int64  `json:"durationMs"`
-	UploadedBy int64  `json:"uploadedBy"`
-	CreatedAt  string `json:"createdAt"`
-}
-
 type User struct {
 	ID                int64   `json:"id"`
 	Username          string  `json:"username"`

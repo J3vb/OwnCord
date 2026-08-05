@@ -754,23 +754,6 @@ describe("API Client", () => {
     });
   });
 
-  describe("sound endpoints", () => {
-    it("getSounds calls GET /sounds", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([{ id: 1, name: "beep" }]));
-      const result = await api.getSounds();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/sounds");
-      expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual([{ id: 1, name: "beep" }]);
-    });
-
-    it("deleteSound calls DELETE /sounds/{id}", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
-      await api.deleteSound(3);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/sounds/3");
-      expect(fetchCallOpts().method).toBe("DELETE");
-    });
-  });
-
   describe("DM endpoints", () => {
     it("getDmChannels calls GET /dms", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ channels: [] }));

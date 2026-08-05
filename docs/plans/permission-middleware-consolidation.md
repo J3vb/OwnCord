@@ -1,6 +1,10 @@
 # Permission-Middleware Consolidation (audit finding A-2026-07-16) — Design
 
-**Status:** implemented 2026-07-23 (D13)
+**Status:** implemented 2026-07-23 (D13) — re-verified 2026-08-04. The one
+deliberately-unfixed copy disclosed at the end of this document,
+`ws.channelCanSend`, still exists as a hand-rolled resolution (now at
+`Server/ws/serve_ready.go:119`, feeding the ready payload's `can_send` flag) —
+the disclosed follow-up remains open.
 **Decision:** D13 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-16 (new, HIGH). Closes **none** of backlog §6
 item 12's findings — A-2026-07-06, A-2026-07-10 and A-2026-07-11 all remain

@@ -32,7 +32,13 @@
     { "wire": "voice_e2ee_announce", "go": "MsgTypeVoiceE2EEAnnounce", "ts": "VOICE_E2EE_ANNOUNCE" },
     { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
     { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
-    { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" }
+    { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" },
+    {
+      "wire": "chat_command",
+      "go": "MsgTypeChatCommand",
+      "ts": "CHAT_COMMAND",
+      "note": "plugin slash-command dispatch (Phase C)"
+    }
   ],
   "server_to_client": [
     { "wire": "auth_ok", "go": "MsgTypeAuthOK", "ts": "AUTH_OK" },
@@ -86,6 +92,18 @@
       "go": "MsgTypeVoiceE2EEOfferRelay",
       "ts": "VOICE_E2EE_OFFER",
       "note": "relay (same string as client msg)"
+    },
+    {
+      "wire": "command_reply",
+      "go": "MsgTypeCommandReply",
+      "ts": "COMMAND_REPLY",
+      "note": "ephemeral plugin reply, sent only to the invoking client"
+    },
+    {
+      "wire": "plugin_broadcast",
+      "go": "MsgTypePluginBroadcast",
+      "ts": "PLUGIN_BROADCAST",
+      "note": "plugin channel broadcast, gated by the sender's SEND_MESSAGES"
     }
   ]
 }

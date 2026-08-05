@@ -1,5 +1,16 @@
 # Security-Scan Remediation (Claude Security run 2026-07-22)
 
+> **Status (verified 2026-08-04): Shipped — all 8 findings (F1–F8) closed.**
+> Of the four F3 follow-ups listed below, two have since shipped: the safety
+> number is rendered (voice-roster shield badge title, `ChannelSidebar.ts:45-60`)
+> and the re-pin affordance exists (mismatch badge click → identity-mismatch
+> modal → `rePinPeerIdentity`, `ChannelSidebar.ts:84-135`). Follow-up 3
+> (`getIdentityPin` fail-open on a transient keyring read error,
+> `identity.ts:106-118`) remains open; follow-up 4 is accepted behavior
+> (degrades to *unverified*, never wrongly-*verified*). The scan artifact
+> directory `CLAUDE-SECURITY-20260722-184557/` referenced below is not part of
+> this repository.
+
 **Scan:** `CLAUDE-SECURITY-20260722-184557/` at revision `e983459` (branch `main`).
 **Findings:** 8 — 4 MEDIUM (F1–F4), 4 LOW (F5–F8), all confidence `medium`, no HIGH.
 **Branch:** `fix/security-scan-2026-07-22`.

@@ -317,6 +317,69 @@ func TestCallRing_RateLimited(t *testing.T) {
 	}
 }
 
+// A block must silence the 1:1 ring like every other DM sink: without it a
+// blocked user could still make the blocker's client ring (A-2026-08-03).
+func TestCallRing_BlockedOneToOneForbidden(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-blk-alice")
+	bob := seedMemberUser(t, database, "ring-blk-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	sendAlice := make(chan []byte, 64)
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "FORBIDDEN" {
+		t.Errorf("expected FORBIDDEN ringing a blocked 1:1 DM, got %q", code)
+	}
+	if got := dmFindMsgType(dmDrainAll(sendBob), "call_incoming"); got != nil {
+		t.Error("a blocked user's ring reached the blocker")
+	}
+}
+
+// The group exemption applies to rings exactly as it does to sends: a block
+// between two members must not silence the room's call signal for everyone.
+func TestCallRing_GroupWithInternalBlockStillRings(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-gblk-alice")
+	bob := seedMemberUser(t, database, "ring-gblk-bob")
+	carol := seedMemberUser(t, database, "ring-gblk-carol")
+	chID := seedGroupDM(t, database, "BlockedRingers", alice.ID, bob.ID, carol.ID)
+
+	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	sendBob := make(chan []byte, 64)
+	sendCarol := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	hub.Register(cCarol)
+	waitRegistered(t, hub, cCarol)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	if dmWaitMsgType(sendBob, "call_incoming", waitTimeout) == nil {
+		t.Error("a group ring was silenced by a block between two members")
+	}
+	if dmWaitMsgType(sendCarol, "call_incoming", waitTimeout) == nil {
+		t.Error("carol did not receive the group call_incoming")
+	}
+}
+
 func TestCallRing_RejectsNonPositiveChannel(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "ringbad-alice")

@@ -16,11 +16,19 @@ All authenticated endpoints require a session token delivered via the `Authoriza
 
 ### Middleware Stack (all routes)
 
-1. **RequestID** -- assigns a unique `X-Request-Id` response header.
-2. **Recoverer** -- catches panics and returns 500.
-3. **Request Logger** -- structured logging of method, path, status, duration.
-4. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-5. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (which has its own 100 MiB limit).
+In mount order (`Server/api/router.go`):
+
+1. **boundRequestID** -- drops an oversized (>128 bytes) or non-printable client-supplied `X-Request-Id` before chi adopts it.
+2. **RequestID** (chi) -- assigns the request ID used in logs.
+3. **setRequestIDHeader** -- echoes the request ID into the `X-Request-Id` response header.
+4. **Recoverer** -- catches panics, logs them through `slog` with a stack capture, returns 500.
+5. **Request Logger** -- structured logging of method, path, status, duration.
+6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
+7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (which has its own 100 MiB limit).
+9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
+
+Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
 
 ---
 
@@ -117,7 +125,7 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 Authenticate with username and password.
 
 **Auth:** None (public)
-**Rate limit:** 60 requests/minute per IP. After 10 consecutive failures from the same IP, the IP is locked out for 15 minutes.
+**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes. Lockouts are persisted to the database and survive server restarts.
 
 #### Request
 
@@ -1470,9 +1478,23 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
   "heap_sys_mb": 24.0,
   "num_gc": 156,
   "connected_users": 8,
+  "voice_sessions": 2,
+  "broadcast_drops": 0,
   "livekit_healthy": true
 }
 ```
+
+`voice_sessions` is the number of active voice connections; `broadcast_drops`
+is the cumulative count of WebSocket events dropped because a client send
+queue was full. `livekit_healthy` is omitted when no LiveKit health check is
+wired.
+
+### GET /metrics (Prometheus)
+
+A Prometheus text-format exporter is mounted at `/metrics` **only** when the
+server was built with `-tags otel` and `telemetry.exporter` is set to
+`prometheus`. It is admin-IP-restricted like the JSON endpoint. In the default
+build the route does not exist (404).
 
 ---
 
@@ -1532,6 +1554,505 @@ Every route still re-checks its bit server-side.
   "permissions": 1048575,
   "is_owner": false
 }
+```
+
+---
+
+## First-Run Setup
+
+### GET /admin/api/setup/status
+
+Reports whether initial setup is needed (no users exist yet).
+
+**Auth:** None (public). After the first user exists, the response reveals
+nothing about the configuration.
+
+#### Response 200 OK
+
+```json
+{
+  "needs_setup": true,
+  "defaults": {
+    "server_name": "OwnCord",
+    "motd": "Welcome!",
+    "registration_open": false,
+    "port": 8443,
+    "tls_mode": "self-signed",
+    "tls_domain": "",
+    "upload_max_size_mb": 100,
+    "voice_quality": "medium",
+    "voice_auto_download": true
+  }
+}
+```
+
+`defaults` (wizard prefill from the running config and settings table) is
+present only while `needs_setup` is `true`.
+
+---
+
+### POST /admin/api/setup
+
+Create the first (Owner) account, optionally applying first-run wizard
+configuration. Only functional while no users exist; afterwards it returns an
+error.
+
+**Auth:** None (public)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "username": "owner",
+  "password": "MyStr0ng!Pass",
+  "wizard": {
+    "server_name": "My Server",
+    "motd": "Welcome!",
+    "registration_open": false,
+    "port": 8443,
+    "tls_mode": "self-signed",
+    "tls_domain": "",
+    "upload_max_size_mb": 100,
+    "voice_quality": "medium",
+    "voice_auto_download": true
+  }
+}
+```
+
+All `wizard` fields are optional; `server_name`, `motd` and
+`registration_open` are stored in the settings table (live), the rest are
+written back to `config.yaml` (consumed at startup).
+
+#### Response 200 OK
+
+```json
+{
+  "token": "raw-session-token",
+  "user_id": 1,
+  "username": "owner",
+  "invite_code": "abc123def",
+  "restart_required": false,
+  "restart_url": "",
+  "warnings": []
+}
+```
+
+`restart_required` is `true` when wizard values that are only read at startup
+(port, TLS) differ from the running config; the server restarts itself right
+after responding, and `restart_url` is where the admin panel will be reachable
+afterwards. `warnings` lists non-fatal problems (e.g. `config.yaml` not
+writable) — the account exists whenever this response is returned.
+
+---
+
+## Server Stats & User Administration
+
+### GET /admin/api/stats
+
+Aggregate counts for the admin dashboard.
+
+**Auth:** Admin perimeter
+
+#### Response 200 OK
+
+```json
+{
+  "user_count": 12,
+  "message_count": 4821,
+  "channel_count": 9,
+  "invite_count": 2,
+  "db_size_bytes": 1048576,
+  "online_count": 3
+}
+```
+
+---
+
+### GET /admin/api/users
+
+List all users with role and ban state.
+
+**Auth:** Admin perimeter
+**Query params:** `limit` (default 50, min 1), `offset` (default 0)
+
+#### Response 200 OK
+
+Array of:
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| `id` | int | |
+| `username` | string | |
+| `avatar` | string? | omitted when unset |
+| `role_id` | int | |
+| `role_name` | string | |
+| `status` | string | presence status |
+| `created_at` | string | |
+| `last_seen` | string? | omitted when never seen |
+| `banned` | bool | |
+| `ban_reason` | string? | omitted when unset |
+| `ban_expires` | string? | omitted for permanent bans |
+
+Password hashes and TOTP secrets are never included.
+
+---
+
+### PATCH /admin/api/users/{id}
+
+Change a user's role and/or ban state. Both actions route through the
+moderation service, which enforces the required bit (`MANAGE_ROLES` for
+`role_id`, `BAN_MEMBERS` for `banned`), the role hierarchy, and writes the
+audit row.
+
+**Auth:** Admin perimeter + per-action bit (see above)
+
+#### Request
+
+```json
+{
+  "role_id": 3,
+  "banned": true,
+  "ban_reason": "spam",
+  "ban_duration_hours": 24
+}
+```
+
+All fields optional. `ban_duration_hours` makes the ban temporary (1–8760;
+omitted or `0` = permanent) and is only meaningful with `banned: true`.
+
+#### Response 200 OK -- the updated user (same shape as the list entry).
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
+| 403 | `FORBIDDEN` | Missing bit, or the actor does not outrank the target |
+| 404 | `NOT_FOUND` | User not found |
+
+---
+
+### DELETE /admin/api/users/{id}/sessions
+
+Force-logout: revoke every session of the target user. The hierarchy rule
+(actor outranks target) is enforced in the moderation service and the action
+is audited.
+
+**Auth:** `KICK_MEMBERS`
+
+#### Response 204 No Content
+
+---
+
+## Audit Log
+
+### GET /admin/api/audit-log
+
+Read the audit trail, newest first.
+
+**Auth:** `VIEW_AUDIT_LOG`
+**Query params:** `limit` (default 50, min 1), `offset` (default 0)
+
+#### Response 200 OK
+
+Array of:
+
+```json
+{
+  "id": 991,
+  "actor_id": 1,
+  "actor_name": "owner",
+  "action": "user_ban",
+  "target_type": "user",
+  "target_id": 7,
+  "detail": "spam",
+  "created_at": "2026-08-04T12:00:00Z"
+}
+```
+
+---
+
+## Server Settings
+
+### GET /admin/api/settings
+
+**Auth:** `MANAGE_SERVER`
+
+Returns the settings table as a flat string map, e.g.:
+
+```json
+{
+  "server_name": "My Server",
+  "motd": "Welcome!",
+  "registration_open": "1",
+  "require_2fa": "0"
+}
+```
+
+---
+
+### PATCH /admin/api/settings
+
+Update settings. Keys are validated against a whitelist before anything is
+written, and all updates are applied in one transaction; each change is
+audited as `setting_change`.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
+`motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
+`registration_open`, `backup_schedule`, `backup_retention`. Boolean settings
+accept `1/0/true/false` and are normalized to `1`/`0`.
+
+Enabling `require_2fa` is refused unless registration is closed **and** every
+user has TOTP enabled.
+
+#### Response 200 OK -- the full settings map after the update.
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `BAD_REQUEST` | Unknown key, invalid boolean, or `require_2fa` preconditions not met |
+
+---
+
+## API Tokens
+
+Owner-only: minting a long-lived bearer credential over the network is the one
+admin action that, via a hijacked session, would outlive a password change and
+bulk logout (API tokens deliberately live outside the session table). These
+routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
+
+### GET /admin/api/tokens
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+Array of:
+
+```json
+{
+  "id": 1,
+  "user_id": 1,
+  "username": "owner",
+  "label": "ci-bot",
+  "created_at": "2026-08-01T10:00:00Z",
+  "last_used": null,
+  "expires_at": null,
+  "revoked_at": null
+}
+```
+
+Token hashes are never returned.
+
+---
+
+### POST /admin/api/tokens
+
+**Auth:** Owner role
+
+#### Request
+
+```json
+{
+  "label": "ci-bot",
+  "username": "",
+  "expires_hours": 0
+}
+```
+
+`label` is required. Empty `username` binds the token to the owner account;
+`expires_hours: 0` means never expires.
+
+#### Response 201 Created
+
+```json
+{
+  "id": 2,
+  "token": "raw-api-token",
+  "label": "ci-bot",
+  "user": "owner"
+}
+```
+
+The raw token is shown exactly once and is never recoverable.
+
+---
+
+### DELETE /admin/api/tokens/{id}
+
+**Auth:** Owner role
+
+#### Response 204 No Content
+
+`404 NOT_FOUND` if there is no *active* token with that id.
+
+---
+
+## Backups
+
+All backup routes are Owner-only. Backups are SQLite snapshots (`VACUUM INTO`)
+stored under `data/backups/`.
+
+### POST /admin/api/backup
+
+Create a backup named `chatserver_<UTC timestamp>.db`.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "path": "chatserver_20260804_120000.db",
+  "created": "20260804_120000"
+}
+```
+
+---
+
+### GET /admin/api/backups
+
+List backups, newest first.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+[{ "name": "chatserver_20260804_120000.db", "size": 1048576, "date": "2026-08-04T12:00:00Z" }]
+```
+
+---
+
+### DELETE /admin/api/backups/{name}
+
+**Auth:** Owner role
+
+`name` is validated against path traversal. Returns `204 No Content`, or
+`404 NOT_FOUND` if the file does not exist.
+
+---
+
+### POST /admin/api/backups/{name}/restore
+
+Restore the database from a backup. The server first writes a
+`pre_restore_<timestamp>.db` safety backup (the restore is aborted if that
+fails), broadcasts a `server_restart` to connected clients, checkpoints and
+closes the database, copies the backup over it, responds, and then restarts
+itself.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "message": "database restored — server restarting",
+  "backup": "chatserver_20260804_120000.db"
+}
+```
+
+---
+
+## Server Updates
+
+Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
+`docs/security.md`).
+
+### GET /admin/api/updates
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "current": "v1.2.0-alpha.1",
+  "latest": "v1.2.0",
+  "update_available": true,
+  "required_assets_present": true,
+  "release_url": "…",
+  "download_url": "…",
+  "checksum_url": "…",
+  "signature_url": "…",
+  "manifest_url": "…",
+  "manifest_signature_url": "…",
+  "release_notes": "…"
+}
+```
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
+| 502 | `UPDATE_CHECK_FAILED` | GitHub API failure |
+
+---
+
+### POST /admin/api/updates/apply
+
+Download, verify and apply the latest release. On success the server responds
+first, then broadcasts a restart notice, swaps the binary (with staged-hash
+re-verification against TOCTOU swaps), spawns the new process and shuts down.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{ "status": "applying", "version": "v1.2.0" }
+```
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
+| 409 | `NO_UPDATE` | Already up to date |
+| 502 | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure |
+
+---
+
+## Server Logs (SSE)
+
+Streaming the server log requires two steps because `EventSource` cannot send
+an `Authorization` header.
+
+### POST /admin/api/logs/ticket
+
+Issue a single-use ticket (30 s TTL) bound to the calling bearer credential.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{ "ticket": "64-hex-chars" }
+```
+
+---
+
+### GET /admin/api/logs/stream?ticket={ticket}
+
+Server-Sent Events stream of structured log records: on connect the in-memory
+ring buffer (capacity 2000) is replayed as backfill, then new entries stream
+live, with a keepalive every 15 s. The ticket is consumed on connect; the
+`ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
+underlying session or API token (or banning the user) mid-stream cuts it.
+
+**Auth:** single-use ticket (from `POST /admin/api/logs/ticket`)
+
+Each event's data is one JSON record:
+
+```json
+{ "ts": "2026-08-04T12:00:00Z", "level": "INFO", "msg": "…", "source": "…", "attrs": "…" }
 ```
 
 ---

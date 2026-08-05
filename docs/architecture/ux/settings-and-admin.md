@@ -1,6 +1,6 @@
 # Settings & Admin — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md).
 
 Covers: the settings overlay and its tabs, account operations (profile, password,
@@ -113,10 +113,13 @@ and (b) confirm destructive actions.
 **Target rules:**
 - Destructive admin actions should show an **in-flight** state (today the
   two-click label reverts immediately and only a toast reports the result —
-  `AdminActions.ts:54-78`; add a pending state so a slow ban doesn't look ignored).
-- **Ban should collect a reason.** `adminBanMember` accepts a `reason` but the
-  menu passes none (`SidebarMemberSection.ts:159-166`). Target: a small reason
-  prompt on ban, since the server stores and displays it.
+  `AdminActions.ts:99` `withConfirmation`; adding a pending state so a slow
+  ban doesn't look ignored is still an open gap).
+- **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
+  reason input plus a duration choice (`AdminActions.ts:311` `appendBanFlow`),
+  and the menu passes both through
+  (`SidebarMemberSection.ts:165-167` → `api.adminBanMember(userId, reason,
+  durationHours)`), so temporary bans and stored reasons work from the client.
 
 ### 3.1 What is *not* in the client (by design)
 
@@ -124,7 +127,11 @@ The full admin panel — user list, audit log, server settings, channel
 permissions, plugin management, backups, updates, first-run setup — is the
 **server-rendered web panel** under `/admin`, gated by IP restriction + admin
 auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
-audit/settings/permissions/setup calls in `api.ts`).
+audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
+does have is a deep-link: `lib/admin-panel.ts` opens
+`https://{host}/admin#{section}` in the OS browser (wired from
+`SidebarArea.ts:189` for the audit log, gated by
+`lib/permissions.ts::canViewAuditLog`).
 
 > **Decision point.** If the target is for admins to manage the server from the
 > desktop app (audit log, settings, plugins) rather than the web panel, that is a
@@ -182,6 +189,17 @@ sequenceDiagram
 > for it and forwards to `UpdateNotifier`, whose `formatDownloadProgress` renders a
 > percentage when `total` is known and falls back to bytes (MB) otherwise, so the
 > banner never looks hung. (Rust change is minimal and CI-gated only.)
+
+---
+
+## 6. System tray
+
+The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
+**Show/Hide** toggles the main window, a **Status** submenu
+(Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
+the TS side applies through the same presence path as the user-bar picker
+(`lib/userStatus.ts` / `components/StatusPicker.ts`), and **Quit** exits the
+app.
 
 ---
 

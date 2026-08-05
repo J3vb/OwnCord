@@ -15,14 +15,13 @@ package ws_test
 //   - every wire value the schema lists has a matching Go constant with the
 //     schema's stated name and value ("schema -> code"), and
 //   - every MsgType* constant declared anywhere in the ws package appears in
-//     the schema ("code -> schema"), with ONE documented exception.
+//     the schema ("code -> schema").
 //
-// The exception: MsgTypeChatCommand ("chat_command", ws/handlers_command.go)
-// is a client->server wire message with no schema entry. It predates the
-// schema/genprotocol pipeline and was deliberately left out — plugin slash
-// commands are dispatched through the plugin registry rather than the fixed
-// handler table the generated constants serve, so it was judged internal
-// wiring rather than part of the documented protocol surface. If a second
+// The exception list below is empty and should stay that way. Its one
+// historical entry, MsgTypeChatCommand, predated the schema/genprotocol
+// pipeline (plugin slash commands were judged internal wiring); the 2026-08-04
+// remediation moved the whole plugin command family (chat_command,
+// command_reply, plugin_broadcast) into the schema, closing DC-01. If an
 // undocumented constant ever appears, this test fails and names it — that is
 // the drift this test exists to catch, not something to silently allowlist.
 
@@ -39,9 +38,7 @@ import (
 	"testing"
 )
 
-var knownUndocumentedConstants = map[string]string{
-	"MsgTypeChatCommand": "chat_command",
-}
+var knownUndocumentedConstants = map[string]string{}
 
 // protocolSchemaEntry mirrors one element of the client_to_server /
 // server_to_client arrays in docs/protocol-schema.json.

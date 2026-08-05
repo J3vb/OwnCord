@@ -1363,11 +1363,18 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Typing | 1 | 3 seconds | Silently dropped |
 | Presence | 1 | 10 seconds | `RATE_LIMITED` error |
 | Reactions | 5 | 1 second | `RATE_LIMITED` error |
+| Voice join / leave | 5 | 1 second | `RATE_LIMITED` error |
 | Voice camera | 2 | 1 second | `RATE_LIMITED` error |
 | Voice screenshare | 2 | 1 second | `RATE_LIMITED` error |
 | Voice token refresh | 1 | 60 seconds | `RATE_LIMITED` error |
-| Voice E2EE announce/offer | 5 | 1 second | `RATE_LIMITED` error |
+| Voice E2EE announce | 5 | 1 second | `RATE_LIMITED` error |
+| Voice E2EE offer | 64 | 1 second | `RATE_LIMITED` error |
 | Voice moderation (mute/deafen/move/kick) | 5 | 1 second | `RATE_LIMITED` error |
+| Call ring | 1 | 3 seconds | `RATE_LIMITED` error |
+
+The E2EE offer budget is deliberately higher than the announce budget: a key
+rotation fires one offer per peer in a single burst, so the limit is sized to
+a whole rotation rather than to a single frame.
 
 ---
 
@@ -1378,7 +1385,7 @@ from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
-### Client -> Server (24 types)
+### Client -> Server (27 types)
 
 | Type | Rate Limit | Notes |
 |------|-----------|-------|
@@ -1392,8 +1399,8 @@ tables below add per-type behavioral notes.
 | `channel_focus` | None | Updates read state |
 | `mark_read` | None | Updates read state without moving focus |
 | `presence_update` | 1/10sec | |
-| `voice_join` | None | |
-| `voice_leave` | None | Empty payload |
+| `voice_join` | 5/sec | |
+| `voice_leave` | 5/sec | Empty payload |
 | `voice_mute` | 2/sec | Refused with `SERVER_MUTED` while server muted |
 | `voice_deafen` | 2/sec | Refused with `SERVER_DEAFENED` while server deafened |
 | `voice_camera` | 2/sec | Requires USE_VIDEO |
@@ -1404,10 +1411,13 @@ tables below add per-type behavioral notes.
 | `voice_mod_kick` | 5/sec | Requires MUTE_MEMBERS + outranks target |
 | `voice_token_refresh` | 1/60sec | Must be in voice |
 | `voice_e2ee_announce` | 5/sec | ECDH pubkey announce |
-| `voice_e2ee_offer` | 5/sec | Wrapped room key to target |
+| `voice_e2ee_offer` | 64/sec | Wrapped room key to target (budgeted per key rotation) |
+| `call_ring` | 1/3sec | DM participants only; fans out as `call_incoming` |
+| `call_decline` | None | DM participants only; fans out as `call_declined` |
+| `chat_command` | None | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping` | None | Heartbeat |
 
-### Server -> Client (33 types)
+### Server -> Client (39 types)
 
 | Type | Has seq? | Delivery |
 |------|----------|----------|
@@ -1438,10 +1448,28 @@ tables below add per-type behavioral notes.
 | `user_update` | Yes | All clients (profile changes) |
 | `member_ban` | Yes | All clients |
 | `roles_update` | Yes | All clients (full role list) |
+| `emoji_update` | Yes | All clients (full custom-emoji set) |
 | `dm_channel_open` | No | Direct to participant |
 | `dm_channel_close` | No | Direct to participant |
+| `call_incoming` | No | Direct to each other DM participant |
+| `call_declined` | No | Direct to each other DM participant |
 | `voice_e2ee_announce` | No | Voice channel (excl. sender) |
 | `voice_e2ee_offer` | No | Direct to target participant |
 | `server_restart` | Yes | All clients |
 | `error` | No | Direct to requester |
 | `pong` | No | Direct to pinger |
+| `command_reply` | No | Direct to invoking client (ephemeral plugin reply) |
+| `plugin_broadcast` | No | Channel (plugin output posted as a broadcast) |
+
+### Plugin command types
+
+Three wire types exist for the WASM plugin system. Since 2026-08-04 they are
+listed in `protocol-schema.json` like every other type (closing DC-01), so
+the generated constants cover them and `make protocol-verify` plus the
+`ws` package's protocol-contract test gate them against drift.
+
+| Type | Direction | Notes |
+|------|-----------|-------|
+| `chat_command` | Client -> Server | `{command, args[], channel_id, req_id?}`; max 64 args; unknown commands return an `error`. No dedicated rate limit; a channel broadcast is gated by the same `CanPost` policy as a real message send. |
+| `command_reply` | Server -> Client | Ephemeral plugin reply, sent only to the invoking client; echoes `req_id`. Payload: `{text}`. |
+| `plugin_broadcast` | Server -> Client | Plugin output posted to a channel. Payload: `{channel_id, user_id, command, text}`. |

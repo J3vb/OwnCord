@@ -1,6 +1,6 @@
 # Connection & Authentication — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md). Shared vocabulary, feedback
 primitives, and the error matrix live in the [README](README.md) and are not
 repeated here.
@@ -51,8 +51,9 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 | health: reachable | `GET /api/v1/health` ok within 3 s | Green dot + server name/MOTD preview |
 | health: unreachable | timeout/opaque error | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
 
-Health polls every 15 s (`profiles.ts`); auto-connect, if enabled for the active
-profile, drives the login form's `auto-connecting` state.
+Health polls every 15 s (interval wired in `main.ts`, profile data via
+`profiles.ts`); auto-connect, if enabled for the active profile, drives the
+login form's `auto-connecting` state.
 
 ### 2.2 Login form — state machine
 
@@ -153,7 +154,7 @@ It exists specifically so Main never renders mid-populate. Everything else
 ## 4. Reconnect UX
 
 The WS client auto-reconnects with exponential backoff (base 1 s, cap 30 s, no
-jitter/cap; `ws.ts:123-126`), preserving `last_seq` for replay. The user-facing
+jitter; `ws.ts:91`), preserving `last_seq` for replay. The user-facing
 contract:
 
 ```mermaid
@@ -186,14 +187,18 @@ a click and failing.
 
 ## 5. Cert trust (TOFU) prompts
 
-The Rust proxies pin the server cert on first use and emit `cert-tofu` events.
-The HTTP proxy usually establishes the pin first (login precedes WS).
+The Rust proxies validate the server cert against the per-host pin store and
+emit `cert-tofu` events. **Deciding never writes a pin** (`tofu.rs`): an
+unknown host's first connection is *rejected* until the user confirms the
+fingerprint, so no credential is ever sent to an unconfirmed host. The HTTP
+proxy usually sees the host first (the connect page's health check precedes
+login and WS).
 
 | Event | Target reaction | Current |
 |-------|-----------------|---------|
-| `trusted_first_use` | 8 s informational banner "Trusting this server's certificate" | Implemented ad hoc in `main.ts:105-129` |
+| `first_use` | **Blocking trust modal** (`createCertFirstUseModal`) showing host + fingerprint; **Accept** stores the pin (`accept_cert_fingerprint`), re-runs the connect-page health check and resumes a pending connect; **Cancel** leaves the host untrusted (health stays "unreachable") | Implemented `main.ts:146-176`; shares a `certModalActive` guard with the mismatch modal so the two never stack |
 | `trusted` | No UI (silent, expected) | — |
-| `mismatch` | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page | Implemented `main.ts:133-164`; reconnect blocked until resolved (`certMismatchBlock`) |
+| `mismatch` | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page | Implemented `main.ts:177-208`; reconnect blocked until resolved (`certMismatchBlock`) |
 
 ```mermaid
 sequenceDiagram

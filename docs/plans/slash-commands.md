@@ -1,6 +1,15 @@
 # Plan: Slash command dispatcher in WS
 
 **Status:** design only, not implemented
+
+> **Staleness notes (2026-08-04):** this design predates several changes and
+> needs a refresh before implementation: migration number `016` is now taken
+> (`016_announcement_channel_type.sql` — the plan's `016_plugin_commands.sql`
+> must be renumbered, as must its checklist); `Server/store/` no longer exists
+> (deleted in D3 — the `sqlite_plugin_commands.go` file below would live in
+> `Server/db/` now); `src/state/` does not exist in the client (state modules
+> live in `src/stores/`). One slice of this plan did land separately: the
+> manifest `commands` name-only ACL (see the inline note in §"Manifest").
 **Owner:** TBD
 **Tracks:** deferred feature backlog (post-beta; see CHANGELOG "Deferred work")
 **Estimated effort:** 1–2 weeks of focused work

@@ -1,6 +1,6 @@
 # Messaging — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md). Shared vocabulary and the error
 matrix live in the [README](README.md).
 
@@ -212,7 +212,7 @@ string and park it in the LRU + IndexedDB caches.
 | Feature | Target UX |
 |---------|-----------|
 | Reply | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview |
-| Pin/unpin | Optimistic (`setMessagePinned`, already optimistic `messages.store.ts:226-240`); pinned panel lists them, empty state "No pinned messages" (already `PinnedMessages.ts:81-89`) |
+| Pin/unpin | Optimistic (`setMessagePinned`, already optimistic `messages.store.ts:226-240`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `PinnedMessages.ts:87`) |
 | Search | Overlay with a status line cycling *type-N-chars → searching → results → no results → failed* (already thorough `SearchOverlay.ts:123-145`); abort in-flight on new query |
 | Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented only for non-active, non-own, non-replay messages (`dispatcher.ts:195`); focus emits `channel_focus` for server read-state |
 
@@ -362,8 +362,8 @@ the same signal in future.
 
 ## Source of truth
 
-`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`
-(+ `message-input/`), `src/pages/main-page/ChannelController.ts`,
+`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`,
+`src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,

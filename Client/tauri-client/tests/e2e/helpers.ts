@@ -457,6 +457,10 @@ export function buildTauriMockScript(opts: {
       }
     }
     window.__tauriEmitEvent = __tauriEmitEvent;
+    // Exposed so tests can wait until a listener is registered before
+    // emitting — registration goes through an async invoke roundtrip, so
+    // emitting straight after page load races it.
+    window.__tauriEventListeners = __eventListeners;
 
     // -----------------------------------------------------------------------
     // HTTP mock state

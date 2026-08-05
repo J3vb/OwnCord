@@ -1,6 +1,6 @@
 # Voice and End-to-End Encryption
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
 Voice/video runs on LiveKit. The Go server issues short-lived scoped tokens and
 relays E2EE key-exchange messages; media flows client↔LiveKit directly. On the
@@ -58,14 +58,20 @@ Supporting pieces:
   admin-IP-restricted), `Server/api/livekit_proxy.go` (HTTP reverse proxy).
 - **Client:** `src/lib/livekitSession.ts` (state machine: idle/connecting/
   connected/reconnecting with a monotonic `joinGeneration` to discard
-  superseded joins), `src/lib/e2eeCrypto.ts` (ECDH, key wrap/unwrap),
+  superseded joins), `src/lib/livekitE2EE.ts` (key-holder election, room-key
+  wrap/unwrap, peer verification state), `src/lib/e2eeCrypto.ts` (ECDH
+  primitives, safety-number fingerprints, long-term identity keys),
+  `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
   `src/lib/screenShare.ts`, `src-tauri/src/livekit_proxy.rs` (tunnel),
   `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
-This message flow (`voice_e2ee_announce` / `voice_e2ee_offer` /
-`voice_speakers`) is currently **absent from `docs/protocol.md`** — recorded as
-spec drift in [audit-2026-07-19.md §2](../audit-2026-07-19.md).
+The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer` / `voice_speakers`)
+is specified in [protocol.md](../protocol.md) (Voice End-to-End Encryption
+section). Long-term identity: each user publishes an ECDSA identity public key
+(`users.identity_public_key`, migration 017); peers pin it on first contact
+and surface a blocking mismatch modal if it later changes (see
+[ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
 `Client/tauri-client/src/lib/livekitSession.ts`,

@@ -28,7 +28,7 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid message"))
 		return nil, "", 0, fmt.Errorf("auth: invalid JSON: %w", err)
 	}
-	if env.Type != "auth" {
+	if env.Type != MsgTypeAuth {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("first message must be auth"))
 		return nil, "", 0, fmt.Errorf("auth: unexpected type %q", env.Type)
 	}

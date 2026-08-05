@@ -36,6 +36,9 @@ the server automatically when a startup-only value changed. Note that
 | `server.allowed_origins` | string[] | `[]` | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted. |
 | `server.trusted_proxies` | string[] | `[]` | CIDRs of trusted reverse proxies (for X-Forwarded-For) |
 | `server.admin_allowed_cidrs` | string[] | private networks | CIDRs allowed to access `/admin` routes. Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
+| `server.waf_enabled` | bool | `false` | Enable the Coraza WAF middleware (inline rules + OWASP Core Rule Set) |
+| `server.waf_paranoia_level` | int | `2` | OWASP CRS paranoia level 1–4; values outside that range fall back to 2 |
+| `server.waf_crs_mode` | string | `"detect"` | CRS layer mode: `off` (inline rules only), `detect` (matches logged, never blocks), `block` (anomaly-scoring blocking). Unknown values fall back to `detect`. |
 
 ### TLS (`tls`)
 
@@ -51,6 +54,7 @@ the server automatically when a startup-only value changed. Note that
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `database.type` | string | `"sqlite"` | Database backend. `sqlite` (or empty) is the only supported value — any other value makes the server refuse to start. |
 | `database.path` | string | `"data/chatserver.db"` | Path to SQLite database file |
 
 ### Uploads (`upload`)
@@ -104,13 +108,14 @@ Controls the tiered event log used for WebSocket reconnection replay. When enabl
 
 ### Telemetry / OpenTelemetry (`telemetry`)
 
-Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contributing](contributing.md)). When disabled, the server uses no-op tracer/meter providers; the legacy JSON `/api/v1/metrics` endpoint is always available regardless of this setting.
+Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contributing](contributing.md)). When disabled, the server uses no-op tracer/meter providers; the legacy JSON `/api/v1/metrics` endpoint exists regardless of this setting (it is admin-IP-restricted, like all metrics surfaces).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `telemetry.enabled` | bool | `false` | Enable the OTel SDK |
 | `telemetry.exporter` | string | `"none"` | Exporter backend: `none`, `prometheus`, `otlp` |
 | `telemetry.otlp_endpoint` | string | `""` | gRPC endpoint for the OTLP exporter (e.g. `localhost:4317`). Only used when `exporter: otlp`. |
+| `telemetry.otlp_insecure` | bool | `false` | Disable TLS for the OTLP gRPC connection. Only set `true` in development / private-network deployments. |
 | `telemetry.service_name` | string | `"owncord-server"` | OTel `service.name` resource attribute |
 
 > **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker.
@@ -118,7 +123,7 @@ Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contri
 
 ### Plugins (`plugins`)
 
-Controls the Wazero WASM plugin runtime. Requires building with `-tags wazero`. When disabled, no plugins are loaded and the plugin admin endpoints return `501 Not Implemented`.
+Controls the Wazero WASM plugin runtime. Requires building with `-tags wazero`. When disabled, no plugins are loaded; plugin admin lifecycle endpoints return `503 Service Unavailable` and the plugin list endpoint returns an empty list.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -145,11 +150,22 @@ never ships in the desktop bundle — the client only ever calls
 > manager) over writing it into `config.yaml`, and rotate it if it has ever
 > been exposed to a client build.
 
+### Logging (`logging`)
+
+Controls server log verbosity. The level gates both stdout and the in-memory
+ring buffer that backs the admin panel's live log view.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
+
 ## Environment Variable Overrides
 
 Every config key can be overridden via environment variables using the prefix `OWNCORD_`.
 
-**Format:** `OWNCORD_<SECTION>_<KEY>`
+**Format:** `OWNCORD_<SECTION>_<KEY>` — the first `_` after the prefix maps to
+the section/key dot; the scheme covers **every** key in the file, including ones
+absent from the table below (it is a representative subset, not the full list).
 
 | Environment Variable | Config Path |
 |---------------------|-------------|
@@ -178,6 +194,10 @@ Every config key can be overridden via environment variables using the prefix `O
 | `OWNCORD_PLUGINS_ENABLED` | `plugins.enabled` |
 | `OWNCORD_PLUGINS_DIRECTORY` | `plugins.directory` |
 | `OWNCORD_GIF_API_KEY` | `gif.api_key` |
+| `OWNCORD_SERVER_WAF_ENABLED` | `server.waf_enabled` |
+| `OWNCORD_DATABASE_TYPE` | `database.type` |
+| `OWNCORD_TELEMETRY_OTLP_INSECURE` | `telemetry.otlp_insecure` |
+| `OWNCORD_LOGGING_LEVEL` | `logging.level` |
 
 ## Example config.yaml
 
@@ -251,6 +271,11 @@ plugins:
 # Prefer OWNCORD_GIF_API_KEY over storing the key in this file.
 gif:
   api_key: ""
+
+# Logging. "level" gates what is logged, to stdout and the admin panel's live
+# log view alike. Override without editing this file via OWNCORD_LOGGING_LEVEL.
+logging:
+  level: "info"                    # debug | info | warn | error
 ```
 
 ## See Also

@@ -175,13 +175,3 @@ export function dmDisplayName(dm: DmChannel): string {
   if (names.length <= 3) return names.join(", ");
   return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
 }
-
-/** Increment a DM's mention count. Callers also call updateDmLastMessage — a
- *  mention is always an unread too. */
-export function incrementDmMention(channelId: number): void {
-  dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) =>
-      c.channelId === channelId ? { ...c, mentionCount: c.mentionCount + 1 } : c,
-    ),
-  }));
-}

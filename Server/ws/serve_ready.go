@@ -137,8 +137,9 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 }
 
 // buildReady constructs the ready server→client message.
-// Per PROTOCOL.md, channels include unread_count and last_message_id per user,
-// and only protocol-specified fields (no slow_mode, archived, voice_* extras).
+// Per docs/protocol.md, channels include unread_count and last_message_id per
+// user, and only protocol-specified fields (no slow_mode, archived, voice_*
+// extras).
 func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {

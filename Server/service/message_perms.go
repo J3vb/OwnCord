@@ -93,7 +93,8 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 // of DM channelID have blocked each other in either direction.
 //
 // It is the single block-check implementation, called from every DM
-// interaction sink — send, edit, react, pin and typing. Enforcing it on the
+// interaction sink — send, edit, react, pin, typing and call rings
+// (DMService.RingTargets). Enforcing it on the
 // send path alone left a blocked user an open channel to the blocker: editing
 // an already-sent message fans MessageEditedDMEvent out to every participant,
 // so arbitrary new text still reached the person who blocked them, and

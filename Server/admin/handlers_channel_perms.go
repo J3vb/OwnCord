@@ -188,6 +188,29 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
 			return
 		}
+		role, err := database.GetRoleByID(r.Context(), roleID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch role")
+			return
+		}
+		if role == nil {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "role not found")
+			return
+		}
+
+		actorRole := actorRoleFromContext(r)
+		if actorRole == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Hierarchy guard: deleting an override is a permission mutation with the
+		// same authority as writing one (removing a deny row restores exactly the
+		// access the PUT path refuses to grant), so gate it identically to
+		// handlePutChannelPermission.
+		if role.Position >= actorRole.Position {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "cannot manage a role at or above your own rank")
+			return
+		}
 
 		if err := database.DeleteChannelOverride(r.Context(), ch.ID, roleID); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel permission")
@@ -197,7 +220,7 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 		actor := actorFromContext(r)
 		slog.Info("channel permissions cleared", "actor_id", actor, "channel_id", ch.ID, "role_id", roleID)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_perms_clear", "channel", ch.ID,
-			fmt.Sprintf("cleared overrides for role %d on #%s", roleID, ch.Name))
+			fmt.Sprintf("cleared overrides for role %s on #%s", role.Name, ch.Name))
 
 		if permInvalidator != nil {
 			permInvalidator.InvalidateAll()

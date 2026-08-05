@@ -1,7 +1,7 @@
 // =============================================================================
 // OwnCord Protocol Types
 // All WebSocket message types, REST response types, and permission definitions.
-// Source of truth: PROTOCOL.md, API.md, SCHEMA.md
+// Source of truth: docs/protocol.md, docs/api.md, docs/schema.md
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -902,16 +902,6 @@ export interface EmojiResponse {
   readonly id: number;
   readonly shortcode: string;
   readonly url: string;
-}
-
-/** Single sound object from GET /api/sounds. */
-export interface SoundResponse {
-  readonly id: number;
-  readonly name: string;
-  readonly filename: string;
-  readonly duration_ms: number;
-  readonly uploaded_by: number;
-  readonly created_at: string;
 }
 
 /** Single invite object from GET/POST /api/invites. */

@@ -1,6 +1,6 @@
 # Voice, Video & E2EE — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md). The signaling/crypto mechanics
 are mapped structurally in [../voice-e2ee.md](../voice-e2ee.md); this document
 specifies the **user-facing** states and reactions.
@@ -154,11 +154,67 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 ---
 
+## 7. E2EE identity verification surface
+
+Peer identity state lives in `voice.store` (per-participant
+`status: verified | unverified | mismatch` + `safetyNumber`), written by
+`lib/livekitE2EE.ts` as announces are verified against the pinned identity
+keys (`lib/identity.ts`).
+
+| State | Roster badge (`ChannelSidebar.ts:45-60`) | Interaction |
+|-------|------------------------------------------|-------------|
+| `verified` | Green shield; title "Identity verified · Safety number: {n}" | none needed |
+| `unverified` | Neutral shield; no pinned key yet | none — pins on first verified announce |
+| `mismatch` | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal |
+
+The mismatch modal (`createIdentityMismatchModal`, `CertMismatchModal.ts:221`;
+opened from `ChannelSidebar.ts:84-135`) shows the **new key's fingerprint** so
+the user can verify it out-of-band before trusting. "Trust New Key" re-pins
+via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
+was displayed, not a fresh store read, so a malicious server cannot swap the
+key during the human verification window (TOCTOU). Reject leaves the peer
+blocked for E2EE media. A stripped or malformed published key disables the
+trust action entirely (a blind accept is refused).
+
+## 8. Media processing & devices
+
+- **Noise suppression:** RNNoise WASM worklet (`lib/noise-suppression.ts`,
+  assets `public/rnnoise.wasm` + `public/rnnoise-worklet.js`), toggled in
+  Settings → Voice & Audio; falls back to a ScriptProcessorNode pipeline when
+  AudioWorklet is unavailable (`noise-suppression.ts:121-205`).
+- **Input volume & VAD:** `lib/audioPipeline.ts` applies input gain and
+  voice-activity gating ahead of publish.
+- **Device hot-swap:** `lib/deviceManager.ts` follows OS device
+  plug/unplug and re-routes the active input/output without rejoining.
+- **Stream preview:** `lib/streamPreview.ts` renders the pre-share preview in
+  the screen-share picker.
+
+## 9. DM calls (ring)
+
+DM voice is the same voice machinery on the DM's voice channel, plus a ring
+layer (no server-side call state — presence in the DM voice channel *is* the
+call):
+
+| Event | Reaction |
+|-------|----------|
+| Outgoing: user clicks Call | `call_ring` sent (rate-limited 1/3 s server-side); caller joins the DM voice channel |
+| Incoming: `call_incoming` | `components/IncomingCallBanner.ts` banner + ring chime (`lib/notifications.ts`), driven by the `lib/call-ring.ts` state machine (30 s auto-timeout) |
+| Accept | Join the DM voice channel; banner clears |
+| Decline | `call_decline` sent → other participants' ringing stops via `call_declined` |
+| Timeout / caller leaves | Banner clears silently |
+
+`call_incoming` / `call_declined` are page-scoped listeners in `MainPage.ts`,
+not dispatcher handlers (see [README §4](README.md)).
+
+---
+
 ## Source of truth
 
-`src/lib/livekitSession.ts`, `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
+`src/lib/livekitSession.ts`, `src/lib/livekitE2EE.ts`,
+`src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
 `src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
-`src/components/ChannelSidebar.ts` (voice-row join freeze on WS reconnect),
-`VoiceChannel.ts`, `VideoGrid.ts`, `src-tauri/src/livekit_proxy.rs`,
-`src-tauri/src/ptt.rs`, `src/lib/e2eeCrypto.ts`; and the structural map in
+`src/components/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
+and the E2EE verification badge), `src/components/VideoGrid.ts`,
+`src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
+`src/lib/e2eeCrypto.ts`, `src/lib/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

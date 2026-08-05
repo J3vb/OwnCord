@@ -34,6 +34,7 @@ const (
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
 	MsgTypeCallRing          = "call_ring"
 	MsgTypeCallDecline       = "call_decline"
+	MsgTypeChatCommand       = "chat_command" // plugin slash-command dispatch (Phase C)
 )
 
 // Server → Client message types (sent in broadcasts/responses).
@@ -75,4 +76,6 @@ const (
 	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
+	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client
+	MsgTypePluginBroadcast     = "plugin_broadcast"    // plugin channel broadcast, gated by the sender's SEND_MESSAGES
 )

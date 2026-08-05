@@ -1,11 +1,11 @@
 # Server Architecture
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
 Single Go binary (`github.com/owncord/server`, Go 1.26). Pure-Go SQLite
-(`modernc.org/sqlite`, no CGO), chi router, `nhooyr.io/websocket`, LiveKit for
-voice, Wazero for plugins (build-tag gated), optional OpenTelemetry
-(`-tags otel`). Roughly 29k LOC of production code and 46k LOC of tests.
+(`modernc.org/sqlite`, no CGO), chi router, `github.com/coder/websocket`,
+LiveKit for voice, Wazero for plugins (build-tag gated), optional OpenTelemetry
+(`-tags otel`). Roughly 42k LOC of production code and 71k LOC of tests.
 
 ## D2 — Package map
 
@@ -33,7 +33,7 @@ flowchart TB
     subgraph data ["Data"]
         DB[("db<br/>query methods (sqlc-backed),<br/>migration runner, models")]
         DBGEN["db/dbgen<br/>sqlc-generated queries"]
-        MIG["migrations<br/>001–016 embedded SQL"]
+        MIG["migrations<br/>001–028 embedded SQL"]
     end
 
     subgraph support ["Support"]
@@ -75,7 +75,8 @@ type-checked query layer rather than dead generated code. Two dashed edges mark
 the residual seam: many REST handlers still receive a raw `*db.DB` alongside
 `svc`, and the `admin` package operates on `*db.DB` almost exclusively —
 consolidating those behind the service layer is the remaining work (audit
-A-2026-07-06). See [data-model.md](data-model.md).
+A-2026-07-06 — resolved for the store seam itself; the residual consolidation
+is its backlog item 12). See [data-model.md](data-model.md).
 
 `api.NewRouter` (`Server/api/router.go`) is the composition root: it constructs
 the rate limiter, TOTP key, storage, `service.New`, the `ws.Hub`, the LiveKit
