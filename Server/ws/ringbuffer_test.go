@@ -179,6 +179,34 @@ func TestEventsSince_AtLatestSeq(t *testing.T) {
 	}
 }
 
+// A client claiming a seq the buffer never held cannot be served a correct
+// replay: nil is the "I can't guarantee coverage" signal that makes the caller
+// fall through to the cold tier and a full ready. Returning an empty slice
+// instead reads as "you are caught up" and silently freezes that client —
+// reachable whenever the server's seq counter restarts below a client's
+// remembered lastSeq (a restart with an empty event table does exactly that).
+func TestEventsSince_AheadOfNewestSeq(t *testing.T) {
+	rb := ws.NewEventRingBuffer(8)
+	for i := uint64(1); i <= 5; i++ {
+		rb.Push(i, 0, []byte("x"))
+	}
+
+	if got := rb.EventsSince(99); got != nil {
+		t.Errorf("EventsSince(99) = %v (len %d), want nil — client is ahead of the buffer", got, len(got))
+	}
+	if got := rb.EventsSinceFiltered(99, map[int64]bool{1: true}); got != nil {
+		t.Errorf("EventsSinceFiltered(99) = %v (len %d), want nil — client is ahead of the buffer", got, len(got))
+	}
+
+	// The legitimate caught-up case must keep returning a non-nil empty replay.
+	if got := rb.EventsSince(5); got == nil {
+		t.Error("EventsSince(5) = nil, want an empty non-nil replay (caught up, not ahead)")
+	}
+	if got := rb.EventsSinceFiltered(5, map[int64]bool{1: true}); got == nil {
+		t.Error("EventsSinceFiltered(5) = nil, want an empty non-nil replay (caught up, not ahead)")
+	}
+}
+
 func TestEventsSince_WraparoundOrder(t *testing.T) {
 	const cap = 4
 	rb := ws.NewEventRingBuffer(cap)
