@@ -162,9 +162,11 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		// winner already handled command binding.
 		r.mu.Unlock()
 		_ = module.Close(ctx)
+		_ = compiled.Close(ctx)
 		return nil
 	}
 	inst.module = module
+	inst.compiled = compiled
 	r.mu.Unlock()
 	if inst.Manifest.HasCapability(CapCommands) {
 		for _, cmd := range listExportedCommands(ctx, module) {
@@ -189,6 +191,10 @@ func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
 		_ = mod.Close(context.WithoutCancel(ctx))
 	}
 	inst.module = nil
+	if compiled, ok := inst.compiled.(wazero.CompiledModule); ok {
+		_ = compiled.Close(context.WithoutCancel(ctx))
+	}
+	inst.compiled = nil
 }
 
 // invokeCommand calls the plugin's exported `command_dispatch` function
@@ -370,10 +376,18 @@ func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
 		return
 	}
 	r.mu.Lock()
+	var staleCompiled any
 	if inst.module == mod {
 		inst.module = nil
+		// The next dispatch re-activates with a fresh compile; close the
+		// stale CompiledModule or the runtime retains every one until exit.
+		staleCompiled = inst.compiled
+		inst.compiled = nil
 	}
 	r.mu.Unlock()
+	if compiled, ok := staleCompiled.(wazero.CompiledModule); ok {
+		_ = compiled.Close(context.Background())
+	}
 }
 
 // listExportedCommands calls the plugin's optional `list_commands` export

@@ -480,3 +480,28 @@ func TestLoadUploadBoundaryValues(t *testing.T) {
 		t.Errorf("Upload.MaxSizeMB = %d, want 0", cfg.Upload.MaxSizeMB)
 	}
 }
+
+func TestLoadEnvOverride_EventPersistence(t *testing.T) {
+	// event_persistence is the only multi-word config section; cutting the
+	// env key at the first underscore produces the dead path
+	// event.persistence_enabled and the documented override is silently
+	// dropped (docs/server-configuration.md).
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Enabled defaults to true, so override it to false — the meaningful
+	// direction for proving the env path is alive.
+	t.Setenv("OWNCORD_EVENT_PERSISTENCE_ENABLED", "false")
+	t.Setenv("OWNCORD_EVENT_PERSISTENCE_RETENTION_HOURS", "48")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.EventPersistence.Enabled {
+		t.Error("EventPersistence.Enabled = true, want env override false")
+	}
+	if cfg.EventPersistence.RetentionHours != 48 {
+		t.Errorf("EventPersistence.RetentionHours = %d, want 48", cfg.EventPersistence.RetentionHours)
+	}
+}

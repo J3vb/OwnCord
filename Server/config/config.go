@@ -536,6 +536,12 @@ func validateYAML(raw []byte) error {
 //	tls_cert_file      -> tls.cert_file
 //	upload_max_size_mb -> upload.max_size_mb
 func envKeyToKoanf(s string) string {
+	// event_persistence is the only multi-word section; cutting at the first
+	// underscore would produce the dead path event.persistence_* and koanf
+	// would drop the documented override silently.
+	if rest, ok := strings.CutPrefix(s, "event_persistence_"); ok {
+		return "event_persistence." + rest
+	}
 	before, after, ok := strings.Cut(s, "_")
 	if !ok {
 		return s

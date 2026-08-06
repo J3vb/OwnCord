@@ -244,7 +244,7 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 			manifestSignatureURL = asset.BrowserDownloadURL
 		}
 	}
-	requiredAssetsPresent := hasRequiredServerAssets(downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL)
+	requiredAssetsPresent := hasRequiredServerAssetsFor(runtime.GOOS, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL)
 	updateAvailable = updateAvailable && requiredAssetsPresent
 
 	return UpdateInfo{
@@ -263,6 +263,14 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	}, nil
 }
 
-func hasRequiredServerAssets(downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string) bool {
-	return downloadURL != "" && checksumURL != "" && signatureURL != "" && manifestURL != "" && manifestSignatureURL != ""
+// hasRequiredServerAssetsFor reports whether every asset the goos-specific
+// verify path consumes is present. The detached binary signature
+// (chatserver.exe.sig) is Windows-only: the Linux tarball path verifies via
+// the signed manifest + checksum and never receives it, so requiring it there
+// would block Linux updates on any release missing a Windows-only asset.
+func hasRequiredServerAssetsFor(goos, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string) bool {
+	if goos == "windows" && signatureURL == "" {
+		return false
+	}
+	return downloadURL != "" && checksumURL != "" && manifestURL != "" && manifestSignatureURL != ""
 }

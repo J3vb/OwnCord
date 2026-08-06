@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"time"
 
@@ -29,8 +30,8 @@ func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 func handleListUsers(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := queryInt(r, "limit", 50, 1)
-		offset := queryInt(r, "offset", 0, 0)
+		limit := queryInt(r, "limit", 50, 1, 500)
+		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 
 		users, err := database.ListAllUsers(r.Context(), limit, offset)
 		if err != nil {

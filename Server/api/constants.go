@@ -136,6 +136,20 @@ const (
 	hstsMaxAgeSeconds = 31536000
 )
 
+// bodyCapExemptPrefixes are the route prefixes excluded from the global 1 MiB
+// body cap because they enforce their own, larger envelope at the route or
+// handler level. A route with a documented cap above 1 MiB that is missing
+// here is unreachable at its own limit: MaxBytesReader wrappers merely
+// delegate reads, so the innermost (global) limit errors first.
+var bodyCapExemptPrefixes = []string{
+	"/api/v1/uploads",
+	// 16 MiB plugin envelope enforced by the handler's own MaxBytesReader.
+	"/api/v1/admin/plugins/install",
+	// 2 MiB avatar envelope: route-scoped MaxBodySize(avatarMaxBodySize)
+	// plus the handler's re-wrap enforce it.
+	"/api/v1/users/me/avatar",
+}
+
 // ─── Size limits ────────────────────────────────────────────────────────────
 
 const (

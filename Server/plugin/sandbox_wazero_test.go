@@ -460,3 +460,42 @@ func TestWazeroInvalidWASMFailsActivation(t *testing.T) {
 		t.Fatal("expected EnablePlugin to fail on invalid WASM")
 	}
 }
+
+// Every re-activation compiles the module again; without closing the previous
+// CompiledModule the shared runtime retains each copy until process exit.
+func TestWazeroDeactivateClosesCompiledModule(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
+	writeTestPlugin(t, dir, "hello", manifest, addWASM)
+
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	rows, err := mem.ListPlugins(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListPlugins: rows=%+v err=%v", rows, err)
+	}
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
+		t.Fatalf("EnablePlugin: %v", err)
+	}
+
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	reg.mu.RUnlock()
+	if inst == nil || inst.module == nil {
+		t.Fatal("instance not activated")
+	}
+	if inst.compiled == nil {
+		t.Fatal("activation must retain the CompiledModule handle for teardown")
+	}
+
+	reg.platformDeactivate(ctx, inst)
+	if inst.module != nil {
+		t.Error("deactivate left inst.module set")
+	}
+	if inst.compiled != nil {
+		t.Error("deactivate leaked the CompiledModule — re-activation cycles retain every compile")
+	}
+}
