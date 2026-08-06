@@ -359,7 +359,9 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/password");
       expect(fetchCallOpts().method).toBe("PUT");
       const body = JSON.parse(fetchCallOpts().body as string);
-      expect(body).toEqual({ current_password: "oldpw", new_password: "newpw" });
+      // The server decodes json:"old_password" (Server/api/profile_handler.go),
+      // and Go's encoding/json has no alias matching: any other key is a 400.
+      expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
     });
 
     it("getSessions calls correct endpoint", async () => {

@@ -333,7 +333,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>(
         "PUT",
         "/users/me/password",
-        { current_password: currentPassword, new_password: newPassword },
+        { old_password: currentPassword, new_password: newPassword },
         signal,
       );
     },
