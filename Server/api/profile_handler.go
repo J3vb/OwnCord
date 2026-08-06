@@ -77,10 +77,10 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
-		r.With(RateLimitMiddleware(limiter, profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster))
 
-		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter))
 
 		if store != nil {
@@ -383,13 +383,9 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		sess, ok := r.Context().Value(SessionKey).(*db.Session)
-		if !ok || sess == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
-			return
-		}
+		// An API-token principal has a nil session (middleware.go); the list
+		// still works — no row is marked current. Only IsCurrent needs it.
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
 		if err != nil {
@@ -407,7 +403,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 				IP:        s.IP,
 				CreatedAt: s.CreatedAt,
 				LastUsed:  s.LastUsed,
-				IsCurrent: s.ID == sess.ID,
+				IsCurrent: sess != nil && s.ID == sess.ID,
 			})
 		}
 

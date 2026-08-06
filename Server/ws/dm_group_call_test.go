@@ -317,6 +317,28 @@ func TestCallRing_RateLimited(t *testing.T) {
 	}
 }
 
+func TestCallDecline_RateLimited(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "declinelimit-alice")
+	bob := seedMemberUser(t, database, "declinelimit-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	sendAlice := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+	hub.Register(cAlice)
+	waitRegistered(t, hub, cAlice)
+
+	// Same shape as call_ring: each frame costs participant + block lookups
+	// and a fan-out to every other participant, so it needs the same limit.
+	hub.HandleMessageForTest(cAlice, callMsg("call_decline", chID))
+	hub.HandleMessageForTest(cAlice, callMsg("call_decline", chID))
+
+	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "RATE_LIMITED" {
+		t.Errorf("expected RATE_LIMITED on a second immediate decline, got %q", code)
+	}
+	_ = bob
+}
+
 // A block must silence the 1:1 ring like every other DM sink: without it a
 // blocked user could still make the blocker's client ring (A-2026-08-03).
 func TestCallRing_BlockedOneToOneForbidden(t *testing.T) {

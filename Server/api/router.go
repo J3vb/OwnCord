@@ -236,7 +236,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
 	r.With(AuthMiddleware(database),
 		RequirePermission(permissions.Administrator),
-		RateLimitMiddleware(limiter, 5, time.Minute, cfg.Server.TrustedProxies)).
+		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 

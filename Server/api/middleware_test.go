@@ -396,7 +396,7 @@ func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 
-	h := api.RateLimitMiddleware(limiter, 5, time.Minute)(http.HandlerFunc(ok))
+	h := api.RateLimitMiddleware(limiter, "test:", 5, time.Minute)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
 	rr := httptest.NewRecorder()
@@ -412,7 +412,7 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	limit := 3
 
-	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
+	h := api.RateLimitMiddleware(limiter, "test:", limit, time.Minute)(http.HandlerFunc(ok))
 
 	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -435,7 +435,7 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 
-	h := api.RateLimitMiddleware(limiter, 1, time.Minute)(http.HandlerFunc(ok))
+	h := api.RateLimitMiddleware(limiter, "test:", 1, time.Minute)(http.HandlerFunc(ok))
 
 	// Exhaust limit.
 	for range 2 {
@@ -462,7 +462,7 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	limit := 2
 
-	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
+	h := api.RateLimitMiddleware(limiter, "test:", limit, time.Minute)(http.HandlerFunc(ok))
 
 	// Two requests from RemoteAddr 10.0.0.99 with an attacker-supplied X-Real-IP.
 	for range limit {
@@ -515,7 +515,7 @@ func TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest(t *test
 	defer slog.SetDefault(prev)
 
 	limiter := auth.NewRateLimiter()
-	h := api.RateLimitMiddleware(limiter, 100, time.Minute,
+	h := api.RateLimitMiddleware(limiter, "test:", 100, time.Minute,
 		[]string{"not-a-cidr", "10.0.0.0/8"})(http.HandlerFunc(ok))
 
 	const warnMsg = "ignoring invalid CIDR entry"
@@ -548,7 +548,7 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 	limit := 2
 	trustedCIDRs := []string{"10.0.0.0/8"}
 
-	h := api.RateLimitMiddleware(limiter, limit, time.Minute, trustedCIDRs)(http.HandlerFunc(ok))
+	h := api.RateLimitMiddleware(limiter, "test:", limit, time.Minute, trustedCIDRs)(http.HandlerFunc(ok))
 
 	// Two requests coming through trusted proxy 10.0.0.1, client IP 203.0.113.5.
 	for range limit {

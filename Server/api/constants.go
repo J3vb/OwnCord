@@ -126,8 +126,11 @@ const (
 	rateLimiterCleanupInterval = 5 * time.Minute
 
 	// rateLimiterCleanupMaxWindow is the maximum window considered when pruning
-	// stale rate-limiter entries.
-	rateLimiterCleanupMaxWindow = 15 * time.Minute
+	// stale rate-limiter entries. It must cover the LARGEST window any caller
+	// passes to Allow: slow mode (service/message_crud.go) uses windows up to
+	// admin's maxSlowModeSeconds (21600 s = 6 h), and a shorter horizon makes
+	// the reaper silently reset long slow modes after ~15 minutes.
+	rateLimiterCleanupMaxWindow = 6 * time.Hour
 
 	// hstsMaxAgeSeconds is the max-age value for the Strict-Transport-Security header.
 	hstsMaxAgeSeconds = 31536000

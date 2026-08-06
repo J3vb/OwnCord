@@ -207,8 +207,14 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 // provided RateLimiter. The client IP is resolved via clientIPWithProxies using
 // the supplied trustedProxies CIDRs — pass nil to always use RemoteAddr.
 // Returns 429 with Retry-After when the limit is exceeded.
-func RateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
-	return rateLimitMiddlewareWithPrefix(limiter, "", limit, window, trustedProxies...)
+//
+// prefix names the endpoint's bucket and must be non-empty in production
+// mounts: the limiter records one timestamp per call regardless of the limit
+// passed, so endpoints sharing a bare-IP key would cap each other at the
+// MINIMUM limit of any of them (ordinary profile edits 429ing the password
+// endpoint, NAT'd logins blocking register).
+func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
+	return rateLimitMiddlewareWithPrefix(limiter, prefix, limit, window, trustedProxies...)
 }
 
 func rateLimitMiddlewareWithPrefix(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
