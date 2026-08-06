@@ -1782,6 +1782,40 @@ describe("LiveKitSession", () => {
       expect(errorCb).toHaveBeenCalledWith("Failed to join voice — connection error");
     });
 
+    it("sends voice_leave and leaves the voice channel when the E2EE key exchange fails", async () => {
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      const keyExchangeSpy = vi
+        .spyOn((session as any)._e2ee, "setupKeyExchange")
+        .mockResolvedValue(false);
+      const leaveSpy = vi.spyOn(session, "leaveVoice");
+
+      const result = await (session as any).connectAndSetup(
+        "token",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        false,
+      );
+
+      expect(result).toBe(false);
+      expect(errorCb).toHaveBeenCalledWith("e2ee_timeout");
+      // The exchange times out BEFORE room.connect(), so no SFU participant
+      // exists and no LiveKit webhook can clean up. Without voice_leave the
+      // server keeps the voice_states row forever; the ghost survives every
+      // sweep and, once elected key holder, wedges the channel's E2EE for all
+      // subsequent joiners. Mirror the reconnect-exhausted give-up path.
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(leaveSpy).toHaveBeenCalledWith(true);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+
+      keyExchangeSpy.mockRestore();
+      leaveSpy.mockRestore();
+    });
+
     it("discards stale join when pendingJoin arrives during connect", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);

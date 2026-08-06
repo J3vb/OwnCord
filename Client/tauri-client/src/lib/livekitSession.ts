@@ -865,7 +865,14 @@ export class LiveKitSession {
       const keyExchangeOk = await this._e2ee.setupKeyExchange(isKeyHolder ?? false, channelId);
       if (!keyExchangeOk) {
         this.onErrorCallback?.("e2ee_timeout");
-        this.leaveVoice(false);
+        // The exchange timed out BEFORE room.connect(): no SFU participant
+        // exists, so no LiveKit webhook will ever clean up, and the server
+        // registered the join when it sent voice_token. Send voice_leave and
+        // leave the store's voice channel (like the reconnect-exhausted give-up
+        // path) or the stale row ghosts forever and can wedge the channel's
+        // key-holder election.
+        this.leaveVoice(true);
+        leaveVoiceChannel();
         return false;
       }
 
