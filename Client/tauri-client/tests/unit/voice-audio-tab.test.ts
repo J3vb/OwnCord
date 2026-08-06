@@ -130,6 +130,84 @@ describe("VoiceAudioTab camera preview", () => {
   });
 });
 
+describe("VoiceAudioTab mic meter", () => {
+  let resolveAudio: ((stream: MediaStream) => void) | null = null;
+  const stopAudioTrack = vi.fn();
+  const audioStream = {
+    getTracks: () => [{ stop: stopAudioTrack }],
+  } as unknown as MediaStream;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    resolveAudio = null;
+    stopAudioTrack.mockClear();
+
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        createAnalyser() {
+          return {
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            frequencyBinCount: 32,
+            getByteFrequencyData: vi.fn(),
+          };
+        }
+
+        createMediaStreamSource() {
+          return { connect: vi.fn() };
+        }
+
+        close() {
+          return Promise.resolve();
+        }
+      },
+    );
+
+    // No videoInputDevice pref, so only the mic meter requests media.
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockImplementation(
+          () =>
+            new Promise<MediaStream>((resolve) => {
+              resolveAudio = resolve;
+            }),
+        ),
+      },
+    });
+  });
+
+  it("stops the mic stream when cleanup ran while getUserMedia was pending", async () => {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    document.body.appendChild(tab.build());
+
+    // SettingsOverlay.hide() calls cleanup() without aborting; a getUserMedia
+    // resolving afterwards must not open the mic — nobody is left to stop it.
+    tab.cleanup();
+    (resolveAudio as ((stream: MediaStream) => void) | null)?.(audioStream);
+
+    await vi.waitFor(() => {
+      expect(stopAudioTrack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("stops the mic stream when the tab was aborted while getUserMedia was pending", async () => {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    document.body.appendChild(tab.build());
+
+    ac.abort();
+    (resolveAudio as ((stream: MediaStream) => void) | null)?.(audioStream);
+
+    await vi.waitFor(() => {
+      expect(stopAudioTrack).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // UI structure and interaction tests
 // ---------------------------------------------------------------------------
