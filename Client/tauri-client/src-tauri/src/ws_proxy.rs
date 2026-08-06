@@ -74,15 +74,23 @@ impl WsState {
     }
 }
 
-/// Clear the live sender slot, but only if `tx` still owns it. Returns false
-/// when a newer connection has taken the slot — that teardown belongs to a
-/// superseded connection and must not clear the slot or announce a close.
-async fn clear_sender_if_owner(
+/// Clear the live sender slot, but only if `my_generation` is still the
+/// current connection generation. Returns false when a newer `ws_connect`
+/// superseded this connection — that teardown must not clear the slot or
+/// announce a close. Ownership is proven by generation, NOT by holding a
+/// Sender clone: a clone kept alive in the monitor task would keep the
+/// outbound channel open, so the write task could never observe closure
+/// after `ws_disconnect` (circular wait — task, socket, and TLS session
+/// would all leak). `generation` only advances inside `begin_connection`
+/// while the slot lock is held, so checking it under the same lock makes
+/// the check-and-clear atomic with respect to new attempts.
+async fn clear_sender_if_current(
     slot: &Mutex<Option<mpsc::Sender<String>>>,
-    tx: &mpsc::Sender<String>,
+    generation: &AtomicU64,
+    my_generation: u64,
 ) -> bool {
     let mut tx_lock = slot.lock().await;
-    if !tx_lock.as_ref().is_some_and(|live| live.same_channel(tx)) {
+    if generation.load(Ordering::SeqCst) != my_generation {
         return false;
     }
     *tx_lock = None;
@@ -212,10 +220,10 @@ pub async fn ws_connect<R: Runtime>(
 
     let (mut sink, mut stream) = ws_stream.split();
 
-    // Channel for JS → server messages (bounded for backpressure)
+    // Channel for JS → server messages (bounded for backpressure). The slot
+    // gets the ONLY Sender: teardown ownership is proven by generation, so no
+    // clone may outlive the slot — one would keep rx.recv() pending forever.
     let (tx, mut rx) = mpsc::channel::<String>(256);
-    // Kept so this connection's teardown can prove it still owns the slot.
-    let my_tx = tx.clone();
     if !state.install_sender(my_generation, tx).await {
         info!("[ws_proxy] handshake superseded by a newer connect; dropping stale socket");
         return Err("superseded by a newer connection".into());
@@ -226,9 +234,10 @@ pub async fn ws_connect<R: Runtime>(
 
     let app_read = app.clone();
     let app_state = app.clone();
-    // Clone the Arc so the monitoring closure can clear tx on any exit path,
+    // Clone the Arcs so the monitoring closure can clear tx on any exit path,
     // including worker task panics, without needing tauri::State.
     let tx_arc = Arc::clone(&state.tx);
+    let generation_arc = Arc::clone(&state.generation);
 
     // Single outer task owns a JoinSet containing read and write workers.
     // join_next() blocks until the first worker finishes (normally or via panic),
@@ -289,7 +298,7 @@ pub async fn ws_connect<R: Runtime>(
         // only when this connection still owns the slot. Clearing
         // unconditionally would kill a newer connection's sender and tell JS
         // that the live connection had closed.
-        if clear_sender_if_owner(&tx_arc, &my_tx).await {
+        if clear_sender_if_current(&tx_arc, &generation_arc, my_generation).await {
             // Always emit closed, even after a panic.
             emit_ws_state(&app_state, "closed");
         } else {
@@ -511,25 +520,49 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn superseded_teardown_leaves_the_live_sender_installed() {
-        let state = WsState::new();
+    // ── Generation-owned teardown ───────────────────────────────────────────
+    //
+    // Teardown ownership must be provable WITHOUT holding a Sender clone: any
+    // clone kept alive by the monitor task keeps the outbound channel open, so
+    // after ws_disconnect drops the slot's sender the write task never sees
+    // rx.recv() == None — writer, reader, and TLS socket all leak in a
+    // circular wait (monitor waits on writer, writer waits on the monitor's
+    // clone dropping).
 
+    #[tokio::test]
+    async fn owning_teardown_clears_the_slot_by_generation() {
+        let state = WsState::new();
+        let my_generation = state.begin_connection().await;
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        state.install_sender(my_generation, tx).await;
+
+        assert!(
+            clear_sender_if_current(&state.tx, &state.generation, my_generation).await,
+            "the owning connection must clear its slot without a Sender clone"
+        );
+        assert!(
+            state.tx.lock().await.is_none(),
+            "ws_send must report not-connected after a real close"
+        );
+    }
+
+    #[tokio::test]
+    async fn superseded_teardown_by_generation_leaves_the_live_sender() {
+        let state = WsState::new();
         let gen_a = state.begin_connection().await;
         let (tx_a, _rx_a) = mpsc::channel::<String>(4);
-        state.install_sender(gen_a, tx_a.clone()).await;
+        state.install_sender(gen_a, tx_a).await;
 
         let gen_b = state.begin_connection().await;
         let (tx_b, _rx_b) = mpsc::channel::<String>(4);
         assert!(state.install_sender(gen_b, tx_b.clone()).await);
 
-        // A's monitor task tears down after B is live. Clearing here would kill
-        // B's sender and emit "closed" while JS believes B is connected.
+        // A's monitor task tears down after B is live. Clearing here would
+        // kill B's sender and emit "closed" while JS believes B is connected.
         assert!(
-            !clear_sender_if_owner(&state.tx, &tx_a).await,
-            "a superseded teardown must not clear the slot"
+            !clear_sender_if_current(&state.tx, &state.generation, gen_a).await,
+            "a superseded teardown must not clear the slot or announce a close"
         );
-
         let slot = state.tx.lock().await;
         assert!(
             slot.as_ref().is_some_and(|t| t.same_channel(&tx_b)),
@@ -538,19 +571,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn owning_teardown_clears_the_sender_slot() {
+    async fn disconnect_closes_the_outbound_channel() {
+        // ws_disconnect's contract (the comment at its *tx_lock = None):
+        // dropping the slot's sender closes the channel so the write task
+        // ends. That holds only while install_sender receives the ONLY
+        // Sender — no teardown-ownership clone may exist.
         let state = WsState::new();
         let generation = state.begin_connection().await;
-        let (tx, _rx) = mpsc::channel::<String>(4);
-        state.install_sender(generation, tx.clone()).await;
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        state.install_sender(generation, tx).await;
 
-        assert!(
-            clear_sender_if_owner(&state.tx, &tx).await,
-            "the owning connection must still clear its own slot"
-        );
-        assert!(
-            state.tx.lock().await.is_none(),
-            "ws_send must report not-connected after a real close"
-        );
+        *state.tx.lock().await = None; // ws_disconnect
+
+        let got = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("write task would hang forever: channel still open after disconnect");
+        assert_eq!(got, None, "rx.recv() must yield None so the write task exits");
     }
+
 }
