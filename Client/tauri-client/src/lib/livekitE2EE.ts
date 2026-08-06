@@ -129,11 +129,18 @@ export class E2EEManager {
    */
   async setupKeyExchange(isKeyHolder: boolean, channelId: number): Promise<boolean> {
     this._channelId = channelId;
-    // Generate a fresh ECDH keypair for this session.
-    this._ecdhKeyPair = await generateECDHKeyPair();
+    // Generate a fresh ECDH keypair for this session, but keep it local and
+    // do NOT publish it to this._ecdhKeyPair until right before the drain
+    // below (after _isKeyHolder/_roomKey are ready). Until then,
+    // handleAnnounce's `!this._ecdhKeyPair` guard queues any announce that
+    // arrives concurrently instead of running it through the live path —
+    // where it would be stored in _peerPublicKeys but sent no offer (isKeyHolder
+    // /roomKey not set up yet) and then never seen by the drain either (it was
+    // never queued), stranding that peer until the next 5-minute rotation.
+    const ecdhKeyPair = await generateECDHKeyPair();
     this._peerPublicKeys.clear();
     clearPeerVerifications();
-    const myPubKeyBase64 = await exportPublicKey(this._ecdhKeyPair.publicKey);
+    const myPubKeyBase64 = await exportPublicKey(ecdhKeyPair.publicKey);
     // Build the signed announce up front — this loads the identity key from
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
@@ -156,6 +163,11 @@ export class E2EEManager {
       log.info("E2EE: key holder — generated room key", { channelId });
       this.startKeyRotationTimer();
     }
+
+    // Publish the keypair now — right before the drain, so every announce
+    // that arrived during the awaits above was queued (not silently
+    // processed with no offer sent) and gets its offer sent below.
+    this._ecdhKeyPair = ecdhKeyPair;
 
     // Drain any announces that arrived before our keypair was ready. These
     // are existing participants whose keys the server relayed during
@@ -194,12 +206,31 @@ export class E2EEManager {
       try {
         await Promise.race([roomKeyPromise, makeTimeout(10_000)]);
       } catch {
-        // First attempt timed out — re-announce and retry once.
+        // First attempt failed — re-announce and retry once. This also
+        // catches a decrypt failure in handleOfferInner (which rejects
+        // roomKeyPromise directly), not just a genuine timeout.
         if (timeoutId !== null) clearTimeout(timeoutId);
+        // clearState() (e.g. the user left voice) also rejects roomKeyPromise
+        // and, unlike a decrypt failure, nulls _ecdhKeyPair — there is nobody
+        // left to retry with. Stop here instead of re-announcing into a torn-
+        // down session and reinstalling a resolver nothing will ever call.
+        if (this._ecdhKeyPair === null) {
+          log.warn("E2EE: key exchange aborted (session cleared)", { channelId });
+          return false;
+        }
         log.warn("E2EE: first key exchange attempt timed out, re-announcing", { channelId });
         this.deps.getWs()?.send({ type: "voice_e2ee_announce", payload: announcePayload });
+        // roomKeyPromise may already be SETTLED (rejected) at this point — a
+        // decrypt failure rejects it permanently, so racing the SAME promise
+        // again would resolve rejected on the very next microtask instead of
+        // giving the retry its intended 5s window. Create a fresh promise and
+        // reinstall the resolver/rejector before racing again.
+        const retryPromise = new Promise<void>((resolve, reject) => {
+          this._roomKeyResolver = resolve;
+          this._roomKeyRejector = reject;
+        });
         try {
-          await Promise.race([roomKeyPromise, makeTimeout(5_000)]);
+          await Promise.race([retryPromise, makeTimeout(5_000)]);
         } catch {
           log.error("E2EE: key exchange timed out after retry — disconnecting", { channelId });
           this._roomKeyResolver = null;
@@ -366,10 +397,28 @@ export class E2EEManager {
       return false;
     }
 
-    // First sight with a valid signature — pin the identity key now.
+    // First sight with a valid signature — pin the identity key now. A
+    // failed write (disk full, unwritable pins file) must not display
+    // "verified" with no pin ever persisted: the pin is what arms mismatch
+    // detection on a LATER announce, so a peer we call verified but never
+    // pinned can never have that check fire — the exact MITM window the pin
+    // exists to close. "no-store" (non-Tauri: no pin store by design) is not
+    // a failure and keeps the normal verified outcome below.
+    let pinWriteFailed = false;
     if (pin === null && host) {
-      await storeIdentityPin(host, String(userId), publishedIdentity);
-      log.info("E2EE: pinned peer identity key on first sight", { userId });
+      const pinResult = await storeIdentityPin(host, String(userId), publishedIdentity);
+      if (pinResult === "failed") {
+        pinWriteFailed = true;
+        log.error("E2EE: failed to persist identity pin — marking unverified, not verified", {
+          userId,
+        });
+      } else {
+        log.info("E2EE: pinned peer identity key on first sight", { userId });
+      }
+    }
+    if (pinWriteFailed) {
+      setPeerVerification({ userId, status: "unverified", safetyNumber: null });
+      return true; // still accept the announce — the write failure alone shouldn't block the call
     }
     const safetyNumber = await computeKeyFingerprint(identityKey);
     setPeerVerification({ userId, status: "verified", safetyNumber });
@@ -464,7 +513,21 @@ export class E2EEManager {
       const keypair = this._ecdhKeyPair;
       const currentRoomKey = this._roomKey;
       if (this._isKeyHolder && currentRoomKey && keypair) {
+        // Capture epoch before the wrap await — a rotation racing this
+        // announce already added the peer to _peerPublicKeys before we got
+        // here, so it offers them the fresh key on its own; if that
+        // happened, ship this pre-rotation wrap and the receiver's
+        // strictly-ordered _offerChain ends up on the dead key.
+        const epochBefore = this._e2eeEpoch;
         const { encryptedKey, iv } = await wrapRoomKey(keypair.privateKey, peerKey, currentRoomKey);
+        if (this._e2eeEpoch !== epochBefore) {
+          log.info("E2EE: discarding stale announce-offer (epoch changed during wrap)", {
+            userId,
+            epochBefore,
+            epochNow: this._e2eeEpoch,
+          });
+          return;
+        }
         this.deps.getWs()?.send({
           type: "voice_e2ee_offer",
           payload: { target_user_id: userId, encrypted_key: encryptedKey, iv },
@@ -526,8 +589,12 @@ export class E2EEManager {
         ivBase64,
       );
 
-      if (this._e2eeEpoch !== epochBefore) {
-        log.info("E2EE: discarding stale offer (epoch changed during unwrap)", {
+      // Discard if either the epoch advanced (a rotation landed during
+      // unwrap) OR the keypair no longer matches (clearState() ran and a new
+      // session generated a fresh one — possible when the epoch is 0 in both
+      // the old and new session, since a non-key-holder never bumps it).
+      if (this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
+        log.info("E2EE: discarding stale offer (epoch or session keypair changed during unwrap)", {
           fromUserId,
           epochBefore,
           epochNow: this._e2eeEpoch,
@@ -604,9 +671,20 @@ export class E2EEManager {
     const myUserId = authStore.getState().user?.id ?? 0;
 
     if (myUserId !== 0 && lowestUserId === myUserId && !wasKeyHolder) {
-      // Prevent concurrent rotations (e.g. two participants leave in rapid succession).
+      // A rotation is already in flight (e.g. we stood down mid-rotation
+      // after accepting another holder's offer, and are now re-elected
+      // because THEY left). Don't drop the re-election — that would strand
+      // the room with no key holder until the next voice_leave self-heals
+      // it. Mirror the sibling branch below: defer, don't drop. The
+      // in-flight rotation's finally -> drainPendingRotationOrArmTimer will
+      // run rotateKeyPeriodically as holder once it completes.
       if (this._rotatingKey) {
-        log.warn("E2EE: key rotation already in progress, skipping", { userId, channelId });
+        this._isKeyHolder = true;
+        this._rotationPending = true;
+        log.warn("E2EE: key rotation already in progress — deferring re-election as holder", {
+          userId,
+          channelId,
+        });
         return;
       }
       this._rotatingKey = true;

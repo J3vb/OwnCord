@@ -65,13 +65,28 @@ describe("identity keyring wrappers", () => {
 describe("identity pin wrappers", () => {
   it("storeIdentityPin invokes store_identity_pin with { host, userId, pin }", async () => {
     invokeMock.mockResolvedValue(undefined);
-    const ok = await storeIdentityPin("chat.example", "42", "pubkey");
-    expect(ok).toBe(true);
+    const result = await storeIdentityPin("chat.example", "42", "pubkey");
+    expect(result).toBe("stored");
     expect(invokeMock).toHaveBeenCalledWith("store_identity_pin", {
       host: "chat.example",
       userId: "42",
       pin: "pubkey",
     });
+  });
+
+  it("storeIdentityPin reports 'failed' (not silently truthy/falsy) when the write rejects", async () => {
+    // The whole point of the tri-state result: a real write error (disk
+    // full, unwritable pins file) must be distinguishable from "no-store"
+    // (non-Tauri, by design) — collapsing both to `false` let a caller
+    // treat a failed write the same as "nothing to persist" and still show
+    // "verified" with no pin ever saved.
+    invokeMock.mockRejectedValueOnce(new Error("disk full"));
+    const result = await storeIdentityPin("chat.example", "42", "pubkey");
+    expect(result).toBe("failed");
+    expect(logMock.error).toHaveBeenCalledWith(
+      "Failed to store identity pin",
+      expect.objectContaining({ host: "chat.example", userId: "42" }),
+    );
   });
 
   it("getIdentityPin returns the pinned key when one is stored", async () => {

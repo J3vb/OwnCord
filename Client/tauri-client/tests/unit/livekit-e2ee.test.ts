@@ -44,7 +44,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 vi.mock("@lib/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
-  storeIdentityPin: vi.fn(async () => true),
+  storeIdentityPin: vi.fn(async () => "stored"),
 }));
 
 vi.mock("@stores/auth.store", () => ({
@@ -80,7 +80,8 @@ vi.mock("@lib/logger", () => ({
 // Now import
 import { E2EEManager } from "../../src/lib/livekitE2EE";
 import { setPeerVerification } from "@stores/voice.store";
-import { unwrapRoomKey, roomKeyToBase64 } from "@lib/e2eeCrypto";
+import { unwrapRoomKey, roomKeyToBase64, wrapRoomKey, generateECDHKeyPair } from "@lib/e2eeCrypto";
+import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/identity";
 
 const PEER_ID = 42;
 
@@ -296,5 +297,196 @@ describe("E2EEManager", () => {
     const offers = sendsOfType(ws, "voice_e2ee_offer");
     expect(offers).toHaveLength(1);
     expect((offers[0] as any).payload.target_user_id).toBe(PEER_ID);
+  });
+
+  // ── Batch C3 findings ───────────────────────────────────────────────────
+
+  it("[finding 1] resumes as key holder when re-elected while a prior rotation is still in flight", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]])); // we (uid 1) are always lowest
+
+    await mgr.setupKeyExchange(true, 1); // epoch 1, holder
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer key known
+
+    // Start a periodic rotation and stall it right after the epoch bump, at
+    // the keyProvider.setKey await — mirrors an in-flight become-holder
+    // rotation (same _rotatingKey guard).
+    let releaseRotationSetKey!: () => void;
+    const stall = new Promise<void>((resolve) => {
+      releaseRotationSetKey = resolve;
+    });
+    mockSetKey.mockImplementationOnce(() => stall);
+    const rotationPromise = mgr.rotateKeyPeriodically();
+    expect(mgr.rotatingKey).toBe(true);
+    expect(mgr.epoch).toBe(2);
+
+    // While that rotation is in flight, an offer from the "real" elected
+    // holder arrives and stands us down (handleOfferInner clears
+    // _isKeyHolder but not _rotatingKey).
+    await mgr.handleOffer(PEER_ID, "enc", "iv");
+
+    // The new holder immediately leaves — we are re-elected. This must not
+    // be a silent no-op just because a rotation is still in flight.
+    await mgr.handleParticipantLeft(99);
+
+    // Let the original (stalled) rotation finish.
+    releaseRotationSetKey();
+    await rotationPromise;
+
+    // The re-election's finally -> drainPendingRotationOrArmTimer must have
+    // run a fresh rotation as holder: one more epoch bump and key-provider
+    // update beyond the two already accounted for (initial holder setup +
+    // the stalled rotation).
+    expect(mgr.epoch).toBe(3);
+    expect(mgr.rotatingKey).toBe(false);
+  });
+
+  it("[finding 2] marks a first-sight peer 'unverified' (not 'verified') when the identity-pin write fails", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair
+    vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
+
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    expect(storeIdentityPin).toHaveBeenCalledWith(
+      "localhost:7880",
+      String(PEER_ID),
+      "peer-identity-b64",
+    );
+    expect(setPeerVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "unverified", safetyNumber: null }),
+    );
+    expect(setPeerVerification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "verified" }),
+    );
+  });
+
+  it("[finding 3] discards a stale offer even when epoch is unchanged, because the keypair belongs to a cleared session", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // Session 1 (non-key-holder): our keypair + the peer's key.
+    const setup1 = mgr.setupKeyExchange(false, 1);
+    await vi.waitFor(() => {
+      expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
+    });
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    // This offer's unwrap stalls — still in flight when the user leaves voice.
+    let releaseUnwrap!: (v: Uint8Array) => void;
+    const stalledUnwrap = new Promise<Uint8Array>((resolve) => {
+      releaseUnwrap = resolve;
+    });
+    vi.mocked(unwrapRoomKey).mockReturnValueOnce(stalledUnwrap);
+    const offerPromise = mgr.handleOffer(PEER_ID, "enc-old", "iv-old");
+    await vi.waitFor(() => expect(unwrapRoomKey).toHaveBeenCalled());
+
+    // Leave voice mid-unwrap.
+    mgr.clearState();
+    await expect(setup1).resolves.toBe(false);
+
+    // A brand-new voice session generates a fresh keypair (forward secrecy).
+    // Epoch is 0 in both sessions (non-key-holder never bumps it), so only
+    // keypair identity can distinguish session 1's stale offer from session 2.
+    const newKeyPair = {
+      publicKey: { type: "public-2" } as unknown as CryptoKey,
+      privateKey: { type: "private-2" } as unknown as CryptoKey,
+    };
+    vi.mocked(generateECDHKeyPair).mockResolvedValueOnce(newKeyPair);
+    await mgr.reannounceForReconnect();
+    mockSetKey.mockClear();
+
+    // The stale session-1 offer now resolves.
+    releaseUnwrap(new Uint8Array(32).fill(9));
+    await offerPromise;
+
+    // Must be discarded: epoch alone (0 === 0) would have let it through.
+    expect(mockSetKey).not.toHaveBeenCalled();
+  });
+
+  it("[finding 4] discards a stale announce-offer if the room key rotates while wrapRoomKey is in flight", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // holder, epoch 1
+
+    let releaseWrap!: (v: { encryptedKey: string; iv: string }) => void;
+    const stalledWrap = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
+      releaseWrap = resolve;
+    });
+    vi.mocked(wrapRoomKey).mockReturnValueOnce(stalledWrap);
+
+    const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalled());
+
+    // A rotation completes while the announce's own wrap is still pending —
+    // it sees PEER_ID already in _peerPublicKeys (stored synchronously before
+    // the stalled wrap) and sends it the fresh key.
+    await mgr.rotateKeyPeriodically();
+    ws.send.mockClear();
+
+    // The stale (pre-rotation) wrap now resolves.
+    releaseWrap({ encryptedKey: "stale-enc", iv: "stale-iv" });
+    await announcePromise;
+
+    // Must be discarded — the peer already has the fresh key from rotation.
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+  });
+
+  it("[finding 5] retries with a fresh promise after a decrypt failure, so a second good offer still completes setup", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    vi.mocked(unwrapRoomKey).mockRejectedValueOnce(new Error("bad offer"));
+
+    const setupPromise = mgr.setupKeyExchange(false, 1);
+    await vi.waitFor(() => {
+      expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
+    });
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    // A corrupt/undecryptable offer arrives — handleOfferInner's catch
+    // rejects the wait.
+    await mgr.handleOffer(PEER_ID, "enc-bad", "iv-bad");
+
+    // The retry must re-announce and give a FRESH window — a second, valid
+    // offer must still be able to complete setup.
+    await vi.waitFor(() => {
+      expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(1);
+    });
+    await mgr.handleOffer(PEER_ID, "enc-good", "iv-good");
+
+    await expect(setupPromise).resolves.toBe(true);
+  });
+
+  it("[finding 6] queues (does not drop) a live announce that arrives during setup, before isKeyHolder/roomKey are ready", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // Stall the identity-key load inside buildAnnouncePayload so a "live"
+    // handleAnnounce can land while setup is still in its prefix — before
+    // _isKeyHolder/_roomKey (and, with the fix, _ecdhKeyPair) are ready.
+    let releaseIdentity!: () => void;
+    const stalledIdentity = new Promise<typeof mockIdentityKeyPair>((resolve) => {
+      releaseIdentity = () => resolve(mockIdentityKeyPair);
+    });
+    vi.mocked(getOrCreateIdentityKeyPair).mockReturnValueOnce(stalledIdentity);
+
+    const setupPromise = mgr.setupKeyExchange(true, 1); // becoming key holder
+    await vi.waitFor(() => expect(getOrCreateIdentityKeyPair).toHaveBeenCalled());
+
+    // A peer announces "live" (server-relayed) while our own setup is still
+    // in flight.
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    releaseIdentity();
+    await setupPromise;
+
+    // The peer must receive a room-key offer — either queued-then-drained, or
+    // handled live after isKeyHolder/roomKey became ready. It must never be
+    // silently stored with no offer ever sent.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
   });
 });

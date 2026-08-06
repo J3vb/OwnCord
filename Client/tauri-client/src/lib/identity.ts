@@ -82,23 +82,34 @@ export async function deleteIdentityKey(host: string): Promise<boolean> {
 
 // ── Peer identity pins (identity_pins.json, TOFU) ──────────────────────────
 
+/**
+ * Result of a peer identity-pin write. Mirrors IdentityPinLookup's tri-state
+ * split: "no-store" (non-Tauri environment, no pin store by design) and
+ * "failed" (a real write error, e.g. disk full / unwritable pins file) are
+ * both falsy under a plain boolean, but callers that display a "verified"
+ * state on the strength of a pin write must be able to tell them apart —
+ * collapsing them let a write failure be silently treated the same as the
+ * no-store case and still show "verified" with no pin ever persisted.
+ */
+export type StoreIdentityPinResult = "stored" | "no-store" | "failed";
+
 /** Pin a peer's identity public key (base64) under `{host}:{userId}`. */
 export async function storeIdentityPin(
   host: string,
   userId: string,
   pin: string,
-): Promise<boolean> {
+): Promise<StoreIdentityPinResult> {
   const invoke = await getInvoke();
   if (!invoke) {
     log.warn("Tauri not available — identity pin not stored");
-    return false;
+    return "no-store";
   }
   try {
     await invoke("store_identity_pin", { host, userId, pin });
-    return true;
+    return "stored";
   } catch (err) {
     log.error("Failed to store identity pin", { host, userId, error: String(err) });
-    return false;
+    return "failed";
   }
 }
 
