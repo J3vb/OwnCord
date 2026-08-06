@@ -190,6 +190,39 @@ describe("WS Dispatcher", () => {
     expect(state.serverName).toBe("TestServer");
   });
 
+  it("re-sends channel_focus for the active channel on auth_ok", () => {
+    // The resume path can land with no ChannelTopic subscription (server
+    // restart / proxy close observed before the client's reconnect) — a
+    // channel already active on the client must be re-focused so the
+    // channel message stream doesn't silently die.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "Welcome!",
+    });
+
+    expect(mock.ws.send).toHaveBeenCalledWith({
+      type: "channel_focus",
+      payload: { channel_id: 42 },
+    });
+  });
+
+  it("sends no channel_focus on auth_ok when no channel is active", () => {
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: null }));
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "Welcome!",
+    });
+
+    expect(mock.ws.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "channel_focus" }),
+    );
+  });
+
   it("wires auth_error to clear auth", () => {
     mock.dispatch("auth_error", { message: "Invalid token" });
     expect(authStore.getState().isAuthenticated).toBe(false);

@@ -142,6 +142,17 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
       setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
+
+      // The resume path can land with no ChannelTopic subscription: the hub
+      // only transfers a focused channel from an old connection entry, but
+      // readPump's unregister deletes that entry as soon as the server
+      // observes the socket close — which happens well before the client's
+      // first reconnect attempt. Re-asserting focus here (idempotent on the
+      // server) covers that gap on every connect, resume included.
+      const activeChannelId = channelsStore.select((s) => s.activeChannelId);
+      if (activeChannelId !== null) {
+        ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
+      }
     }),
   );
 
