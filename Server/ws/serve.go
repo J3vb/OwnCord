@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -164,6 +165,27 @@ func (h *Hub) handleReconnect(
 				for _, p := range persisted {
 					events = append(events, p.Payload)
 				}
+				// The EventPersister flushes asynchronously, so cold rows can
+				// lag the live seq: events broadcast after the last flush sit
+				// only in the ring buffer. Merge that tail, or the replay
+				// presents an incomplete resume as complete (the client tracks
+				// only max(seq) and cannot detect the hole).
+				maxPersistedSeq := uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
+				switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
+				case tail != nil:
+					events = append(events, tail...)
+				case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
+					// Post-restart empty buffer with the hub seq seeded from
+					// the store max: nothing was broadcast after the last
+					// persisted row, so the cold rows alone are complete.
+				default:
+					// The buffer cannot vouch for the gap above the newest
+					// persisted row — force a full ready instead of a replay
+					// with a silent hole at its end.
+					slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
+						"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
+					events = nil
+				}
 				replaySource = "db"
 			}
 		}
@@ -212,6 +234,19 @@ func (h *Hub) handleReconnect(
 	h.announceConnectPresence(c)
 
 	return true
+}
+
+// unregisterFailedHandshake removes c after a post-registerNow handshake
+// write failure. No readPump ever starts for this connection, and the old
+// connection this one replaced already ran its defer (skipping teardown
+// because this client held the slot) — so when no replacement remains, the
+// standard disconnect teardown must run here or the user stays online forever.
+func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
+	if replaced := h.unregisterNow(c); !replaced {
+		cleanupCtx := context.WithoutCancel(ctx)
+		_ = h.db.MarkUserDisconnected(cleanupCtx, c.userID)
+		h.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, c.user.CustomStatus))
+	}
 }
 
 // applyConnectStatus writes the status this session comes online as and caches
@@ -273,14 +308,15 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user 
 
 	// Include the user's open DM channels. Only the ID set matters here, so
 	// use the PK-covered dm_open_state lookup instead of the full DM query.
+	// Fatal like the three sibling lookups above: a silently DM-stripped
+	// replay advances the client's lastSeq past DM events it never received —
+	// a permanent hole. The caller's error path falls back to full ready.
 	dmIDs, dmErr := database.GetUserDMChannelIDs(ctx, user.ID)
 	if dmErr != nil {
-		slog.Warn("computeAllowedChannels GetUserDMChannelIDs", "err", dmErr)
-		// Non-fatal: DM events will simply be filtered out.
-	} else {
-		for _, id := range dmIDs {
-			allowed[id] = true
-		}
+		return nil, fmt.Errorf("computeAllowedChannels GetUserDMChannelIDs: %w", dmErr)
+	}
+	for _, id := range dmIDs {
+		allowed[id] = true
 	}
 
 	return allowed, nil
@@ -376,7 +412,7 @@ func (h *Hub) handleFreshConnect(
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
 	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
-		h.unregisterNow(c)
+		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return err
 	}
@@ -384,7 +420,7 @@ func (h *Hub) handleFreshConnect(
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
 		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
-			h.unregisterNow(c)
+			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return err
 		}
@@ -392,7 +428,7 @@ func (h *Hub) handleFreshConnect(
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
 		_ = conn.Write(ctx, websocket.MessageText,
 			buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
-		h.unregisterNow(c)
+		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
 		return readyErr
 	}

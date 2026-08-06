@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 )
 
 // EmitEvents routes typed events to the appropriate broadcast methods.
@@ -33,6 +34,14 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
+			// dm_channel_open is unsequenced and targeted, so replay can never
+			// deliver it — an addressee mid-reconnect would be left with an
+			// unreachable DM channel. Bump the visibility watermark so any
+			// client resuming from a seq at or before the open takes the
+			// full-ready path (whose payload includes DM channels).
+			if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
+				h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
 		case ChannelEvent:
 			h.BroadcastToChannel(e.ChannelID(), e.Payload())

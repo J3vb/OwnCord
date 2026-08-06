@@ -268,7 +268,7 @@ func (h *Hub) Run() {
 				case bm := <-h.broadcast:
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
-					h.sweepStaleClients()
+					h.onStaleTick()
 				case <-sessionSweepTicker.C:
 					// The revoked-session and stale-voice sweeps do per-client
 					// DB work, so they run off the dispatch goroutine — a slow

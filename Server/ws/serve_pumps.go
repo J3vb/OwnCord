@@ -26,12 +26,42 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		return true
 	}
 
+	// drainChannel writes every message still buffered on ch without blocking.
+	// Returns false only when a write failed; empty or closed is true.
+	drainChannel := func(ch chan []byte) bool {
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return true
+				}
+				if !writeMsg(msg) {
+					return false
+				}
+			default:
+				return true
+			}
+		}
+	}
+
+	// drainAndClose flushes whatever the kick paths queued before closing the
+	// send channels (e.g. the BANNED error frame that makes the client clear
+	// its credentials) — serve.go and hub_broadcast.go both document that
+	// writePump drains remaining messages after closeSend. Returning on the
+	// first closed channel would drop those frames.
+	drainAndClose := func() {
+		if drainChannel(c.sendHigh) && drainChannel(c.send) {
+			drainChannel(c.sendLow)
+		}
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}
+
 	for {
 		// Priority 1: drain all pending high-priority messages first.
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -47,7 +77,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -55,7 +85,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 			}
 		case msg, ok := <-c.send:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -63,7 +93,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 			}
 		case msg, ok := <-c.sendLow:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {

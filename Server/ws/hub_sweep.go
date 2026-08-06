@@ -16,6 +16,14 @@ import (
 // a ping every 30s, so 90s (3x) gives plenty of margin.
 const staleClientTimeout = 90 * time.Second
 
+// onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
+func (h *Hub) onStaleTick() {
+	h.sweepStaleClients()
+	// Per-channel token buckets are created on first broadcast; prune idle
+	// ones here or the bucket map grows for the process lifetime.
+	h.topicLimiter.Cleanup(10 * time.Minute)
+}
+
 // kickClient forcibly removes a client from the hub and closes its send channel,
 // which causes writePump to exit and the WebSocket connection to close.
 // It is safe to call from any goroutine.
@@ -25,8 +33,12 @@ func (h *Hub) kickClient(c *Client) {
 		delete(h.clients, c.userID)
 	}
 	h.mu.Unlock()
-	h.pubsub.UnsubscribeAll(c)
+	// closeSend BEFORE UnsubscribeAll: Subscribe's only re-take guard is
+	// isSendClosed, so a Subscribe racing this kick either lands before the
+	// close (and UnsubscribeAll below removes it) or sees the closed channel
+	// and refuses. The reverse order leaves the dead client holding the topic.
 	c.closeSend()
+	h.pubsub.UnsubscribeAll(c)
 }
 
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never

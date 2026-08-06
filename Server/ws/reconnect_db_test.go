@@ -266,3 +266,112 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 		t.Errorf("full tier count = %d, want 1: an over-cap gap must force a full ready re-sync", fullTier)
 	}
 }
+
+// TestReconnect_ColdTierMergesRingBufferTail locks the flush-lag hole: the
+// EventPersister flushes asynchronously (~100ms batches), so cold rows can lag
+// the live seq. Events broadcast after the last flush sit only in the ring
+// buffer — a cold replay built from persisted rows alone presents an
+// incomplete resume as complete (the client tracks only max(seq) and cannot
+// detect the hole), which the maxColdReplay cap in the same function exists
+// to prevent.
+//
+// Setup: cold rows 501..700; ring buffer holds 601..710 (so the buffer cannot
+// serve last_seq=500 itself, but can serve everything past the newest
+// persisted row). The replay must deliver 501..710 — the 200 cold rows plus
+// the 10-event buffer tail.
+func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+
+	userID, err := database.CreateUser(context.Background(), "reconnect-tail-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	eventStore := openEventStoreDB(t)
+	bgCtx := context.Background()
+	for seq := int64(501); seq <= 700; seq++ {
+		payload := fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq)
+		if err := eventStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
+			t.Fatalf("PersistEvent seq=%d: %v", seq, err)
+		}
+	}
+
+	hub := ws.NewHub(database, limiter, nil)
+	hub.SetEventStore(eventStore)
+	go hub.Run()
+	defer hub.Stop()
+
+	rb := hub.ReplayBuffer()
+	for seq := uint64(601); seq <= 710; seq++ {
+		rb.Push(seq, 0, fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq))
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	dialCtx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
+	defer cancel()
+
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	authMsg := map[string]any{
+		"type":    "auth",
+		"payload": map[string]any{"token": token, "last_seq": uint64(500)},
+	}
+	raw, _ := json.Marshal(authMsg)
+	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+
+	_, msg, err := conn.Read(dialCtx)
+	if err != nil {
+		t.Fatalf("read auth_ok: %v", err)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(msg, &resp)
+	if resp["type"] != "auth_ok" {
+		t.Fatalf("expected auth_ok, got %s", msg)
+	}
+
+	// Count replayed frames; the highest seq seen must reach the buffer tail.
+	var replayed int
+	var maxSeq float64
+	for {
+		readCtx, readCancel := context.WithTimeout(dialCtx, 500*time.Millisecond)
+		_, evt, readErr := conn.Read(readCtx)
+		readCancel()
+		if readErr != nil {
+			break
+		}
+		var frame map[string]any
+		if json.Unmarshal(evt, &frame) == nil && frame["type"] == "broadcast" {
+			replayed++
+			if s, ok := frame["seq"].(float64); ok && s > maxSeq {
+				maxSeq = s
+			}
+		}
+	}
+	if replayed != 210 {
+		t.Errorf("replayed %d events, want 210 (200 cold rows + 10 ring-buffer tail)", replayed)
+	}
+	if maxSeq != 710 {
+		t.Errorf("max replayed seq = %.0f, want 710 — events after the last persister flush were silently dropped", maxSeq)
+	}
+}

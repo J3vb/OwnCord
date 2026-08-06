@@ -592,6 +592,18 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		h.seqMu.Lock()
 		defer h.seqMu.Unlock()
 
+		// Channel-scoped sends consult the topic limiter BEFORE a seq is
+		// allocated: a shed frame that consumed a seq would sit in the replay
+		// buffer as a number no client ever saw live, and since clients ack
+		// only max(seq), it could never be requested back.
+		if bm.recipients == nil && bm.channelID != 0 {
+			if !h.topicLimiter.Allow(ChannelTopic(bm.channelID)) {
+				slog.Warn("hub: topic rate limit exceeded, dropping message",
+					"channel_id", bm.channelID)
+				return 0, 0, false
+			}
+		}
+
 		seq = h.nextSeq()
 		msg := wrapWithSeq(bm.msg, seq)
 
@@ -623,14 +635,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 			// Global broadcast — deliver to every connected client.
 			h.pubsub.PublishGlobal(msg)
 		default:
-			// Channel-scoped broadcast — deliver to subscribers of the channel topic.
-			topic := ChannelTopic(bm.channelID)
-			if !h.topicLimiter.Allow(topic) {
-				slog.Warn("hub: topic rate limit exceeded, dropping message",
-					"channel_id", bm.channelID, "seq", seq)
-				return seq, 0, false
-			}
-			delivered = h.pubsub.Publish(topic, msg, 0)
+			// Channel-scoped broadcast — deliver to subscribers of the channel
+			// topic. The rate limiter already passed above, before the seq
+			// was allocated.
+			delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
 			channelSend = true
 		}
 		return seq, delivered, channelSend
