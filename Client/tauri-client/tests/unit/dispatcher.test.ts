@@ -45,6 +45,7 @@ vi.mock("@lib/livekitSession", () => ({
   isVoiceConnected: vi.fn(() => false),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
+  disableCamera: vi.fn(async () => {}),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
@@ -60,7 +61,12 @@ vi.mock("@lib/identity", () => ({
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
-import { setMuted as mockSetMuted, setDeafened as mockSetDeafened } from "@lib/livekitSession";
+import {
+  setMuted as mockSetMuted,
+  setDeafened as mockSetDeafened,
+  leaveVoice as mockLeaveVoice,
+  disableCamera as mockDisableCamera,
+} from "@lib/livekitSession";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -1269,6 +1275,54 @@ describe("WS Dispatcher", () => {
     expect(voiceStore.getState().currentChannelId).toBe(3);
   });
 
+  // A server-initiated eviction (CONNECT_VOICE revocation sweep, channel
+  // delete) has no companion teardown message — voice_leave for the local
+  // user IS the signal that must also tear down the LiveKit session, or mic
+  // publish + E2EE key material stay live while the UI shows not-in-voice.
+  it("tears down the LiveKit session on a self voice_leave for the current channel", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+  });
+
+  // A stale voice_leave for a channel we've already left (and rejoined
+  // elsewhere) must not kill the newer join's live session.
+  it("does not tear down the session for a stale voice_leave from a channel already left", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // Currently in channel 9 (a newer join) — the incoming voice_leave is for
+    // the old channel 3.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+  });
+
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -2281,6 +2335,17 @@ describe("WS Dispatcher", () => {
         "That voice channel has reached its video limit",
         "error",
       );
+    });
+
+    // max_video has no SFU-level enforcement — the server's VIDEO_LIMIT refusal
+    // only rejects the DB write. Without a client-side rollback the refused
+    // camera track keeps publishing (and streaming to everyone) while
+    // voice_state says camera=false, so VIDEO_LIMIT is otherwise cosmetic.
+    it("rolls back the local camera publish on VIDEO_LIMIT", async () => {
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      await vi.runAllTimersAsync();
+
+      expect(mockDisableCamera).toHaveBeenCalled();
     });
 
     // A capacity refusal is about the voice channel, not about the composer,

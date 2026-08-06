@@ -6,6 +6,8 @@ const mockVoiceState = vi.hoisted(() => ({
   localMuted: false,
   localDeafened: false,
   localServerMuted: false,
+  localCamera: false,
+  localScreenshare: false,
 }));
 
 const mockRoom = vi.hoisted(() => ({
@@ -283,6 +285,9 @@ describe("LiveKitSession", () => {
     vi.useFakeTimers();
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
+    mockVoiceState.localServerMuted = false;
+    mockVoiceState.localCamera = false;
+    mockVoiceState.localScreenshare = false;
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -897,6 +902,60 @@ describe("LiveKitSession", () => {
       expect((session as any)._screenState.manualScreenTracks).toEqual([]);
       expect(setLocalScreenshare).toHaveBeenCalledWith(false);
     });
+
+    // Without this, a successful auto-reconnect leaves the server's
+    // voice_states row with camera=1/screenshare=1 forever (the reconnected
+    // participant is not "rogue" so no webhook clears it), occupying a
+    // max_video slot the user can never free even by re-toggling.
+    it("sends voice_camera/voice_screenshare OFF frames before tearing down local tracks", async () => {
+      session.setServerHost("localhost:7880");
+      const sendSpy = vi.fn();
+      session.setWsClient({ send: sendSpy } as any);
+
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(disconnectedHandler).toBeDefined();
+
+      mockVoiceState.localCamera = true;
+      mockVoiceState.localScreenshare = true;
+      sendSpy.mockClear();
+
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
+      expect(sendSpy).toHaveBeenCalledWith({
+        type: "voice_screenshare",
+        payload: { enabled: false },
+      });
+    });
+
+    it("does not send camera/screenshare OFF frames when neither was active", async () => {
+      session.setServerHost("localhost:7880");
+      const sendSpy = vi.fn();
+      session.setWsClient({ send: sendSpy } as any);
+
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(disconnectedHandler).toBeDefined();
+
+      sendSpy.mockClear();
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_camera" }));
+      expect(sendSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_screenshare" }),
+      );
+    });
   });
 
   describe("handleDisconnected during initial connect", () => {
@@ -1430,6 +1489,30 @@ describe("LiveKitSession", () => {
       expect(setupSpy).toHaveBeenCalled();
       setupSpy.mockRestore();
     });
+
+    // Same root cause as the PTT server-mute guard: a listen-only join
+    // publishes no audio track, so a moderator's server-mute persists but has
+    // nothing to act on at the SFU. Clicking "Grant Microphone" must not
+    // publish a fresh, unmuted track the whole channel can hear.
+    it("keeps the mic muted when server-muted, mirroring the deafened branch", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+      vi.clearAllMocks();
+      mockVoiceState.localServerMuted = true;
+
+      try {
+        await session.retryMicPermission();
+
+        expect(setListenOnly).toHaveBeenCalledWith(false);
+        // applyMicMuteState(true) re-disables the mic it just enabled.
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+        expect(setLocalMuted).not.toHaveBeenCalledWith(false);
+      } finally {
+        mockVoiceState.localServerMuted = false;
+      }
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -1883,6 +1966,66 @@ describe("LiveKitSession", () => {
       await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880", true);
 
       expect(leaveSpy).toHaveBeenCalledWith(false);
+      leaveSpy.mockRestore();
+    });
+  });
+
+  describe("connectAndSetup post-connect checkpoints (supersession)", () => {
+    // Checkpoint 2 (right after room.connect()) already disconnects only its
+    // OWN localRoom — checkpoints 3/4/5 (after restoreLocalVoiceState and each
+    // saved-device switch) must do the same, not call the global leaveVoice().
+    // A newer attempt can install its own "connected" state into the shared
+    // _state while an older attempt is still awaiting one of these steps;
+    // calling the global leaveVoice() at that point tears down whichever
+    // session currently occupies _state — the NEWER one, not this attempt's.
+    it("checkpoint 3 does not call the global leaveVoice, and leaves a newer attempt's state untouched", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      const micDeferred = createDeferred<void>();
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementationOnce(
+        () => micDeferred.promise,
+      );
+
+      const resultPromise = (session as any).connectAndSetup(
+        "token-A",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        true,
+      );
+
+      // Let this attempt reach room.connect() -> restoreLocalVoiceState() ->
+      // setMicrophoneEnabled(), which is now stalled on micDeferred.
+      await vi.advanceTimersByTimeAsync(0);
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.channelId).toBe(1);
+
+      const leaveSpy = vi.spyOn(session, "leaveVoice");
+
+      // A newer attempt (channel 2) has already superseded this one and
+      // installed its own connected state into the shared _state.
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 2,
+        latestToken: "token-B",
+        lastUrl: "/livekit-b",
+        lastDirectUrl: undefined,
+      };
+
+      // Now let the stalled attempt's restoreLocalVoiceState resolve.
+      micDeferred.resolve(undefined);
+      const result = await resultPromise;
+
+      expect(result).toBe("superseded");
+      // Must never call the global leaveVoice() here — that would tear down
+      // whatever the newer attempt just installed (worker, E2EE state, room).
+      expect(leaveSpy).not.toHaveBeenCalled();
+      // The newer attempt's state must be untouched.
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.channelId).toBe(2);
+
       leaveSpy.mockRestore();
     });
   });

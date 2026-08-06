@@ -31,6 +31,7 @@ export interface RoomEventDeps {
   getOnRemoteVideoRemovedCallback: () => RemoteVideoRemovedCallback | null;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
+  isReconnecting: () => boolean;
   getLatestToken: () => string | null;
   getLastUrl: () => string | null;
   getLastDirectUrl: () => string | undefined;
@@ -159,8 +160,13 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
 
   const handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
-    if (deps.isConnecting()) {
-      log.info("Disconnect during initial connect — deferring to retry loop");
+    if (deps.isConnecting() || deps.isReconnecting()) {
+      // The bundled livekit-client fires this event synchronously on every
+      // failed reconnect attempt inside the retry loop's own room.connect()
+      // call, before that call rejects — the active loop already owns retry
+      // and cleanup, so a second entry here must not start a second,
+      // uncancellable attemptAutoReconnect loop (mirrors the initial-connect guard above).
+      log.info("Disconnect during connect/reconnect — deferring to retry loop");
       return;
     }
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;

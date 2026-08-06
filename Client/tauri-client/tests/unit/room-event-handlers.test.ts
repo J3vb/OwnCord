@@ -99,6 +99,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     getOnRemoteVideoRemovedCallback: () => spies.onRemoteVideoRemoved,
     getOnErrorCallback: () => spies.onError,
     isConnecting: () => false,
+    isReconnecting: () => false,
     getLatestToken: () => "tok",
     getLastUrl: () => "wss://lk.example",
     getLastDirectUrl: () => undefined,
@@ -519,6 +520,22 @@ describe("handleDisconnected", () => {
 
     expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
     expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+  });
+
+  // The bundled livekit-client emits RoomEvent.Disconnected (synchronously,
+  // before rejecting) on EVERY failed reconnect attempt inside the retry
+  // loop's own room.connect() call — including while the active reconnect
+  // loop is still running with the attempt room's listeners attached. Without
+  // this guard that re-entrant Disconnected starts a SECOND, uncancellable
+  // attemptAutoReconnect loop whose AbortController is stored nowhere.
+  it("defers to the active reconnect loop while already reconnecting", () => {
+    const h = build({ isConnecting: () => false, isReconnecting: () => true });
+
+    h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
+
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+    expect(h.spies.teardownForReconnect).not.toHaveBeenCalled();
   });
 
   it("auto-reconnects on an unexpected disconnect", () => {

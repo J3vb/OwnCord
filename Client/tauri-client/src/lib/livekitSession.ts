@@ -280,6 +280,7 @@ export class LiveKitSession {
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
       getOnErrorCallback: () => this.onErrorCallback,
       isConnecting: () => this._connecting,
+      isReconnecting: () => this._state.type === "reconnecting",
       getLatestToken: () => this._latestToken,
       getLastUrl: () => this._lastUrl,
       getLastDirectUrl: () => this._lastDirectUrl,
@@ -309,6 +310,21 @@ export class LiveKitSession {
       teardownForReconnect: () => {
         this._audioPipeline.teardownAudioPipeline();
         this.clearTokenRefreshTimer();
+        // The WS session is independent of the LiveKit drop, so tell the
+        // server the camera/screenshare are off before the local tracks are
+        // stopped below — otherwise a successful reconnect leaves the
+        // server's voice_states row at camera=1/screenshare=1 forever (no
+        // webhook clears a reconnected, non-rogue participant), occupying a
+        // max_video slot the user can never free.
+        const { localCamera, localScreenshare } = voiceStore.getState();
+        if (this.ws !== null) {
+          if (localCamera) {
+            this.ws.send({ type: "voice_camera", payload: { enabled: false } });
+          }
+          if (localScreenshare) {
+            this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
+          }
+        }
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
@@ -807,6 +823,20 @@ export class LiveKitSession {
     this.onRemoteVideoRemovedCallback = null;
   }
 
+  /** Post-connect-checkpoint cleanup for a superseded connectAndSetup attempt
+   *  (checkpoints 3-5, after this attempt already installed its room into the
+   *  shared "connected" state). By the time one of these fires, a NEWER
+   *  attempt may have already claimed `_state` (and torn down THIS attempt's
+   *  room via its own entry-point leaveVoice(false)) — so this must disconnect
+   *  only the passed-in localRoom, mirroring checkpoint 2, and must never call
+   *  the global leaveVoice()/touch `_state`, or it tears down whichever
+   *  session currently occupies `_state`, which now belongs to the newer
+   *  attempt. */
+  private disconnectSupersededLocalRoom(localRoom: Room): void {
+    localRoom.removeAllListeners();
+    localRoom.disconnect().catch((err) => log.debug("Failed to disconnect superseded room", err));
+  }
+
   /** Shared connect-with-retry + post-connect setup used by both the primary
    *  handleVoiceToken path and the pending-join drain loop.
    *  Returns true if the room ended up connected and set up,
@@ -984,7 +1014,7 @@ export class LiveKitSession {
           log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
             channelId,
           });
-          this.leaveVoice(false);
+          this.disconnectSupersededLocalRoom(localRoom);
           return "superseded";
         }
 
@@ -1002,7 +1032,7 @@ export class LiveKitSession {
           log.info("connectAndSetup: superseded after audioinput switch — aborting", {
             channelId,
           });
-          this.leaveVoice(false);
+          this.disconnectSupersededLocalRoom(localRoom);
           return "superseded";
         }
 
@@ -1020,7 +1050,7 @@ export class LiveKitSession {
           log.info("connectAndSetup: superseded after audiooutput switch — aborting", {
             channelId,
           });
-          this.leaveVoice(false);
+          this.disconnectSupersededLocalRoom(localRoom);
           return "superseded";
         }
 
@@ -1168,10 +1198,15 @@ export class LiveKitSession {
       await room.localParticipant.setMicrophoneEnabled(true);
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
-      const { localDeafened } = voiceStore.getState();
-      if (localDeafened) {
+      // Also honor a moderator's server-mute the same way: a listen-only join
+      // publishes no audio track, so the server-side mute has nothing to act
+      // on and persists silently — republishing here must not hand the whole
+      // channel a fresh, unmuted track. (The setMuted() guard does not cover
+      // this direct setMicrophoneEnabled call.)
+      const { localDeafened, localServerMuted } = voiceStore.getState();
+      if (localDeafened || localServerMuted) {
         await this.applyMicMuteState(true);
-        log.info("Microphone acquired but muted (user is deafened)");
+        log.info("Microphone acquired but muted (user is deafened or server-muted)");
       } else {
         setLocalMuted(false);
         log.info("Microphone permission granted — exited listen-only mode");

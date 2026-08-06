@@ -589,13 +589,26 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.VOICE_LEAVE, (payload) => {
       removeVoiceUser(payload);
-      // Notify E2EE state machine so key holder can rotate the room key.
-      void livekitSession().then(({ handleParticipantLeft }) =>
-        handleParticipantLeft(payload.user_id),
-      );
-      // Clear local voice state if the current user was removed (kick/disconnect)
       const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
+      const isSelf = payload.user_id === currentUserId;
+      // A server-initiated eviction (revocation sweep, channel delete) has no
+      // companion teardown message — this voice_leave IS the signal that
+      // drives our own LiveKit/E2EE teardown, or mic publish and key material
+      // stay live while the UI shows not-in-voice. Guard on channel match: a
+      // late-arriving voice_leave for a channel we already left (and rejoined
+      // elsewhere) must not kill a newer join. Read the store before
+      // leaveVoiceChannel() below clears currentChannelId.
+      const shouldTeardownSession =
+        isSelf && voiceStore.getState().currentChannelId === payload.channel_id;
+      // Notify E2EE state machine so key holder can rotate the room key, and
+      // (when applicable) tear down the media session — both through one lazy
+      // import so the two effects cannot land in different ticks.
+      void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
+        handleParticipantLeft(payload.user_id);
+        if (shouldTeardownSession) leaveVoice(false);
+      });
+      // Clear local voice state if the current user was removed (kick/disconnect)
+      if (isSelf) {
         leaveVoiceChannel();
       }
     }),
@@ -746,6 +759,10 @@ export function wireDispatcher(
       }
       if (payload.code === "VIDEO_LIMIT") {
         showToast(payload.message || "That voice channel has reached its video limit", "error");
+        // max_video has no SFU-level enforcement — the server only refuses the
+        // DB write. Without this rollback the already-published camera track
+        // keeps streaming to everyone while voice_state says camera=false.
+        void livekitSession().then(({ disableCamera }) => disableCamera());
         return;
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
