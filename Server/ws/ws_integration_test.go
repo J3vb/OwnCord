@@ -673,6 +673,141 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	}
 }
 
+// TestServeWS_ReplayFallback_PreservesVoiceState verifies the replay-FAILURE
+// path: a reconnect whose last_seq the ring buffer cannot serve (seq far ahead,
+// e.g. after a server restart reset the counter) falls back to
+// handleFreshConnect with lastSeq > 0 preserved. registerNow then transfers the
+// old connection's live voice state into the new client, so the fresh-connect
+// stale-voice cleanup must NOT delete the DB row (or remove the LiveKit
+// participant, whose removal token is the very JoinedAt being transferred) —
+// otherwise the user is "in voice" on the hub only: voice_join bounces off
+// ALREADY_JOINED and sweepStaleVoiceStates never heals memory-without-row.
+func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter, nil)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser(context.Background(), "ws-voice-fallback", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	chID, err := database.CreateChannel(context.Background(), "voice-fallback", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
+		t.Helper()
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]any{"token": token, "last_seq": lastSeq},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		for i := range 2 {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("read handshake message %d: %v", i, readErr)
+			}
+		}
+		return conn
+	}
+
+	// First connection: fresh, then put the user in voice (DB + in-memory).
+	conn1 := dialAndAuth(0)
+	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
+
+	var originalClient *ws.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		originalClient = hub.GetClient(userID)
+		if originalClient != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if originalClient == nil {
+		t.Fatal("expected first client to be registered")
+	}
+
+	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vsBefore, err := database.GetVoiceState(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(before reconnect): %v", err)
+	}
+	if vsBefore == nil {
+		t.Fatal("expected voice state row after JoinVoiceChannel")
+	}
+	ws.SetClientVoiceStateForTest(originalClient, chID, vsBefore.JoinedAt)
+
+	// Second connection: last_seq far ahead of anything the buffer holds —
+	// replay fails, handleFreshConnect runs with lastSeq > 0, and registerNow
+	// transfers the old connection's voice state.
+	conn2 := dialAndAuth(999)
+	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+
+	var replacementClient *ws.Client
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		replacementClient = hub.GetClient(userID)
+		if replacementClient != nil && replacementClient != originalClient {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if replacementClient == nil || replacementClient == originalClient {
+		t.Fatal("expected replacement client to be registered")
+	}
+
+	// The transferred in-memory state and the DB row must stay consistent:
+	// either both present (transfer honored) or both gone — never memory-only.
+	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != chID {
+		t.Fatalf("replacement client voiceChID = %d, want %d", got, chID)
+	}
+	vs, vsErr := database.GetVoiceState(context.Background(), userID)
+	if vsErr != nil {
+		t.Fatalf("GetVoiceState: %v", vsErr)
+	}
+	if vs == nil {
+		t.Fatal("replay fallback: DB voice_state row was deleted while registerNow transferred the in-memory state")
+	}
+	if vs.ChannelID != chID {
+		t.Fatalf("replay fallback: DB voice_state channel_id = %d, want %d", vs.ChannelID, chID)
+	}
+}
+
 // TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream verifies the
 // authorized half of the voice-subscription gate end to end: the reconnect
 // handshake passes the user's READ_MESSAGES set to registerNow, so a user who

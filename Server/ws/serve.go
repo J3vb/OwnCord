@@ -294,32 +294,46 @@ func (h *Hub) handleFreshConnect(
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
 	if vs, err := database.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
-		slog.Info("ws fresh connect: cleaning stale voice state",
-			"user_id", c.userID, "channel_id", vs.ChannelID)
-		if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
-			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
-		}
-		h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
-		if h.livekit != nil {
-			// BUG-089: Capture stale join token so the goroutine only removes
-			// the exact stale participant. The identity includes joinedAt, so
-			// even if the user rejoins voice quickly, the new session has a
-			// different identity and won't be removed. The removal must
-			// complete even if this connection drops mid-handshake, so detach
-			// from cancellation (values kept); shutdown is handled via h.stop.
-			staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-			lkCtx := context.WithoutCancel(ctx)
-			go func() {
-				select {
-				case <-h.stop:
-					return
-				default:
-				}
-				if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
-					slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
-						"err", err, "user_id", staleUserID, "channel_id", staleChID)
-				}
-			}()
+		// Replay-failure fallback (lastSeq > 0): registerNow below transfers
+		// the still-registered old connection's live voice state into this
+		// client. Deleting the DB row here — and the LiveKit participant,
+		// whose removal token is the very JoinedAt being transferred — would
+		// leave the user "in voice" on the hub only: voice_join bounces off
+		// ALREADY_JOINED and sweepStaleVoiceStates never heals
+		// memory-without-row. Keep the row so ready stays consistent. If the
+		// old client unregisters before registerNow runs, the transfer is
+		// skipped and the next sweep reaps the then-truly-stale row.
+		if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+			slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
+				"user_id", c.userID, "channel_id", vs.ChannelID)
+		} else {
+			slog.Info("ws fresh connect: cleaning stale voice state",
+				"user_id", c.userID, "channel_id", vs.ChannelID)
+			if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+				slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+			}
+			h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
+			if h.livekit != nil {
+				// BUG-089: Capture stale join token so the goroutine only removes
+				// the exact stale participant. The identity includes joinedAt, so
+				// even if the user rejoins voice quickly, the new session has a
+				// different identity and won't be removed. The removal must
+				// complete even if this connection drops mid-handshake, so detach
+				// from cancellation (values kept); shutdown is handled via h.stop.
+				staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
+				lkCtx := context.WithoutCancel(ctx)
+				go func() {
+					select {
+					case <-h.stop:
+						return
+					default:
+					}
+					if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
+						slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
+							"err", err, "user_id", staleUserID, "channel_id", staleChID)
+					}
+				}()
+			}
 		}
 	}
 
