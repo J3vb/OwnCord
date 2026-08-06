@@ -230,6 +230,91 @@ func TestDeleteAccount_SquattedAnonNameStillDeletes(t *testing.T) {
 	}
 }
 
+// ─── DeleteAccount — canonical admin criterion, tokens, DM cleanup ───────────
+
+func TestDeleteAccount_LastAdminGuard_SurvivesRoleRename(t *testing.T) {
+	database := openMigratedMemory(t)
+	// The Owner can rename the seeded Admin role (id=2); the guard must key
+	// on the canonical role IDs, not the display name.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE roles SET name = 'Staff' WHERE id = 2`); err != nil {
+		t.Fatalf("rename admin role: %v", err)
+	}
+	adminID := seedUser(t, database, "renamedadmin")
+	setRole(t, database, adminID, 2)
+
+	err := database.DeleteAccount(context.Background(), adminID)
+	if !errors.Is(err, db.ErrLastAdmin) {
+		t.Errorf("DeleteAccount(last holder of renamed admin role) = %v, want ErrLastAdmin", err)
+	}
+}
+
+func TestDeleteAccount_RevokesAPITokensAndPermanentBan(t *testing.T) {
+	database := openMigratedMemory(t)
+	uid := seedUser(t, database, "tokenuser")
+
+	tokenHash := "testhash-tokenuser"
+	if _, err := database.CreateAPIToken(context.Background(), uid, tokenHash, "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	// A previously lapsed temp ban left ban_expires in the past; combined
+	// with banned=1 that reads as NOT banned (TestIsEffectivelyBanned_*).
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET ban_expires = '2020-01-01 00:00:00' WHERE id = ?`, uid); err != nil {
+		t.Fatalf("set stale ban_expires: %v", err)
+	}
+
+	if err := database.DeleteAccount(context.Background(), uid); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	if tok, _ := database.GetActiveAPIToken(context.Background(), tokenHash); tok != nil {
+		t.Error("API token still active after account deletion; want revoked")
+	}
+	var banExpires *string
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT ban_expires FROM users WHERE id = ?`, uid).Scan(&banExpires); err != nil {
+		t.Fatalf("read ban_expires: %v", err)
+	}
+	if banExpires != nil {
+		t.Errorf("ban_expires = %q after deletion, want NULL (permanent ban)", *banExpires)
+	}
+}
+
+func TestDeleteAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
+	database := openMigratedMemory(t)
+	userA := seedUser(t, database, "dmlast-a")
+	userB := seedUser(t, database, "dmlast-b")
+	userC := seedUser(t, database, "dmlast-c")
+
+	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", []int64{userA, userB, userC})
+	if err != nil {
+		t.Fatalf("CreateGroupDMChannel: %v", err)
+	}
+	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID); err != nil {
+		t.Fatalf("LeaveGroupDM(userB): %v", err)
+	}
+	if _, err := database.LeaveGroupDM(context.Background(), userC, ch.ID); err != nil {
+		t.Fatalf("LeaveGroupDM(userC): %v", err)
+	}
+
+	// userA is now the last participant; deleting the account must apply
+	// LeaveGroupDM's invariant — a participant-less DM channel is an
+	// unreachable, undeletable row and must not survive.
+	if err := database.DeleteAccount(context.Background(), userA); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	var count int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM channels WHERE id = ?`, ch.ID).Scan(&count); err != nil {
+		t.Fatalf("count channels: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("group DM channel survived deletion of its last participant; want removed")
+	}
+}
+
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 func setRole(t *testing.T, database *db.DB, userID, roleID int64) {

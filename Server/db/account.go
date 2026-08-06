@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/owncord/server/permissions"
 )
 
 // DeleteAccount anonymises and disables a user account within a single
@@ -34,9 +36,13 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	// ── Guard: last admin/owner check ────────────────────────────────────
-	// Dynamically resolve admin-class role IDs from the roles table.
+	// Resolve admin-class roles by the canonical criteria — the seeded
+	// Owner/Admin role IDs plus any custom role holding the Administrator
+	// bypass bit. Names are user-editable (the Owner can rename the seeded
+	// Admin role), so a name lookup would silently disable the guard.
 	adminRows, err := tx.QueryContext(ctx,
-		`SELECT id FROM roles WHERE name IN ('Owner', 'Admin')`,
+		`SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0`,
+		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator,
 	)
 	if err != nil {
 		return fmt.Errorf("DeleteAccount fetch admin roles: %w", err)
@@ -91,12 +97,38 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		}
 	}
 
+	// Snapshot the user's DM channels before the participant rows go away,
+	// so channels left with zero participants can be removed below —
+	// LeaveGroupDM's invariant: a participant-less DM channel is an
+	// unreachable, undeletable row.
+	var dmChannelIDs []int64
+	dmRows, err := tx.QueryContext(ctx,
+		`SELECT channel_id FROM dm_participants WHERE user_id = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("DeleteAccount list dm channels: %w", err)
+	}
+	for dmRows.Next() {
+		var chID int64
+		if scanErr := dmRows.Scan(&chID); scanErr != nil {
+			dmRows.Close() //nolint:errcheck
+			return fmt.Errorf("DeleteAccount scan dm channel: %w", scanErr)
+		}
+		dmChannelIDs = append(dmChannelIDs, chID)
+	}
+	dmRows.Close() //nolint:errcheck
+	if dmRows.Err() != nil {
+		return fmt.Errorf("DeleteAccount dm channels rows: %w", dmRows.Err())
+	}
+
 	// ── Purge related data ───────────────────────────────────────────────
 	stmts := []struct {
 		label string
 		query string
 	}{
 		{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
+		// API tokens authenticate independently of sessions; leaving them
+		// active would keep the deleted account usable.
+		{"api_tokens", `UPDATE api_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`},
 		{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 		{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 		{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
@@ -105,6 +137,17 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {
 			return fmt.Errorf("DeleteAccount %s: %w", s.label, err)
+		}
+	}
+
+	// Remove DM channels the deletion left without participants.
+	for _, chID := range dmChannelIDs {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM channels WHERE id = ? AND type = 'dm'
+			   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = channels.id)`,
+			chID,
+		); err != nil {
+			return fmt.Errorf("DeleteAccount empty dm channel: %w", err)
 		}
 	}
 
@@ -146,6 +189,9 @@ const anonymiseUserAttempts = 4
 // suffix so no third party can pin the account in place by squatting a
 // predictable string.
 func anonymiseUser(ctx context.Context, tx *sql.Tx, userID int64) error {
+	// ban_expires must be cleared: a stale lapsed temp-ban timestamp would
+	// make banned=1 read as NOT banned (IsEffectivelyBanned), reviving the
+	// deleted account for any credential that survives.
 	const anonymise = `UPDATE users
 		 SET username    = ?,
 		     password    = '',
@@ -153,6 +199,7 @@ func anonymiseUser(ctx context.Context, tx *sql.Tx, userID int64) error {
 		     totp_secret = NULL,
 		     status      = 'offline',
 		     banned      = 1,
+		     ban_expires = NULL,
 		     ban_reason  = 'account deleted'
 		 WHERE id = ?`
 

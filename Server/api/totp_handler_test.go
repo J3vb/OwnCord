@@ -402,6 +402,132 @@ func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
 	}
 }
 
+// ─── API-token principals (nil session) and post-password bans ───────────────
+
+func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	secret, _ := auth.GenerateTOTPSecret()
+	hash, _ := auth.HashPassword("Password1!")
+	uid, _ := database.CreateUser(context.Background(), "banafterpw", hash, 4)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "banafterpw",
+		"password": "Password1!",
+	})
+	var loginResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	partialToken, _ := loginResp["partial_token"].(string)
+	if partialToken == "" {
+		t.Fatal("expected partial_token from login")
+	}
+
+	// The ban lands inside the 10-minute partial-token window; the sibling
+	// login path refuses banned users right after the password compare.
+	if err := database.BanUser(context.Background(), uid, "test ban", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
+		map[string]string{"code": code})
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("verify-totp for banned user: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	}
+	var verifyResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&verifyResp)
+	if verifyResp["token"] != nil {
+		t.Error("verify-totp issued a session token to a banned user")
+	}
+}
+
+func TestConfirmTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	sessionToken := loginAndGetToken(t, router, database, "apitotp1", 4)
+	user, _ := database.GetUserByUsername(context.Background(), "apitotp1")
+	if user == nil {
+		t.Fatal("user not found")
+	}
+	apiTok, _ := auth.GenerateToken()
+	if _, err := database.CreateAPIToken(context.Background(), user.ID, auth.HashToken(apiTok), "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", apiTok,
+		map[string]string{"password": "Password1!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable via API token: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var enableResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", apiTok,
+		map[string]string{"password": "Password1!", "code": code})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("confirm via API token: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A 2FA change from a sessionless principal must revoke EVERY login
+	// session (keep = 0), mirroring the change-password path — not skip
+	// revocation entirely.
+	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(sessionToken)); s != nil {
+		t.Error("login session survived a 2FA enable performed via API token; want all sessions revoked")
+	}
+}
+
+func TestDisableTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("Password1!")
+	uid, _ := database.CreateUser(context.Background(), "apitotp2", hash, 4)
+	apiTok, _ := auth.GenerateToken()
+	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(apiTok), "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	// Enable + confirm 2FA via the API token first.
+	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", apiTok,
+		map[string]string{"password": "Password1!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var enableResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", apiTok,
+		map[string]string{"password": "Password1!", "code": code})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("confirm: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A login session created after enrollment must be revoked by the disable.
+	sessionToken, _ := auth.GenerateToken()
+	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(sessionToken), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	rr = deleteWithToken(t, router, "/api/v1/users/me/totp", apiTok,
+		map[string]string{"password": "Password1!"})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("disable via API token: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(sessionToken)); s != nil {
+		t.Error("login session survived a 2FA disable performed via API token; want all sessions revoked")
+	}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // deleteWithToken sends a DELETE request with a JSON body and auth token.
