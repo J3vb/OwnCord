@@ -49,6 +49,10 @@ type Querier interface {
 	DeleteEmoji(ctx context.Context, id int64) (sql.Result, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteLockout(ctx context.Context, key string) error
+	// Avatars are attachments that are never linked to a message on purpose: the
+	// users.avatar URL is what keeps them alive and authorizes serving them
+	// (migration 027). Excluding them here is what stops the sweep from destroying
+	// every avatar in the instance. idx_users_avatar makes the lookup cheap.
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
 	DeleteRole(ctx context.Context, id int64) error

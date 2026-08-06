@@ -15,5 +15,15 @@ LEFT JOIN channels c ON c.id = m.channel_id
 WHERE a.id = ?;
 
 -- name: DeleteOrphanedAttachments :many
-DELETE FROM attachments WHERE message_id IS NULL AND uploaded_at < ? RETURNING stored_as;
+-- Avatars are attachments that are never linked to a message on purpose: the
+-- users.avatar URL is what keeps them alive and authorizes serving them
+-- (migration 027). Excluding them here is what stops the sweep from destroying
+-- every avatar in the instance. idx_users_avatar makes the lookup cheap.
+DELETE FROM attachments
+WHERE message_id IS NULL
+  AND uploaded_at < ?
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
+  )
+RETURNING stored_as;
 

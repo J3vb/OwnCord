@@ -459,7 +459,7 @@ func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
 	_ = database.CreateAttachment(context.Background(), "orphan-1", userID, "file.txt", "stored-orphan.txt", "text/plain", 100, nil, nil)
 
 	// Use a cutoff far in the future so the attachment is considered old.
-	files, err := database.DeleteOrphanedAttachments(context.Background(), "2099-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}
@@ -487,12 +487,57 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "with attachment", nil)
 	_, _ = database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"linked-1"})
 
-	files, err := database.DeleteOrphanedAttachments(context.Background(), "2099-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}
 	if len(files) != 0 {
 		t.Errorf("expected 0 orphans (linked), got %d", len(files))
+	}
+}
+
+// An avatar is an attachment that is deliberately never linked to a message:
+// users.avatar points at it by URL and that reference is what authorizes serving
+// it (migration 027). The orphan sweep must therefore not treat it as garbage.
+func TestDeleteOrphanedAttachments_KeepsLiveAvatars(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "avatar-owner")
+
+	_ = database.CreateAttachment(context.Background(), "avatar-1", userID, "me.png", "stored-avatar.png", "image/png", 100, nil, nil)
+	avatarURL := "/api/v1/files/avatar-1"
+	if err := database.UpdateUserProfile(context.Background(), userID, "avatar-owner", &avatarURL, nil, nil); err != nil {
+		t.Fatalf("UpdateUserProfile: %v", err)
+	}
+
+	files, err := database.DeleteOrphanedAttachments(context.Background(), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DeleteOrphanedAttachments: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 deletions, got %d (%v) — a live avatar was swept", len(files), files)
+	}
+	att, _ := database.GetAttachmentByID(context.Background(), "avatar-1")
+	if att == nil {
+		t.Error("live avatar attachment must survive the orphan sweep")
+	}
+}
+
+// The sweep runs with a one-hour grace period. uploaded_at is written by SQLite
+// as 'YYYY-MM-DD HH:MM:SS', so a cutoff in any other shape compares bytewise
+// against it and silently collapses the grace window.
+func TestDeleteOrphanedAttachments_GracePeriodHoldsSameDay(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "grace-uploader")
+
+	_ = database.CreateAttachment(context.Background(), "fresh-1", userID, "file.txt", "stored-fresh.txt", "text/plain", 100, nil, nil)
+
+	// Exactly what the maintenance loop passes: one hour ago.
+	files, err := database.DeleteOrphanedAttachments(context.Background(), time.Now().Add(-1*time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteOrphanedAttachments: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 deletions, got %d (%v) — an upload inside the grace period was swept", len(files), files)
 	}
 }
 
@@ -503,7 +548,7 @@ func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
 	_ = database.CreateAttachment(context.Background(), "future-1", userID, "file.txt", "stored-future.txt", "text/plain", 100, nil, nil)
 
 	// Cutoff in the past — newly created attachment should NOT be deleted.
-	files, err := database.DeleteOrphanedAttachments(context.Background(), "2000-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}

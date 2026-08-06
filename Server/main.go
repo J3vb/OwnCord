@@ -310,7 +310,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 				}
 
 				// Clean up orphaned attachments (uploaded but never linked to a message).
-				cutoff := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+				cutoff := time.Now().Add(-1 * time.Hour)
 				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
 				if orphanErr != nil {
 					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
