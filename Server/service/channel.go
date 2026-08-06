@@ -230,9 +230,11 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
 
-	// Mark channel as read.
+	// Mark channel as read. latestID == 0 (no undeleted messages) still
+	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
+	// correct then — any future message id is larger, so unread counts hold.
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
-	if err == nil && latestID > 0 {
+	if err == nil {
 		_ = s.st.UpdateReadState(ctx, userID, channelID, latestID)
 	}
 

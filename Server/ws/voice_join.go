@@ -124,8 +124,15 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
 				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
-			// Restore client voice state so the user knows they're still in the old channel.
+			// Restore client voice state so the user knows they're still in the
+			// old channel. The failed leave already dropped the voice-topic
+			// subscription and key-holder entry, and voice state and topic
+			// subscription must move as a pair (see clearVoiceAndUnsubscribe)
+			// — without them the restored session silently misses every
+			// voice_e2ee relay for its channel.
 			c.setVoiceState(vs.ChannelID, vs.JoinedAt)
+			h.pubsub.Subscribe(c, VoiceTopic(vs.ChannelID))
+			h.updateKeyHolder(vs.ChannelID)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
 			return
 		}

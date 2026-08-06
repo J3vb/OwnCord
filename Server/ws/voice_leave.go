@@ -30,7 +30,30 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
 		return
 	}
+	h.finishVoiceLeave(ctx, c, oldChID, oldJoinToken)
+}
 
+// handleVoiceLeaveIfStillIn is handleVoiceLeave conditioned on the channel: it
+// evicts only if chID is still the client's current voice channel, reporting
+// whether it did. An eviction decided against a snapshotted channel (the
+// revocation sweep's DB-backed permission check) must not clear a newer
+// membership committed while the decision was in flight — the same rule
+// LeaveVoiceChannelIfMatch applies to the DB row.
+func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64) bool {
+	oldJoinToken, ok := c.clearVoiceStateIfMatch(chID)
+	if !ok {
+		return false
+	}
+	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
+	h.finishVoiceLeave(ctx, c, chID, oldJoinToken)
+	return true
+}
+
+// finishVoiceLeave is the shared tail of the leave paths, run after the
+// client's voice state and topic subscription are cleared: DB row removal
+// (with retry), voice_leave broadcast, key-holder re-election and LiveKit
+// participant removal.
+func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken string) {
 	username := ""
 	if c.user != nil {
 		username = c.user.Username

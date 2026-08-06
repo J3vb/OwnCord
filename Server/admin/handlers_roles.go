@@ -131,7 +131,7 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// but reading first keeps the invalidation correct even if a concurrent
 		// role assignment lands in between (the extra id is a wasted eviction,
 		// a missing one is a stale grant).
-		affected := roles.AffectedUserIDs(r.Context(), id)
+		affected, affectedOK := roles.AffectedUserIDs(r.Context(), id)
 
 		role, permsChanged, err := roles.UpdateRole(r.Context(), actorFromContext(r), id, req.toInput())
 		if err != nil {
@@ -140,7 +140,14 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		}
 
 		if permsChanged {
-			invalidateUsers(permInvalidator, affected)
+			if affectedOK {
+				invalidateUsers(permInvalidator, affected)
+			} else if permInvalidator != nil {
+				// The member list was unreadable, so per-user eviction cannot
+				// be trusted; drop every cached mask instead (what reorder
+				// does on every call) rather than leave revoked grants live.
+				permInvalidator.InvalidateAll()
+			}
 			// READ_MESSAGES may have moved in either direction, so every
 			// channel's audience for this role has to be re-derived.
 			if hub != nil {

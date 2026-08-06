@@ -98,7 +98,14 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	// Enforce MaxVideo limit when enabling camera using an atomic check-and-update.
 	if enabled {
 		ch, chErr := d.DB.GetChannel(ctx, voiceChID)
-		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 {
+		if chErr != nil {
+			// Fail closed: an unreadable channel row is not "no cap
+			// configured" — falling through to the unconditional enable
+			// bypasses the per-channel video limit.
+			slog.Error("handleVoiceCameraV2 GetChannel", "err", chErr, "channel_id", voiceChID)
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
+		}
+		if ch != nil && ch.VoiceMaxVideo > 0 {
 			ok, limitErr := d.DB.EnableCameraIfUnderLimit(ctx, userID, voiceChID, ch.VoiceMaxVideo)
 			if limitErr != nil {
 				slog.Error("handleVoiceCameraV2 EnableCameraIfUnderLimit", "err", limitErr, "channel_id", voiceChID)

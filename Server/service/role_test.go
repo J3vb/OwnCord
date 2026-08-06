@@ -606,12 +606,12 @@ func TestListRoles_CarriesMemberCounts(t *testing.T) {
 func TestAffectedUserIDs(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 
-	ids := svc.AffectedUserIDs(context.Background(), permissions.MemberRoleID)
-	if len(ids) != 2 {
-		t.Errorf("AffectedUserIDs = %v, want 2 members", ids)
+	ids, ok := svc.AffectedUserIDs(context.Background(), permissions.MemberRoleID)
+	if !ok || len(ids) != 2 {
+		t.Errorf("AffectedUserIDs = %v ok=%v, want 2 members", ids, ok)
 	}
-	if got := svc.AffectedUserIDs(context.Background(), 9999); len(got) != 0 {
-		t.Errorf("AffectedUserIDs(missing) = %v, want empty", got)
+	if got, ok := svc.AffectedUserIDs(context.Background(), 9999); !ok || len(got) != 0 {
+		t.Errorf("AffectedUserIDs(missing) = %v ok=%v, want empty and ok", got, ok)
 	}
 }
 

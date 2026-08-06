@@ -142,6 +142,24 @@ func (c *Client) clearVoiceState() (int64, string) {
 	return oldChID, oldJoinToken
 }
 
+// clearVoiceStateIfMatch clears the voice state only when the current channel
+// is chID, returning the join token and whether it cleared. Delayed evictions
+// decided against a snapshotted channel use it so a membership committed after
+// the snapshot survives — the in-memory analogue of LeaveVoiceChannelIfMatch.
+func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	if c.voiceChID != chID {
+		return "", false
+	}
+	oldJoinToken := c.voiceJoinToken
+	c.voiceChID = 0
+	c.voiceJoinToken = ""
+	c.e2eePubKey = ""
+	c.e2eeSignature = ""
+	return oldJoinToken, true
+}
+
 // setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
 // together with its identity-key signature ("" for legacy announces).
 func (c *Client) setE2EEPubKey(key, signature string) {

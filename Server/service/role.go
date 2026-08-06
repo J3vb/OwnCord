@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -23,6 +24,11 @@ import (
 type RoleService struct {
 	st    Store
 	perms *PermissionService
+	// mu serializes the read-check-write mutations: position uniqueness and
+	// the role cap are enforced against a ListRoles snapshot, not by a DB
+	// constraint, so two interleaved mutations can both see the same free
+	// slot. Single-process server — one lock covers every writer.
+	mu sync.Mutex
 }
 
 // NewRoleService creates a RoleService.
@@ -178,6 +184,8 @@ func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithM
 
 // CreateRole creates a role strictly below the actor's own rank.
 func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
 		return nil, err
@@ -265,6 +273,8 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 // the caller uses that to decide between a cheap roles_update broadcast and a
 // full visibility re-sync.
 func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, permsChanged bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
 		return nil, false, err
@@ -343,6 +353,8 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 // default role. Returns the deleted role, the fallback its members landed on,
 // and the ids of those members so the caller can invalidate and re-sync them.
 func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
 		return nil, nil, nil, err
@@ -406,6 +418,8 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 // the actor (N < actor.Position, enforced by maxRoles), and never collide with
 // the untouched roles above the actor.
 func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedIDs []int64) ([]*db.Role, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
 		return nil, err
@@ -459,15 +473,16 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 	return updated, nil
 }
 
-// AffectedUserIDs returns the ids of the users holding roleID. Handlers use it
-// to invalidate exactly the permission-cache entries a role edit touches.
-func (s *RoleService) AffectedUserIDs(ctx context.Context, roleID int64) []int64 {
+// AffectedUserIDs returns the ids of the users holding roleID, and whether the
+// lookup succeeded. Handlers use it to invalidate exactly the permission-cache
+// entries a role edit touches; on ok=false the caller must fall back to a
+// blanket invalidation — a nil list treated as "nobody" silently leaves stale
+// masks in place.
+func (s *RoleService) AffectedUserIDs(ctx context.Context, roleID int64) ([]int64, bool) {
 	ids, err := s.st.ListUserIDsByRole(ctx, roleID)
 	if err != nil {
-		// The caller falls back to a blanket invalidation; a partial list here
-		// would silently leave stale masks in place.
 		slog.Warn("role service: failed to list role members", "role_id", roleID, "err", err)
-		return nil
+		return nil, false
 	}
-	return ids
+	return ids, true
 }

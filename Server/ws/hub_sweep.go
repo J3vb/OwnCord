@@ -162,10 +162,16 @@ func (h *Hub) sweepStaleVoiceStates() {
 		if chID == 0 || h.hasChannelPerm(ctx, c, chID, permissions.ConnectVoice) {
 			continue
 		}
-		slog.Warn("sweepStaleVoiceStates: evicting participant whose CONNECT_VOICE was revoked",
+		// The permission check is a DB round-trip; a voice_join to a
+		// still-permitted channel may have committed while it ran. The
+		// eviction is conditional on the client still being in the checked
+		// channel — never on whatever channel it is in by now.
+		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID) {
+			continue
+		}
+		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
 			"user_id", c.userID, "channel_id", chID)
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
-		h.handleVoiceLeave(ctx, c)
 	}
 
 	allStates, err := h.db.GetAllVoiceStates(ctx)
