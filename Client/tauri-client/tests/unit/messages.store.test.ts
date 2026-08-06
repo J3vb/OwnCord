@@ -19,6 +19,7 @@ import {
   getChannelMessages,
   isChannelLoaded,
   hasMoreMessages,
+  isWindowDetached,
   clearChannelMessages,
   setChannelLoading,
   setChannelLoadError,
@@ -232,6 +233,45 @@ describe("messages store", () => {
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(1);
       expect(msgs[0]!.id).toBe(20);
+    });
+
+    it("keeps a newer live broadcast that landed while the history fetch was in flight", () => {
+      // The broadcast arrives over the open WS after the server ran the GET
+      // query but before the response reaches the client.
+      addMessage(makeChatPayload({ id: 300, channel_id: 1, content: "live" }));
+
+      setMessages(1, [makeMessageResponse({ id: 201 }), makeMessageResponse({ id: 200 })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual([200, 201, 300]);
+      expect(msgs[2]!.content).toBe("live");
+    });
+
+    it("keeps pending and failed optimistic rows across setMessages", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "in flight",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "SLOW_MODE");
+
+      setMessages(1, [makeMessageResponse({ id: 200 })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
+      expect(msgs[1]!.status).toBe("pending");
+      expect(msgs[2]!.status).toBe("failed");
     });
   });
 
@@ -964,7 +1004,10 @@ describe("messages store", () => {
       expect(msgs).toHaveLength(500);
     });
 
-    it("sets hasMore to true when trimming on prepend", () => {
+    it("keeps the server's hasMore and detaches when trimming on prepend", () => {
+      // Trimming on prepend drops the live tail (rows BELOW the window), not
+      // older history, so "more above" stays whatever the server said and the
+      // channel becomes a detached window instead.
       const initial: MessageResponse[] = [];
       for (let i = 301; i <= 500; i++) {
         initial.push(makeMessageResponse({ id: i, channel_id: 1 }));
@@ -977,7 +1020,8 @@ describe("messages store", () => {
       }
       prependMessages(1, older, false);
 
-      expect(hasMoreMessages(1)).toBe(true);
+      expect(hasMoreMessages(1)).toBe(false);
+      expect(isWindowDetached(1)).toBe(true);
     });
   });
 
@@ -1095,6 +1139,25 @@ describe("messages store", () => {
       addMessage(makeChatPayload({ id: 700, content: "once" }));
       addMessage(makeChatPayload({ id: 700, content: "once" }));
       expect(getChannelMessages(1)).toHaveLength(1);
+    });
+
+    it("does not consume a pending row for a same-author broadcast with different content", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "mine, still sending",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      // Same author, different content: a replayed message from another
+      // session of this account, not the echo of the pending send.
+      addMessage(makeChatPayload({ id: 800, user: TEST_USER, content: "from my other device" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("pending");
+      expect(msgs.find((m) => m.id === 800)!.content).toBe("from my other device");
     });
 
     it("defensively reconciles a broadcast that raced ahead of its ack", () => {

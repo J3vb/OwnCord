@@ -124,6 +124,15 @@ describe("voice store", () => {
       expect(user?.screenshare).toBe(false);
     });
 
+    it("maps camera/screenshare from the ready payload when present", () => {
+      // The server marshals the voice_states rows wholesale — a full-ready
+      // resync mid-call must not blank a peer's active camera/screenshare.
+      setVoiceStates([{ ...VOICE_STATE_1, camera: true, screenshare: true }]);
+      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(user?.camera).toBe(true);
+      expect(user?.screenshare).toBe(true);
+    });
+
     it("replaces existing voice states entirely", () => {
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
       setVoiceStates([VOICE_STATE_3]);

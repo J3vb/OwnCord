@@ -66,6 +66,7 @@ import { invalidateReactionUsers } from "@components/message-list/reaction-toolt
 import { notifyIncomingMessage } from "./notifications";
 import { highlightsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
+import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
@@ -218,10 +219,21 @@ export function wireDispatcher(
         }
       }
 
-      // Populate DM channels if present in the ready payload
+      // Populate DM channels from the ready payload. The server always sends
+      // the field, so an empty array is an authoritative "no open DMs" (all
+      // closed/left on another device) and must clear ghosts from dmStore —
+      // skipping it would let a stale DM survive every reconnect.
       const dmPayloads = payload.dm_channels ?? [];
-      if (dmPayloads.length > 0) {
-        setDmChannels(dmPayloads.map(mapDmPayload));
+      setDmChannels(dmPayloads.map(mapDmPayload));
+
+      // The server's read_states go stale while a channel stays focused
+      // (channel_focus is sent once per mount, mark_read only from the context
+      // menu), so a full-ready resync restates non-zero unread/mention counts
+      // for the very channel the user is reading. Mark it read: this advances
+      // the server read state and clears the local badges, for server channels
+      // and DMs alike. Skipped on first connect (nothing was active yet).
+      if (currentActive !== null) {
+        markChannelRead(currentActive);
       }
 
       // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
@@ -661,6 +673,19 @@ export function wireDispatcher(
   // fail the matching optimistic row exactly like a server error reply would.
   // An optimistic reaction toggle rolls back the same way. Fire-and-forget
   // sends (typing, presence, voice) have no pending entry and stay logged-only.
+  // A connection that leaves "connected" can never deliver chat_send_ok for
+  // frames already handed to the transport: fail every pending optimistic
+  // send so its row offers retry instead of spinning forever (and the leaked
+  // pendingSends entries are cleared).
+  unsubs.push(
+    ws.onStateChange((state) => {
+      if (state !== "reconnecting" && state !== "disconnected") return;
+      for (const id of [...messagesStore.getState().pendingSends.keys()]) {
+        markSendFailed(id, "OFFLINE");
+      }
+    }),
+  );
+
   unsubs.push(
     ws.onSendFailure((id, code) => {
       if (messagesStore.getState().pendingSends.has(id)) {

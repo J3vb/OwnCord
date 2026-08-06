@@ -123,9 +123,10 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
 
-const { mockReattachToPresent, mockJumpToMessage } = vi.hoisted(() => ({
+const { mockReattachToPresent, mockJumpToMessage, mockIsWindowDetached } = vi.hoisted(() => ({
   mockReattachToPresent: vi.fn(),
   mockJumpToMessage: vi.fn(),
+  mockIsWindowDetached: vi.fn(() => false),
 }));
 
 vi.mock("@stores/messages.store", () => ({
@@ -135,6 +136,7 @@ vi.mock("@stores/messages.store", () => ({
   markSendFailed: mockMarkSendFailed,
   removeOptimistic: mockRemoveOptimistic,
   reattachToPresent: mockReattachToPresent,
+  isWindowDetached: mockIsWindowDetached,
 }));
 
 vi.mock("@lib/message-navigation", () => ({
@@ -419,6 +421,24 @@ describe("createChannelController", () => {
           attachments: [],
         },
       });
+    });
+
+    it("onSend from a detached window reattaches to present before sending", () => {
+      // After a jump into history the composer stays enabled; sending must
+      // land the optimistic row in the live tail, not mid-history.
+      mockIsWindowDetached.mockReturnValueOnce(true);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
+
+      capturedMessageInputOpts.onSend("hello", null, []);
+
+      expect(mockReattachToPresent).toHaveBeenCalledWith(42);
+      // Reattach clears "loaded", so the live tail is refetched.
+      expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+      // The send itself still goes out.
+      expect(opts.ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
     });
 
     it("onSend while disconnected records a failed optimistic row (no silent drop)", () => {

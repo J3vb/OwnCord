@@ -189,6 +189,9 @@ export interface ReadyVoiceState {
   /** Moderator-imposed; optional so an older server's payload still parses. */
   readonly server_muted?: boolean;
   readonly server_deafened?: boolean;
+  /** Live video publications; optional so an older server's payload still parses. */
+  readonly camera?: boolean;
+  readonly screenshare?: boolean;
 }
 
 /** Role object in the ready payload and in roles_update. */

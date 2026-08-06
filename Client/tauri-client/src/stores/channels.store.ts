@@ -109,10 +109,18 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       voiceMaxVideo: ch.voice_max_video ?? 0,
     });
   }
-  channelsStore.setState((prev) => ({
-    ...prev,
-    channels: map,
-  }));
+  channelsStore.setState((prev) => {
+    // The ready payload never includes DM rows (those arrive via dm_channels
+    // and are synthesized into this store on selection), so carry them across
+    // the rebuild — destroying them would break call/profile actions for the
+    // DM the user is currently viewing until they re-click it.
+    for (const [id, ch] of prev.channels) {
+      if (ch.type === "dm" && !map.has(id)) {
+        map.set(id, ch);
+      }
+    }
+    return { ...prev, channels: map };
+  });
 }
 
 /** Bulk set roles from the ready payload. */
@@ -127,9 +135,13 @@ export function getRoleIdByName(name: string): number | undefined {
   return match?.id;
 }
 
-/** Add a single channel from a channel_create event. */
+/** Add a single channel from a channel_create event. The server re-sends
+ *  channel_create to still-visible clients on role/override edits, so the add
+ *  must be idempotent: the broadcast carries no per-user data, and a re-add
+ *  must preserve the existing row's per-user fields instead of resetting them. */
 export function addChannel(channel: ChannelCreatePayload): void {
   channelsStore.setState((prev) => {
+    const existing = prev.channels.get(channel.id);
     const next = new Map(prev.channels);
     next.set(channel.id, {
       id: channel.id,
@@ -138,12 +150,12 @@ export function addChannel(channel: ChannelCreatePayload): void {
       category: channel.category,
       topic: channel.topic ?? "",
       position: channel.position,
-      unreadCount: 0,
-      mentionCount: 0,
-      lastMessageId: null,
-      // Broadcasts carry no per-user data; default permissive. The next ready
-      // payload delivers the authoritative can_send. Server enforces regardless.
-      canSend: true,
+      unreadCount: existing?.unreadCount ?? 0,
+      mentionCount: existing?.mentionCount ?? 0,
+      lastMessageId: existing?.lastMessageId ?? null,
+      // For a genuinely new channel default permissive; the next ready payload
+      // delivers the authoritative can_send. Server enforces regardless.
+      canSend: existing?.canSend ?? true,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
       voiceMaxUsers: channel.voice_max_users ?? 0,

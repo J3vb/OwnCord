@@ -201,9 +201,16 @@ export function addMessage(payload: ChatMessagePayload): void {
     }
 
     // 2. Defensive: reconcile the oldest pending optimistic row from this author
-    //    (a broadcast that arrived before its chat_send_ok ack).
+    //    (a broadcast that arrived before its chat_send_ok ack). Content must
+    //    match too — our own echo always carries identical content, while a
+    //    same-author message from another session of this account does not,
+    //    and consuming the pending row for it would orphan the real send.
     const pendingIdx = existing.findIndex(
-      (m) => m.status === "pending" && m.correlationId !== null && m.user.id === message.user.id,
+      (m) =>
+        m.status === "pending" &&
+        m.correlationId !== null &&
+        m.user.id === message.user.id &&
+        m.content === message.content,
     );
     if (pendingIdx !== -1) {
       const replaced = existing.map((m, i) => (i === pendingIdx ? message : m));
@@ -330,7 +337,14 @@ export function setChannelLoadError(channelId: number): void {
 }
 
 /** Bulk set messages from a REST response. Marks channel as loaded.
- *  The server returns messages newest-first; we reverse to chronological order. */
+ *  The server returns messages newest-first; we reverse to chronological order.
+ *
+ *  Merges rather than clobbers: a live broadcast or an optimistic send can
+ *  land while the fetch is in flight, and the snapshot predates those rows —
+ *  replacing wholesale would silently discard them (and loadedChannels then
+ *  blocks any refetch until a full reload). Rows from the previous array are
+ *  carried over when they are pending/failed, or "sent" but newer than
+ *  anything in the snapshot. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
@@ -342,14 +356,29 @@ export function setMessages(
       ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
       : converted;
   messagesStore.setState((prev) => {
+    const previous = prev.messagesByChannel.get(channelId) ?? [];
+    const snapshotIds = new Set(trimmed.map((m) => m.id));
+    const maxSnapshotId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
+    const carried = previous.filter(
+      (m) => !snapshotIds.has(m.id) && (m.status !== "sent" || m.id > maxSnapshotId),
+    );
+    let merged = carried.length > 0 ? [...trimmed, ...carried] : trimmed;
+    const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
+    if (mergeTrimmed) {
+      merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
+    }
+
     const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, trimmed);
+    updatedMessages.set(channelId, merged);
 
     const updatedLoaded = new Set(prev.loadedChannels);
     updatedLoaded.add(channelId);
 
     const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.set(channelId, hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL);
+    updatedHasMore.set(
+      channelId,
+      hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL || mergeTrimmed,
+    );
 
     const updatedLoadState = new Map(prev.historyLoadState);
     updatedLoadState.delete(channelId);
@@ -453,22 +482,34 @@ export function prependMessages(
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
-    // Keep newest messages (end of array); drop oldest loaded history when cap exceeded
+    // Keep the OLDEST rows (start of array) when the cap is exceeded: the
+    // user is scrolling up, so the fetched page must survive — trimming it
+    // would make every cap-hit prepend a content-identical no-op that
+    // refetches the same page forever. The dropped live tail is restored via
+    // the detached-window machinery ("Jump to Present"), mirroring
+    // setAroundMessages' window semantics.
     const wasTrimmed = combined.length > MAX_MESSAGES_PER_CHANNEL;
     if (wasTrimmed) {
-      combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
+      combined = combined.slice(0, MAX_MESSAGES_PER_CHANNEL);
     }
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, combined);
 
     const updatedHasMore = new Map(prev.hasMore);
-    // If we trimmed older messages, there are definitely more on the server above.
-    updatedHasMore.set(channelId, hasMore || wasTrimmed);
+    // Trimming drops rows below the window, never above it, so "more above"
+    // is exactly what the server said.
+    updatedHasMore.set(channelId, hasMore);
+
+    const updatedDetached = new Set(prev.detachedChannels);
+    if (wasTrimmed) {
+      updatedDetached.add(channelId);
+    }
 
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       hasMore: updatedHasMore,
+      detachedChannels: updatedDetached,
     };
   });
 }

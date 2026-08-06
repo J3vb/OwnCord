@@ -26,7 +26,8 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
-import type { WsClient, WsListener } from "../../src/lib/ws";
+import { setMarkReadSender } from "../../src/lib/read-state";
+import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 
 // Mock notifications and livekitSession to avoid side effects
@@ -73,6 +74,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 function createMockWs() {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
   const sendFailureListeners = new Set<(id: string, code: string) => void>();
+  const stateListeners = new Set<(state: ConnectionState) => void>();
 
   const ws: WsClient = {
     connect: vi.fn(),
@@ -87,7 +89,10 @@ function createMockWs() {
         listeners.get(type)?.delete(listener as unknown as WsListener<ServerMessage["type"]>);
       };
     },
-    onStateChange: vi.fn(() => () => {}),
+    onStateChange(listener: (state: ConnectionState) => void): () => void {
+      stateListeners.add(listener);
+      return () => stateListeners.delete(listener);
+    },
     onSendFailure(listener: (id: string, code: string) => void): () => void {
       sendFailureListeners.add(listener);
       return () => sendFailureListeners.delete(listener);
@@ -116,7 +121,13 @@ function createMockWs() {
     }
   }
 
-  return { ws, dispatch, dispatchSendFailure, listeners };
+  function dispatchState(state: ConnectionState): void {
+    for (const listener of stateListeners) {
+      listener(state);
+    }
+  }
+
+  return { ws, dispatch, dispatchSendFailure, dispatchState, listeners };
 }
 
 describe("WS Dispatcher", () => {
@@ -624,7 +635,7 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBeNull();
   });
 
-  it("ready with no DM channels in payload skips setDmChannels", () => {
+  it("ready with no DM channels in payload leaves dmStore empty", () => {
     mock.dispatch("ready", {
       channels: [],
       members: [],
@@ -633,6 +644,145 @@ describe("WS Dispatcher", () => {
     });
 
     expect(dmStore.getState().channels).toHaveLength(0);
+  });
+
+  it("ready with an empty dm_channels array clears stale DM rows", () => {
+    // The server always sends dm_channels; [] is an authoritative "no open
+    // DMs" (all closed on another device), not "nothing to say".
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      dm_channels: [],
+    });
+
+    expect(dmStore.getState().channels).toHaveLength(0);
+  });
+
+  describe("ready re-marks the active channel read", () => {
+    afterEach(() => {
+      setMarkReadSender(null);
+    });
+
+    it("clears the resurrected badge and advances the server read state for the focused channel", () => {
+      // read_states go stale while a channel stays focused (channel_focus is
+      // sent once per mount), so a full-ready resync restates non-zero counts
+      // for the channel the user is currently reading.
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("ready", {
+        channels: [
+          {
+            id: 1,
+            name: "general",
+            type: "text",
+            category: null,
+            position: 0,
+            unread_count: 4,
+            mention_count: 2,
+          },
+        ],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.unreadCount).toBe(0);
+      expect(ch?.mentionCount).toBe(0);
+      expect(sender).toHaveBeenCalledWith(1);
+    });
+
+    it("clears the badge for the actively viewed DM too", () => {
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: 5,
+            last_message: "hello",
+            last_message_at: "2026-03-15T10:00:00Z",
+            unread_count: 3,
+            mention_count: 1,
+          },
+        ],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.unreadCount).toBe(0);
+      expect(dm?.mentionCount).toBe(0);
+      expect(sender).toHaveBeenCalledWith(50);
+    });
+
+    it("does not send mark_read when no channel was active before the ready", () => {
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+
+      mock.dispatch("ready", {
+        channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // Auto-select ran, but a first connect is not a resync — the payload's
+      // counts are fresh and the user was not yet reading anything.
+      expect(sender).not.toHaveBeenCalled();
+    });
+  });
+
+  it("fails every pending optimistic send when the connection drops", () => {
+    addOptimisticMessage({
+      correlationId: "corr-drop",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "in flight",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    // Reaching connected must not fail anything…
+    mock.dispatchState("connected");
+    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.status).toBe("pending");
+
+    // …but the connection dropping can never deliver chat_send_ok for the
+    // pending frame, so the row must fail with retry instead of spinning.
+    mock.dispatchState("reconnecting");
+
+    const msg = messagesStore.getState().messagesByChannel.get(1)![0]!;
+    expect(msg.status).toBe("failed");
+    expect(msg.errorCode).toBe("OFFLINE");
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
   });
 
   it("wires chat_edited to messages store", () => {

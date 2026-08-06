@@ -144,8 +144,11 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
       muted: vs.muted,
       deafened: vs.deafened,
       speaking: false,
-      camera: false,
-      screenshare: false,
+      // The ready payload carries the authoritative DB flags; blanking them
+      // on a mid-call resync would hide a peer's live camera/screenshare
+      // until they toggled it. Absent (older server) still defaults false.
+      camera: vs.camera ?? false,
+      screenshare: vs.screenshare ?? false,
       serverMuted: vs.server_muted ?? false,
       serverDeafened: vs.server_deafened ?? false,
     });

@@ -24,6 +24,7 @@ import {
   markSendFailed,
   removeOptimistic,
   reattachToPresent,
+  isWindowDetached,
 } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
@@ -178,6 +179,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     ): void {
       const user = currentMessageUser();
       if (user === null) return;
+      // Sending while viewing a detached history window jumps to present: the
+      // optimistic row belongs in the live tail, and addMessage would refuse
+      // to append the echo into a detached window anyway. Mirrors
+      // onJumpToPresent — reattach clears "loaded" so the tail is refetched.
+      if (isWindowDetached(channelId)) {
+        reattachToPresent(channelId);
+        if (channelAbort !== null) {
+          void msgCtrl.loadMessages(channelId, channelAbort.signal);
+        }
+      }
       const timestamp = new Date().toISOString();
       if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a

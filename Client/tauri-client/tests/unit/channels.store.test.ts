@@ -112,6 +112,38 @@ describe("channels store", () => {
       expect(ch?.unreadCount).toBe(0);
       expect(ch?.lastMessageId).toBeNull();
     });
+
+    it("carries synthesized DM rows across a ready rebuild", () => {
+      setChannels(readyChannels);
+      // A DM row is synthesized client-side (selectDmConversation); the ready
+      // payload never restates it, so a rebuild must not destroy it.
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(99, {
+          id: 99,
+          name: "bob",
+          type: "dm",
+          category: null,
+          topic: "",
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: next };
+      });
+
+      setChannels(readyChannels);
+
+      const dm = channelsStore.getState().channels.get(99);
+      expect(dm?.type).toBe("dm");
+      expect(dm?.name).toBe("bob");
+    });
   });
 
   describe("addChannel", () => {
@@ -159,6 +191,28 @@ describe("channels store", () => {
       expect(before).not.toBe(after);
       expect(before.size).toBe(3);
       expect(after.size).toBe(4);
+    });
+
+    it("preserves per-user fields on a re-sent channel_create (idempotent add)", () => {
+      // The server re-broadcasts channel_create on role/override edits with
+      // the note "Idempotent add on the client" — the broadcast carries no
+      // per-user fields, so a re-add must not reset them.
+      setChannels(readyChannels); // channel 1: unreadCount 3, lastMessageId 100
+      incrementMention(1);
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(1, { ...prev.channels.get(1)!, canSend: false });
+        return { ...prev, channels: next };
+      });
+
+      addChannel({ id: 1, name: "general-renamed", type: "text", category: "Text", position: 0 });
+
+      const ch = channelsStore.getState().channels.get(1)!;
+      expect(ch.name).toBe("general-renamed"); // payload fields still apply
+      expect(ch.unreadCount).toBe(3);
+      expect(ch.mentionCount).toBe(1);
+      expect(ch.lastMessageId).toBe(100);
+      expect(ch.canSend).toBe(false);
     });
   });
 
