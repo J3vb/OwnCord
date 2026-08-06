@@ -11,33 +11,42 @@ import (
 // living inside an actual surviving tag, case-insensitively, tolerating
 // whitespace around the '='.
 //
-// The check is deliberately tag-scoped (requires a preceding unclosed '<')
-// rather than a bare `\bon\w+\s*=` substring match: bluemonday's
-// StrictPolicy strips every tag, so the only way "onerror=" et al. can
-// survive into `out` is as inert plain text a user actually typed (e.g. a
-// message that reads "use onClick= to bind a handler") — that text renders
-// as a text node, not as a live attribute, so it is not an active-content
-// sink. A bare substring match flags that benign case as a false positive
-// (confirmed via fuzzing: seed "on0=" round-trips unchanged through
-// sanitizeContent and is not exploitable). Requiring tag context is what
-// actually distinguishes "typed the word onclick=" from "smuggled a live
-// onclick attribute".
-var onEventAttr = regexp.MustCompile(`(?i)<[^>]*\bon\w+\s*=`)
+// The check is deliberately tag-scoped rather than a bare `\bon\w+\s*=`
+// substring match, but it is scoped to a *tag-like* start specifically —
+// `<` immediately followed by a letter or '/' — not just any `<`.
+// sanitizeContent now unescapes bluemonday's output, so a literal '<' CAN
+// survive into `out` as plain text a user actually typed (e.g. "5 > 3 && 2
+// < 4" round-trips unchanged). But sanitizeToFixpoint reruns
+// unescape-sanitize-unescape until the result stops changing, and a '<'
+// followed by a letter (start-tag open) or '/' (end-tag open) is exactly
+// the shape bluemonday's tokenizer treats as real markup and strips on the
+// next pass — so that adjacency can never be present at a fixpoint. A '<'
+// followed by anything else (space, digit, punctuation) isn't a tag
+// production at all and is genuinely inert (e.g. a message that reads "use
+// onClick= to bind a handler", or "on0=", confirmed via fuzzing to
+// round-trip unexploitably) — not a live attribute, so requiring the
+// tag-like start is what actually distinguishes "typed the word onclick="
+// from "smuggled a live onclick attribute", now that plain '<' is no longer
+// itself proof of nothing dangerous.
+var onEventAttr = regexp.MustCompile(`(?i)<[a-z/][^>]*\bon\w+\s*=`)
 
 // jsURLInTag matches a javascript: (or similar) pseudo-scheme living inside
 // an actual surviving tag's attribute — the only shape that is an active
-// sink. Like onEventAttr, this is tag-scoped rather than a bare substring
-// match: bluemonday's StrictPolicy strips every tag (and HTML-escapes any
-// stray '<'), so "javascript:" surviving into `out` at all means it arrived
-// as inert plain text (e.g. a message that reads "the demo used
-// javascript:void(0) links") — not as a live href. Fuzzing confirmed the
-// bare-substring version false-positives on exactly that case (seed
-// "jAvAsCript:0"), and the client's own markdown renderer independently
-// refuses to autolink a javascript: pseudo-URL (see
+// sink. Like onEventAttr, this requires a tag-like start ('<' followed by a
+// letter or '/'), not just any '<': since sanitizeContent's outer unescape
+// can now leave a literal '<' in inert plain text, a bare '<[^>]*' scope
+// would false-positive on typed text like "5 < 10, javascript:void(0)".
+// sanitizeToFixpoint's repeated unescape-sanitize-unescape passes guarantee
+// a '<' immediately followed by a letter or '/' cannot survive — that shape
+// is real markup to bluemonday's tokenizer and gets stripped on the next
+// pass — so this pattern only matches the still-impossible live-tag case.
+// Fuzzing confirmed the bare-substring version false-positives on plain
+// text (seed "jAvAsCript:0"), and the client's own markdown renderer
+// independently refuses to autolink a javascript: pseudo-URL (see
 // tauri-client/tests/unit/content-markdown.test.ts, "does not autolink a
 // javascript: pseudo-URL"), so plain-text "javascript:" is not exploitable
 // through any known rendering path.
-var jsURLInTag = regexp.MustCompile(`(?i)<[^>]*\bjavascript:`)
+var jsURLInTag = regexp.MustCompile(`(?i)<[a-z/][^>]*\bjavascript:`)
 
 // FuzzSanitizeContent hammers sanitizeContent with untrusted message content
 // looking for a case where the "strip everything" bluemonday policy still

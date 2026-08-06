@@ -71,8 +71,15 @@ func nullable(v string) *string {
 // cleanText strips HTML and trims a free-text profile field. Both the profile
 // PATCH and the presence path run values through it before any bound check, so
 // a payload cannot buy length with markup that is about to be stripped anyway.
+//
+// Uses sanitizeToFixpoint (message.go), not a bare sanitizer.Sanitize call:
+// display name, about, custom status, and DM group names all render through
+// the client's textContent-only path (same as message content), so a plain
+// sanitizer.Sanitize call would persist and display literal &#39;/&gt;/&amp;
+// entities for ordinary punctuation instead of the characters typed — the
+// exact bug sanitizeToFixpoint fixes for message content.
 func cleanText(v string) string {
-	return strings.TrimSpace(sanitizer.Sanitize(v))
+	return strings.TrimSpace(sanitizeToFixpoint(v))
 }
 
 // resolveOptional picks the column value for one nullable text field: the
