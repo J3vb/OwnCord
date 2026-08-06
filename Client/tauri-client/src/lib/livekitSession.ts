@@ -1237,6 +1237,17 @@ export class LiveKitSession {
   }
 
   setMuted(muted: boolean): void {
+    // A moderator-imposed mute is not ours to lift. The server only mutes the
+    // track SIDs that exist at mute time and the LiveKit grant still carries
+    // the microphone publish source, so unmuting here would publish a fresh
+    // track the SFU happily forwards — server-side muting relies on the client
+    // refusing its own unmute. The guard lives here rather than in the callers
+    // because push-to-talk calls straight into this method (ptt.ts), bypassing
+    // the voice widget's own check. Muting is always permitted.
+    if (!muted && voiceStore.getState().localServerMuted === true) {
+      log.debug("Ignoring unmute: server-muted by a moderator");
+      return;
+    }
     setLocalMuted(muted);
     this.applyMicMuteState(muted).catch((e) => log.warn("applyMicMuteState failed", e));
   }

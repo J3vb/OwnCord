@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockVoiceState = vi.hoisted(() => ({
   localMuted: false,
   localDeafened: false,
+  localServerMuted: false,
 }));
 
 const mockRoom = vi.hoisted(() => ({
@@ -1279,6 +1280,30 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
       expect(setupSpy).toHaveBeenCalled();
       setupSpy.mockRestore();
+    });
+
+    // A moderator's server-mute must not be liftable by the client. The server
+    // only mutes track SIDs that exist at mute time and the LiveKit grant still
+    // carries the microphone publish source, so re-publishing a fresh track
+    // (which unmuting does) is accepted by the SFU: the refusal has to happen
+    // here, in the one entry point every caller shares. PTT reaches this
+    // directly, bypassing the widget's own guard.
+    it("refuses to unmute while server-muted, but still allows muting", async () => {
+      mockVoiceState.localServerMuted = true;
+      try {
+        session.setMuted(false);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+        expect(setLocalMuted).not.toHaveBeenCalledWith(false);
+
+        // Muting is always allowed — a server-muted user may still mute themselves.
+        session.setMuted(true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      } finally {
+        mockVoiceState.localServerMuted = false;
+      }
     });
   });
 
