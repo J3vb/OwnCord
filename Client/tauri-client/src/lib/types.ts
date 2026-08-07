@@ -939,16 +939,6 @@ export interface InviteResponse {
   readonly expires_at: string | null;
 }
 
-/** Single session object from GET /api/users/me/sessions. */
-export interface SessionResponse {
-  readonly id: number;
-  readonly device: string | null;
-  readonly ip_address: string | null;
-  readonly created_at: string;
-  readonly last_used: string;
-  readonly expires_at: string;
-}
-
 /** Upload response from POST /api/uploads. */
 export interface UploadResponse {
   readonly id: string;

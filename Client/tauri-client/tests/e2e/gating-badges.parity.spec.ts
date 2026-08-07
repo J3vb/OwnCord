@@ -189,9 +189,21 @@ test.describe("@parity per-channel mute", () => {
 
     // Persistence: the mute lives in localStorage under the settings prefix,
     // independent of any store/WS round-trip (see @lib/channel-mutes).
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("owncord:settings:mutedChannels"),
-    );
+    //
+    // The key is scoped by server host (`mutedChannels:<host>`) because channel
+    // ids are per-server autoincrement integers and every profile shares one
+    // webview origin — so read whichever scoped key exists rather than pinning
+    // the host the test server happens to be on.
+    const readMutedChannels = () =>
+      page.evaluate(() => {
+        const prefix = "owncord:settings:mutedChannels";
+        const key = Object.keys(localStorage).find(
+          (k) => k === prefix || k.startsWith(`${prefix}:`),
+        );
+        return key === undefined ? null : localStorage.getItem(key);
+      });
+
+    const stored = await readMutedChannels();
     expect(JSON.parse(stored ?? "[]")).toContain(1);
 
     // Re-opening the menu reflects the flipped state.
@@ -204,9 +216,7 @@ test.describe("@parity per-channel mute", () => {
     await expect(page.locator("[data-testid='channel-1']")).not.toHaveClass(/muted/, {
       timeout: 5_000,
     });
-    const storedAfter = await page.evaluate(() =>
-      localStorage.getItem("owncord:settings:mutedChannels"),
-    );
+    const storedAfter = await readMutedChannels();
     expect(JSON.parse(storedAfter ?? "[]")).not.toContain(1);
   });
 });

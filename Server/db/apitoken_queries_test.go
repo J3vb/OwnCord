@@ -222,8 +222,6 @@ func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
 // because ' ' sorts below 'T' and a naive lexical compare reads a same-day
 // space-form expiry as lapsed (or, in the other direction, a live ban as lapsed).
 func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
-	ctx := context.Background()
-
 	for _, tc := range []struct {
 		name    string
 		expires string
@@ -235,6 +233,7 @@ func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
 		{"live ban, space-separated form", time.Now().UTC().Add(time.Hour).Format("2006-01-02 15:04:05"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
 			database := newTokenTestDB(t)
 			ownerID := seedTokenUser(t, database, "owner", 1)
 			adminID := seedTokenUser(t, database, "live-admin", 2)

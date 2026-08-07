@@ -41,7 +41,7 @@ func TestRegisterNow_ReplacementNeverLosesAConcurrentGlobalBroadcast(t *testing.
 	h.mu.Unlock()
 	h.pubsub.Subscribe(old, TopicGlobal)
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		replacement := NewTestClient(h, userID, make(chan []byte, 8))
 		replacement.lastSeq = 1 // network reconnect path
 

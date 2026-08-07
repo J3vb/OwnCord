@@ -52,10 +52,11 @@ export type OnUnauthorized = () => void;
 /**
  * Single session object from GET /users/me/sessions, matching the server's
  * wire shape (Server/api/profile_handler.go's sessionResponse, wrapped in a
- * `{sessions: [...]}` envelope — docs/api.md). Defined here rather than in
- * `./types`'s SessionResponse: that type has drifted from the actual
- * contract (declares `ip_address`/`expires_at`, which the server never sends,
- * and omits `ip`/`is_current`, which it always does).
+ * `{sessions: [...]}` envelope — docs/api.md). Defined here, next to its only
+ * consumer, rather than in `./types`: the declaration that used to live there
+ * had drifted from the actual contract (it declared `ip_address`/`expires_at`,
+ * which the server never sends, and omitted `ip`/`is_current`, which it always
+ * does), and nothing else needs this shape.
  */
 export interface SessionInfo {
   readonly id: number;

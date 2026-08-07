@@ -49,14 +49,14 @@ func TestBumpVisibilityWatermark_ConcurrentCallsNeverRegress(t *testing.T) {
 
 	const goroutines = 32
 	done := make(chan struct{})
-	for i := 0; i < goroutines; i++ {
-		go func(n int) {
+	for range goroutines {
+		go func() {
 			defer func() { done <- struct{}{} }()
 			atomic.AddUint64(&h.seq, 1)
 			h.bumpVisibilityWatermark()
-		}(i)
+		}()
 	}
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		<-done
 	}
 

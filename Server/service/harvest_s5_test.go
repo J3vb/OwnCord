@@ -45,11 +45,9 @@ func TestCreateRole_ConcurrentCreatesCannotCollideOnPosition(t *testing.T) {
 	created := make([]*db.Role, 2)
 	errs := make([]error, 2)
 	for i, name := range []string{"RaceA", "RaceB"} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			created[i], errs[i] = svc.CreateRole(context.Background(), 2, RoleInput{Name: new(name)})
-		}()
+		})
 	}
 	wg.Wait()
 
