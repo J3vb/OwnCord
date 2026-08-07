@@ -2,11 +2,13 @@
 .env
 Server/.env
 
-# Claude Code — local-only, never committed. A slashless pattern matches at any
-# depth, so these also cover Server/CLAUDE.md, Client/**/CLAUDE.md and nested
-# .claude/ dirs.
-.claude/
-CLAUDE.md
+# Claude Code — local-only by default. The exceptions are committed on purpose:
+# a cloud session clones this repo and sees ONLY tracked files, so the CLAUDE.md
+# files, skills and workflows have to be here or it starts with no instructions.
+# Machine-local state (settings.local.json, locks) stays ignored.
+.claude/*
+!.claude/skills/
+!.claude/workflows/
 CLAUDE.local.md
 .mcp.json
 
