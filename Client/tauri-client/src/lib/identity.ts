@@ -50,7 +50,19 @@ export async function saveIdentityKey(host: string, key: string): Promise<boolea
   }
 }
 
-/** Load the identity private-key blob for a host, or null if absent/unavailable. */
+/**
+ * Load the identity private-key blob for a host, or null when nothing is
+ * stored (a clean `load_identity_key` resolution with no value).
+ *
+ * A command REJECTION is rethrown, not swallowed to null: `secret_store::get`
+ * on the Rust side reports `Ok(None)` only when both the keyring and the
+ * fallback file genuinely hold nothing, and propagates a keyring read error
+ * as `Err` instead. A rejection here is therefore a real, unreadable store —
+ * not "nothing stored". Callers (see `loadOrGenerateIdentityKeyPair`) rely on
+ * that distinction to abort instead of minting and publishing a fresh
+ * identity keypair over an existing one, which would invalidate every peer's
+ * TOFU pin.
+ */
 export async function loadIdentityKey(host: string): Promise<string | null> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -60,8 +72,12 @@ export async function loadIdentityKey(host: string): Promise<string | null> {
     const result = await invoke("load_identity_key", { host });
     return typeof result === "string" ? result : null;
   } catch (err) {
-    log.error("Failed to load identity key", { host, error: String(err) });
-    return null;
+    log.error(
+      "Failed to load identity key — propagating so the caller does not treat an unreadable " +
+        'store as "no key stored"',
+      { host, error: String(err) },
+    );
+    throw err;
   }
 }
 
@@ -220,8 +236,18 @@ async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPai
     // docs/credential-storage.md), so reaching the branch below now means the
     // secret survived neither store. Kept because this is the failure a
     // resolved promise cannot express, and its only other symptom is peers
-    // flagging the user as a MITM after a restart.
-    if ((await loadIdentityKey(host)) !== blob) {
+    // flagging the user as a MITM after a restart. A read error here (as
+    // opposed to loadIdentityKey's first call above, which decides whether to
+    // regenerate) is treated the same as a mismatch, not rethrown — we
+    // already have a freshly generated keypair for this session, so there is
+    // nothing left to abort.
+    let persisted: boolean;
+    try {
+      persisted = (await loadIdentityKey(host)) === blob;
+    } catch {
+      persisted = false;
+    }
+    if (!persisted) {
       log.error(
         "Identity key did not persist — the credential store accepted the write but did not return it. " +
           "This session works, but peers will see a new identity (and prompt to re-verify) every restart.",

@@ -54,11 +54,20 @@ describe("identity keyring wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("delete_identity_key", { host: "chat.example" });
   });
 
-  it("returns false/null and swallows errors when a command rejects", async () => {
+  it("returns false and swallows errors when a command rejects (save/delete)", async () => {
     invokeMock.mockRejectedValue(new Error("keyring boom"));
     expect(await saveIdentityKey("h", "k")).toBe(false);
-    expect(await loadIdentityKey("h")).toBeNull();
     expect(await deleteIdentityKey("h")).toBe(false);
+  });
+
+  it("loadIdentityKey rethrows (does not swallow) when the command rejects", async () => {
+    // A keyring read error must not be indistinguishable from "nothing
+    // stored" — loadOrGenerateIdentityKeyPair uses a null return to decide
+    // whether to mint a brand-new identity keypair, so swallowing an error
+    // into null here mints and publishes a fresh identity on every transient
+    // store failure, invalidating every peer's TOFU pin.
+    invokeMock.mockRejectedValueOnce(new Error("keyring boom"));
+    await expect(loadIdentityKey("h")).rejects.toThrow("keyring boom");
   });
 });
 
@@ -219,6 +228,18 @@ describe("getOrCreateIdentityKeyPair", () => {
     });
   });
 
+  it("aborts instead of regenerating when the keyring read fails (does not overwrite an unreadable identity)", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.reject(new Error("keychain locked"));
+      return Promise.resolve(undefined);
+    });
+
+    await expect(getOrCreateIdentityKeyPair("chat.example")).rejects.toThrow("keychain locked");
+    // Must not have minted and saved a brand-new identity over the top of an
+    // unreadable (not necessarily absent) stored key.
+    expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
+  });
+
   it("stays quiet when the store round-trips the key", async () => {
     let savedBlob: string | undefined;
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
@@ -307,6 +328,20 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
 
     expect(published).toBe(false);
     expect(second).not.toHaveBeenCalled();
+  });
+
+  it("does not mint/publish a new identity key when the keyring read fails (fire-and-forget)", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.reject(new Error("keychain locked"));
+      return Promise.resolve(undefined);
+    });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    expect(published).toBe(false);
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
   });
 
   it("swallows a failing profile update (fire-and-forget, never throws)", async () => {

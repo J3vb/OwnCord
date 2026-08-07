@@ -92,6 +92,28 @@ const FALLBACK_BACKEND: Backend = Backend::EncryptedFile;
 /// secret — the caller's in-memory copy is all that is left, so the current
 /// session still works but nothing survives a restart.
 pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, String> {
+    set_with(
+        account,
+        secret,
+        keyring_set,
+        keyring_get,
+        keyring_delete,
+        |acct, sec| set_fallback(app, acct, sec),
+        |acct| clear_fallback(app, acct),
+    )
+}
+
+/// Core decision logic for [`set`], with the keyring and fallback operations
+/// injected so the branching is testable without a live OS credential store.
+fn set_with(
+    account: &str,
+    secret: &str,
+    keyring_set: impl Fn(&str, &str) -> Result<(), String>,
+    keyring_get: impl Fn(&str) -> Result<Option<String>, String>,
+    keyring_delete: impl Fn(&str) -> Result<(), String>,
+    fallback_set: impl FnOnce(&str, &str) -> Result<(), String>,
+    fallback_clear: impl FnOnce(&str),
+) -> Result<Backend, String> {
     match keyring_set(account, secret) {
         Ok(()) => match keyring_get(account) {
             // The normal path: written and read back byte-for-byte.
@@ -99,7 +121,7 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
                 // A machine that was previously degraded and has since been
                 // fixed must not keep a stale ciphertext shadowing the real
                 // store on the next read.
-                clear_fallback(app, account);
+                fallback_clear(account);
                 return Ok(Backend::Keyring);
             }
             Ok(Some(_)) => {
@@ -127,10 +149,23 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
                  but the read-back failed: {e} — falling back"
             ),
         },
-        Err(e) => log::error!("{SERVICE}: credential store write failed for '{account}': {e}"),
+        Err(e) => {
+            log::error!("{SERVICE}: credential store write failed for '{account}': {e}");
+            // An older secret may already sit in the keyring from a prior
+            // successful write. get() reads the keyring first, so leaving
+            // that stale entry in place would shadow the fresh secret parked
+            // in the fallback below — mirrors the read-back-mismatch arm
+            // above, which purges for the same reason.
+            if let Err(de) = keyring_delete(account) {
+                log::warn!(
+                    "{SERVICE}: could not remove a stale keyring entry for '{account}' after a \
+                     failed write: {de}"
+                );
+            }
+        }
     }
 
-    set_fallback(app, account, secret)?;
+    fallback_set(account, secret)?;
     log::warn!(
         "{SERVICE}: account '{account}' is stored in the encrypted fallback file, not the OS \
          credential store. See docs/credential-storage.md"
@@ -143,12 +178,34 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
 /// The OS credential store wins over the fallback file, so a machine that
 /// recovers goes back to the real store without any migration step.
 pub fn get(app: &AppHandle, account: &str) -> Result<Option<String>, String> {
+    get_with(account, keyring_get, |acct| get_fallback(app, acct))
+}
+
+/// Core decision logic for [`get`], with the keyring and fallback lookups
+/// injected so the branching is testable without a live OS credential store.
+fn get_with(
+    account: &str,
+    keyring_get: impl Fn(&str) -> Result<Option<String>, String>,
+    get_fallback: impl Fn(&str) -> Option<String>,
+) -> Result<Option<String>, String> {
     match keyring_get(account) {
-        Ok(Some(secret)) => return Ok(Some(secret)),
-        Ok(None) => {}
-        Err(e) => log::warn!("{SERVICE}: credential store read failed for '{account}': {e}"),
+        Ok(Some(secret)) => Ok(Some(secret)),
+        Ok(None) => Ok(get_fallback(account)),
+        Err(e) => {
+            log::warn!("{SERVICE}: credential store read failed for '{account}': {e}");
+            // A read error must not collapse to "nothing stored": on a
+            // healthy machine set() clears the fallback on every successful
+            // write, so an empty fallback here is indistinguishable from
+            // "never stored". Prefer a fallback copy if one exists; only
+            // report "nothing" when both stores genuinely have nothing, and
+            // otherwise propagate the error so the caller can tell a broken
+            // store apart from first login.
+            match get_fallback(account) {
+                Some(secret) => Ok(Some(secret)),
+                None => Err(e),
+            }
+        }
     }
-    Ok(get_fallback(app, account))
 }
 
 /// Remove `account` from every store. Absent entries are not an error.
@@ -411,6 +468,90 @@ mod tests {
     fn fallback_aad_is_account_specific() {
         assert_ne!(fallback_aad("host.example"), fallback_aad("identity:host.example"));
         assert_eq!(fallback_aad("host.example"), fallback_aad("host.example"));
+    }
+
+    // -- get_with: finding "a keyring read error must not read as 'not stored'" --
+
+    #[test]
+    fn get_with_falls_back_when_the_keyring_errors_but_the_fallback_has_a_copy() {
+        let result = get_with(
+            "identity:chat.example",
+            |_| Err("keychain locked".to_string()),
+            |_| Some("fallback-secret".to_string()),
+        );
+        assert_eq!(result, Ok(Some("fallback-secret".to_string())));
+    }
+
+    #[test]
+    fn get_with_propagates_the_keyring_error_when_the_fallback_is_also_empty() {
+        // The bug: a keyring read failure must never be reported as "nothing
+        // stored" (Ok(None)) when the fallback is empty too — that is
+        // indistinguishable from first login, and the E2EE identity keypair
+        // loader mints and publishes a brand-new identity key on exactly that
+        // signal, invalidating every peer's TOFU pin.
+        let result = get_with("identity:chat.example", |_| Err("keychain locked".to_string()), |_| None);
+        assert_eq!(result, Err("keychain locked".to_string()));
+    }
+
+    #[test]
+    fn get_with_prefers_the_live_keyring_value_over_the_fallback() {
+        let result = get_with("acct", |_| Ok(Some("live".to_string())), |_| Some("stale".to_string()));
+        assert_eq!(result, Ok(Some("live".to_string())));
+    }
+
+    #[test]
+    fn get_with_uses_the_fallback_when_the_keyring_has_nothing_stored() {
+        let result = get_with("acct", |_| Ok(None), |_| Some("fallback".to_string()));
+        assert_eq!(result, Ok(Some("fallback".to_string())));
+    }
+
+    // -- set_with: finding "a failed keyring write must not leave a stale entry" --
+
+    #[test]
+    fn set_with_deletes_any_stale_keyring_entry_when_the_write_fails() {
+        // The bug: a write failure with an older secret already sitting in
+        // the keyring from a prior successful write must not leave that
+        // stale entry in place — get() reads the keyring first, so it would
+        // shadow the fresh secret parked in the fallback below forever.
+        use std::cell::Cell;
+        let delete_called = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "new-secret",
+            |_, _| Err("write failed".to_string()),
+            |_| panic!("keyring_get must not run after a failed write"),
+            |_| {
+                delete_called.set(true);
+                Ok(())
+            },
+            |_, _| Ok(()),
+            |_| {},
+        );
+        assert_eq!(result, Ok(FALLBACK_BACKEND));
+        assert!(
+            delete_called.get(),
+            "a failed keyring write must delete any stale prior entry before falling back"
+        );
+    }
+
+    #[test]
+    fn set_with_returns_keyring_backend_when_the_write_round_trips() {
+        use std::cell::Cell;
+        let cleared = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "secret",
+            |_, s| {
+                assert_eq!(s, "secret");
+                Ok(())
+            },
+            |_| Ok(Some("secret".to_string())),
+            |_| panic!("must not delete a keyring entry that round-tripped"),
+            |_, _| panic!("must not touch the fallback on a successful round trip"),
+            |_| cleared.set(true),
+        );
+        assert_eq!(result, Ok(Backend::Keyring));
+        assert!(cleared.get(), "a recovered machine must clear any stale fallback copy");
     }
 
     #[cfg(windows)]
