@@ -104,6 +104,14 @@ type Querier interface {
 	// A :one query already reads a single row via QueryRow, so no LIMIT is needed
 	// (and an explicit LIMIT 1 is mis-emitted by sqlc here). ORDER BY puts the
 	// highest-position role first, so that first row is the owner.
+	// Banned users are excluded: account deletion anonymises the row and sets
+	// banned = 1 permanently, so without this filter a self-deleted Owner keeps
+	// outranking every live admin and becomes the default identity for token
+	// creation forever -- minting tokens the auth layer then 403s on every use.
+	// The ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause)
+	// so a lapsed temporary ban stays eligible; the replace() normalises the space
+	// separator form of ban_expires to 'T' before comparing, because ' ' sorts
+	// below 'T' and a same-day space-form expiry would otherwise read as lapsed.
 	GetOwnerUser(ctx context.Context) (User, error)
 	GetReactionCounts(ctx context.Context, messageID int64) ([]GetReactionCountsRow, error)
 	// Reactors for one (message, emoji) pair, oldest reaction first. The reactions
@@ -153,6 +161,11 @@ type Querier interface {
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
 	ListEmoji(ctx context.Context) ([]ListEmojiRow, error)
 	ListInvites(ctx context.Context) ([]ListInvitesRow, error)
+	// The ready payload's member roster. docs/protocol.md documents members[] as
+	// "All registered users", so this must not silently truncate: the previous
+	// LIMIT 1000 dropped every member past the first thousand with no has_more
+	// signal, leaving those users unrenderable and unmentionable on the client
+	// with nothing to indicate the list was incomplete.
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	// Highest rank first. Positions are only "unique enough": reorder normalizes

@@ -120,6 +120,62 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	}
 }
 
+// TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim locks the
+// attachment-unlink fix: messages.channel_id and attachments.message_id both
+// cascade ON DELETE (migrations/001), so deleting the channel row on the last
+// leave would otherwise destroy the attachment rows too — the only handle the
+// orphan sweep (DeleteOrphanedAttachments) has on the uploaded files,
+// stranding them on disk with no query left able to name them.
+func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
+	database := groupDMFixture(t)
+	ctx := context.Background()
+
+	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", []int64{1, 2, 3})
+	if err != nil {
+		t.Fatalf("CreateGroupDMChannel: %v", err)
+	}
+
+	msgID, err := database.CreateMessage(ctx, group.ID, 1, "look at this", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"att-leave-1", "photo.png", "stored-photo.png", "image/png", 2048, 1,
+	); err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, 1, []string{"att-leave-1"}); err != nil || n != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	}
+
+	for _, uid := range []int64{1, 2, 3} {
+		if _, err := database.LeaveGroupDM(ctx, uid, group.ID); err != nil {
+			t.Fatalf("LeaveGroupDM(%d): %v", uid, err)
+		}
+	}
+
+	ch, err := database.GetChannel(ctx, group.ID)
+	if err != nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if ch != nil {
+		t.Error("channel survived the last participant leaving")
+	}
+
+	att, err := database.GetAttachmentByID(ctx, "att-leave-1")
+	if err != nil {
+		t.Fatalf("GetAttachmentByID: %v", err)
+	}
+	if att == nil {
+		t.Fatal("attachment row was destroyed by the channel-delete cascade; want it unlinked and preserved for the orphan sweep")
+	}
+	if att.MessageID != nil {
+		t.Errorf("attachment MessageID = %v, want nil (unlinked ahead of the cascade)", *att.MessageID)
+	}
+}
+
 func TestSetDMChannelName_RefusesNonDM(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()

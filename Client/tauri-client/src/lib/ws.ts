@@ -88,12 +88,42 @@ export interface WsClientConfig {
   readonly maxMessageSizeBytes?: number;
 }
 
+/**
+ * Supplies the channel the user currently has open, so the auth frame can
+ * declare it on a resume.
+ *
+ * Registered rather than imported: ws.ts is the transport and deliberately
+ * depends on nothing but types and the logger, which is what lets the tests
+ * drive it with minimal mocks.
+ *
+ * Without this the resumed connection holds no ChannelTopic subscription until
+ * the post-auth_ok `channel_focus` round trip completes, and every message
+ * broadcast to that channel in the meantime is lost with no way to ask for it
+ * back (the client only reports max(seq)). The server still READ-gates the id
+ * before honouring it, and `channel_focus` is still sent on auth_ok — this
+ * only shrinks the window to zero.
+ */
+let activeChannelProvider: (() => number | null) | null = null;
+
+export function setActiveChannelProvider(fn: (() => number | null) | null): void {
+  activeChannelProvider = fn;
+}
+
 const DEFAULT_MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 function uuid(): string {
   return crypto.randomUUID();
+}
+
+/** Normalize a host for comparison against the Rust proxies' cert-tofu event
+ *  host, mirroring `tofu::cert_store_key`'s trailing-":443" strip
+ *  (src-tauri/src/tofu.rs). Profile/config hosts are stored verbatim (e.g.
+ *  "example.com:443"), but the proxies always emit the normalized form, so an
+ *  un-normalized comparison here would silently miss the match. */
+function normalizeHostForCertCompare(host: string): string {
+  return host.replace(/:443$/, "");
 }
 
 export function createWsClient() {
@@ -334,7 +364,7 @@ export function createWsClient() {
       // events for any tunneled host, and the connect page health-checks
       // every saved profile, so an unrelated profile's rotated cert must not
       // permanently kill this socket's reconnect loop.
-      if (config !== null && raw.host === config.host) {
+      if (config !== null && raw.host === normalizeHostForCertCompare(config.host)) {
         certMismatchBlock = true;
         // A reconnect armed before the mismatch arrived would still fire and
         // call connect(), which clears the latch — resuming the loop against
@@ -384,7 +414,19 @@ export function createWsClient() {
         }
         setState("authenticating");
         if (config === null) return;
-        send({ type: "auth", payload: { token: config.token, last_seq: lastSeq } });
+        // active_channel_id only matters on a resume (last_seq > 0); on a
+        // fresh connect the ready payload re-establishes everything anyway.
+        // Omitted when unknown so the frame stays byte-identical to before
+        // for callers that never register a provider.
+        const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
+        send({
+          type: "auth",
+          payload: {
+            token: config.token,
+            last_seq: lastSeq,
+            ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
+          },
+        });
       } else if (rustState === "closed") {
         proxyOpen = false;
         log.info("WebSocket closed", {

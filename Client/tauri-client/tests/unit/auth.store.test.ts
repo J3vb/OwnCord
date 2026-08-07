@@ -14,7 +14,9 @@ import {
   setVoiceStatus,
 } from "../../src/stores/voice.store";
 import { leaveVoice } from "@lib/livekitSession";
-import type { UserWithRole } from "../../src/lib/types";
+import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stores/messages.store";
+import { acknowledgeNsfw, isNsfwAcknowledged } from "../../src/lib/nsfw-gate";
+import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
@@ -123,6 +125,19 @@ describe("auth store", () => {
       clearAuth();
       const after = authStore.getState();
       expect(before).not.toBe(after);
+    });
+
+    // v076: acknowledgements are per-viewer consent, not per-device. Host
+    // scoping cannot cover a second account on the SAME server, so the age
+    // gate must be re-armed on logout or the next user silently inherits it.
+    it("clears NSFW acknowledgements so the next account re-sees the age gate", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      acknowledgeNsfw(12);
+      expect(isNsfwAcknowledged(12)).toBe(true);
+
+      clearAuth();
+
+      expect(isNsfwAcknowledged(12)).toBe(false);
     });
 
     it("records 'user' as the default logout reason", () => {
@@ -352,6 +367,54 @@ describe("auth store", () => {
 
       unsubA();
       unsubB();
+    });
+  });
+
+  // Regression: clearAuth() must also drop messagesStore, or a channel id
+  // that also exists on the next-signed-into server (channel ids are only
+  // unique per-server) renders the previous session's cached messages and
+  // never refetches, because MessageController.loadMessages short-circuits
+  // on isChannelLoaded.
+  describe("clearAuth messages cleanup", () => {
+    const AUTHOR: MessageUser = { id: 1, username: "alice", avatar: "alice.png" };
+
+    function makeMessageResponse(overrides?: Partial<MessageResponse>): MessageResponse {
+      return {
+        id: 1,
+        channel_id: 1,
+        user: AUTHOR,
+        content: "pre-logout message",
+        reply_to: null,
+        attachments: [],
+        reactions: [],
+        pinned: false,
+        edited_at: null,
+        deleted: false,
+        timestamp: "2026-03-15T10:00:00Z",
+        ...overrides,
+      };
+    }
+
+    it("clears cached messages and the loaded flag on logout", () => {
+      setMessages(1, [makeMessageResponse()], false);
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getChannelMessages(1)).toHaveLength(1);
+
+      clearAuth();
+
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getChannelMessages(1)).toHaveLength(0);
+    });
+
+    it("does not leak the previous session's message content into the next", () => {
+      setMessages(1, [makeMessageResponse({ content: "server A secret" })], false);
+      clearAuth();
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+
+      // Same numeric channel id, different server: must come back empty and
+      // unloaded so the caller refetches instead of rendering stale content.
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getChannelMessages(1)).toHaveLength(0);
     });
   });
 });

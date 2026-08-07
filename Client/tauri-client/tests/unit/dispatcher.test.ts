@@ -6,6 +6,7 @@ import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/chann
 import {
   messagesStore,
   addOptimisticMessage,
+  addOptimisticReaction,
   getChannelMessages,
 } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -434,6 +435,97 @@ describe("WS Dispatcher", () => {
     expect(member?.avatar).toBe("/api/v1/files/abc");
   });
 
+  describe("presence and user_update sync dmStore", () => {
+    const dmChannel = {
+      channelId: 50,
+      recipient: { id: 10, username: "bob", avatar: "old.png", status: "online" as const },
+      participants: [{ id: 10, username: "bob", avatar: "old.png", status: "online" as const }],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    };
+
+    beforeEach(() => {
+      dmStore.setState(() => ({
+        channels: [{ ...dmChannel, participants: [...dmChannel.participants] }],
+      }));
+    });
+
+    it("updates the DM partner's status on presence, in recipient and participants", () => {
+      mock.dispatch("presence", { user_id: 10, status: "dnd" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("dnd");
+      expect(dm?.participants[0]?.status).toBe("dnd");
+    });
+
+    it("leaves an unrelated DM partner's status alone", () => {
+      mock.dispatch("presence", { user_id: 999, status: "dnd" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("online");
+    });
+
+    it("updates the DM partner's username/avatar/displayName on user_update", () => {
+      mock.dispatch("user_update", {
+        user_id: 10,
+        username: "bobby",
+        avatar: "new.png",
+        display_name: "Bobby",
+        about: "",
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.username).toBe("bobby");
+      expect(dm?.recipient.avatar).toBe("new.png");
+      expect(dm?.recipient.displayName).toBe("Bobby");
+      expect(dm?.participants[0]?.username).toBe("bobby");
+    });
+
+    it("clears the DM partner's nickname when user_update reports it cleared", () => {
+      dmStore.setState((prev) => ({
+        channels: prev.channels.map((c) => ({
+          ...c,
+          recipient: { ...c.recipient, displayName: "Bobby" },
+          participants: c.participants.map((p) => ({ ...p, displayName: "Bobby" })),
+        })),
+      }));
+
+      mock.dispatch("user_update", {
+        user_id: 10,
+        username: "bob",
+        avatar: "old.png",
+        display_name: null,
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.displayName).toBe("");
+    });
+
+    // An older or partial server omits display_name entirely; that means
+    // "unchanged", not "cleared" — membersStore already guards it this way.
+    it("leaves the DM partner's nickname alone when user_update omits display_name", () => {
+      dmStore.setState((prev) => ({
+        channels: prev.channels.map((c) => ({
+          ...c,
+          recipient: { ...c.recipient, displayName: "Bobby" },
+          participants: c.participants.map((p) => ({ ...p, displayName: "Bobby" })),
+        })),
+      }));
+
+      mock.dispatch("user_update", { user_id: 10, username: "bobby", avatar: "new.png" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.username).toBe("bobby");
+      expect(dm?.recipient.displayName).toBe("Bobby");
+      expect(dm?.participants[0]?.displayName).toBe("Bobby");
+    });
+  });
+
   it("wires typing to members store", () => {
     mock.dispatch("typing", { channel_id: 1, user_id: 42, username: "bob" });
     const typing = membersStore.getState().typingUsers.get(1);
@@ -841,6 +933,39 @@ describe("WS Dispatcher", () => {
     expect(messagesStore.getState().pendingSends.size).toBe(0);
   });
 
+  it("rolls back every pending optimistic reaction toggle when the connection drops", () => {
+    mock.dispatch("chat_message", {
+      id: 900,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "react to me",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    addOptimisticReaction("corr-react-drop", {
+      channelId: 1,
+      messageId: 900,
+      emoji: "👍",
+      action: "add",
+    });
+
+    const before = getChannelMessages(1)[0]!.reactions.find((r) => r.emoji === "👍");
+    expect(before?.count).toBe(1);
+    expect(before?.me).toBe(true);
+    expect(messagesStore.getState().pendingReactions?.has("corr-react-drop")).toBe(true);
+
+    // Same reasoning as pendingSends above: the frame is gone with the dying
+    // socket, so the toggle must roll back instead of leaving a permanently
+    // wrong pill and a stale pendingReactions entry.
+    mock.dispatchState("reconnecting");
+
+    const after = getChannelMessages(1)[0]!.reactions.find((r) => r.emoji === "👍");
+    expect(after).toBeUndefined();
+    expect(messagesStore.getState().pendingReactions?.has("corr-react-drop")).toBe(false);
+  });
+
   it("wires chat_edited to messages store", () => {
     // First add a message
     mock.dispatch("chat_message", {
@@ -1160,6 +1285,40 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
     expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+  });
+
+  it("syncs authStore.user.role when the member_update is about the signed-in user", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 42, username: "alice", avatar: null, role: "member" },
+    }));
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(42, {
+        id: 42,
+        username: "alice",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("member_update", { user_id: 42, role: "admin" });
+
+    expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+    expect(authStore.getState().user?.role).toBe("admin");
+  });
+
+  it("leaves authStore.user.role untouched for a member_update about someone else", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("member_update", { user_id: 42, role: "admin" });
+
+    expect(authStore.getState().user?.role).toBe("member");
   });
 
   it("wires roles_update to replace the role list", () => {

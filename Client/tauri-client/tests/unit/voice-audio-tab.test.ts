@@ -747,6 +747,40 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("stops applying sensitivity after a pointercancel interrupts the drag (v097)", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
+    expect(threshold).not.toBeNull();
+    // jsdom doesn't implement the Pointer Capture API — stub it as a no-op,
+    // same as a real browser call the handler makes unconditionally.
+    (threshold as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture =
+      vi.fn();
+
+    threshold.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 0 }));
+    mockSetVoiceSensitivity.mockClear();
+
+    threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 10 }));
+    expect(mockSetVoiceSensitivity).toHaveBeenCalledTimes(1);
+
+    // The OS claims the touch gesture as a pan and fires pointercancel
+    // instead of pointerup.
+    threshold.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }));
+
+    mockSetVoiceSensitivity.mockClear();
+    threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 50 }));
+
+    // Without a pointercancel listener, onMove stays attached and this
+    // would call setVoiceSensitivity again with no button held.
+    expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+
+    ac.abort();
+  });
+
   it("mic level monitoring handles getUserMedia failure gracefully", async () => {
     vi.stubGlobal("navigator", {
       mediaDevices: {

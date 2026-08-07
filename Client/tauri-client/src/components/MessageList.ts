@@ -268,6 +268,36 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   const unreadOnOpen = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
 
+  /**
+   * Message id the NEW divider is anchored to, once one has been picked.
+   * `firstUnreadIndex` returns a count-from-the-end offset, which drifts
+   * whenever the loaded window grows (new messages arrive) between one full
+   * rebuild and the next — the exact thing unreadOnOpen's doc comment above
+   * promises won't happen. Latching onto the message id the first valid index
+   * pointed at keeps the divider glued to that message for the rest of the
+   * visit regardless of how the window grows around it.
+   */
+  let newDividerAnchorId: number | null = null;
+
+  /**
+   * Resolve the NEW divider's position for this rebuild. Prefers the latched
+   * anchor id (stable across window growth); falls back to the count formula
+   * only until an anchor exists, then latches it — skipping id 0 (an
+   * unconfirmed optimistic row) since that id is not unique across pending
+   * sends and would anchor to the wrong message once reconciled.
+   */
+  function resolveNewDividerIndex(messages: readonly Message[]): number {
+    if (newDividerAnchorId !== null) {
+      return messages.findIndex((m) => m.id === newDividerAnchorId);
+    }
+    const idx = firstUnreadIndex(messages, unreadOnOpen);
+    const anchor = idx !== -1 ? messages[idx] : undefined;
+    if (anchor !== undefined && anchor.id !== 0) {
+      newDividerAnchorId = anchor.id;
+    }
+    return idx;
+  }
+
   // ---------------------------------------------------------------------------
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
@@ -514,12 +544,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   function rebuildItems(): void {
     allMessages = getChannelMessages(options.channelId);
-    virtualItems = buildVirtualItems(
-      allMessages,
-      null,
-      null,
-      firstUnreadIndex(allMessages, unreadOnOpen),
-    );
+    virtualItems = buildVirtualItems(allMessages, null, null, resolveNewDividerIndex(allMessages));
 
     // Build Fenwick tree initialized with smart estimates / cached heights
     tree = new FenwickTree(virtualItems.length);

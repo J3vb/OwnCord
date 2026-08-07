@@ -301,20 +301,36 @@ export function markSendFailed(correlationId: string, errorCode: string | null):
 /** Remove an optimistic row (retry discards the old row; delete-draft dismisses it). */
 export function removeOptimistic(correlationId: string): void {
   messagesStore.setState((prev) => {
-    const channelId = prev.pendingSends.get(correlationId);
     const updatedPending = new Map(prev.pendingSends);
     updatedPending.delete(correlationId);
-    if (channelId === undefined) {
-      return { ...prev, pendingSends: updatedPending };
+
+    // A "failed" row has already been dropped from pendingSends by
+    // markSendFailed, so pendingSends can't tell us its channel — scan for
+    // the row itself instead. This is the common case: Retry/Delete only
+    // render for status==="failed" rows (renderers.ts), so a pendingSends
+    // hit here would mean removeOptimistic raced ahead of the row ever
+    // failing.
+    const channelId = prev.pendingSends.get(correlationId);
+    if (channelId !== undefined) {
+      const existing = prev.messagesByChannel.get(channelId);
+      if (existing === undefined) {
+        return { ...prev, pendingSends: updatedPending };
+      }
+      const filtered = existing.filter((m) => m.correlationId !== correlationId);
+      const updatedMessages = new Map(prev.messagesByChannel);
+      updatedMessages.set(channelId, filtered);
+      return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
     }
-    const existing = prev.messagesByChannel.get(channelId);
-    if (existing === undefined) {
-      return { ...prev, pendingSends: updatedPending };
+
+    for (const [cid, list] of prev.messagesByChannel) {
+      if (!list.some((m) => m.correlationId === correlationId)) continue;
+      const filtered = list.filter((m) => m.correlationId !== correlationId);
+      const updatedMessages = new Map(prev.messagesByChannel);
+      updatedMessages.set(cid, filtered);
+      return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
     }
-    const filtered = existing.filter((m) => m.correlationId !== correlationId);
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, filtered);
-    return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
+
+    return { ...prev, pendingSends: updatedPending };
   });
 }
 
@@ -783,6 +799,11 @@ export function updateReaction(payload: ReactionUpdatePayload, currentUserId: nu
     if (updatedMessages === null) return prev;
     return { ...prev, messagesByChannel: updatedMessages };
   });
+}
+
+/** Reset the entire store to its initial (empty) state — e.g. on logout. */
+export function resetMessagesStore(): void {
+  messagesStore.setState(() => INITIAL_STATE);
 }
 
 // -----------------------------------------------------------------------------

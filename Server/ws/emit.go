@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
 )
 
 // EmitEvents routes typed events to the appropriate broadcast methods.
@@ -40,7 +39,12 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// client resuming from a seq at or before the open takes the
 			// full-ready path (whose payload includes DM channels).
 			if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
-				h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+				// Ratcheted upward only: see bumpVisibilityWatermark on Hub.
+				// A plain Store(Load(&h.seq)) here (as on the other two
+				// writers) let a writer that read an older h.seq overwrite a
+				// concurrently stored higher watermark, silently regressing
+				// mustFullResync's boundary.
+				h.bumpVisibilityWatermark()
 			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
 		case ChannelEvent:

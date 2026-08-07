@@ -527,6 +527,16 @@ type MemberSummary struct {
 // so "who is invisible" is decided in exactly one place.
 func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
 	m.Status = StatusForViewer(m.Status, m.ID, viewerID)
+	// A connected-but-invisible member collapses to "offline" above, but their
+	// custom_status is a separate column BroadcastStatus never touches. Left
+	// alone, a viewer sees {status:"offline", custom_status:"<text>"} for that
+	// member while every genuinely disconnected member is
+	// {status:"offline", custom_status:null} — the surviving text is a tell
+	// that the member is actually online. Blank it at the same choke point
+	// that collapses the status so no other caller has to remember to.
+	if m.ID != viewerID && m.Status == StatusOffline {
+		m.CustomStatus = nil
+	}
 	return m
 }
 

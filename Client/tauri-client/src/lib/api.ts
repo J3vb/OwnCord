@@ -18,7 +18,6 @@ import type {
   ChannelResponse,
   EmojiResponse,
   InviteResponse,
-  SessionResponse,
   UploadResponse,
   VoiceCredentialsResponse,
   MemberResponse,
@@ -49,6 +48,29 @@ export class ApiClientError extends Error {
 }
 
 export type OnUnauthorized = () => void;
+
+/**
+ * Single session object from GET /users/me/sessions, matching the server's
+ * wire shape (Server/api/profile_handler.go's sessionResponse, wrapped in a
+ * `{sessions: [...]}` envelope — docs/api.md). Defined here rather than in
+ * `./types`'s SessionResponse: that type has drifted from the actual
+ * contract (declares `ip_address`/`expires_at`, which the server never sends,
+ * and omits `ip`/`is_current`, which it always does).
+ */
+export interface SessionInfo {
+  readonly id: number;
+  /** Never null: the server's fields are plain Go strings, so an unknown
+   *  device or address arrives as "" rather than being omitted. */
+  readonly device: string;
+  readonly ip: string;
+  readonly created_at: string;
+  readonly last_used: string;
+  readonly is_current: boolean;
+}
+
+interface SessionsListResponse {
+  readonly sessions: SessionInfo[];
+}
 
 const log = createLogger("api");
 
@@ -353,8 +375,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("DELETE", "/users/me/totp", { password }, signal);
     },
 
-    getSessions(signal?: AbortSignal): Promise<SessionResponse[]> {
-      return request<SessionResponse[]>("GET", "/users/me/sessions", undefined, signal);
+    getSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
+      return request<SessionsListResponse>("GET", "/users/me/sessions", undefined, signal).then(
+        (r) => r.sessions,
+      );
     },
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {

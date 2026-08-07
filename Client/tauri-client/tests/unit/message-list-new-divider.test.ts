@@ -15,7 +15,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore } from "@stores/messages.store";
+import { messagesStore, addMessage } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
@@ -206,6 +206,58 @@ describe("MessageList — new-messages divider", () => {
     mount();
 
     expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+  });
+
+  // Regression: firstUnreadIndex is messages.length - unreadOnOpen, an offset
+  // from the end. A full rebuild after messages arrive during the visit used
+  // to recompute that offset against the new (longer) length, sliding the
+  // line down past the messages it was placed to mark.
+  it("keeps the divider anchored to the same message across a rebuild after messages arrive", () => {
+    setMessages([1, 2, 3, 4, 5].map(makeMessage));
+    openChannelWithUnread(2);
+    mount();
+
+    const before = container.querySelector('[data-testid="new-messages-divider"]')
+      ?.nextElementSibling as HTMLElement;
+    expect(before.dataset.testid).toBe("message-4");
+
+    // Three more messages arrive while the reader is on the channel, via the
+    // real append path (addMessage), which preserves the existing rows'
+    // identity — the append fast path handles this correctly on its own.
+    // Store notifications are microtask-batched, so every step is flushed:
+    // without that the assertions below read the DOM from mount() and pass
+    // no matter what rebuildItems would have done.
+    for (const id of [6, 7, 8]) {
+      addMessage({
+        id,
+        channel_id: CHANNEL_ID,
+        user: { id: 1, username: "Alice", avatar: null },
+        content: `Message ${id}`,
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 5)).toISOString(),
+      });
+    }
+    messagesStore.flush();
+    expect(container.querySelector('[data-testid="message-8"]')).not.toBeNull();
+    const afterAppend = container.querySelector('[data-testid="new-messages-divider"]')
+      ?.nextElementSibling as HTMLElement;
+    expect(afterAppend.dataset.testid).toBe("message-4");
+
+    // A non-append change (an edit) forces a full rebuild instead of the
+    // append fast path — this is where the count-based offset used to drift.
+    messagesStore.setState((prev) => {
+      const list = prev.messagesByChannel.get(CHANNEL_ID)!;
+      const next = list.map((m) => (m.id === 1 ? { ...m, content: "edited" } : m));
+      const updated = new Map(prev.messagesByChannel);
+      updated.set(CHANNEL_ID, next);
+      return { ...prev, messagesByChannel: updated };
+    });
+    messagesStore.flush();
+
+    const after = container.querySelector('[data-testid="new-messages-divider"]')
+      ?.nextElementSibling as HTMLElement;
+    expect(after.dataset.testid).toBe("message-4");
   });
 
   // The line marks a boundary; the message under it must not be rendered as a

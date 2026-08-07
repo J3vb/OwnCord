@@ -159,7 +159,23 @@ func (h *Hub) sweepStaleVoiceStates() {
 	h.mu.RUnlock()
 	for _, c := range inVoice {
 		chID := c.getVoiceChID()
-		if chID == 0 || h.hasChannelPerm(ctx, c, chID, permissions.ConnectVoice) {
+		if chID == 0 {
+			continue
+		}
+		allowed, err := h.hasChannelPermChecked(ctx, c.userID, chID, permissions.ConnectVoice)
+		if err != nil {
+			// A transient read failure (I/O error, lock contention, a
+			// maintenance window) is not a revocation — hasChannelPerm and
+			// permissions.Checker.HasChannelPerm both collapse any DB error
+			// to "denied", which would otherwise evict every in-voice
+			// participant on one bad read. Skip this client this tick; the
+			// next tick retries. Mirrors sweepRevokedSessions' guard on its
+			// own batch lookup below.
+			slog.Warn("sweepStaleVoiceStates: permission check failed, skipping this tick",
+				"user_id", c.userID, "channel_id", chID, "err", err)
+			continue
+		}
+		if allowed {
 			continue
 		}
 		// The permission check is a DB round-trip; a voice_join to a
@@ -217,10 +233,56 @@ func (h *Hub) sweepStaleVoiceStates() {
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
 		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
+		// Re-elect the key holder now that this ghost row is gone — every
+		// other path that removes a voice participant does this
+		// (finishVoiceLeave, the LiveKit webhook, registerNow,
+		// handleVoiceJoin). Without it, a departed user stripped out here
+		// while still named as key holder leaves the remaining lowest-uid
+		// participant self-promoting and rotating the room key locally, and
+		// its voice_e2ee_offers are rejected with NOT_KEY_HOLDER until the
+		// next join/leave in the channel. No locks are held here, matching
+		// the webhook call site.
+		h.updateKeyHolder(s.channelID)
 		if h.livekit != nil {
 			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
 		}
 	}
+}
+
+// hasChannelPermChecked is hasChannelPerm's error-aware counterpart: it
+// distinguishes a genuine permission denial (role missing, or the effective
+// permission bits don't include perm) from a DB read failure, by inlining the
+// same resolution hasChannelPerm/permissions.Checker.HasChannelPerm perform —
+// both of which collapse any error into "denied", indistinguishable from a
+// real revocation. sweepStaleVoiceStates needs that distinction: unlike a
+// handler answering one client's request, it evicts a live voice session on
+// "denied", so a transient read failure must not be treated as a revocation.
+func (h *Hub) hasChannelPermChecked(ctx context.Context, userID, channelID int64, perm int64) (allowed bool, err error) {
+	role, err := h.db.GetRoleForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if role == nil {
+		// No role row is a genuine deny, not an error — mirrors
+		// hasChannelPerm's role == nil case.
+		return false, nil
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true, nil
+	}
+	allow, deny, err := h.db.GetChannelPermissions(ctx, channelID, role.ID)
+	if err != nil {
+		return false, err
+	}
+	o := permissions.ChannelOverride{Allow: allow, Deny: deny}
+	if userID != 0 {
+		uAllow, uDeny, uErr := h.db.GetUserChannelPermissions(ctx, channelID, userID)
+		if uErr != nil {
+			return false, uErr
+		}
+		o.UserAllow, o.UserDeny = uAllow, uDeny
+	}
+	return permissions.EffectiveChannelPerms(role.Permissions, o)&perm == perm, nil
 }
 
 // CleanupVoiceForChannel removes all voice participants from the given channel.

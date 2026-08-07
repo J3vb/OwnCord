@@ -133,10 +133,28 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// a missing one is a stale grant).
 		affected, affectedOK := roles.AffectedUserIDs(r.Context(), id)
 
+		// The pre-update name is read the same way, so a rename can be
+		// detected below even though UpdateRole itself only reports whether
+		// permissions changed.
+		before, beforeErr := database.GetRoleByID(r.Context(), id)
+
 		role, permsChanged, err := roles.UpdateRole(r.Context(), actorFromContext(r), id, req.toInput())
 		if err != nil {
 			writeRoleErr(w, err)
 			return
+		}
+
+		// Clients key a member's role by NAME, not id (member_update /
+		// ready carry a role name string). A rename alone leaves every
+		// member of the role holding a name that no longer resolves against
+		// the post-rename role list — they lose their role color, member-list
+		// group and permission-gated affordances until they reconnect. A
+		// member_update per affected user re-keys them, exactly like a role
+		// delete's fallback move already does.
+		if beforeErr == nil && before != nil && before.Name != role.Name && affectedOK && hub != nil {
+			for _, uid := range affected {
+				hub.BroadcastMemberUpdate(uid, role.Name)
+			}
 		}
 
 		if permsChanged {

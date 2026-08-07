@@ -7,6 +7,8 @@ import {
   setLocalDeafened,
   setLocalCamera,
   setLocalScreenshare,
+  setPttGated,
+  isPttPollingLive,
   leaveVoiceChannel,
   setListenOnly,
   setVoiceStatus,
@@ -49,6 +51,13 @@ import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventH
 export type { StreamQuality } from "@lib/screenShare";
 
 const log = createLogger("livekitSession");
+
+// --- Push-to-talk liveness (cross-module signal, no instance state) ---
+
+/** Re-exported from the voice store, which owns the flag so `ptt.ts` can write
+ *  it at startup without importing this module (and the ~1.3 MB livekit-client
+ *  SDK behind it). See `voice.store.ts` for the platform-capability contract. */
+export { setPttPollingLive } from "@stores/voice.store";
 
 // --- Pure helpers (no instance state) ---
 
@@ -109,6 +118,16 @@ type SessionState =
 export class LiveKitSession {
   /** Single source of truth for all connection-lifecycle state. */
   private _state: SessionState = { type: "idle" };
+
+  /** BUG-142 fix: the ONLY source of join generations. Must never be
+   *  re-derived from `_state` — a transition through "idle" (e.g. leaveVoice()
+   *  during an in-flight connect) would reset a derived counter back to the
+   *  same value a still-running stale attempt is holding, letting the two
+   *  attempts collide on one generation and defeating every supersession
+   *  checkpoint. Monotonic increments here guarantee every connectAndSetup()
+   *  call gets a value no other attempt has ever held, regardless of how
+   *  many times the session has bounced through "idle" in between. */
+  private _joinGenerationCounter = 0;
 
   // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
@@ -455,10 +474,14 @@ export class LiveKitSession {
           } catch (disconnectErr) {
             log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
           }
-          this._audioPipeline.setRoom(null);
-          this._audioElements.setRoom(null);
-          this._deviceManager.setRoom(null);
-          this._deviceManager.setAudioPipeline(null);
+          // Re-sync from the CURRENT shared state instead of unconditionally
+          // nulling: by the time this runs, a newer attempt may already own
+          // `_state` (and its room), and this attempt's own room is never the
+          // one referenced there (we are aborting before reaching "connected").
+          // syncModuleRooms() derives from `_room`, so it correctly nulls the
+          // modules when nothing newer has connected yet, and correctly leaves
+          // a newer session's wiring alone when one has.
+          this.syncModuleRooms();
         };
         // Set state to reconnecting with the fresh room-less attempt info;
         // the actual room appears in "connected" state after connect succeeds.
@@ -572,13 +595,31 @@ export class LiveKitSession {
             ac: this._state.ac,
           });
         }
-        this._audioPipeline.setRoom(null);
-        this._audioElements.setRoom(null);
-        this._deviceManager.setRoom(null);
-        this._deviceManager.setAudioPipeline(null);
+        // See the matching comment in cleanupAbortedReconnect above: sync from
+        // the current shared state rather than unconditionally nulling, so a
+        // stale failed attempt cannot clobber a newer session's module wiring.
+        this.syncModuleRooms();
       }
     }
-    // All attempts exhausted — give up and clean up.
+    // All attempts exhausted — give up and clean up. But first check this
+    // loop is still current: the user may have left voice or joined a
+    // different channel during the last attempt's delay/connect, in which
+    // case `leaveVoice(true)` below would tear down the LIVE session that
+    // replaced this one (CLAUDE.md: voice sessions are superseded, not
+    // cancelled — cleanup here must be scoped to this attempt, not global).
+    // The state-type check is what catches a re-join of the SAME channel:
+    // connectAndSetup() overwrites `_state` without aborting our signal (the
+    // `_room` getter is null while "reconnecting", so its entry-point
+    // leaveVoice(false) never runs), leaving both `signal.aborted` false and
+    // `_currentChannelId` equal to ours once that join reaches "connected".
+    if (
+      signal.aborted ||
+      this._state.type !== "reconnecting" ||
+      this._currentChannelId !== channelId
+    ) {
+      log.info("Auto-reconnect give-up skipped — superseded");
+      return;
+    }
     // Send voice_leave over WS so the server removes our voice state;
     // without this the server and other clients see us as a ghost participant.
     log.error("Auto-reconnect exhausted all attempts, giving up");
@@ -745,7 +786,23 @@ export class LiveKitSession {
     if (room === null) return;
 
     const state = voiceStore.getState();
-    const muted = state.localMuted || state.localDeafened;
+    // A bound PTT key means transmission is gated by press/release, but the
+    // Rust poller only emits ptt-state on a state TRANSITION — an idle key
+    // produces no event at all, so without this the freshly published mic
+    // would stay hot and transmitting until the user's first press+release.
+    // Only arm this when the poller is confirmed live (setPttPollingLive) —
+    // gating on the stored key alone would close the mic permanently on
+    // platforms where PTT can never actually report state (macOS's
+    // is_key_down stub, pure-Wayland Linux with no XWayland).
+    // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
+    // user muted themselves", and ptt.ts refuses to open the mic on a PTT
+    // press while it is set — writing it here would close the mic for the
+    // whole session instead of only until the first press.
+    const pttArmed = mode === "join" && isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0;
+    if (mode === "join") {
+      setPttGated(pttArmed);
+    }
+    const muted = pttArmed || state.localMuted || state.localDeafened;
     const deafened = state.localDeafened;
     const shouldEnableMicrophone = !muted;
 
@@ -850,12 +907,13 @@ export class LiveKitSession {
     isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
     if (this._room !== null) this.leaveVoice(false);
-    // Increment the generation counter and embed it into the "connecting" state.
-    // Any newer call to connectAndSetup() will produce a larger generation,
-    // making myGeneration !== currentGeneration at each checkpoint.
-    const prevState = this._state;
-    const prevGeneration = prevState.type === "connecting" ? prevState.joinGeneration : 0;
-    const myGeneration = prevGeneration + 1;
+    // Draw the next generation from the monotonic instance counter (never
+    // re-derived from `_state`) and embed it into the "connecting" state.
+    // Any newer call to connectAndSetup() will produce a strictly larger
+    // generation, making myGeneration !== currentGeneration at each
+    // checkpoint even if this attempt's own state transitioned through
+    // "idle" in the meantime.
+    const myGeneration = ++this._joinGenerationCounter;
     this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
     // "joining" = connecting to the room; the E2EE "securing" phase is set below.
     setVoiceStatus("joining");
@@ -894,6 +952,21 @@ export class LiveKitSession {
       setVoiceStatus("securing");
       const keyExchangeOk = await this._e2ee.setupKeyExchange(isKeyHolder ?? false, channelId);
       if (!keyExchangeOk) {
+        // setupKeyExchange() also returns false when clearState() aborted the
+        // wait (e.g. a supersession that ran leaveVoice() while we were
+        // blocked here) — indistinguishable from a genuine timeout by return
+        // value alone. Check ownership before treating it as a real failure:
+        // a superseded attempt must not fire a spurious toast, send
+        // voice_leave (it carries no channel id and would act on whichever
+        // channel the NEWER attempt just joined), or clear the store's
+        // currentChannelId that the newer join just set.
+        if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+          log.info("connectAndSetup: superseded during key exchange — aborting", {
+            channelId,
+            myGeneration,
+          });
+          return "superseded";
+        }
         this.onErrorCallback?.("e2ee_timeout");
         // The exchange timed out BEFORE room.connect(): no SFU participant
         // exists, so no LiveKit webhook will ever clean up, and the server
@@ -1064,6 +1137,12 @@ export class LiveKitSession {
     } catch (err) {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (localRoom !== null) {
+        // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected
+        // acts on the shared session state, so a failed attempt's Disconnected
+        // event would otherwise tear down (or spawn a reconnect loop for)
+        // whichever session owns `_state` by then — which, when this attempt
+        // has been superseded, is a live one that belongs to a newer join.
+        localRoom.removeAllListeners();
         try {
           void localRoom.disconnect();
         } catch {
@@ -1071,7 +1150,28 @@ export class LiveKitSession {
         }
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
-      this.leaveVoice(false);
+      // Only touch the shared session state if this attempt is still current.
+      // A superseded attempt must not clear a newer join's server-side voice
+      // membership — leaveVoice's voice_leave frame carries no channel id and
+      // acts on whichever channel the user currently occupies, so sending it
+      // here for a stale attempt would delete the NEW join's voice_states row
+      // — nor reset a live session back to idle (CLAUDE.md: voice sessions are
+      // superseded, not cancelled).
+      if (
+        this._state.type === "connecting" &&
+        this._state.joinGeneration === myGeneration &&
+        this._state.pendingJoin === null
+      ) {
+        // The connect attempt failed entirely: no SFU participant was ever
+        // created, so no LiveKit webhook will ever clean up, and the server
+        // already registered the join when it sent voice_token. Send
+        // voice_leave and leave the store's voice channel (mirroring the
+        // e2ee-timeout and reconnect-exhausted give-up paths) or the stale
+        // voice_states row ghosts forever and can wedge the channel's
+        // key-holder election.
+        this.leaveVoice(true);
+        leaveVoiceChannel();
+      }
       return false;
     } finally {
       // Only clear "connecting" back to "idle" if we are still in the connecting
@@ -1295,6 +1395,15 @@ export class LiveKitSession {
   }
 
   setDeafened(deafened: boolean): void {
+    // Mirror setMuted's guard: a moderator-imposed deafen is not ours to
+    // lift locally. Without this, undeafening while server-deafened
+    // resubscribes remote audio and unmutes the mic client-side even though
+    // the server still considers the user deafened — see setMuted() above
+    // for why the refusal must live in this shared entry point.
+    if (!deafened && voiceStore.getState().localServerDeafened === true) {
+      log.debug("Ignoring undeafen: server-deafened by a moderator");
+      return;
+    }
     setLocalDeafened(deafened);
     this._audioElements.applyRemoteAudioSubscriptionState(deafened);
     const shouldMute = deafened || voiceStore.getState().localMuted;

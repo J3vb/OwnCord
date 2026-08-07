@@ -9,6 +9,7 @@ import {
   leaveVoiceChannel,
   setLocalMuted,
   setLocalDeafened,
+  setPttGated,
   setLocalCamera,
   setLocalScreenshare,
   setListenOnly,
@@ -140,6 +141,59 @@ describe("voice store", () => {
       expect(state.voiceUsers.size).toBe(1);
       expect(state.voiceUsers.has(10)).toBe(false);
       expect(state.voiceUsers.has(20)).toBe(true);
+    });
+
+    describe("local moderator-flag derivation (v049)", () => {
+      afterEach(() => {
+        authStore.setState(() => ({
+          token: null,
+          user: null,
+          serverName: null,
+          motd: "",
+          isAuthenticated: false,
+        }));
+      });
+
+      it("derives localServerMuted/localServerDeafened from the signed-in user's row", () => {
+        authStore.setState((prev) => ({
+          ...prev,
+          user: { id: 1, username: "me", avatar: null, role: "member" },
+        }));
+        // A full-ready reconnect (mustFullResync / replay miss) that
+        // preserves a live voice session reports the moderator flags on the
+        // signed-in user's own row.
+        setVoiceStates([
+          { ...VOICE_STATE_1, server_muted: true, server_deafened: true },
+          VOICE_STATE_2,
+        ]);
+        const state = voiceStore.getState();
+        expect(state.localServerMuted).toBe(true);
+        expect(state.localServerDeafened).toBe(true);
+      });
+
+      it("resets the local moderator flags to false when the signed-in user's row omits them", () => {
+        authStore.setState((prev) => ({
+          ...prev,
+          user: { id: 1, username: "me", avatar: null, role: "member" },
+        }));
+        // Simulate a stale localServerMuted from before the resync.
+        voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
+        setVoiceStates([VOICE_STATE_1]); // no server_muted/server_deafened on this row
+        const state = voiceStore.getState();
+        expect(state.localServerMuted).toBe(false);
+        expect(state.localServerDeafened).toBe(false);
+      });
+
+      it("leaves the local moderator flags false when the signed-in user is absent from the payload", () => {
+        authStore.setState((prev) => ({
+          ...prev,
+          user: { id: 999, username: "me", avatar: null, role: "member" },
+        }));
+        setVoiceStates([{ ...VOICE_STATE_1, server_muted: true }]);
+        const state = voiceStore.getState();
+        expect(state.localServerMuted).toBe(false);
+        expect(state.localServerDeafened).toBe(false);
+      });
     });
   });
 
@@ -297,6 +351,26 @@ describe("voice store", () => {
       setLocalDeafened(true);
       setLocalDeafened(false);
       expect(voiceStore.getState().localDeafened).toBe(false);
+    });
+  });
+
+  describe("setPttGated", () => {
+    it("sets pttGated to true", () => {
+      setPttGated(true);
+      expect(voiceStore.getState().pttGated).toBe(true);
+    });
+
+    it("sets pttGated to false", () => {
+      setPttGated(true);
+      setPttGated(false);
+      expect(voiceStore.getState().pttGated).toBe(false);
+    });
+
+    it("does not touch localMuted — PTT must never write the explicit-mute flag (v006)", () => {
+      setLocalMuted(true);
+      setPttGated(false); // PTT key pressed
+      expect(voiceStore.getState().localMuted).toBe(true);
+      expect(voiceStore.getState().pttGated).toBe(false);
     });
   });
 

@@ -336,9 +336,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         modal.mount(document.body);
       },
       onReorderChannel: (reorders) => {
-        for (const r of reorders) {
-          void api.adminUpdateChannel(r.channelId, { position: r.newPosition });
-        }
+        // The store already applied the optimistic order (drag-reorder.ts,
+        // on mouseup). Aggregate the per-channel PATCHes and surface a single
+        // failure toast — same try/catch+toast contract as onSave/onDelete
+        // above — instead of a bare `void` per call, which left a rejected or
+        // failed write unreported and the sidebar showing an order the
+        // server never accepted.
+        void Promise.allSettled(
+          reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
+        ).then((results) => {
+          if (results.some((r) => r.status === "rejected")) {
+            getToast()?.show("Failed to save channel order", "error");
+          }
+        });
       },
       onPurgeChannel: async (channel, count) => {
         try {

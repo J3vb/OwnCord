@@ -39,6 +39,18 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
   };
 }
 
+/**
+ * Whether the server marked this invite revoked. `InviteResponse` does not
+ * declare the field (redemption enforces it server-side; the list endpoint
+ * deliberately still includes revoked invites), so this reaches into the raw
+ * payload the same way `mapInviteResponse` already does for `created_by`.
+ * Without this, a revoked invite renders identically to a live one — Copy and
+ * Revoke on a code that redemption always rejects.
+ */
+function isInviteRevoked(r: InviteResponse): boolean {
+  return (r as unknown as Record<string, unknown>)["revoked"] === true;
+}
+
 // ---------------------------------------------------------------------------
 // Pinned message mapping
 // ---------------------------------------------------------------------------
@@ -136,6 +148,12 @@ export function createInviteManagerController(opts: {
   readonly getRoot: () => HTMLDivElement | null;
 }): InviteManagerController {
   let instance: MountableComponent | null = null;
+  // Set for the duration of the getInvites() round trip. `instance` is only
+  // assigned after the await, so the synchronous `instance !== null` guard
+  // alone lets a double-click during the fetch mount two overlays — the
+  // second assignment orphans the first, which is then unreachable by its own
+  // close affordances. This flag closes that window.
+  let opening = false;
 
   function close(): void {
     if (instance !== null) {
@@ -146,10 +164,11 @@ export function createInviteManagerController(opts: {
 
   async function open(): Promise<void> {
     const root = opts.getRoot();
-    if (instance !== null || root === null) return;
+    if (instance !== null || root === null || opening) return;
+    opening = true;
     try {
       const raw = await opts.api.getInvites();
-      const invites = raw.map(mapInviteResponse);
+      const invites = raw.filter((r) => !isInviteRevoked(r)).map(mapInviteResponse);
       instance = createInviteManager({
         invites,
         onCreateInvite: async () => {
@@ -184,6 +203,8 @@ export function createInviteManagerController(opts: {
     } catch (err) {
       log.error("Failed to open invite manager", { error: String(err) });
       showToast("Failed to load invites", "error");
+    } finally {
+      opening = false;
     }
   }
 
@@ -212,6 +233,10 @@ export function createPinnedPanelController(opts: {
   readonly onJumpToMessage?: (messageId: number) => void;
 }): PinnedPanelController {
   let instance: MountableComponent | null = null;
+  // Same guard as InviteManagerController.open: `instance` is only assigned
+  // after the getPins() await, so a double-click during the fetch would
+  // otherwise mount two panels and orphan the first one permanently.
+  let opening = false;
 
   function close(): void {
     if (instance !== null) {
@@ -225,9 +250,11 @@ export function createPinnedPanelController(opts: {
       close();
       return;
     }
+    if (opening) return;
     const root = opts.getRoot();
     const channelId = opts.getCurrentChannelId();
     if (root === null || channelId === null) return;
+    opening = true;
     try {
       const resp = await opts.api.getPins(channelId);
       const pins = resp.messages.map(mapToPinnedMessage);
@@ -257,6 +284,8 @@ export function createPinnedPanelController(opts: {
     } catch (err) {
       log.error("Failed to load pinned messages", { error: String(err) });
       showToast("Failed to load pinned messages", "error");
+    } finally {
+      opening = false;
     }
   }
 

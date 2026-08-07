@@ -1087,6 +1087,76 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	assertNoMsgType(t, memberSend, "channel_delete")
 }
 
+// can_send used to be computed only in the ready payload, so a mid-session
+// permission edit left a connected client's composer on its stale connect-time
+// verdict until the socket was rebuilt. The targeted channel_create this
+// fan-out sends now carries each recipient's own verdict — and because it is
+// per-recipient, two clients must be able to receive different answers from
+// the same RefreshChannelVisibility call.
+func TestRefreshChannelVisibility_TargetedCreateCarriesPerClientCanSend(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "cansend-room")
+	ch, err := database.GetChannel(context.Background(), chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	owner := seedOwnerUser(t, database, "cansend-owner")
+	memberID := seedTestUser(t, database, "cansend-member")
+	member, err := database.GetUserByID(context.Background(), memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	ownerSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	ownerClient := ws.NewTestClientWithUser(hub, owner, chID, ownerSend)
+	memberClient := ws.NewTestClientWithUser(hub, member, chID, memberSend)
+	hub.Register(ownerClient)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	// Member keeps READ_MESSAGES (0x0002) but loses SEND_MESSAGES (0x0001), so
+	// the channel stays VISIBLE while posting is revoked — precisely the case a
+	// visibility-only fan-out used to leave with a stale composer.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 1)`,
+		chID,
+	); err != nil {
+		t.Fatalf("insert override: %v", err)
+	}
+
+	hub.RefreshChannelVisibility(ch)
+
+	memberMsg := drainForMsgType(t, memberSend, "channel_create")
+	memberPayload, ok := memberMsg["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("member channel_create payload not an object: %#v", memberMsg["payload"])
+	}
+	canSend, present := memberPayload["can_send"]
+	if !present {
+		t.Fatal("targeted channel_create omitted can_send — the client keeps its stale connect-time verdict")
+	}
+	if canSend != false {
+		t.Fatalf("member can_send = %v, want false (SEND_MESSAGES denied)", canSend)
+	}
+
+	// Same call, same channel, different recipient: the owner's admin bit must
+	// still yield true, proving the value is resolved per client rather than
+	// encoded once for the whole audience.
+	ownerMsg := drainForMsgType(t, ownerSend, "channel_create")
+	ownerPayload, ok := ownerMsg["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("owner channel_create payload not an object: %#v", ownerMsg["payload"])
+	}
+	if ownerPayload["can_send"] != true {
+		t.Fatalf("owner can_send = %v, want true (admin bypass)", ownerPayload["can_send"])
+	}
+}
+
 func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) {
 	hub, database := newTestHub(t)
 

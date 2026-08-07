@@ -17,8 +17,26 @@
 
 const STORAGE_PREFIX = "owncord:nsfw-ack:";
 
+/**
+ * Server host the acknowledgements below belong to. The app is multi-server,
+ * a server/account switch is in-document SPA navigation (no reload, so
+ * sessionStorage survives it), and channel ids are per-server SQLite
+ * autoincrement integers — without a host component in the key, an ack for
+ * channel N on server A silently suppresses the gate for an unrelated
+ * channel N on server B. `null` (before any host is known, or in a context
+ * that never sets one) falls back to the original unscoped key.
+ */
+let currentHost: string | null = null;
+
+/** Point acknowledgements at a specific server. Call on connect and on
+ *  server switch, mirroring `channel-mutes.ts`'s `setChannelMutesHost`. */
+export function setNsfwGateHost(host: string | null): void {
+  currentHost = host;
+}
+
 function storageKey(channelId: number): string {
-  return `${STORAGE_PREFIX}${channelId}`;
+  const suffix = currentHost === null ? `${channelId}` : `${channelId}:${currentHost}`;
+  return `${STORAGE_PREFIX}${suffix}`;
 }
 
 /**

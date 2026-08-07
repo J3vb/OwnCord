@@ -264,6 +264,17 @@ type channelPayload struct {
 	// show "3/5" and the client can explain a refusal it could have predicted.
 	VoiceMaxUsers int `json:"voice_max_users"`
 	VoiceMaxVideo int `json:"voice_max_video"`
+	// CanSend is the per-recipient composer affordance, the same value the
+	// ready payload ships per channel. It is per-client, so only the targeted
+	// sends in RefreshChannelVisibility populate it — the shared-buffer
+	// broadcasts (BroadcastChannelCreate/Update) leave it nil, since one
+	// encoded frame is delivered to every recipient and a single value would
+	// be wrong for some of them.
+	//
+	// Pointer + omitempty so "not stated" stays distinguishable from "false":
+	// a client must keep its existing verdict when the field is absent, and an
+	// older server that never sends it keeps the permissive default.
+	CanSend *bool `json:"can_send,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -702,6 +713,21 @@ func buildChannelCreate(ch *db.Channel) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: channelPayloadFrom(ch),
+	})
+}
+
+// buildChannelCreateFor constructs a channel_create addressed to ONE client,
+// carrying that client's can_send verdict.
+//
+// Separate from buildChannelCreate because can_send is per-recipient: the
+// broadcast form encodes a single frame for a whole audience, so it must leave
+// the field absent rather than assert one client's answer for everyone.
+func buildChannelCreateFor(ch *db.Channel, canSend bool) []byte {
+	p := channelPayloadFrom(ch)
+	p.CanSend = &canSend
+	return buildJSON(wsMsg{
+		Type:    MsgTypeChannelCreate,
+		Payload: p,
 	})
 }
 

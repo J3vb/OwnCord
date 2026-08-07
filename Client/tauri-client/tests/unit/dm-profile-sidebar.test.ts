@@ -180,4 +180,44 @@ describe("DmProfileSidebar", () => {
     sidebar2.destroy?.();
     localStorage.removeItem("owncord:dm-note:99");
   });
+
+  it("scopes the note to the server host when one is supplied", () => {
+    // User ids are per-server, so an unscoped key means a note about user 5
+    // on server A is shown for, and overwritten by, the unrelated user 5 on
+    // server B in the multi-profile client.
+    const user = makeUser({ id: 5 });
+    const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+    sidebarA.mount(container);
+    const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+    noteElA.value = "Note about server A's user 5";
+    noteElA.dispatchEvent(new Event("input"));
+    sidebarA.destroy?.();
+
+    expect(localStorage.getItem("owncord:dm-note:a.example.com:5")).toBe(
+      "Note about server A's user 5",
+    );
+
+    // The unrelated user 5 on a different server sees no note.
+    const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
+    sidebarB.mount(container);
+    const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+    expect(noteElB.value).toBe("");
+    sidebarB.destroy?.();
+
+    localStorage.removeItem("owncord:dm-note:a.example.com:5");
+  });
+
+  it("falls back to the legacy unscoped key to migrate a note saved before host-scoping", () => {
+    const user = makeUser({ id: 42 });
+    localStorage.setItem("owncord:dm-note:42", "Pre-existing note");
+
+    const sidebar = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
+    sidebar.mount(container);
+    const noteEl = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+
+    expect(noteEl.value).toBe("Pre-existing note");
+
+    sidebar.destroy?.();
+    localStorage.removeItem("owncord:dm-note:42");
+  });
 });

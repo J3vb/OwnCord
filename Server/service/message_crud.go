@@ -45,6 +45,16 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	isDM := ch.Type == "dm"
 
+	// Archived channels are read-only. Until now `archived` was consulted only
+	// by the visibility predicate (VisibleChannelIDs / RefreshChannelVisibility),
+	// so it hid the channel without protecting it: any caller that still held
+	// the id — a custom client, or a stock client racing the channel_delete —
+	// could keep posting into an archive indefinitely. History stays readable;
+	// only writes are refused.
+	if !isDM && ch.Archived {
+		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	}
+
 	// Permission check.
 	if err := s.checkSendPermission(ctx, p.UserID, p.ChannelID, ch.Type); err != nil {
 		return nil, err
@@ -106,6 +116,19 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
 				"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
 		}
+		if linked == 0 && content == "" {
+			// sanitizeContent waived the empty-content check purely on the
+			// requested attachment count, before any link attempt. None of
+			// them actually linked (all missing, foreign, or already
+			// linked — e.g. a retry of a partially-completed send), so the
+			// row that just committed has no content and no attachments.
+			// Compensate the same way the linkErr path above does, rather
+			// than broadcasting a blank message.
+			if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
+				slog.Error("MessageService.SendMessage DeleteMessage (empty-after-link cleanup)", "err", delErr, "msg_id", msgID)
+			}
+			return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		}
 		if linked > 0 {
 			attMap, attErr := s.st.GetAttachmentsByMessageIDs(ctx, []int64{msgID})
 			if attErr != nil {
@@ -114,6 +137,25 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 				attachments = attMap[msgID]
 			}
 		}
+	}
+
+	// Advance the author's own read state past the message they just sent.
+	// Both unread queries count "messages with id > my read_states row" and
+	// neither filters by author, so without this an author's own message
+	// counts as unread to themselves: post in a channel, navigate away, and
+	// the next `ready` restates it as an unread badge that never clears until
+	// something else marks the channel read.
+	//
+	// Done here rather than by adding an author filter to the two queries so
+	// the stored read state stays truthful — you have, in fact, seen your own
+	// message — and so the fix covers DMs and text channels through one path.
+	//
+	// Best-effort: the message is already committed and broadcast-bound, so a
+	// failure here must not fail the send. The worst case is the pre-existing
+	// stale-badge behaviour, which the next mark_read corrects.
+	if err := s.st.UpdateReadState(ctx, p.UserID, p.ChannelID, msgID); err != nil {
+		slog.Warn("MessageService.SendMessage: could not advance author read state",
+			"err", err, "user_id", p.UserID, "channel_id", p.ChannelID, "msg_id", msgID)
 	}
 
 	result := &SendMessageResult{

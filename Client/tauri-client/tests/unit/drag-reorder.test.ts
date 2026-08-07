@@ -16,9 +16,10 @@ import {
 } from "@components/channel-sidebar/drag-reorder";
 import type { ChannelReorderData } from "@components/ChannelSidebar";
 import { authStore } from "@stores/auth.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { UserWithRole } from "@lib/types";
+import { Permission } from "@lib/types";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -106,8 +107,12 @@ function yInRow(idx: number, half: "top" | "bottom"): number {
   return idx * 20 + (half === "top" ? 4 : 16);
 }
 
+/** A real drag holds the left button down for its whole duration, so `buttons`
+ *  (the held-button bitmask) is set alongside `button` (which button changed)
+ *  on every synthetic event — mousemove gates on `buttons` to detect a stale
+ *  latch left by an off-row release. */
 function mouse(type: string, clientX: number, clientY: number): MouseEvent {
-  return new MouseEvent(type, { clientX, clientY, button: 0, bubbles: true });
+  return new MouseEvent(type, { clientX, clientY, button: 0, buttons: 1, bubbles: true });
 }
 
 /** Drives a full drag of `fromId` onto the given half of row `toIdx`. */
@@ -168,6 +173,25 @@ describe("attachDragHandlers permission gate", () => {
     const el = rig.items.get(1);
 
     expect(el?.classList.contains("channel-draggable")).toBe(draggable);
+  });
+
+  // Gated on the MANAGE_CHANNELS bit, not the literal role name — the same
+  // derivation as Edit/Delete (context-menu.ts) and the category "+"
+  // (ChannelSidebar.ts), so the three cannot drift apart on who may reorder.
+  it("makes a custom role holding MANAGE_CHANNELS draggable, even though its name is neither owner nor admin", () => {
+    setRoles([{ id: 9, name: "Curator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    signIn("Curator");
+    const rig = buildRig([makeCh(1, 0)]);
+
+    expect(rig.items.get(1)?.classList.contains("channel-draggable")).toBe(true);
+  });
+
+  it("does not make a role literally named 'admin' draggable when it lacks MANAGE_CHANNELS", () => {
+    setRoles([{ id: 9, name: "admin", color: null, permissions: 0 }]);
+    signIn("admin");
+    const rig = buildRig([makeCh(1, 0)]);
+
+    expect(rig.items.get(1)?.classList.contains("channel-draggable")).toBe(false);
   });
 
   it("does nothing when no user is signed in", () => {
@@ -245,6 +269,37 @@ describe("drag activation threshold", () => {
     el?.dispatchEvent(mouse("mousemove", 0, 60));
 
     expect(el?.classList.contains("dragging")).toBe(false);
+  });
+
+  it("a stale pending-drag latch left by an off-row release does not resume on a later buttonless hover", () => {
+    // Press near row 1, drift under the 5px threshold, and release over row 2:
+    // no drag ran, and because mousedown/mouseup targeted different elements,
+    // row 1's own mouseup listener never fires, so its pendingDrag latch is
+    // never cleared.
+    signIn("owner");
+    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const row1 = rig.items.get(1)!;
+
+    row1.dispatchEvent(mouse("mousedown", 0, yInRow(0, "bottom")));
+    row1.dispatchEvent(mouse("mousemove", 0, yInRow(0, "bottom") + 1)); // 1px, below threshold
+    document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "top"))); // released over row 2
+
+    expect(row1.classList.contains("dragging")).toBe(false);
+
+    // Later, the pointer crosses row 1 again with no button held (a plain
+    // hover). Without the fix this satisfies the 5px threshold against the
+    // stale startX/startY and silently starts a real drag.
+    row1.dispatchEvent(
+      new MouseEvent("mousemove", {
+        clientX: 0,
+        clientY: yInRow(0, "top") + 20,
+        buttons: 0,
+        bubbles: true,
+      }),
+    );
+
+    expect(row1.classList.contains("dragging")).toBe(false);
+    expect(document.body.classList.contains("channel-reordering")).toBe(false);
   });
 });
 

@@ -569,10 +569,19 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
             if (autoLoginCancelled) return;
 
-            // Use stored token directly for reconnection
+            // Use stored token directly for reconnection. Preserve the
+            // profile's existing rememberPassword rather than forcing it to
+            // false (autoConnect profiles always have it true — see
+            // setAutoLogin), and skip wirePostAuth's credential re-save: the
+            // password is never returned over IPC here, so saving with
+            // rememberPassword defaulted to true would call saveCredential
+            // with password undefined, which rewrites the whole stored
+            // blob and silently destroys any password the user opted to
+            // remember (save_credential only carries the password key
+            // `if let Some(...)`, so a None wipes it — see credentials.rs).
             api.setConfig({ host: autoProfile.host });
-            ensureProfileExists(autoProfile.host, cred.username, false);
-            wirePostAuth(autoProfile.host, cred.token, cred.username);
+            ensureProfileExists(autoProfile.host, cred.username, autoProfile.rememberPassword);
+            wirePostAuth(autoProfile.host, cred.token, cred.username, undefined, false);
             return;
           }
         } catch (err) {

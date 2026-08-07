@@ -9,9 +9,13 @@ import (
 	"github.com/owncord/server/service"
 )
 
-// channel_focus / mark_read share one budget: both run the identical
-// HandleChannelFocus service call, whose UpdateReadState is a SQLite write
-// against the single writer connection.
+// channel_focus and mark_read each get their own 5/s budget under this same
+// limit/window even though both run the identical HandleChannelFocus service
+// call. They used to share one auth.Key("focus", ...) budget, which let a
+// "Mark All as Read" burst (one mark_read per badged channel) exhaust the
+// window and silently drop the next legitimate channel_focus — leaving the
+// connection subscribed to the previous channel's pub/sub topic with no
+// error surfaced to the client.
 const (
 	focusRateLimit  = 5
 	focusRateWindow = time.Second
@@ -96,9 +100,10 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	chID := focusCmd.ChannelID()
 
 	// Every frame drives an unmetered SQLite write (UpdateReadState) plus
-	// perm checks and pubsub churn; mark_read shares the budget because it
-	// runs the identical service call. Silently dropping matches the
-	// handlers' existing error posture.
+	// perm checks and pubsub churn, so focus is metered on its own key —
+	// mark_read runs the identical service call but must not be able to
+	// spend this budget (see handleMarkReadV2). Silently dropping matches
+	// the handlers' existing error posture.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("focus", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{}
 	}
@@ -123,8 +128,11 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	d := deps.(PresenceDeps)
 	markCmd := cmd.(MarkReadCmd)
 
-	// Shared budget with channel_focus — same underlying SQLite write.
-	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("focus", info.UserID), focusRateLimit, focusRateWindow) {
+	// Own budget, separate from channel_focus: a "Mark All as Read" burst
+	// (one mark_read per badged channel) must not starve a legitimate
+	// channel_focus that shares the same 5/s window — that silently leaves
+	// the connection subscribed to the old channel's pub/sub topic.
+	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("markread", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{}
 	}
 

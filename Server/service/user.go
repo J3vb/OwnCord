@@ -10,17 +10,49 @@ import (
 	"unicode/utf8"
 
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/syncutil"
 	"github.com/owncord/server/telemetry"
 )
 
 // UserService handles user profile and session operations.
 type UserService struct {
-	st Store
+	st           Store
+	profileLocks keyedMutex
 }
 
 // NewUserService creates a UserService.
 func NewUserService(st Store) *UserService {
 	return &UserService{st: st}
+}
+
+// keyedMutex hands out a per-key lock so unrelated keys never contend, while
+// operations on the same key serialize. UpdateProfile uses one keyed by user
+// ID: it is an unsynchronized read-merge-write (GetUserByID, merge the
+// patch, UpdateUserProfile), and PATCH /users/me can race POST
+// /users/me/avatar for the same user — without serialization, the loser's
+// write commits columns merged against a pre-race snapshot, silently
+// reverting whatever the winner just changed. Entries are never removed;
+// the key space is bounded by distinct user IDs, not by request rate.
+type keyedMutex struct {
+	mu    syncutil.Mutex
+	locks map[int64]*syncutil.Mutex
+}
+
+// lock acquires the per-key lock and returns a func to release it.
+func (k *keyedMutex) lock(key int64) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = make(map[int64]*syncutil.Mutex)
+	}
+	l, ok := k.locks[key]
+	if !ok {
+		l = &syncutil.Mutex{}
+		k.locks[key] = l
+	}
+	k.mu.Unlock()
+
+	l.Lock()
+	return l.Unlock
 }
 
 // AvatarFileURL is the server-relative path an uploaded avatar is served from.
@@ -114,7 +146,15 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 
 	// The update writes every column, so a partial patch has to be merged
 	// against the current row first — otherwise setting only a display name
-	// would silently clear the about text.
+	// would silently clear the about text. That read-merge-write must be
+	// serialized per user: PATCH /users/me and POST /users/me/avatar both
+	// land here for the same account, and without a lock the second call's
+	// read can land between the first call's read and write, so its merge
+	// (built from the pre-race row) silently reverts the first call's change
+	// when it writes.
+	unlock := s.profileLocks.lock(userID)
+	defer unlock()
+
 	current, err := s.st.GetUserByID(ctx, userID)
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)

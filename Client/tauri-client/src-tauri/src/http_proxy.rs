@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use rustls::pki_types::ServerName;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -55,6 +55,18 @@ impl HttpProxyState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Remove the `remote_host` entry, but only if it still points at `port`.
+    /// Used by `run_proxy_loop`'s accept-error exit path to deregister a dead
+    /// tunnel without racing a newer tunnel that may have already replaced it
+    /// (e.g. `stop_http_proxy` + a fresh `start_http_proxy` while this loop
+    /// was mid-shutdown).
+    async fn remove_if_port_matches(&self, remote_host: &str, port: u16) {
+        let mut inner = self.inner.lock().await;
+        if inner.get(remote_host).is_some_and(|entry| entry.port == port) {
+            inner.remove(remote_host);
         }
     }
 }
@@ -111,6 +123,7 @@ pub async fn start_http_proxy<R: Runtime>(
         app.clone(),
         listener,
         remote_host.clone(),
+        port,
         shutdown_rx,
     ));
     // Watch the loop so a panic is logged instead of vanishing silently (which
@@ -161,6 +174,7 @@ async fn run_proxy_loop<R: Runtime>(
     app: AppHandle<R>,
     listener: TcpListener,
     remote_host: String,
+    port: u16,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut consecutive_errors: u32 = 0;
@@ -191,6 +205,21 @@ async fn run_proxy_loop<R: Runtime>(
                                 "[http_proxy] {} consecutive accept errors, stopping proxy loop",
                                 MAX_CONSECUTIVE_ACCEPT_ERRORS
                             );
+                            // Deregister the dead tunnel BEFORE the break drops
+                            // `listener`, so a future start_http_proxy rebinds a
+                            // fresh port instead of handing back this closed one
+                            // forever. Doing it here rather than after the loop
+                            // returns matters: the listener still holds the port,
+                            // so no newer tunnel can have been handed the same
+                            // number and the port guard cannot misfire.
+                            if let Some(state) = app.try_state::<HttpProxyState>() {
+                                state.remove_if_port_matches(&remote_host, port).await;
+                            } else {
+                                warn!(
+                                    "[http_proxy] state unmanaged; cannot deregister dead tunnel for {}",
+                                    remote_host
+                                );
+                            }
                             break;
                         }
                     }
@@ -407,6 +436,45 @@ async fn handle_connection<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression: the accept-error exit path in run_proxy_loop must be able to
+    // deregister its own dead entry, but must NOT clobber a newer tunnel that
+    // has since replaced it under the same remote_host key.
+    #[tokio::test]
+    async fn remove_if_port_matches_removes_only_matching_entry() {
+        let state = HttpProxyState::new();
+        {
+            let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+            let mut inner = state.inner.lock().await;
+            inner.insert(
+                "example.com:8443".to_string(),
+                ProxyEntry {
+                    port: 4242,
+                    shutdown_tx: tx,
+                },
+            );
+        }
+
+        // A stale loop reporting a port that no longer matches the live
+        // entry must leave the current entry alone.
+        state
+            .remove_if_port_matches("example.com:8443", 9999)
+            .await;
+        assert_eq!(
+            state.inner.lock().await.get("example.com:8443").map(|e| e.port),
+            Some(4242),
+            "mismatched port must not remove a newer tunnel's entry"
+        );
+
+        // A loop reporting its own still-current port must remove it.
+        state
+            .remove_if_port_matches("example.com:8443", 4242)
+            .await;
+        assert!(
+            state.inner.lock().await.get("example.com:8443").is_none(),
+            "matching port must deregister the dead tunnel"
+        );
+    }
 
     #[test]
     fn validate_rejects_crlf_and_null() {

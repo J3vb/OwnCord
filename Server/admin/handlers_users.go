@@ -62,6 +62,20 @@ type patchUserRequest struct {
 // effectively permanent and should be issued as such.
 const maxBanDurationHours = 24 * 365
 
+// memberUnbanBroadcaster is an optional capability of HubBroadcaster: tell
+// every connected client a user is back in the roster after an unban, the
+// mirror of BroadcastMemberBan. It is checked with a type assertion instead
+// of being added to HubBroadcaster directly (admin/types.go, not owned by
+// this change) so this fix does not force every HubBroadcaster
+// implementation — production and test doubles alike — to gain the method
+// before it compiles. See the batch report's cross_batch note: *ws.Hub needs
+// BroadcastMemberUnban(userID int64) wired up for this to take effect at
+// runtime; until then the assertion below simply misses and the handler's
+// existing (pre-fix) behavior is unchanged.
+type memberUnbanBroadcaster interface {
+	BroadcastMemberUnban(userID int64)
+}
+
 // writeModerationErr maps ModerationService errors onto admin API responses.
 func writeModerationErr(w http.ResponseWriter, err error) {
 	switch {
@@ -144,8 +158,17 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 				writeModerationErr(w, actionErr)
 				return
 			}
-			if *req.Banned && hub != nil {
+			switch {
+			case *req.Banned && hub != nil:
 				hub.BroadcastMemberBan(id)
+			case !*req.Banned && hub != nil:
+				// Ban had no WS event on the way out (member_ban hard-deletes
+				// the row client-side); unban needs one on the way back in, or
+				// every already-connected client keeps the user missing from
+				// its member store while a freshly connecting client sees them.
+				if mub, ok := hub.(memberUnbanBroadcaster); ok {
+					mub.BroadcastMemberUnban(id)
+				}
 			}
 		}
 
@@ -169,6 +192,14 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			if role, err := database.GetRoleByID(r.Context(), *req.RoleID); err == nil && role != nil {
 				if hub != nil {
 					hub.BroadcastMemberUpdate(id, role.Name)
+					// BroadcastMemberUpdate only revokes subscriptions the new
+					// role can no longer read (hub_broadcast.go's
+					// revokeUnreadableChannels); it never grants the ones the
+					// new role newly gained READ_MESSAGES on. Without this,
+					// a promoted user's sidebar is missing channels until
+					// their next reconnect, unlike a role permission edit or
+					// a role delete, which both re-derive visibility fully.
+					hub.RefreshAllChannelVisibility()
 				}
 			}
 		}

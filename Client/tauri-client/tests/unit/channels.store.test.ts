@@ -214,6 +214,46 @@ describe("channels store", () => {
       expect(ch.lastMessageId).toBe(100);
       expect(ch.canSend).toBe(false);
     });
+
+    // v017: can_send used to be computed only in the ready payload, so a role
+    // or override edit left every connected client's composer on its stale
+    // connect-time verdict until the socket was rebuilt. The targeted
+    // channel_create from RefreshChannelVisibility now carries this viewer's
+    // own verdict, and it must win over the retained value.
+    it("applies can_send from a targeted channel_create", () => {
+      setChannels(readyChannels); // channel 1 starts canSend: true
+
+      addChannel({
+        id: 1,
+        name: "general",
+        type: "text",
+        category: "Text",
+        position: 0,
+        can_send: false,
+      });
+
+      expect(channelsStore.getState().channels.get(1)!.canSend).toBe(false);
+    });
+
+    it("re-grants can_send when a permission edit restores posting", () => {
+      setChannels(readyChannels);
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(1, { ...prev.channels.get(1)!, canSend: false });
+        return { ...prev, channels: next };
+      });
+
+      addChannel({
+        id: 1,
+        name: "general",
+        type: "text",
+        category: "Text",
+        position: 0,
+        can_send: true,
+      });
+
+      expect(channelsStore.getState().channels.get(1)!.canSend).toBe(true);
+    });
   });
 
   describe("updateChannel", () => {

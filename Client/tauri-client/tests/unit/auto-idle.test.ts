@@ -180,6 +180,24 @@ describe("startAutoIdle", () => {
     expect(loadUserStatus()).toBe("idle");
   });
 
+  it("restores Online on activity when the controller starts from a persisted auto-idle state", () => {
+    // Regression for v023: a session that starts already auto-idle (app
+    // restart, MainPage remount) must still be un-idled by activity. The
+    // in-memory latch used to start false regardless of the persisted
+    // status/origin, so apply(false) was unreachable and the user broadcast
+    // "idle" for the rest of the session no matter how much they used the app.
+    saveUserStatus("idle", "auto");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
+
+    target.fire();
+
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("online");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadUserStatusOrigin()).toBe("manual");
+  });
+
   it("stops firing after destroy", () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();

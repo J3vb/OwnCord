@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, removeChannel } from "@stores/channels.store";
 
 export interface DmUser {
   readonly id: number;
@@ -105,10 +105,18 @@ export function removeDmChannel(channelId: number): void {
  * channel the server no longer recognizes. `fallback` lets each caller pick
  * its own landing spot — the sidebar restores the channel visited before the
  * DM; a background close just needs somewhere safe.
+ *
+ * Also removes the `type: "dm"` mirror row that `addDmToChannelsStore`
+ * synthesizes into channelsStore on selection — otherwise the mirror (and
+ * its unread count) survives the close and every future `ready` rebuild
+ * (`setChannels` deliberately re-carries dm-typed rows), leaving a phantom
+ * entry that keeps "Mark All as Read" lit with nothing unread on screen and
+ * would send `mark_read` for a channel the user no longer has open.
  */
 export function closeDmLocally(channelId: number, fallback: () => void): void {
   const wasActive = channelsStore.getState().activeChannelId === channelId;
   removeDmChannel(channelId);
+  removeChannel(channelId);
   if (wasActive) fallback();
 }
 
@@ -190,6 +198,37 @@ export function dmDisplayName(dm: DmChannel): string {
   if (!dm.isGroup) return names[0]!;
   if (names.length <= 3) return names.join(", ");
   return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+}
+
+/**
+ * Patch a participant's live profile/presence fields (status, username,
+ * avatar, displayName) across every DM channel they appear in — both as
+ * `recipient` and inside `participants`.
+ *
+ * dmStore's copy of a partner's status/username/avatar is otherwise only
+ * ever set wholesale by `setDmChannels` (on `ready`) and `addDmChannel`
+ * (`dm_channel_open` / REST create); presence and profile-change events
+ * patch membersStore only, which the DM sidebar never reads. Without this,
+ * a DM partner going offline or renaming would leave the sidebar row
+ * showing stale status/name for the rest of the session.
+ */
+export function updateDmParticipant(userId: number, patch: Partial<DmUser>): void {
+  dmStore.setState((prev) => {
+    const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
+    let changed = false;
+    const channels = prev.channels.map((c) => {
+      if (c.recipient.id !== userId && c.participants.every((p) => p.id !== userId)) {
+        return c;
+      }
+      changed = true;
+      return {
+        ...c,
+        recipient: patchUser(c.recipient),
+        participants: c.participants.map(patchUser),
+      };
+    });
+    return changed ? { channels } : prev;
+  });
 }
 
 /** Increment a DM's mention count. Callers also call updateDmLastMessage — a

@@ -45,14 +45,18 @@ UPDATE users SET banned = 1, ban_reason = ?, ban_expires = ? WHERE id = ?;
 -- name: UnbanUser :exec
 UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?;
 
+-- The ready payload's member roster. docs/protocol.md documents members[] as
+-- "All registered users", so this must not silently truncate: the previous
+-- LIMIT 1000 dropped every member past the first thousand with no has_more
+-- signal, leaving those users unrenderable and unmentionable on the client
+-- with nothing to indicate the list was incomplete.
 -- name: ListMembers :many
 SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
        u.display_name, u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.banned = 0
-ORDER BY u.username ASC
-LIMIT 1000;
+ORDER BY u.username ASC;
 
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;

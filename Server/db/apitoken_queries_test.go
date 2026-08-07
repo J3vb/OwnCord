@@ -185,3 +185,78 @@ func TestGetOwnerUser(t *testing.T) {
 		t.Fatalf("GetOwnerUser = %+v, want owner id %d", u, ownerID)
 	}
 }
+
+// A deleted account is anonymised and permanently banned in place, keeping its
+// high-position role row. Without a banned filter that tombstone outranks every
+// live admin forever and becomes the default identity for API-token creation,
+// minting tokens the auth layer then rejects on every use.
+func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
+	ctx := context.Background()
+	database := newTokenTestDB(t)
+
+	bannedOwnerID := seedTokenUser(t, database, "deleted-owner", 1)
+	adminID := seedTokenUser(t, database, "live-admin", 2)
+
+	if err := database.BanUser(ctx, bannedOwnerID, "account deleted", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	u, err := database.GetOwnerUser(ctx)
+	if err != nil {
+		t.Fatalf("GetOwnerUser: %v", err)
+	}
+	if u == nil {
+		t.Fatal("GetOwnerUser = nil, want the live admin")
+	}
+	if u.ID == bannedOwnerID {
+		t.Fatalf("GetOwnerUser returned the banned owner (id %d) — a deleted account must never be the default token identity", u.ID)
+	}
+	if u.ID != adminID {
+		t.Fatalf("GetOwnerUser = id %d, want live admin id %d", u.ID, adminID)
+	}
+}
+
+// A temporary ban that has already lapsed must not exclude the owner: the query
+// mirrors auth.IsEffectivelyBanned, which treats an elapsed ban_expires as not
+// banned. Both spellings of ban_expires that the auth layer accepts are covered,
+// because ' ' sorts below 'T' and a naive lexical compare reads a same-day
+// space-form expiry as lapsed (or, in the other direction, a live ban as lapsed).
+func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		expires string
+		want    bool // true = owner should still be returned
+	}{
+		{"lapsed ISO-8601 Z form", time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05Z"), true},
+		{"lapsed space-separated form", time.Now().UTC().Add(-time.Hour).Format("2006-01-02 15:04:05"), true},
+		{"live ban, ISO-8601 Z form", time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05Z"), false},
+		{"live ban, space-separated form", time.Now().UTC().Add(time.Hour).Format("2006-01-02 15:04:05"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newTokenTestDB(t)
+			ownerID := seedTokenUser(t, database, "owner", 1)
+			adminID := seedTokenUser(t, database, "live-admin", 2)
+
+			if _, err := database.ExecContext(ctx,
+				`UPDATE users SET banned = 1, ban_expires = ? WHERE id = ?`, tc.expires, ownerID); err != nil {
+				t.Fatalf("seed temp ban: %v", err)
+			}
+
+			u, err := database.GetOwnerUser(ctx)
+			if err != nil {
+				t.Fatalf("GetOwnerUser: %v", err)
+			}
+			if u == nil {
+				t.Fatal("GetOwnerUser = nil, want a user")
+			}
+			if tc.want && u.ID != ownerID {
+				t.Fatalf("GetOwnerUser = id %d, want owner id %d (lapsed ban must not exclude)", u.ID, ownerID)
+			}
+			if !tc.want && u.ID != adminID {
+				t.Fatalf("GetOwnerUser = id %d, want admin id %d (live ban must exclude the owner)", u.ID, adminID)
+			}
+		})
+	}
+}

@@ -365,9 +365,26 @@ describe("API Client", () => {
     });
 
     it("getSessions calls correct endpoint", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([]));
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
+    });
+
+    // Regression for v112: the server wraps the list in a {sessions: [...]}
+    // envelope (Server/api/profile_handler.go's sessionsListResponse); a bare
+    // array would make every consumer's .map/.length fail or read undefined.
+    it("getSessions unwraps the {sessions: [...]} envelope", async () => {
+      const session = {
+        id: 1,
+        device: "Chrome on Linux",
+        ip: "127.0.0.1",
+        created_at: "2026-01-01T00:00:00Z",
+        last_used: "2026-01-02T00:00:00Z",
+        is_current: true,
+      };
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
+      const result = await api.getSessions();
+      expect(result).toEqual([session]);
     });
 
     it("revokeSession calls DELETE with session ID", async () => {
@@ -1018,7 +1035,7 @@ describe("API Client", () => {
 
   describe("doFetch body serialization", () => {
     it("omits body when body is undefined (GET requests)", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([]));
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
       expect(fetchCallOpts().body).toBeUndefined();
     });

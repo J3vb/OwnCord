@@ -3,8 +3,8 @@
 // Each server message type maps to one or more store actions.
 
 import type { WsClient } from "./ws";
-import { toConnectionStatus } from "./ws";
-import { authStore, setAuth, clearAuth } from "@stores/auth.store";
+import { toConnectionStatus, setActiveChannelProvider } from "./ws";
+import { authStore, setAuth, clearAuth, updateUser } from "@stores/auth.store";
 import { setTransientError, setConnectionStatus } from "@stores/ui.store";
 import {
   setChannels,
@@ -56,6 +56,7 @@ import {
   updateDmLastMessagePreview,
   incrementDmMention,
   dmDisplayName,
+  updateDmParticipant,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
@@ -139,6 +140,14 @@ export function wireDispatcher(
   const unsubs: Array<() => void> = [];
 
   // ── Auth ──────────────────────────────────────────────
+
+  // Let the transport declare the open channel in the auth frame itself, so a
+  // resuming server can restore the ChannelTopic subscription during the
+  // handshake rather than only after the channel_focus round trip below —
+  // closing the window in which channel broadcasts reach nobody on this
+  // socket. The round trip stays as the fallback for older servers.
+  setActiveChannelProvider(() => channelsStore.select((s) => s.activeChannelId));
+  unsubs.push(() => setActiveChannelProvider(null));
 
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
@@ -451,6 +460,10 @@ export function wireDispatcher(
       // store treats "field absent" as "leave the text alone", which is what
       // an older server's presence event means.
       updatePresence(payload.user_id, payload.status, payload.custom_status);
+      // dmStore keeps its own frozen copy of a DM partner's status for the
+      // sidebar row (see buildDmConversations) — membersStore alone does not
+      // reach it.
+      updateDmParticipant(payload.user_id, { status: payload.status });
     }),
   );
 
@@ -515,6 +528,16 @@ export function wireDispatcher(
     ws.on(S.MEMBER_UPDATE, (payload) => {
       log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
+
+      // Keep authStore in sync when the signed-in user's own role changed —
+      // every permission gate (canManageChannels, canViewAuditLog, ...) reads
+      // authStore.user.role, not membersStore, so without this a promotion or
+      // demotion of the current user would leave every affordance stale until
+      // the socket reconnects (mirrors the USER_UPDATE self-branch below).
+      const me = authStore.getState().user;
+      if (me && payload.user_id === me.id) {
+        updateUser({ role: payload.role });
+      }
     }),
   );
 
@@ -547,6 +570,17 @@ export function wireDispatcher(
         avatar: payload.avatar,
         displayName: payload.display_name,
         identityPublicKey: payload.identity_public_key,
+      });
+      // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
+      // username/avatar/displayName is otherwise never refreshed. DmUser's
+      // avatar/displayName are non-nullable ("" = unset), so null (cleared)
+      // maps to "". display_name absent means "leave the nickname alone" —
+      // an older or partial payload must not blank it, exactly as
+      // updateMemberProfile above.
+      updateDmParticipant(payload.user_id, {
+        username: payload.username,
+        avatar: payload.avatar ?? "",
+        ...(payload.display_name === undefined ? {} : { displayName: payload.display_name ?? "" }),
       });
 
       // Update auth store if the current user changed their own profile.
@@ -732,6 +766,14 @@ export function wireDispatcher(
       // iterating the live Map's keys would mutate during iteration.
       for (const id of Array.from(messagesStore.getState().pendingSends.keys())) {
         markSendFailed(id, "OFFLINE");
+      }
+      // Same reasoning applies to optimistic reaction toggles: a reaction
+      // frame already handed to a dying socket can never deliver its
+      // chat_send_ok/error either, so roll back every pending toggle instead
+      // of leaving a permanently wrong pill and a stale pendingReactions
+      // entry that could later consume an unrelated self-echo.
+      for (const id of Array.from(messagesStore.getState().pendingReactions?.keys() ?? [])) {
+        rollbackReaction(id);
       }
     }),
   );

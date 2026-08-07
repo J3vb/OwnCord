@@ -67,12 +67,32 @@ type authSuccessResponse struct {
 	User         *userResponse `json:"user,omitempty"`
 }
 
+// AuthBroadcaster is the interface handleDeleteAccount uses to notify
+// connected WebSocket clients that an account is gone. Satisfied by *ws.Hub
+// (which already implements BroadcastMemberBan for the admin ban path this
+// mirrors).
+type AuthBroadcaster interface {
+	BroadcastMemberBan(userID int64)
+}
+
 // MountAuthRoutes registers all auth endpoints on the given router.
 // Rate limiters are applied per-endpoint as specified. trustedProxies is the
 // list of CIDRs whose X-Forwarded-For / X-Real-IP headers are honoured for
 // rate-limiting IP resolution. totpKey is the AES-256 key used to encrypt
 // TOTP secrets at rest (M1 security hardening).
-func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, totpKey []byte) {
+//
+// broadcaster is variadic and optional: MountAuthRoutes is called before the
+// hub exists (router.go mounts auth routes first, and the hub needs the
+// router to register its own webhook route), so a caller that cannot supply
+// one yet may omit it entirely and self-deletion simply sends no event,
+// exactly like today. A caller mounted after hub creation should pass it so
+// DELETE /api/v1/auth/account can broadcast the same member_ban event the
+// admin ban path already sends for the identical anonymise-and-ban DB state.
+func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, totpKey []byte, broadcaster ...AuthBroadcaster) {
+	var ab AuthBroadcaster
+	if len(broadcaster) > 0 {
+		ab = broadcaster[0]
+	}
 	registerLimiter := limiter
 	loginLimiter := limiter
 	partialStore := auth.NewPartialAuthStore(partialAuthStoreTTL)
@@ -97,7 +117,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 
 		r.With(AuthMiddleware(database),
 			RateLimitMiddleware(limiter, "del_account:", sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
-			Delete("/account", handleDeleteAccount(database, limiter))
+			Delete("/account", handleDeleteAccount(database, limiter, ab))
 	})
 
 	r.With(AuthMiddleware(database),
@@ -512,7 +532,10 @@ type deleteAccountRequest struct {
 // handleDeleteAccount processes DELETE /api/v1/auth/account.
 // The caller must supply their current password for confirmation.
 // Progressive lockout mirrors the login handler: 3 failures → 15-min lock.
-func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
+// broadcaster may be nil, in which case no event is sent and other connected
+// clients converge on their next reconnect instead (same fallback every
+// other broadcaster-optional handler in this package uses).
+func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter, broadcaster AuthBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -584,6 +607,14 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "account_deleted", "user", user.ID,
 			"account self-deleted from "+ip)
+
+		// DeleteAccount left the row in exactly the state an admin ban does
+		// (anonymised, banned, sessions revoked) — broadcast the same event so
+		// every other connected client drops the deleted user immediately
+		// instead of keeping their pre-deletion username until it reconnects.
+		if broadcaster != nil {
+			broadcaster.BroadcastMemberBan(user.ID)
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}

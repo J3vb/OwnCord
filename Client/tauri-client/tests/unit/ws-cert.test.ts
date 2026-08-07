@@ -68,6 +68,47 @@ describe("cert mismatch blocking", () => {
     expect(reconnectCalls).toHaveLength(0);
   });
 
+  it("blocks reconnect when the profile host carries an explicit :443 that the Rust proxy normalizes away", async () => {
+    // Regression for v052: config.host is stored verbatim (e.g. a profile
+    // saved as "example.com:443"), but the Rust proxies emit the event host
+    // through tofu::cert_store_key, which strips a trailing ":443". An
+    // un-normalized comparison would miss this match and the reconnect loop
+    // would keep re-handshaking the untrusted host every backoff interval.
+    client.connect({ host: "example.com:443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Rust-normalized event host — no ":443" suffix.
+    emitTauriEvent("cert-tofu", {
+      host: "example.com",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls).toHaveLength(0);
+  });
+
   it("should unblock after acceptCertFingerprint", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);

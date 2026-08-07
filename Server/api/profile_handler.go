@@ -241,11 +241,23 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 		}
 
 		if req.IdentityPublicKey != nil {
-			updated, err = svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
-			if err != nil {
-				writeServiceError(r.Context(), w, err)
+			// Captured into a separate variable rather than reassigned into
+			// updated: on failure below, updated still holds the profile
+			// snapshot that DID commit, so it can still be broadcast instead
+			// of discarded.
+			withKey, keyErr := svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
+			if keyErr != nil {
+				// The username/avatar/display_name/about write above already
+				// committed — only the identity key failed. Broadcasting the
+				// committed half keeps every other connected client in sync
+				// even though this request reports failure; leaving it
+				// unbroadcast would strand them on the old profile until
+				// their next ready.
+				broadcastUserUpdate(broadcaster, updated)
+				writeServiceError(r.Context(), w, keyErr)
 				return
 			}
+			updated = withKey
 		}
 
 		broadcastUserUpdate(broadcaster, updated)

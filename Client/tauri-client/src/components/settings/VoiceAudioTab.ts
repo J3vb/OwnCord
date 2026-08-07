@@ -179,9 +179,16 @@ function buildVoiceAudioTabInner(
       const onUp = (): void => {
         meterThreshold.removeEventListener("pointermove", onMove);
         meterThreshold.removeEventListener("pointerup", onUp);
+        meterThreshold.removeEventListener("pointercancel", onUp);
       };
       meterThreshold.addEventListener("pointermove", onMove, { signal });
       meterThreshold.addEventListener("pointerup", onUp, { signal });
+      // A touch/pen drag that the OS claims as a pan (or any other
+      // mid-drag pointer loss) fires pointercancel instead of pointerup.
+      // Without this, onMove stays attached for the tab's lifetime and
+      // every later hover over the handle silently rewrites and persists
+      // voiceSensitivity with no button held (v097).
+      meterThreshold.addEventListener("pointercancel", onUp, { signal });
     },
     { signal },
   );

@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/telemetry"
 )
@@ -51,6 +52,16 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	recipient, err := s.st.GetUserByID(ctx, recipientID)
 	if err != nil || recipient == nil {
+		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
+	}
+	// GetUserByID has no banned filter (unlike the lookups that normally
+	// surface a user to a caller, e.g. ListMembers), and a hand-crafted
+	// recipient_id naming a deleted/banned account otherwise creates a
+	// dead-end DM channel plus participant rows for the tombstone user.
+	// Gated on IsEffectivelyBanned rather than the raw flag so a lapsed
+	// temporary ban — which login/WS already treat as not-banned — still
+	// permits the DM once it expires.
+	if auth.IsEffectivelyBanned(recipient) {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
 
@@ -228,6 +239,12 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	for _, rid := range unique {
 		user, err := s.st.GetUserByID(ctx, rid)
 		if err != nil || user == nil {
+			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
+		}
+		// See the matching check in CreateDM: gate on effective ban status,
+		// not the raw flag, so a lapsed temporary ban does not wrongly
+		// refuse the group.
+		if auth.IsEffectivelyBanned(user) {
 			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 		}
 		blocked, err := s.st.IsEitherBlocked(ctx, userID, rid)

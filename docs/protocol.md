@@ -93,11 +93,25 @@ The sequence number system enables reconnection with state recovery.
 | Category | Has seq? | Examples |
 |----------|----------|---------|
 | Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
-| Global broadcasts | Yes | `presence` (except the invisible split, see Presence), `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral | No | `typing` |
+| Global broadcasts | Yes | `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral | No | `typing`, `presence` from a `presence_update` (see below) |
 | DM messages | No | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `dm_channel_open`, `dm_channel_close` |
 | Call signalling | No | `call_incoming`, `call_declined` |
 | Direct responses | No | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong` |
+
+**`presence` is split, and only one half is sequenced.** Connect and disconnect
+presence is a normal sequenced global broadcast, so it replays on a warm resume.
+A `presence` caused by the user changing their own status (`presence_update`) is
+sent on the low-priority, droppable tier instead: it carries no `seq`, it can be
+shed under send-buffer pressure for a fully connected client, and it is not
+replayed — so a status change made while a client was away is not delivered when
+that client resumes.
+
+This is deliberate, not an oversight: presence is best-effort by design, and
+`member_join` carries `status` precisely so a client can re-derive presence
+without depending on the correction arriving. Clients must treat presence as
+eventually-consistent and must not assume they have seen every transition. See
+Presence for the invisible-member split.
 
 ---
 
@@ -121,6 +135,19 @@ After the WebSocket connection is established, the client sends the first messag
 |-------|------|----------|-------------|
 | `token` | string | Yes | Session token obtained from `POST /api/v1/auth/login` |
 | `last_seq` | uint64 | No | Last sequence number received. If > 0, server attempts replay. Default 0. |
+| `active_channel_id` | int64 | No | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
+
+`active_channel_id` closes a resume-only gap. The hub restores a reconnecting
+client's channel subscription by copying it from the previous connection entry,
+but that entry is deleted as soon as the server observes the old socket close —
+which normally happens well before the client reconnects. Without the hint the
+resumed socket holds no channel subscription until its post-`auth_ok`
+`channel_focus` round trip completes, and everything broadcast to that channel
+in the meantime reaches nobody on that connection and can never be re-requested,
+since the client only ever reports `max(seq)`.
+
+Clients should still send `channel_focus` after `auth_ok` — it remains the
+fallback for servers that predate this field, and it is idempotent.
 
 ### Step 2: Success -- auth_ok
 
@@ -640,6 +667,17 @@ All channel update messages are broadcast to all connected clients. Triggered by
 }
 ```
 
+`can_send` is an **optional extra field on the targeted form only.** When a role
+or channel-override edit changes who may post, `RefreshChannelVisibility` sends
+each still-visible client its own `channel_create`, and that copy carries this
+viewer's `can_send` — the same value `ready` ships per channel — so the composer
+affordance converges without a reconnect.
+
+The broadcast form omits it: one encoded frame is delivered to a whole audience,
+and a single value would be wrong for some of them. Older servers omit it too.
+**Treat an absent `can_send` as "unchanged", never as `false`** — a client that
+resets on absence would disable the composer on every ordinary broadcast.
+
 ### channel_update (Server -> Client, broadcast)
 
 Full channel object — the same payload shape as `channel_create`, built by the
@@ -657,6 +695,14 @@ sidebar; a client that ignores the field behaves exactly as before it existed.
 Archiving or unarchiving additionally triggers targeted `channel_create` /
 `channel_delete` sends (`Hub.RefreshChannelVisibility`), because it changes who
 may see the channel rather than only how it looks.
+
+**An archived channel is read-only, and the server enforces that.** History
+stays readable, but `chat_send` is refused with `FORBIDDEN` and `voice_join`
+with `BAD_REQUEST`, and archiving a voice channel evicts whoever is already
+connected. Hiding the channel is not on its own a protection: a caller that
+still holds the id — a custom client, or a stock client racing the
+`channel_delete` the archive transition sends — would otherwise keep writing
+into an archive that nobody can see or moderate.
 
 ### channel_delete (Server -> Client, broadcast)
 

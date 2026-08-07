@@ -24,6 +24,21 @@ import { loadPref, savePref } from "./preferences";
 const MUTED_KEY = "mutedChannels";
 
 /**
+ * Server host the mutes below belong to. The app is multi-server (saved
+ * profiles keyed by host, all sharing one Tauri webview origin and therefore
+ * one localStorage), and channel ids are per-server SQLite autoincrement
+ * integers — without a host component in the key, muting channel 7 on one
+ * server silently mutes channel 7 on every other server too. `null` (the
+ * startup default, before any host is known) falls back to the original
+ * unscoped key so a pre-scoping install's mutes are not orphaned.
+ */
+let currentHost: string | null = null;
+
+function mutedKey(): string {
+  return currentHost === null ? MUTED_KEY : `${MUTED_KEY}:${currentHost}`;
+}
+
+/**
  * Cached parse of the stored list. Notification gating runs on every incoming
  * message, and a JSON.parse per message for a list that changes on a menu
  * click is work nobody asked for. Invalidated by the pref-change event
@@ -32,9 +47,22 @@ const MUTED_KEY = "mutedChannels";
  */
 let cache: ReadonlySet<number> | null = null;
 
+/**
+ * Point mute reads/writes at a specific server's key and drop the cache so
+ * the next read re-parses under the new key instead of returning the
+ * previous server's set. Call on connect and on server switch — mirroring
+ * how `read-state.ts`'s `setMarkReadSender` and `ui.store.ts`'s
+ * `loadCollapsedCategories` are wired from MainPage per-connection.
+ */
+export function setChannelMutesHost(host: string | null): void {
+  if (host === currentHost) return;
+  currentHost = host;
+  invalidateMuteCache();
+}
+
 function readMuted(): ReadonlySet<number> {
   if (cache !== null) return cache;
-  const raw = loadPref<unknown[]>(MUTED_KEY, []);
+  const raw = loadPref<unknown[]>(mutedKey(), []);
   const ids = new Set<number>();
   if (Array.isArray(raw)) {
     for (const v of raw) {
@@ -49,7 +77,7 @@ function readMuted(): ReadonlySet<number> {
 
 function writeMuted(ids: ReadonlySet<number>): void {
   cache = ids;
-  savePref(MUTED_KEY, [...ids]);
+  savePref(mutedKey(), [...ids]);
 }
 
 /** Drop the cached parse. Exported for tests and for logout. */
@@ -60,7 +88,7 @@ export function invalidateMuteCache(): void {
 if (typeof window !== "undefined") {
   window.addEventListener("owncord:pref-change", (e) => {
     const detail = (e as CustomEvent<{ key?: string }>).detail;
-    if (detail?.key === MUTED_KEY) invalidateMuteCache();
+    if (detail?.key === mutedKey()) invalidateMuteCache();
   });
   // Cross-tab: the native storage event fires only in the *other* tab.
   window.addEventListener("storage", () => invalidateMuteCache());

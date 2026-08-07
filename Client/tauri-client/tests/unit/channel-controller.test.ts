@@ -121,6 +121,12 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
     mockRemoveOptimistic: vi.fn(),
   }));
 
+const { mockMarkChannelRead } = vi.hoisted(() => ({ mockMarkChannelRead: vi.fn() }));
+
+vi.mock("@lib/read-state", () => ({
+  markChannelRead: mockMarkChannelRead,
+}));
+
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
 
 const { mockReattachToPresent, mockJumpToMessage, mockIsWindowDetached } = vi.hoisted(() => ({
@@ -157,7 +163,12 @@ vi.mock("../../src/pages/main-page/ChatHeader", () => ({
   updateChatHeaderForDm: mockUpdateChatHeaderForDm,
 }));
 
-const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
+const {
+  mockDmStoreGetState,
+  mockMembersStoreGetState,
+  dmStoreSubscribers,
+  membersStoreSubscribers,
+} = vi.hoisted(() => ({
   mockDmStoreGetState: vi.fn(() => ({
     channels: [] as Array<{
       channelId: number;
@@ -173,6 +184,8 @@ const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
     }>,
   })),
   mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
+  dmStoreSubscribers: [] as Array<() => void>,
+  membersStoreSubscribers: [] as Array<() => void>,
 }));
 
 vi.mock("@stores/dm.store", async () => {
@@ -181,13 +194,25 @@ vi.mock("@stores/dm.store", async () => {
   // in a test while agreeing in production.
   const actual = await vi.importActual<typeof import("@stores/dm.store")>("@stores/dm.store");
   return {
-    dmStore: { getState: mockDmStoreGetState },
+    dmStore: {
+      getState: mockDmStoreGetState,
+      subscribeSelector: vi.fn((_sel: unknown, cb: () => void) => {
+        dmStoreSubscribers.push(cb);
+        return () => {};
+      }),
+    },
     dmDisplayName: actual.dmDisplayName,
   };
 });
 
 vi.mock("@stores/members.store", () => ({
-  membersStore: { getState: mockMembersStoreGetState },
+  membersStore: {
+    getState: mockMembersStoreGetState,
+    subscribeSelector: vi.fn((_sel: unknown, cb: () => void) => {
+      membersStoreSubscribers.push(cb);
+      return () => {};
+    }),
+  },
 }));
 
 // Block-state gating: capture the subscription callback so tests can simulate a
@@ -272,6 +297,8 @@ describe("createChannelController", () => {
     capturedMessageListOpts = null;
     capturedMessageInputOpts = null;
     blocksSubscribers.length = 0;
+    dmStoreSubscribers.length = 0;
+    membersStoreSubscribers.length = 0;
     mockDmComposerBlockReason.mockReturnValue(null);
     // The controller gates sends on the store-backed connection status
     // (docs/architecture/ux §3), not on ws.getState().
@@ -342,6 +369,30 @@ describe("createChannelController", () => {
     expect(mockTypingDestroy).toHaveBeenCalled();
     expect(mockMessageInputDestroy).toHaveBeenCalled();
     expect(ctrl.currentChannelId).toBe(99);
+  });
+
+  it("marks the previous channel read when switching away from it", () => {
+    // channel_focus only advances read state for the channel being entered;
+    // nothing advances it for the channel being left, so leaving must mark it
+    // read explicitly or its badges come back stale on the next `ready`.
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+
+    ctrl.mountChannel(42, "general");
+    expect(mockMarkChannelRead).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(99, "random");
+
+    expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
+  });
+
+  it("does not mark anything read on the very first mount (no previous channel)", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+
+    ctrl.mountChannel(42, "general");
+
+    expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
 
   it("updates chat header name", () => {
@@ -542,6 +593,59 @@ describe("createChannelController", () => {
       capturedMessageListOpts.onDeleteDraft("cid-2");
 
       expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
+      expect((opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(sendCalls);
+    });
+
+    it("onRetry still re-sends a failed draft after the channel was remounted", () => {
+      // A failed row survives a channel switch (it is carried across history
+      // refetches), so its draft must too — a per-mount draft map left Retry
+      // silently inert once the reader switched away and back.
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // cid-1 is channel_focus; the chat_send gets cid-2.
+      capturedMessageInputOpts.onSend("hello", null, []);
+      expect(mockAddOptimistic).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
+      );
+
+      // Simulate a real remount: switch away and back to the same channel.
+      ctrl.destroyChannel();
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
+      expect(mockAddOptimistic).toHaveBeenLastCalledWith(
+        expect.objectContaining({ correlationId: "cid-4", content: "hello" }),
+      );
+    });
+
+    it("releases a draft once the send is acked", () => {
+      // The draft map outlives a channel switch so a failed row stays
+      // retriable. Nothing else prunes it, so an accepted send must release
+      // its own entry or every message of the session is retained forever.
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", null, []);
+
+      const ackCall = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: unknown[]) => c[0] === "chat_send_ok",
+      );
+      const onAck = ackCall![1] as (payload: unknown, id?: string) => void;
+      onAck({ message_id: 7, timestamp: "2024-01-01T00:00:00Z" }, "cid-2");
+
+      const sendCalls = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
+      capturedMessageListOpts.onRetry("cid-2");
+
+      // No draft left to re-send: the ack already released it.
       expect((opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(sendCalls);
     });
 
@@ -940,6 +1044,100 @@ describe("createChannelController", () => {
         username: "unknown",
         status: "Offline",
       });
+    });
+
+    it("keeps the DM header subtitle live when the partner's presence changes", () => {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "alice", avatar: "", status: "offline" },
+            participants: [{ id: 5, username: "alice", avatar: "", status: "offline" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "alice", "dm");
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
+        username: "alice",
+        status: "Offline",
+      });
+
+      // The partner comes online — no re-mount, just a members store update.
+      mockMembersStoreGetState.mockReturnValue({
+        members: new Map([[5, { id: 5, username: "alice", status: "online" }]]),
+      });
+      for (const cb of membersStoreSubscribers) cb();
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
+        username: "alice",
+        status: "Online",
+      });
+    });
+
+    it("keeps a group DM header live when the roster changes", () => {
+      const dmChannel = {
+        channelId: 42,
+        recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+        participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
+        name: "",
+        isGroup: true,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+      };
+      mockDmStoreGetState.mockReturnValue({ channels: [dmChannel] });
+
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "Group", "dm");
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ status: "2 members: You, alice" }),
+      );
+
+      // Someone else joins the group — no re-mount, just a dm store update.
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            ...dmChannel,
+            participants: [
+              { id: 5, username: "alice", avatar: "", status: "online" },
+              { id: 6, username: "bob", avatar: "", status: "online" },
+            ],
+          },
+        ],
+      });
+      for (const cb of dmStoreSubscribers) cb();
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ status: "3 members: You, alice, bob" }),
+      );
     });
 
     it("resets header for non-DM channel when chatHeaderRefs is provided", () => {

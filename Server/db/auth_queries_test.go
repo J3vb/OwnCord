@@ -877,3 +877,53 @@ func TestListMembers_IncludesIdentityKey(t *testing.T) {
 		t.Errorf("idkey_none IdentityPublicKey = %v, want nil", *byName["idkey_none"].IdentityPublicKey)
 	}
 }
+
+// ─── MemberSummary.ForViewer ──────────────────────────────────────────────────
+
+// TestMemberSummary_ForViewer_BlanksCustomStatusWhenInvisible locks the
+// invisible-presence invariant against a leak: a connected-but-invisible
+// member collapses to status "offline" for other viewers, but without also
+// blanking custom_status they'd see {status:"offline", custom_status:"<text>"}
+// — a tell that distinguishes them from every genuinely disconnected member,
+// who reads as {status:"offline", custom_status:null}.
+func TestMemberSummary_ForViewer_BlanksCustomStatusWhenInvisible(t *testing.T) {
+	status := "in a meeting"
+	m := db.MemberSummary{ID: 1, Username: "ghost", Status: db.StatusInvisible, CustomStatus: &status}
+
+	seen := m.ForViewer(2) // a different viewer
+	if seen.Status != db.StatusOffline {
+		t.Fatalf("Status = %q, want %q", seen.Status, db.StatusOffline)
+	}
+	if seen.CustomStatus != nil {
+		t.Errorf("CustomStatus = %q, want nil (must not leak that %d is connected-but-invisible)", *seen.CustomStatus, m.ID)
+	}
+}
+
+// TestMemberSummary_ForViewer_KeepsOwnCustomStatusWhenInvisible ensures the
+// blanking is other-viewer-only: the owner of an invisible status must still
+// see their own true custom status, or their own client would render it wrong.
+func TestMemberSummary_ForViewer_KeepsOwnCustomStatusWhenInvisible(t *testing.T) {
+	status := "in a meeting"
+	m := db.MemberSummary{ID: 1, Username: "ghost", Status: db.StatusInvisible, CustomStatus: &status}
+
+	seen := m.ForViewer(1) // the owner themselves
+	if seen.Status != db.StatusInvisible {
+		t.Fatalf("Status = %q, want %q (owner sees the true value)", seen.Status, db.StatusInvisible)
+	}
+	if seen.CustomStatus == nil || *seen.CustomStatus != status {
+		t.Errorf("CustomStatus = %v, want %q", seen.CustomStatus, status)
+	}
+}
+
+// TestMemberSummary_ForViewer_KeepsCustomStatusWhenOnline ensures the new
+// blanking is scoped to offline-appearing rows only — an online member's
+// custom status must still reach other viewers.
+func TestMemberSummary_ForViewer_KeepsCustomStatusWhenOnline(t *testing.T) {
+	status := "shipping code"
+	m := db.MemberSummary{ID: 1, Username: "alice", Status: db.StatusOnline, CustomStatus: &status}
+
+	seen := m.ForViewer(2)
+	if seen.CustomStatus == nil || *seen.CustomStatus != status {
+		t.Errorf("CustomStatus = %v, want %q", seen.CustomStatus, status)
+	}
+}

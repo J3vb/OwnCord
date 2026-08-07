@@ -69,7 +69,34 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, ol
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}
 
-	h.broadcastVoiceEvent(ctx, oldChID, buildVoiceLeave(oldChID, c.userID))
+	// Audience = broadcastVoiceEvent's (READ ∪ still-in-the-room) plus the
+	// leaver themselves. The union of the room's remaining participants is
+	// what broadcastVoiceEvent provides and must be kept: voice membership is
+	// gated on CONNECT_VOICE alone, so a participant without READ would
+	// otherwise miss the departure and keep a stale E2EE key holder. The extra
+	// term is the leaver: the caller has already cleared their client voice
+	// state, so that union can no longer see them, yet for a server-initiated
+	// eviction (revocation sweep, moderator kick/move, token-refresh refusal)
+	// this voice_leave IS their only teardown signal. Mirrors
+	// CleanupVoiceForChannel, which appends the evicted participants for
+	// exactly the same reason.
+	audience := h.channelReadAudience(ctx, oldChID)
+	seen := make(map[int64]struct{}, len(audience)+1)
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, other := range h.clients {
+		if _, ok := seen[uid]; !ok && other.getVoiceChID() == oldChID {
+			seen[uid] = struct{}{}
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	if _, ok := seen[c.userID]; !ok {
+		audience = append(audience, c.userID)
+	}
+	h.broadcastChannelScopedTo(oldChID, buildVoiceLeave(oldChID, c.userID), audience, "voice event")
 
 	// Re-elect key holder now that this user has left the channel.
 	h.updateKeyHolder(oldChID)

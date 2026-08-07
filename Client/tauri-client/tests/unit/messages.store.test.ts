@@ -1135,6 +1135,26 @@ describe("messages store", () => {
       expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
     });
 
+    it("removeOptimistic drops an already-failed row, whose channel is no longer in pendingSends", () => {
+      // markSendFailed deletes the correlationId from pendingSends when it
+      // flips the row to "failed" — the Retry/Delete buttons only render for
+      // failed rows, so this is the path every UI-driven removeOptimistic call
+      // actually takes.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+
+      removeOptimistic("c1");
+      expect(getChannelMessages(1)).toHaveLength(0);
+    });
+
     it("addMessage is idempotent by real id (replay-safe)", () => {
       addMessage(makeChatPayload({ id: 700, content: "once" }));
       addMessage(makeChatPayload({ id: 700, content: "once" }));

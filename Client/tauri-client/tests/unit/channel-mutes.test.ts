@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   isChannelMuted,
   listMutedChannels,
@@ -7,6 +7,7 @@ import {
   toggleChannelMute,
   notificationAllowed,
   invalidateMuteCache,
+  setChannelMutesHost,
 } from "@lib/channel-mutes";
 import { STORAGE_PREFIX } from "@lib/preferences";
 
@@ -73,6 +74,54 @@ describe("channel mutes — storage", () => {
       new CustomEvent("owncord:pref-change", { detail: { key: "mutedChannels" } }),
     );
     expect(isChannelMuted(12)).toBe(true);
+  });
+});
+
+describe("channel mutes — host scoping", () => {
+  afterEach(() => {
+    // currentHost is module-level state that outlives a single test.
+    setChannelMutesHost(null);
+  });
+
+  it("does not leak a mute across two server hosts", () => {
+    // Regression for v047: channel ids are per-server, so an unscoped key
+    // meant muting channel 7 on one server silently muted channel 7 on every
+    // other server too.
+    setChannelMutesHost("a.example.com");
+    muteChannel(7);
+    expect(isChannelMuted(7)).toBe(true);
+
+    setChannelMutesHost("b.example.com");
+    expect(isChannelMuted(7)).toBe(false);
+
+    setChannelMutesHost("a.example.com");
+    expect(isChannelMuted(7)).toBe(true);
+  });
+
+  it("persists each host's mutes under a distinct localStorage key", () => {
+    setChannelMutesHost("a.example.com");
+    muteChannel(1);
+    setChannelMutesHost("b.example.com");
+    muteChannel(2);
+
+    expect(
+      JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}mutedChannels:a.example.com`)!),
+    ).toEqual([1]);
+    expect(
+      JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}mutedChannels:b.example.com`)!),
+    ).toEqual([2]);
+  });
+
+  it("switching to the same host is a no-op that keeps the cache", () => {
+    setChannelMutesHost("a.example.com");
+    muteChannel(3);
+    setChannelMutesHost("a.example.com");
+    expect(isChannelMuted(3)).toBe(true);
+  });
+
+  it("falls back to the legacy unscoped key when no host has been set", () => {
+    muteChannel(9);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([9]);
   });
 });
 

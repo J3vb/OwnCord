@@ -103,6 +103,22 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     PRIMARY KEY (message_id, mentioned_user_id)
 );
 
+-- Mirrors migrations/001. Required, not optional decoration: the DM close
+-- path (db.LeaveGroupDM) unlinks a channel's attachments before hard-deleting
+-- the channel row, because messages.channel_id and attachments.message_id both
+-- cascade ON DELETE and the cascade would otherwise destroy the rows the
+-- orphan sweep needs to reclaim the files. Without this table the handler
+-- answers 500.
+CREATE TABLE IF NOT EXISTS attachments (
+    id          TEXT    PRIMARY KEY,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    filename    TEXT    NOT NULL,
+    stored_as   TEXT    NOT NULL,
+    mime_type   TEXT    NOT NULL,
+    size        INTEGER NOT NULL,
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 
 CREATE TABLE IF NOT EXISTS dm_participants (
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,

@@ -255,6 +255,17 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			// metadata — send targeted channel_create/channel_delete so
 			// connected clients re-sync without a reconnect.
 			if existing.Archived != updated.Archived {
+				// Archiving hides a voice channel the same way deleting it
+				// does — nobody can see it or reach it afterward — so live
+				// participants must be evicted the same way handleDeleteChannel
+				// evicts them, or they keep their DB row, VoiceTopic
+				// subscription and LiveKit session in a room nothing shows.
+				// Order matches handleDeleteChannel: evict before the
+				// visibility change so a voice_leave lands on clients that
+				// still have the channel subscribed.
+				if !existing.Archived && updated.Archived {
+					hub.CleanupVoiceForChannel(id)
+				}
 				hub.RefreshChannelVisibility(updated)
 			}
 		}

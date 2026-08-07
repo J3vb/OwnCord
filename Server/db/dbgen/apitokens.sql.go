@@ -63,6 +63,9 @@ SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
        display_name, about, custom_status
 FROM users
+WHERE banned = 0
+   OR (ban_expires IS NOT NULL
+       AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id ASC
 `
 
@@ -73,6 +76,14 @@ ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id AS
 // A :one query already reads a single row via QueryRow, so no LIMIT is needed
 // (and an explicit LIMIT 1 is mis-emitted by sqlc here). ORDER BY puts the
 // highest-position role first, so that first row is the owner.
+// Banned users are excluded: account deletion anonymises the row and sets
+// banned = 1 permanently, so without this filter a self-deleted Owner keeps
+// outranking every live admin and becomes the default identity for token
+// creation forever -- minting tokens the auth layer then 403s on every use.
+// The ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause)
+// so a lapsed temporary ban stays eligible; the replace() normalises the space
+// separator form of ban_expires to 'T' before comparing, because ' ' sorts
+// below 'T' and a same-day space-form expiry would otherwise read as lapsed.
 func (q *Queries) GetOwnerUser(ctx context.Context) (User, error) {
 	row := q.db.QueryRowContext(ctx, getOwnerUser)
 	var i User

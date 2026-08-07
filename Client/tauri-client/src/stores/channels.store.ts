@@ -153,9 +153,13 @@ export function addChannel(channel: ChannelCreatePayload): void {
       unreadCount: existing?.unreadCount ?? 0,
       mentionCount: existing?.mentionCount ?? 0,
       lastMessageId: existing?.lastMessageId ?? null,
-      // For a genuinely new channel default permissive; the next ready payload
-      // delivers the authoritative can_send. Server enforces regardless.
-      canSend: existing?.canSend ?? true,
+      // A targeted channel_create from RefreshChannelVisibility carries this
+      // viewer's own can_send, so a live role/override edit updates the
+      // composer without waiting for a reconnect. The field is absent on the
+      // shared-buffer broadcasts (one frame, many recipients) and on older
+      // servers — keep the existing verdict there, and default permissive for
+      // a genuinely new channel. The server enforces regardless.
+      canSend: channel.can_send ?? existing?.canSend ?? true,
       slowMode: channel.slow_mode ?? 0,
       nsfw: channel.nsfw ?? false,
       voiceMaxUsers: channel.voice_max_users ?? 0,

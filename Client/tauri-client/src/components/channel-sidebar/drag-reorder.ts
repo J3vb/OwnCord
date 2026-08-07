@@ -1,13 +1,13 @@
 /**
  * Channel drag-reorder — mouse-based drag-and-drop for channel reordering.
  * Uses mousedown/mousemove/mouseup (avoids WebView2 HTML5 DnD issues).
- * Admin/owner only.
+ * Gated on MANAGE_CHANNELS, like every other channel-management affordance.
  */
 
-import { getCurrentUser } from "@stores/auth.store";
 import { updateChannelPosition } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { ChannelReorderData } from "../ChannelSidebar";
+import { canManageChannels } from "@lib/permissions";
 
 // ── Drag state (mouse-based, avoids WebView2 HTML5 DnD issues) ──
 interface DragState {
@@ -165,7 +165,7 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
   );
 }
 
-/** Make a channel element draggable via mousedown (admin/owner only). */
+/** Make a channel element draggable via mousedown (MANAGE_CHANNELS only). */
 export function attachDragHandlers(
   el: HTMLElement,
   channel: Channel,
@@ -177,9 +177,11 @@ export function attachDragHandlers(
   if (onReorderChannel === undefined) {
     return;
   }
-  const user = getCurrentUser();
-  const role = user?.role?.toLowerCase() ?? "";
-  if (role !== "owner" && role !== "admin") {
+  // The one derivation for every channel-management affordance (create, edit,
+  // delete, reorder) — a custom role holding the bit gets the same rows the
+  // Edit/Delete menu already offers it, and a role merely *named* "admin"
+  // without the bit does not get a drag the server will 403.
+  if (!canManageChannels()) {
     return;
   }
 
@@ -205,6 +207,15 @@ export function attachDragHandlers(
   el.addEventListener(
     "mousemove",
     (e) => {
+      // Defuse a stale latch: pendingDrag is cleared only by a mouseup on
+      // this same row (see the listener below), so releasing the button
+      // anywhere else — off this row entirely, or via a fast flick — leaves
+      // it armed. A later button-free hover would otherwise promote it into
+      // a real drag on the next `if` below.
+      if (e.buttons === 0) {
+        pendingDrag = null;
+        return;
+      }
       if (pendingDrag === null || activeDrag !== null) {
         return;
       }

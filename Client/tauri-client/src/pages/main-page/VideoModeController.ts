@@ -53,8 +53,16 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
   let focusedTileId: number | null = null;
+  /** Set when the user explicitly dismisses the grid while local video is
+   *  still on (switching to a text channel). Without this, checkVideoMode()
+   *  re-opens the grid the moment any remote peer's camera/screenshare
+   *  toggles, since that re-invokes checkVideoMode() and localVideoOn is
+   *  still true. Cleared once local video actually goes off, or when the
+   *  grid is opened again through any other path. */
+  let userDismissedVideo = false;
 
   function showVideoGrid(): void {
+    userDismissedVideo = false;
     if (videoMode) return;
     videoMode = true;
     slots.messagesSlot.style.display = "none";
@@ -63,7 +71,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.videoGridSlot.style.display = "block";
   }
 
-  function showChat(): void {
+  /** Close the grid without recording a dismissal. Used by the paths that
+   *  close it on the user's behalf (no streams left, left the channel,
+   *  teardown) — only an explicit showChat() is a dismissal. */
+  function closeVideoGrid(): void {
     if (!videoMode) return;
     videoMode = false;
     focusedTileId = null;
@@ -75,16 +86,31 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.videoGridSlot.style.display = "none";
   }
 
+  function showChat(): void {
+    // The user asked for chat (switching to a text channel) while still
+    // broadcasting — remember it, or checkVideoMode() drags them back into
+    // the grid the next time any peer toggles a camera (v048).
+    const voice = voiceStore.getState();
+    if (voice.localCamera || voice.localScreenshare) {
+      userDismissedVideo = true;
+    }
+    closeVideoGrid();
+  }
+
   function checkVideoMode(): void {
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
     if (channelId === null) {
-      if (videoMode) showChat();
+      // Not a dismissal: leaving voice can clear currentChannelId before
+      // localCamera/localScreenshare go false, and this early return skips
+      // the reset below — showChat() here would strand userDismissedVideo
+      // set and suppress auto-open for the next session.
+      closeVideoGrid();
       return;
     }
     const channelUsers = voice.voiceUsers.get(channelId);
     if (!channelUsers) {
-      if (videoMode) showChat();
+      closeVideoGrid();
       return;
     }
 
@@ -104,13 +130,17 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       anyVideoOn = videoGrid.hasStreams();
     }
     // Auto-close video grid when no streams remain
-    if (!anyVideoOn && videoMode) {
-      showChat();
+    if (!anyVideoOn) {
+      closeVideoGrid();
     }
     // BUG-105: Auto-open video grid only for LOCAL camera/screenshare.
     // Remote streams require manual click (Discord-style behavior).
     const localVideoOn = voice.localCamera || voice.localScreenshare;
-    if (localVideoOn && !videoMode) {
+    if (!localVideoOn) {
+      // Nothing left to dismiss — the next camera/screenshare start should
+      // auto-open the grid again.
+      userDismissedVideo = false;
+    } else if (!videoMode && !userDismissedVideo) {
       showVideoGrid();
     }
 
@@ -177,10 +207,11 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   }
 
   function destroy(): void {
-    if (videoMode) showChat();
+    closeVideoGrid();
     focusedTileId = null;
     localTileAdded = false;
     localScreenshareTileAdded = false;
+    userDismissedVideo = false;
   }
 
   return {

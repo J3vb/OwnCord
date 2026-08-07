@@ -489,4 +489,139 @@ describe("createVideoModeController", () => {
     ctrl.showChat();
     expect(ctrl.getFocusedTileId()).toBeNull();
   });
+
+  describe("sticky video-grid dismissal (v048)", () => {
+    it("showChat while local video is on stays dismissed through a later checkVideoMode", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({
+          currentChannelId: 10,
+          localCamera: true,
+          voiceUsers: new Map([[10, users]]),
+        }),
+      );
+
+      const slots = makeSlots();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+      });
+
+      // Auto-opens because local camera is on.
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+
+      // User switches to a text channel — explicit dismissal.
+      ctrl.showChat();
+      expect(ctrl.isVideoMode()).toBe(false);
+
+      // A remote peer's camera toggling re-invokes checkVideoMode(); local
+      // video is still on, but the dismissal must stick.
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(slots.messagesSlot.style.display).toBe("");
+    });
+
+    it("re-arms auto-open once local video turns off after a dismissal", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      const state = makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, users]]),
+      });
+      mockVoiceStoreGetState.mockReturnValue(state);
+
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      ctrl.showChat();
+      expect(ctrl.isVideoMode()).toBe(false);
+
+      // Local camera turns off entirely — dismissal is cleared.
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: false });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+
+      // Local camera turns back on — auto-open fires again since there is
+      // nothing left to have dismissed.
+      mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+
+    it("explicit showVideoGrid clears a prior dismissal", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({
+          currentChannelId: 10,
+          localCamera: true,
+          voiceUsers: new Map([[10, users]]),
+        }),
+      );
+
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      ctrl.showChat();
+      expect(ctrl.isVideoMode()).toBe(false);
+
+      // User manually re-opens the grid.
+      ctrl.showVideoGrid();
+      expect(ctrl.isVideoMode()).toBe(true);
+
+      ctrl.showChat();
+      ctrl.checkVideoMode();
+      // Dismissal was cleared by showVideoGrid, but showChat() re-set it —
+      // so this exercises that the flag responds to the most recent call.
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("does not treat leaving the channel as a dismissal (v048)", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      const inChannel = makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, users]]),
+      });
+      mockVoiceStoreGetState.mockReturnValue(inChannel);
+
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+
+      // leaveVoice() clears currentChannelId before localCamera goes false,
+      // and this checkVideoMode() returns early — closing the grid here must
+      // not record a dismissal that outlives the session.
+      mockVoiceStoreGetState.mockReturnValue({ ...inChannel, currentChannelId: null });
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(false);
+
+      // Next session, camera on again: auto-open must still work.
+      mockVoiceStoreGetState.mockReturnValue(inChannel);
+      ctrl.checkVideoMode();
+      expect(ctrl.isVideoMode()).toBe(true);
+    });
+  });
 });

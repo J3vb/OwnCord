@@ -473,5 +473,49 @@ describe("DeviceManager", () => {
       // Enumerate failed, so no device switch should have been attempted
       expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
+
+    it("ignores a stale enumeration result when the room is swapped mid-await (v096)", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "saved-device-id";
+        if (key === "audioOutputDevice") return "";
+        return defaultVal;
+      });
+
+      let resolveDevices: ((devices: Array<{ deviceId: string }>) => void) | null = null;
+      mockGetLocalDevices.mockImplementation((kind: string) => {
+        if (kind === "audioinput") {
+          return new Promise((resolve) => {
+            resolveDevices = resolve;
+          });
+        }
+        return Promise.resolve([]);
+      });
+
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      // Fire the debounce — handleDeviceChange starts and suspends on the
+      // still-pending getLocalDevices("audioinput") call.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(resolveDevices).not.toBeNull();
+
+      // A system-driven reconnect (LiveKit Disconnected -> syncModuleRooms)
+      // swaps in a fresh Room while enumeration is still in flight.
+      const newRoom = {
+        localParticipant: { setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined) },
+        switchActiveDevice: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      dm.setRoom(newRoom);
+
+      // The saved device is missing from this (stale) result, which would
+      // normally trigger a fallback.
+      resolveDevices!([{ deviceId: "other-device" }]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The stale attempt must not act on either the old room (it isn't
+      // "current" anymore) or the new one (this attempt was never for it).
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+      expect(newRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
   });
 });

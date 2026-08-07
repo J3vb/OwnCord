@@ -414,6 +414,62 @@ describe("composer integration", () => {
     expect(popupEl()).toBeNull();
   });
 
+  it("resyncs on a keyboard caret move, so Home+Enter sends instead of splicing a stale completion", () => {
+    type("@ali");
+    expect(popupEl()).not.toBeNull();
+
+    // Home jumps the caret to the start of the line — the popup must notice
+    // the caret left the token, the same way it does for a mouse click.
+    const ta = textarea();
+    ta.selectionStart = 0;
+    ta.selectionEnd = 0;
+    ta.dispatchEvent(new KeyboardEvent("keyup", { key: "Home", bubbles: true }));
+
+    expect(popupEl()).toBeNull();
+    press("Enter");
+    expect(onSend).toHaveBeenCalledWith("@ali", null, []);
+  });
+
+  // The caret-move resync must skip the keys the popup owns: a real browser
+  // always fires keyup after keydown, so resyncing on Escape's keyup would
+  // reopen the popup the keydown just dismissed.
+  it("stays closed through the keyup that follows Escape", () => {
+    type("hey @al");
+    press("Escape");
+    textarea().dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
+
+    expect(popupEl()).toBeNull();
+    press("Enter");
+    expect(onSend).toHaveBeenCalledWith("hey @al", null, []);
+  });
+
+  // Likewise for the arrows: setQuery resets the highlight to row 0, so a
+  // resync on ArrowDown's keyup would make the popup unnavigable.
+  it("keeps the arrow-key highlight through the keyup that follows the keydown", () => {
+    type("@al");
+    const ta = textarea();
+    press("ArrowDown");
+    ta.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowDown", bubbles: true }));
+
+    expect(ta.getAttribute("aria-activedescendant")).toBe("mention-autocomplete-option-1");
+    press("Enter");
+    expect(ta.value).toBe("@alice ");
+  });
+
+  // Backstop for caret moves the composer never sees at all (Ctrl+A leaves no
+  // input event and no caret-move keyup): completing there used to splice the
+  // token at a stale anchor, producing "@alice @ali".
+  it("refuses to complete when the caret no longer follows the token", () => {
+    type("@ali");
+    const ta = textarea();
+    ta.selectionStart = 0;
+    ta.selectionEnd = ta.value.length;
+
+    press("Enter");
+    expect(ta.value).toBe("@ali");
+    expect(popupEl()).toBeNull();
+  });
+
   it("marks the textarea as a combobox while open and follows the arrows", () => {
     type("@al");
     const ta = textarea();

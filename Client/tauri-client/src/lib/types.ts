@@ -354,6 +354,16 @@ export interface ChannelCreatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /**
+   * This viewer's composer affordance — see ReadyChannel.can_send.
+   *
+   * Present only on the per-client channel_create the server sends when a
+   * role or override edit changes who may post (RefreshChannelVisibility);
+   * absent on the shared-buffer broadcast, which encodes one frame for many
+   * recipients, and absent from older servers. Treat absent as "unchanged",
+   * never as false.
+   */
+  readonly can_send?: boolean;
 }
 
 export interface ChannelUpdatePayload {
@@ -590,6 +600,18 @@ export interface ErrorPayload {
 export interface AuthPayload {
   readonly token: string;
   readonly last_seq?: number;
+  /**
+   * The channel this client had open when it disconnected, sent only on a
+   * resume (`last_seq > 0`).
+   *
+   * Lets the server restore the ChannelTopic subscription during the handshake
+   * instead of leaving the socket unsubscribed until the post-`auth_ok`
+   * `channel_focus` round trip lands — messages broadcast in that window would
+   * otherwise reach nobody on this connection and could never be re-requested,
+   * since the client only reports `max(seq)`. The server re-checks read
+   * permission before honouring it. Omitted when unknown.
+   */
+  readonly active_channel_id?: number;
 }
 
 export interface ChatSendPayload {

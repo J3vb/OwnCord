@@ -516,6 +516,55 @@ func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.
 	}
 }
 
+// TestWebhook_ParticipantLeft_ClearsE2EEState_OnMatch locks a correctness
+// detail of the v050 fix: handleWebhookParticipantLeft now clears the
+// client's voice state via an atomic compare-and-clear (both channel and
+// join token checked under voiceMu in one critical section) instead of two
+// independent unlocked reads followed by an unconditional clear. This test
+// pins the matching-case behavior of the rewrite: it must still clear
+// e2eePubKey/e2eeSignature exactly like the old clearVoiceState-based path
+// did, not just voiceChID/voiceJoinToken — otherwise a departed
+// participant's stale ECDH key lingers on the connection and pollutes a
+// later voice session's peer-key store.
+func TestWebhook_ParticipantLeft_ClearsE2EEState_OnMatch(t *testing.T) {
+	t.Parallel()
+	hub, database := newVoiceHub(t)
+
+	user := seedVoiceOwner(t, database, "webhook-e2ee-user")
+	chanID := seedVoiceChannel(t, database, "webhook-e2ee-ch")
+
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vs, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClient(hub, user.ID, send)
+	ws.SetClientVoiceStateForTest(c, chanID, vs.JoinedAt)
+	ws.SetClientE2EEPubKeyForTest(c, "fake-ecdh-pubkey")
+	hub.RegisterNowForTest(c)
+
+	hub.HandleWebhookParticipantLeftForTest(user.ID, chanID, vs.JoinedAt)
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Errorf("voice channel = %d after matching webhook cleanup, want 0", got)
+	}
+	if got := ws.GetClientE2EEPubKeyForTest(c); got != "" {
+		t.Errorf("E2EE pub key = %q after matching webhook cleanup, want cleared", got)
+	}
+
+	dbState, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after webhook: %v", err)
+	}
+	if dbState != nil {
+		t.Error("voice_states row still present after matching webhook cleanup")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // livekit_process.go – generateConfig tests
 // ---------------------------------------------------------------------------

@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"sync/atomic"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -284,6 +283,35 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, permissions.ReadMessages)
 	}
 
+	// userCanSend mirrors channelCanSend (serve_ready.go) — the value the ready
+	// payload ships per channel — but expressed as per-user permission checks
+	// so it works in both the service and bare-hub branches without needing a
+	// resolved *db.Role. HasChannelPerm already bypasses for admins and fails
+	// closed on a lookup error, matching channelCanSend's own admin shortcut.
+	//
+	// Without this, can_send is only ever computed at connect time, so a role
+	// edit or override edit leaves every connected client's composer stuck on
+	// its stale connect-time verdict until the socket is rebuilt.
+	userCanSend := func(userID, roleID int64) bool {
+		has := func(perm int64) bool {
+			if h.perms != nil {
+				return h.perms.HasChannelPerm(ctx, userID, ch.ID, perm)
+			}
+			role, err := h.db.GetRoleByID(ctx, roleID)
+			if err != nil || role == nil {
+				return false
+			}
+			return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, perm)
+		}
+		if !has(permissions.ReadMessages) || !has(permissions.SendMessages) {
+			return false
+		}
+		if ch.Type == "announcement" {
+			return has(permissions.ManageMessages)
+		}
+		return true
+	}
+
 	for _, c := range clients {
 		if c.user == nil {
 			continue
@@ -313,7 +341,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
-			c.sendMsg(buildChannelCreate(ch))
+			// Addressed per client so it can carry this recipient's own
+			// can_send verdict — the whole point of this fan-out is that a
+			// permission change just made those verdicts diverge.
+			c.sendMsg(buildChannelCreateFor(ch, userCanSend(c.user.ID, c.user.RoleID)))
 			continue
 		}
 		c.sendMsg(buildChannelDelete(ch.ID))
@@ -327,9 +358,11 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 
 	// Clients not connected right now missed the targeted sends above. Move
 	// the watermark so any resume from a seq at or before this point is
-	// forced onto the full-ready path instead of replay (stored after the
-	// sends so a concurrent seq advance errs toward re-syncing more clients).
-	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+	// forced onto the full-ready path instead of replay. Ratcheted upward
+	// only — see bumpVisibilityWatermark — so a concurrent writer that read
+	// an older seq cannot regress a watermark another writer already pushed
+	// higher.
+	h.bumpVisibilityWatermark()
 }
 
 // RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every
@@ -454,11 +487,14 @@ func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 // Only the topics the socket actually holds are examined — a blanket sweep over
 // every channel would disclose the full channel-ID list to a demoted user.
 func (h *Hub) revokeUnreadableChannels(userID int64) {
-	// Stored after the targeted sends (as in RefreshChannelVisibility) so a
-	// concurrent seq advance errs toward re-syncing more clients. Deferred
-	// because it must cover the early returns too: a user who is offline, or
-	// whose socket is closed below, converges via the full-ready path.
-	defer h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+	// Ratcheted upward only (see bumpVisibilityWatermark), and evaluated at
+	// defer-RUN time — not the plain Store(Load(&h.seq)) this used to be,
+	// whose argument would have been evaluated at this defer STATEMENT,
+	// capturing entry-time seq and stomping any higher watermark stored by a
+	// concurrent writer during the per-topic DB loop below. Deferred because
+	// it must cover the early returns too: a user who is offline, or whose
+	// socket is closed below, converges via the full-ready path.
+	defer h.bumpVisibilityWatermark()
 
 	if h.db == nil {
 		return

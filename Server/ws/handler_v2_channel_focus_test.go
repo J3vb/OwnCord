@@ -209,6 +209,31 @@ func TestMarkReadV2_RateLimited_SkipsReadStateWrite(t *testing.T) {
 	}
 }
 
+func TestMarkReadV2Burst_DoesNotStarveChannelFocus(t *testing.T) {
+	deps, userID, chID := newFocusTestDeps(t)
+	deps.Limiter = auth.NewRateLimiter()
+	info := ClientInfo{UserID: userID, Username: "focuser"}
+
+	// A "Mark All as Read" burst exhausts mark_read's own 5/s budget...
+	for range 5 {
+		res := handleMarkReadV2(context.Background(), MarkReadCmd{userID: userID, channelID: chID}, info, deps)
+		if res.Error != nil {
+			t.Fatalf("in-budget mark_read %v returned error", res.Error)
+		}
+	}
+	markRes := handleMarkReadV2(context.Background(), MarkReadCmd{userID: userID, channelID: chID}, info, deps)
+	if markRes.Error != nil {
+		t.Fatalf("rate-limited mark_read returned error %v, want silent drop", markRes.Error)
+	}
+
+	// ...but must not consume any of channel_focus's separate budget: a
+	// channel switch immediately after the burst still succeeds.
+	focusRes := handleChannelFocusV2(context.Background(), ChannelFocusCmd{userID: userID, channelID: chID}, info, deps)
+	if focusRes.SetChannelID == nil {
+		t.Fatal("channel_focus after a mark_read burst must still set the channel id, not be starved by a shared budget")
+	}
+}
+
 func TestChannelFocusV2_NoEvents(t *testing.T) {
 	deps, userID, chID := newFocusTestDeps(t)
 	cmd := ChannelFocusCmd{userID: userID, channelID: chID}

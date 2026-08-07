@@ -75,6 +75,14 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
+  /** True while push-to-talk is bound and the key is NOT currently held —
+   *  i.e. the mic should be gated (silenced) for PTT reasons. This is
+   *  deliberately a separate flag from localMuted: PTT must never write the
+   *  flag that represents the user's own explicit mute (see ptt.ts and
+   *  livekitSession.setMuted), so a hot-mic press can't undo a self-mute and
+   *  a PTT release can't corrupt the mute toggle's state. Always written by
+   *  the store; optional only for the same fixture reason as localServerMuted. */
+  readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
@@ -98,6 +106,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localServerMuted: false,
   localServerDeafened: false,
+  pttGated: false,
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
@@ -118,6 +127,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
+    pttGated: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -154,13 +164,19 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
     });
   }
 
-  // Check if current user is in any voice channel
+  // Check if current user is in any voice channel, and capture their own
+  // row so the moderator-imposed flags below can be derived from it — a
+  // full-ready reconnect (mustFullResync / replay-buffer miss) that
+  // preserves a live voice session must not leave localServerMuted/
+  // localServerDeafened stuck at their pre-reconnect values (v049).
   const currentUserId = authStore.getState().user?.id ?? 0;
   let autoJoinChannel: number | null = null;
+  let selfState: ReadyVoiceState | undefined;
   if (currentUserId !== 0) {
     for (const vs of states) {
       if (vs.user_id === currentUserId) {
         autoJoinChannel = vs.channel_id;
+        selfState = vs;
         break;
       }
     }
@@ -174,6 +190,8 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
     // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
     // or resetVoiceStore() on logout.
     currentChannelId: autoJoinChannel ?? prev.currentChannelId,
+    localServerMuted: selfState?.server_muted ?? false,
+    localServerDeafened: selfState?.server_deafened ?? false,
   }));
 }
 
@@ -305,6 +323,42 @@ export function setLocalDeafened(deafened: boolean): void {
     ...prev,
     localDeafened: deafened,
   }));
+}
+
+/** Record whether push-to-talk is currently gating (silencing) the mic —
+ *  i.e. the bound key is not held. Written only from ptt.ts. Deliberately
+ *  separate from localMuted so PTT can never write the flag that represents
+ *  the user's own explicit mute (see the VoiceState.pttGated doc comment). */
+export function setPttGated(gated: boolean): void {
+  voiceStore.setState((prev) => (prev.pttGated === gated ? prev : { ...prev, pttGated: gated }));
+}
+
+/** Whether the Rust-side PTT key poller is actually able to report key state
+ *  on this platform. Module-level rather than store state: it is a process-wide
+ *  platform capability, not per-session voice state, so `resetVoiceStore()` on
+ *  logout must NOT clear it.
+ *
+ *  It lives here rather than in livekitSession.ts so `ptt.ts` can write it
+ *  during startup without importing that module — livekitSession pulls in the
+ *  ~1.3 MB livekit-client SDK, which is deliberately kept off the startup path.
+ *
+ *  Defaults to false so an un-wired or unsupported poller never causes a
+ *  join-time mute that nothing can later lift. */
+let pttPollingLive = false;
+
+/** Report whether the PTT key-polling backend can actually observe key state.
+ *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
+ *  Tauri command), not merely whether a key is bound in preferences: on macOS
+ *  `is_key_down` is a stub returning false and on pure-Wayland Linux
+ *  `DeviceState::checked_new()` returns None, so no `ptt-state` event can ever
+ *  arrive to lift a join-time mute. */
+export function setPttPollingLive(live: boolean): void {
+  pttPollingLive = live;
+}
+
+/** Whether the PTT poller is live (see `setPttPollingLive`). */
+export function isPttPollingLive(): boolean {
+  return pttPollingLive;
 }
 
 /** Toggle local camera state. */
