@@ -31,7 +31,11 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
   function getFilteredChannels(query: string): readonly Channel[] {
     const state = channelsStore.getState();
-    const all = Array.from(state.channels.values());
+    // DM rows are synthesized into channelsStore once opened, but they have
+    // their own sidebar path (full clearDmUnread/setSidebarMode handling) —
+    // listing them here too would select via a bare setActiveChannel and
+    // leave their unread/mention badge lit forever.
+    const all = Array.from(state.channels.values()).filter((ch) => ch.type !== "dm");
     const sorted = [...all].toSorted((a, b) => a.position - b.position);
 
     if (query.length === 0) return sorted;

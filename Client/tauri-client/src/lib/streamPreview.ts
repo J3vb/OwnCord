@@ -23,6 +23,37 @@ interface PreviewState {
 
 const previewTimers = new WeakMap<HTMLElement, PreviewState>();
 
+/**
+ * Rows currently attached to each sidebar-lifetime AbortSignal. One abort
+ * listener is registered per signal (below), not one per attachStreamPreview
+ * call — the sidebar re-renders on every structural voice change and
+ * re-attaches every previewable row to the same signal each time, so a
+ * per-call listener would accumulate one closure (pinning its row) forever.
+ */
+const rowsBySignal = new WeakMap<AbortSignal, Set<HTMLElement>>();
+
+/** Track `row` against `signal`, registering the signal's shared abort
+ *  listener the first time it's seen. */
+function trackRowForSignal(row: HTMLElement, signal: AbortSignal): void {
+  let rows = rowsBySignal.get(signal);
+  if (rows === undefined) {
+    rows = new Set();
+    rowsBySignal.set(signal, rows);
+    signal.addEventListener(
+      "abort",
+      () => {
+        for (const trackedRow of rows!) {
+          clearPreviewState(trackedRow);
+          removePreviewDom(trackedRow);
+        }
+        rows!.clear();
+      },
+      { once: true },
+    );
+  }
+  rows.add(row);
+}
+
 /** Height the preview expands to. Set dynamically after DOM insertion. */
 /** Debounce delay before showing the preview. */
 const DEBOUNCE_MS = 300;
@@ -289,11 +320,8 @@ export function attachStreamPreview(
   row.addEventListener("focusin", startPreview, { signal });
   row.addEventListener("focusout", stopPreview, { signal });
 
-  // Cleanup on abort (sidebar teardown)
-  signal.addEventListener("abort", () => {
-    clearPreviewState(row);
-    removePreviewDom(row);
-  });
+  // Cleanup on abort (sidebar teardown) — one shared listener per signal.
+  trackRowForSignal(row, signal);
 }
 
 /**

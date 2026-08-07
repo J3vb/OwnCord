@@ -36,7 +36,9 @@ export interface MessageListOptions {
   readonly channelName: string;
   readonly channelType?: string;
   readonly currentUserId: number;
-  readonly onScrollTop: () => void;
+  /** May return a promise (e.g. the underlying fetch); MessageList clears its
+   *  loadingOlder latch once it settles, success or failure. */
+  readonly onScrollTop: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
   readonly onDeleteClick: (messageId: number) => void;
@@ -710,7 +712,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       hasMoreMessages(options.channelId)
     ) {
       loadingOlder = true;
-      options.onScrollTop();
+      // A failed fetch never changes the message count, so the subscriber
+      // below (which only reacts to a count change) would leave loadingOlder
+      // latched forever. Clear it once the load settles either way — the
+      // subscriber's reset still applies to the success path but is now just
+      // belt-and-braces.
+      void Promise.resolve(options.onScrollTop()).finally(() => {
+        loadingOlder = false;
+      });
     }
 
     // Update floating scroll-to-bottom button visibility

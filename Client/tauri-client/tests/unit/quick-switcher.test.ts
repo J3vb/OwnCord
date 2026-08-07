@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import type { QuickSwitcherOptions } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
+import { addDmToChannelsStore } from "../../src/pages/main-page/SidebarDmHelpers";
+import type { DmChannel } from "@stores/dm.store";
 import type { ReadyChannel } from "../../src/lib/types";
 
 function resetStore(): void {
@@ -248,6 +250,33 @@ describe("QuickSwitcher", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
     expect(container.querySelectorAll(".quick-switcher__item").length).toBe(0);
+  });
+
+  it("does not list DM rows synthesized into channelsStore (they belong to the DM sidebar section)", () => {
+    const dm: DmChannel = {
+      channelId: 99,
+      recipient: { id: 1, username: "bob", avatar: "", status: "online" },
+      participants: [{ id: 1, username: "bob", avatar: "", status: "online" }],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    };
+    addDmToChannelsStore(dm);
+
+    switcher.mount(container);
+
+    // Still just the 4 text/voice channels — the synthesized DM row is not
+    // duplicated here, and selecting it here would bypass clearDmUnread.
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items.length).toBe(4);
+    const names = Array.from(items).map(
+      (el) => el.querySelector(".quick-switcher__name")?.textContent,
+    );
+    expect(names).not.toContain("bob");
   });
 
   it("does not show category for channels without one", () => {

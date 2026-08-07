@@ -305,6 +305,57 @@ describe("createMessageJumper", () => {
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
   });
+
+  it("a stale jump response does not overwrite a newer jump's window (race guard)", async () => {
+    // Neither jump ever finds the target already loaded, so both go through
+    // the fetch path.
+    const scrollToMessage = vi.fn().mockReturnValue(false);
+    const ctrl = {
+      currentChannelId: 1,
+      messageList: { scrollToMessage },
+    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+
+    let resolveA: (v: unknown) => void = () => {};
+    let resolveB: (v: unknown) => void = () => {};
+    const getMessagesAround = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveA = resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveB = resolve)));
+
+    const jumper = createMessageJumper({
+      api: fakeApi(getMessagesAround),
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    // A (older, target 10) starts and suspends on its fetch; B (newer,
+    // target 20) starts right after — both requests are now in flight.
+    const jumpA = jumper.jumpTo(1, 10);
+    const jumpB = jumper.jumpTo(1, 20);
+    expect(getMessagesAround).toHaveBeenCalledTimes(2);
+
+    // B's response lands first (real network reordering).
+    resolveB({ messages: [response(20)], has_more_before: true, has_more_after: true });
+    await jumpB;
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.map((m) => m.id),
+    ).toEqual([20]);
+
+    // A's response lands after B already applied its window — the stale
+    // response must not clobber it.
+    resolveA({ messages: [response(10)], has_more_before: true, has_more_after: true });
+    await jumpA;
+
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.map((m) => m.id),
+    ).toEqual([20]);
+  });
 });
 
 // ---------------------------------------------------------------------------

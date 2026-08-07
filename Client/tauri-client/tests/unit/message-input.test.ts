@@ -770,6 +770,28 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("selecting a GIF sends it without discarding a typed draft", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "wait for it...";
+
+    const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
+    gifBtn.click();
+    expect(lastGifPickerOptions).not.toBeNull();
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
+
+    // The GIF is sent as its own message...
+    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    // ...and the user's typed draft survives, instead of being overwritten
+    // and thrown away.
+    expect(textarea.value).toBe("wait for it...");
+
+    comp.destroy?.();
+  });
+
   it("opening GIF picker closes emoji picker", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);

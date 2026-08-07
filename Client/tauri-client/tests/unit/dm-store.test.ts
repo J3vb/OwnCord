@@ -1,14 +1,16 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   dmStore,
   setDmChannels,
   addDmChannel,
   removeDmChannel,
+  closeDmLocally,
   updateDmLastMessage,
   updateDmLastMessagePreview,
   clearDmUnread,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { channelsStore } from "../../src/stores/channels.store";
 
 function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
@@ -110,6 +112,35 @@ describe("dmStore", () => {
       removeDmChannel(1);
       const after = dmStore.getState().channels;
       expect(after).not.toBe(before);
+    });
+  });
+
+  // ── closeDmLocally ─────────────────────────────────────
+
+  describe("closeDmLocally", () => {
+    beforeEach(() => {
+      channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    });
+
+    it("removes the channel and does not run the fallback when it was not active", () => {
+      setDmChannels([makeDm({ channelId: 5 }), makeDm({ channelId: 6 })]);
+      const fallback = vi.fn();
+
+      closeDmLocally(5, fallback);
+
+      expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([6]);
+      expect(fallback).not.toHaveBeenCalled();
+    });
+
+    it("removes the channel and runs the fallback when it was the active channel", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+      const fallback = vi.fn();
+
+      closeDmLocally(5, fallback);
+
+      expect(dmStore.getState().channels).toHaveLength(0);
+      expect(fallback).toHaveBeenCalledOnce();
     });
   });
 

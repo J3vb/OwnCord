@@ -23,11 +23,17 @@ import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
+import {
+  saveCredential,
+  loadCredential,
+  deleteCredential,
+  createUserUpdateCredentialSaver,
+} from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { initDeepLinks } from "@lib/deep-link";
 import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
+import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
 
@@ -189,7 +195,7 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
           if (lastConnectHost && lastConnectToken) {
-            ws.connect({ host: lastConnectHost, token: lastConnectToken });
+            reconnectAfterCertAccept(ws, router, lastConnectHost, lastConnectToken);
           }
         } catch (err) {
           log.error("Failed to accept cert fingerprint", err);
@@ -324,16 +330,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     }
 
     // Update saved credentials when the current user changes their username.
+    // Guarded by the same remember-password opt-out as the initial save
+    // above (BUG-135), and passes the session's password through so a later
+    // save doesn't wipe out the one saved at login for an opted-in user.
     sessionUnsubs.push(
-      ws.on("user_update", (payload) => {
-        const currentUserId = authStore.getState().user?.id ?? 0;
-        if (payload.user_id === currentUserId) {
-          const currentToken = authStore.getState().token;
-          if (currentToken) {
-            void saveCredential(host, payload.username, currentToken);
-          }
-        }
-      }),
+      ws.on("user_update", createUserUpdateCredentialSaver(host, rememberPassword, password)),
     );
 
     const unsubState = ws.onStateChange((wsState) => {
@@ -608,9 +609,14 @@ authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
     if (!isAuthenticated && router.getCurrentPage() === "main") {
-      // Leave voice channel before disconnecting so other clients see it immediately
-      const voice = voiceStore.getState();
-      if (voice.currentChannelId !== null) {
+      // Leave voice channel before disconnecting so other clients see it
+      // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
+      // than the live voiceStore: clearAuth applies state (including this
+      // isAuthenticated flip) synchronously and already reset voiceStore in
+      // that same call, before this subscriber ever runs (store
+      // notifications are microtask-deferred) — voiceStore here would always
+      // read "idle".
+      if (authStore.getState().logoutWasInVoice === true) {
         voiceSessionLeave(false); // false: we send voice_leave below
         ws.send({ type: "voice_leave", payload: {} });
         leaveVoiceChannel();

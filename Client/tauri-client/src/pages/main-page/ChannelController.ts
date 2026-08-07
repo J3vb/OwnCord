@@ -231,8 +231,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       currentUserId: userId,
       onScrollTop: () => {
         if (channelAbort !== null) {
-          void msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
+          return msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
         }
+        return undefined;
       },
       onRetryLoad: () => {
         if (channelAbort !== null) {

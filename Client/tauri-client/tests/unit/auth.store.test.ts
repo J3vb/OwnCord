@@ -7,7 +7,12 @@ import {
   getCurrentUser,
   updateUser,
 } from "../../src/stores/auth.store";
-import { resetVoiceStore, joinVoiceChannel, setVoiceStatus } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  resetVoiceStore,
+  joinVoiceChannel,
+  setVoiceStatus,
+} from "../../src/stores/voice.store";
 import { leaveVoice } from "@lib/livekitSession";
 import type { UserWithRole } from "../../src/lib/types";
 
@@ -250,6 +255,31 @@ describe("auth store", () => {
       clearAuth();
       await flushMicrotasks();
       expect(leaveVoice).toHaveBeenCalledWith(false);
+    });
+  });
+
+  // clearAuth's logoutWasInVoice snapshot — main.ts's isAuthenticated
+  // subscriber gates its voice_leave send on this instead of re-reading
+  // voiceStore, which clearAuth has already reset by the time any subscriber
+  // observes the transition (store notifications are microtask-deferred).
+  describe("clearAuth logoutWasInVoice snapshot", () => {
+    beforeEach(() => {
+      resetVoiceStore();
+    });
+
+    it("is false when not in a voice channel at logout", () => {
+      clearAuth();
+      expect(authStore.getState().logoutWasInVoice).toBe(false);
+    });
+
+    it("snapshots true when in a voice channel, surviving clearAuth's own voiceStore reset", () => {
+      joinVoiceChannel(7);
+      clearAuth();
+
+      expect(authStore.getState().logoutWasInVoice).toBe(true);
+      // The snapshot must reflect voice state as it was BEFORE this same
+      // call reset it — not the (already-idle) state read afterward.
+      expect(voiceStore.getState().currentChannelId).toBeNull();
     });
   });
 

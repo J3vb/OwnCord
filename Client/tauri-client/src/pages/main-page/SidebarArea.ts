@@ -42,7 +42,7 @@ import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.sto
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { dmStore, removeDmChannel } from "@stores/dm.store";
+import { dmStore, closeDmLocally } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canViewAuditLog } from "@lib/permissions";
@@ -442,12 +442,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * (the next `ready` restores the truth either way).
    */
   function closeOrLeaveDm(channelId: number): void {
-    const wasActive = channelsStore.getState().activeChannelId === channelId;
-    removeDmChannel(channelId);
+    closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
       getToast()?.show("Could not leave that conversation", "error");
     });
-    if (wasActive) fallBackFromDm();
   }
 
   /** Rename a group DM (participants only; the server refuses a 1:1). */

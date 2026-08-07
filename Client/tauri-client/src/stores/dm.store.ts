@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { channelsStore } from "@stores/channels.store";
 
 export interface DmUser {
   readonly id: number;
@@ -94,6 +95,21 @@ export function removeDmChannel(channelId: number): void {
   dmStore.setState((prev) => ({
     channels: prev.channels.filter((c) => c.channelId !== channelId),
   }));
+}
+
+/**
+ * Local close/removal for a DM that is gone — closed here, or reported gone
+ * by the server (`dm_channel_close`, possibly from another signed-in
+ * device). Drops it from dmStore and, if it was the channel being viewed,
+ * runs `fallback` so the message list/composer don't stay mounted against a
+ * channel the server no longer recognizes. `fallback` lets each caller pick
+ * its own landing spot — the sidebar restores the channel visited before the
+ * DM; a background close just needs somewhere safe.
+ */
+export function closeDmLocally(channelId: number, fallback: () => void): void {
+  const wasActive = channelsStore.getState().activeChannelId === channelId;
+  removeDmChannel(channelId);
+  if (wasActive) fallback();
 }
 
 /** Update last message info for a DM channel (on new message) and increment unread.

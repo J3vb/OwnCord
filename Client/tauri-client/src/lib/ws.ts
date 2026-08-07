@@ -329,8 +329,22 @@ export function createWsClient() {
         fingerprint: evt.fingerprint,
         storedFingerprint: evt.storedFingerprint,
       });
-      certMismatchBlock = true;
-      setState("disconnected");
+      // Only latch/tear down THIS connection when the mismatch is for the
+      // host it's actually connected to — the http proxy emits mismatch
+      // events for any tunneled host, and the connect page health-checks
+      // every saved profile, so an unrelated profile's rotated cert must not
+      // permanently kill this socket's reconnect loop.
+      if (config !== null && raw.host === config.host) {
+        certMismatchBlock = true;
+        // A reconnect armed before the mismatch arrived would still fire and
+        // call connect(), which clears the latch — resuming the loop against
+        // the very host whose certificate just changed. Latching only blocks
+        // FUTURE scheduling, so the pending attempt has to be cancelled here.
+        cancelReconnect();
+        setState("disconnected");
+      }
+      // Notified unconditionally either way — the connect page's first-use
+      // and mismatch modals key off host and need every event.
       for (const listener of certMismatchListeners) {
         listener(evt);
       }
@@ -428,6 +442,10 @@ export function createWsClient() {
     wsGeneration++;
     config = cfg;
     intentionalClose = false;
+    // Belt-and-braces: a fresh connect (even one not routed through
+    // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
+    // host) must not inherit a stale block from a previous connection.
+    certMismatchBlock = false;
     cancelReconnect();
 
     setState("connecting");
@@ -535,6 +553,10 @@ export function createWsClient() {
     // (logout). Automatic reconnects go through scheduleReconnect() which
     // preserves lastSeq for server-side event replay.
     lastSeq = 0;
+    // Reset the backoff exponent too — a session abandoned mid-reconnect must
+    // not carry its attempt count (and therefore its backoff ceiling) into
+    // the next login's first retry.
+    reconnectAttempt = 0;
   }
 
   return {

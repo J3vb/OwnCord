@@ -4,6 +4,7 @@
  */
 
 import { createLogger } from "./logger";
+import { authStore } from "@stores/auth.store";
 
 const log = createLogger("credentials");
 
@@ -48,6 +49,31 @@ export async function saveCredential(
     log.error("Failed to save credential", { host, error: String(err) });
     return false;
   }
+}
+
+/**
+ * Build a `user_update` listener that refreshes a session's stored
+ * credential when the local user's own profile changes (a username edit, or
+ * the identity-key PATCH) — mirroring the initial saveCredential call's
+ * remember-password opt-out (BUG-135) so a later profile edit can't silently
+ * persist a bearer token the user declined to store. Passes the session's
+ * password through on every call: save_credential replaces the whole stored
+ * blob, so omitting it (defaulting to null) would wipe out the password
+ * saved at login for a user who DID opt in.
+ */
+export function createUserUpdateCredentialSaver(
+  host: string,
+  rememberPassword: boolean,
+  password: string | undefined,
+): (payload: { readonly user_id: number; readonly username: string }) => void {
+  return (payload) => {
+    if (!rememberPassword) return;
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    if (payload.user_id !== currentUserId) return;
+    const currentToken = authStore.getState().token;
+    if (!currentToken) return;
+    void saveCredential(host, payload.username, currentToken, password);
+  };
 }
 
 /**

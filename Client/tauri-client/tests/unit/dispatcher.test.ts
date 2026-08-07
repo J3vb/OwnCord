@@ -614,7 +614,34 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBe(7);
   });
 
-  it("ready does NOT change active channel when one is already set", () => {
+  it("ready does NOT change active channel when it is still present in the payload", () => {
+    // Regression guard for the auto-select branch: an already-active channel
+    // that is STILL in the new snapshot must not be reassigned to the first
+    // text channel (99 sorts after 1, so a naive "pick first" would move it).
+    channelsStore.setState((prev) => ({
+      ...prev,
+      activeChannelId: 99,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [
+        { id: 1, name: "general", type: "text", category: null, position: 0 },
+        { id: 99, name: "kept", type: "text", category: null, position: 1 },
+      ],
+      members: [],
+      voice_states: [],
+      roles: [],
+    });
+
+    expect(channelsStore.getState().activeChannelId).toBe(99);
+  });
+
+  it("ready clears the active channel when it is no longer present in the payload", () => {
+    // Was locked as "does NOT change active channel when one is already
+    // set" — but 99 was never actually IN that payload, so this was really
+    // pinning the bug (BUG report #2): a channel deleted/closed while this
+    // client was offline stayed "active" forever, leaving its message list
+    // and composer mounted against a channel the server no longer knows.
     channelsStore.setState((prev) => ({
       ...prev,
       activeChannelId: 99,
@@ -627,7 +654,30 @@ describe("WS Dispatcher", () => {
       roles: [],
     });
 
-    expect(channelsStore.getState().activeChannelId).toBe(99);
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+  });
+
+  it("ready keeps the active DM channel when it is still present in dm_channels", () => {
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      dm_channels: [
+        {
+          channel_id: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          last_message_id: null,
+          last_message: "",
+          last_message_at: "",
+          unread_count: 0,
+        },
+      ],
+    });
+
+    expect(channelsStore.getState().activeChannelId).toBe(50);
   });
 
   it("ready with no text channels does not set active", () => {
@@ -1672,6 +1722,46 @@ describe("WS Dispatcher", () => {
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
   });
 
+  it("does not gate blockedByThem on a FORBIDDEN send in a group DM", () => {
+    // Group DMs are exempt from block checks server-side (a group FORBIDDEN
+    // means something else, e.g. stale membership) — recipient is just
+    // participants[0] for a group, so flagging it here would incorrectly
+    // gate an unrelated 1:1 DM with that same person.
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 8,
+          recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+          participants: [
+            { id: 5, username: "alice", avatar: "", status: "online" },
+            { id: 6, username: "bob", avatar: "", status: "online" },
+          ],
+          name: "Crew",
+          isGroup: true,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    addOptimisticMessage({
+      correlationId: "corr-group",
+      channelId: 8,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch("error", { code: "FORBIDDEN", message: "not a participant" }, "corr-group");
+
+    expect(blocksStore.getState().blockedByThem.has(5)).toBe(false);
+    // Still marks the row failed (existing behaviour preserved).
+    expect(getChannelMessages(8)[0]!.status).toBe("failed");
+  });
+
   it("on ready publishes the client's identity key when the server copy is stale", async () => {
     cleanup(); // tear down the no-api dispatcher wired in beforeEach
     mockEnsurePublished.mockClear();
@@ -2127,6 +2217,110 @@ describe("WS Dispatcher", () => {
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
       expect(dmStore.getState().channels).toHaveLength(0);
+    });
+
+    it("falls back to another open DM when the closed DM was active", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+          {
+            channelId: 60,
+            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([60]);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+    });
+
+    it("falls back to the first text channel when the closed DM was active and no DMs remain", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(1, {
+          id: 1,
+          name: "general",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: ch, activeChannelId: 50 };
+      });
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
+    it("does not change the active channel when the closed DM was not active", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(1);
     });
   });
 

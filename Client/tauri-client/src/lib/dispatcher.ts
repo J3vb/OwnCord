@@ -51,7 +51,7 @@ import {
   dmStore,
   setDmChannels,
   addDmChannel,
-  removeDmChannel,
+  closeDmLocally,
   updateDmLastMessage,
   updateDmLastMessagePreview,
   incrementDmMention,
@@ -210,12 +210,32 @@ export function wireDispatcher(
         );
       }
 
-      // Auto-select the first text channel if none is active
+      // Auto-select the first text channel if none is active; clear it when
+      // the channel this session was viewing is gone from the fresh snapshot
+      // (deleted, or a DM closed elsewhere while this client was offline) so
+      // the activeChannelId subscriber actually fires and tears down the
+      // stale message list/composer instead of leaving them mounted against
+      // a channel the server no longer recognizes. Checked against the raw
+      // payload (not the synthesized channelsStore row) so a still-open DM
+      // that was never locally synthesized this session isn't wrongly
+      // cleared.
       const currentActive = channelsStore.select((s) => s.activeChannelId);
+      // Set only when the branch below clears a channel that was active
+      // before this ready — distinct from "no channel was active", which
+      // must NOT mark-read whatever the auto-select branch just picked.
+      let activeChannelCleared = false;
       if (currentActive === null && payload.channels.length > 0) {
         const firstText = payload.channels.find((ch) => ch.type === "text");
         if (firstText !== undefined) {
           setActiveChannel(firstText.id);
+        }
+      } else if (currentActive !== null) {
+        const stillPresent =
+          payload.channels.some((ch) => ch.id === currentActive) ||
+          (payload.dm_channels ?? []).some((dm) => dm.channel_id === currentActive);
+        if (!stillPresent) {
+          setActiveChannel(null);
+          activeChannelCleared = true;
         }
       }
 
@@ -231,8 +251,9 @@ export function wireDispatcher(
       // menu), so a full-ready resync restates non-zero unread/mention counts
       // for the very channel the user is reading. Mark it read: this advances
       // the server read state and clears the local badges, for server channels
-      // and DMs alike. Skipped on first connect (nothing was active yet).
-      if (currentActive !== null) {
+      // and DMs alike. Skipped on first connect (nothing was active yet) and
+      // when the block above just cleared a channel that's gone.
+      if (currentActive !== null && !activeChannelCleared) {
         markChannelRead(currentActive);
       }
 
@@ -293,7 +314,21 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.DM_CHANNEL_CLOSE, (payload) => {
       log.info("DM channel closed", { channelId: payload.channel_id });
-      removeDmChannel(payload.channel_id);
+      // Delivered to a device that never ran the local close flow (closed
+      // from another signed-in device) — unlike the sidebar's closeOrLeaveDm,
+      // there is no "channel visited before this DM" to restore, so fall
+      // back to another open DM, else the first text channel.
+      closeDmLocally(payload.channel_id, () => {
+        const remaining = dmStore.getState().channels;
+        if (remaining.length > 0) {
+          setActiveChannel(remaining[0]!.channelId);
+          return;
+        }
+        const firstText = [...channelsStore.getState().channels.values()]
+          .filter((ch) => ch.type === "text")
+          .toSorted((a, b) => a.position - b.position)[0];
+        setActiveChannel(firstText?.id ?? null);
+      });
     }),
   );
 
@@ -604,8 +639,8 @@ export function wireDispatcher(
       // (when applicable) tear down the media session — both through one lazy
       // import so the two effects cannot land in different ticks.
       void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-        handleParticipantLeft(payload.user_id);
-        if (shouldTeardownSession) leaveVoice(false);
+        void handleParticipantLeft(payload.user_id);
+        if (shouldTeardownSession) void leaveVoice(false);
       });
       // Clear local voice state if the current user was removed (kick/disconnect)
       if (isSelf) {
@@ -693,7 +728,9 @@ export function wireDispatcher(
   unsubs.push(
     ws.onStateChange((state) => {
       if (state !== "reconnecting" && state !== "disconnected") return;
-      for (const id of [...messagesStore.getState().pendingSends.keys()]) {
+      // Snapshot the ids: markSendFailed deletes from pendingSends, so
+      // iterating the live Map's keys would mutate during iteration.
+      for (const id of Array.from(messagesStore.getState().pendingSends.keys())) {
         markSendFailed(id, "OFFLINE");
       }
     }),
@@ -737,7 +774,11 @@ export function wireDispatcher(
             chId === undefined
               ? undefined
               : dmStore.getState().channels.find((c) => c.channelId === chId);
-          if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
+          // Block gating is a 1:1-only rule (server exempts group DMs from
+          // block checks entirely — a group FORBIDDEN means something else,
+          // e.g. stale membership). recipient is just participants[0] for a
+          // group, so flagging it there would gate an unrelated 1:1 DM.
+          if (dm !== undefined && !dm.isGroup) setUserBlockedByThem(dm.recipient.id, true);
         }
         markSendFailed(id, payload.code);
         return;

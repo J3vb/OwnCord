@@ -27,6 +27,14 @@ export interface AuthState {
   /** Set by clearAuth; cleared again on the next setAuth. Optional so the
    *  many inline AuthState test fixtures need not restate it. */
   readonly logoutReason?: LogoutReason | null;
+  /**
+   * Snapshot of "was the user in a voice channel", taken by clearAuth before
+   * it resets voiceStore. clearAuth applies state synchronously but store
+   * notifications are microtask-deferred, so a subscriber reacting to
+   * isAuthenticated flipping false always sees voiceStore already reset —
+   * this is what such a subscriber must gate a voice_leave send on instead.
+   */
+  readonly logoutWasInVoice?: boolean;
 }
 
 const INITIAL_STATE: AuthState = {
@@ -63,6 +71,9 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // When a voice session exists the module is necessarily already loaded, so
   // this import resolves from the module cache in a microtask.
   const voice = voiceStore.getState();
+  // Snapshot BEFORE resetVoiceStore() below clears it — this is the last
+  // moment the pre-logout voice state is knowable.
+  const wasInVoice = voice.currentChannelId !== null;
   if (voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
     void import("@lib/livekitSession")
       .then(({ leaveVoice }) => leaveVoice(false))
@@ -70,7 +81,11 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   }
   resetVoiceStore();
   cleanupNotificationAudio();
-  authStore.setState(() => ({ ...INITIAL_STATE, logoutReason: reason }));
+  authStore.setState(() => ({
+    ...INITIAL_STATE,
+    logoutReason: reason,
+    logoutWasInVoice: wasInVoice,
+  }));
 }
 
 /** Shorthand selector for the current token. */

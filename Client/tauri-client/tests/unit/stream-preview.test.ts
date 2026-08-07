@@ -289,6 +289,42 @@ describe("streamPreview", () => {
     expect(getPreview(row)).toBeNull();
   });
 
+  // Abort-listener accumulation (leak fix)
+  it("registers only one abort listener per signal, not one per attach call", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    const addSpy = vi.spyOn(ac.signal, "addEventListener");
+    const row1 = createRow(1);
+    const row2 = createRow(2);
+
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+    // A re-render re-attaches the same row to the same sidebar-lifetime signal.
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+
+    const abortCalls = addSpy.mock.calls.filter(([type]) => type === "abort");
+    expect(abortCalls).toHaveLength(1);
+  });
+
+  it("still cleans up every row attached to a signal when it aborts", () => {
+    mockGetRemoteVideoStream.mockReturnValue(createMockMediaStream());
+    const row1 = createRow(1);
+    const row2 = createRow(2);
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+
+    row1.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    row2.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row1)).not.toBeNull();
+    expect(getPreview(row2)).not.toBeNull();
+
+    ac.abort();
+
+    expect(getPreview(row1)).toBeNull();
+    expect(getPreview(row2)).toBeNull();
+  });
+
   // Track mute event → placeholder
   it("swaps to placeholder on track mute event", () => {
     const stream = createMockMediaStream();
