@@ -130,6 +130,84 @@ describe("VoiceAudioTab camera preview", () => {
   });
 });
 
+describe("VoiceAudioTab mic meter", () => {
+  let resolveAudio: ((stream: MediaStream) => void) | null = null;
+  const stopAudioTrack = vi.fn();
+  const audioStream = {
+    getTracks: () => [{ stop: stopAudioTrack }],
+  } as unknown as MediaStream;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    resolveAudio = null;
+    stopAudioTrack.mockClear();
+
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        createAnalyser() {
+          return {
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            frequencyBinCount: 32,
+            getByteFrequencyData: vi.fn(),
+          };
+        }
+
+        createMediaStreamSource() {
+          return { connect: vi.fn() };
+        }
+
+        close() {
+          return Promise.resolve();
+        }
+      },
+    );
+
+    // No videoInputDevice pref, so only the mic meter requests media.
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockImplementation(
+          () =>
+            new Promise<MediaStream>((resolve) => {
+              resolveAudio = resolve;
+            }),
+        ),
+      },
+    });
+  });
+
+  it("stops the mic stream when cleanup ran while getUserMedia was pending", async () => {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    document.body.appendChild(tab.build());
+
+    // SettingsOverlay.hide() calls cleanup() without aborting; a getUserMedia
+    // resolving afterwards must not open the mic — nobody is left to stop it.
+    tab.cleanup();
+    (resolveAudio as ((stream: MediaStream) => void) | null)?.(audioStream);
+
+    await vi.waitFor(() => {
+      expect(stopAudioTrack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("stops the mic stream when the tab was aborted while getUserMedia was pending", async () => {
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    document.body.appendChild(tab.build());
+
+    ac.abort();
+    (resolveAudio as ((stream: MediaStream) => void) | null)?.(audioStream);
+
+    await vi.waitFor(() => {
+      expect(stopAudioTrack).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // UI structure and interaction tests
 // ---------------------------------------------------------------------------
@@ -666,6 +744,40 @@ describe("VoiceAudioTab UI structure", () => {
     meterBar.dispatchEvent(new MouseEvent("click", { clientX: 0 }));
 
     expect(mockSetVoiceSensitivity).toHaveBeenCalled();
+    ac.abort();
+  });
+
+  it("stops applying sensitivity after a pointercancel interrupts the drag (v097)", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
+    expect(threshold).not.toBeNull();
+    // jsdom doesn't implement the Pointer Capture API — stub it as a no-op,
+    // same as a real browser call the handler makes unconditionally.
+    (threshold as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture =
+      vi.fn();
+
+    threshold.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 0 }));
+    mockSetVoiceSensitivity.mockClear();
+
+    threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 10 }));
+    expect(mockSetVoiceSensitivity).toHaveBeenCalledTimes(1);
+
+    // The OS claims the touch gesture as a pan and fires pointercancel
+    // instead of pointerup.
+    threshold.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }));
+
+    mockSetVoiceSensitivity.mockClear();
+    threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 50 }));
+
+    // Without a pointercancel listener, onMove stays attached and this
+    // would call setVoiceSensitivity again with no button held.
+    expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
+
     ac.abort();
   });
 

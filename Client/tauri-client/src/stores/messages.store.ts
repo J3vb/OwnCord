@@ -60,11 +60,26 @@ export interface Message {
   readonly mentionsEveryone?: boolean;
 }
 
+/** A reaction toggle applied optimistically, awaiting its server echo. Keyed
+ *  by the WS envelope id so an error reply (or local transport failure) can
+ *  roll back exactly this toggle — the same correlation scheme pendingSends
+ *  uses for optimistic message rows. */
+export interface PendingReaction {
+  readonly channelId: number;
+  readonly messageId: number;
+  readonly emoji: string;
+  readonly action: "add" | "remove";
+}
+
 export interface MessagesState {
   /** Messages per channel: channelId -> ordered array of Message */
   readonly messagesByChannel: ReadonlyMap<number, readonly Message[]>;
   /** Pending send confirmations: correlationId -> channelId */
   readonly pendingSends: ReadonlyMap<string, number>;
+  /** Optimistic reaction toggles awaiting their echo: correlationId -> toggle.
+   *  The store always sets it; optional only so the many inline MessagesState
+   *  test fixtures need not restate it. */
+  readonly pendingReactions?: ReadonlyMap<string, PendingReaction>;
   /** Whether we've loaded initial messages for a channel */
   readonly loadedChannels: ReadonlySet<number>;
   /** Whether more messages exist above for a channel */
@@ -140,6 +155,7 @@ const MAX_MESSAGES_PER_CHANNEL = 500;
 const INITIAL_STATE: MessagesState = {
   messagesByChannel: new Map(),
   pendingSends: new Map(),
+  pendingReactions: new Map(),
   loadedChannels: new Set(),
   hasMore: new Map(),
   historyLoadState: new Map(),
@@ -185,9 +201,16 @@ export function addMessage(payload: ChatMessagePayload): void {
     }
 
     // 2. Defensive: reconcile the oldest pending optimistic row from this author
-    //    (a broadcast that arrived before its chat_send_ok ack).
+    //    (a broadcast that arrived before its chat_send_ok ack). Content must
+    //    match too — our own echo always carries identical content, while a
+    //    same-author message from another session of this account does not,
+    //    and consuming the pending row for it would orphan the real send.
     const pendingIdx = existing.findIndex(
-      (m) => m.status === "pending" && m.correlationId !== null && m.user.id === message.user.id,
+      (m) =>
+        m.status === "pending" &&
+        m.correlationId !== null &&
+        m.user.id === message.user.id &&
+        m.content === message.content,
     );
     if (pendingIdx !== -1) {
       const replaced = existing.map((m, i) => (i === pendingIdx ? message : m));
@@ -278,20 +301,36 @@ export function markSendFailed(correlationId: string, errorCode: string | null):
 /** Remove an optimistic row (retry discards the old row; delete-draft dismisses it). */
 export function removeOptimistic(correlationId: string): void {
   messagesStore.setState((prev) => {
-    const channelId = prev.pendingSends.get(correlationId);
     const updatedPending = new Map(prev.pendingSends);
     updatedPending.delete(correlationId);
-    if (channelId === undefined) {
-      return { ...prev, pendingSends: updatedPending };
+
+    // A "failed" row has already been dropped from pendingSends by
+    // markSendFailed, so pendingSends can't tell us its channel — scan for
+    // the row itself instead. This is the common case: Retry/Delete only
+    // render for status==="failed" rows (renderers.ts), so a pendingSends
+    // hit here would mean removeOptimistic raced ahead of the row ever
+    // failing.
+    const channelId = prev.pendingSends.get(correlationId);
+    if (channelId !== undefined) {
+      const existing = prev.messagesByChannel.get(channelId);
+      if (existing === undefined) {
+        return { ...prev, pendingSends: updatedPending };
+      }
+      const filtered = existing.filter((m) => m.correlationId !== correlationId);
+      const updatedMessages = new Map(prev.messagesByChannel);
+      updatedMessages.set(channelId, filtered);
+      return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
     }
-    const existing = prev.messagesByChannel.get(channelId);
-    if (existing === undefined) {
-      return { ...prev, pendingSends: updatedPending };
+
+    for (const [cid, list] of prev.messagesByChannel) {
+      if (!list.some((m) => m.correlationId === correlationId)) continue;
+      const filtered = list.filter((m) => m.correlationId !== correlationId);
+      const updatedMessages = new Map(prev.messagesByChannel);
+      updatedMessages.set(cid, filtered);
+      return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
     }
-    const filtered = existing.filter((m) => m.correlationId !== correlationId);
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, filtered);
-    return { ...prev, messagesByChannel: updatedMessages, pendingSends: updatedPending };
+
+    return { ...prev, pendingSends: updatedPending };
   });
 }
 
@@ -314,7 +353,14 @@ export function setChannelLoadError(channelId: number): void {
 }
 
 /** Bulk set messages from a REST response. Marks channel as loaded.
- *  The server returns messages newest-first; we reverse to chronological order. */
+ *  The server returns messages newest-first; we reverse to chronological order.
+ *
+ *  Merges rather than clobbers: a live broadcast or an optimistic send can
+ *  land while the fetch is in flight, and the snapshot predates those rows —
+ *  replacing wholesale would silently discard them (and loadedChannels then
+ *  blocks any refetch until a full reload). Rows from the previous array are
+ *  carried over when they are pending/failed, or "sent" but newer than
+ *  anything in the snapshot. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
@@ -326,14 +372,29 @@ export function setMessages(
       ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
       : converted;
   messagesStore.setState((prev) => {
+    const previous = prev.messagesByChannel.get(channelId) ?? [];
+    const snapshotIds = new Set(trimmed.map((m) => m.id));
+    const maxSnapshotId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
+    const carried = previous.filter(
+      (m) => !snapshotIds.has(m.id) && (m.status !== "sent" || m.id > maxSnapshotId),
+    );
+    let merged = carried.length > 0 ? [...trimmed, ...carried] : trimmed;
+    const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
+    if (mergeTrimmed) {
+      merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
+    }
+
     const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, trimmed);
+    updatedMessages.set(channelId, merged);
 
     const updatedLoaded = new Set(prev.loadedChannels);
     updatedLoaded.add(channelId);
 
     const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.set(channelId, hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL);
+    updatedHasMore.set(
+      channelId,
+      hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL || mergeTrimmed,
+    );
 
     const updatedLoadState = new Map(prev.historyLoadState);
     updatedLoadState.delete(channelId);
@@ -437,22 +498,34 @@ export function prependMessages(
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
-    // Keep newest messages (end of array); drop oldest loaded history when cap exceeded
+    // Keep the OLDEST rows (start of array) when the cap is exceeded: the
+    // user is scrolling up, so the fetched page must survive — trimming it
+    // would make every cap-hit prepend a content-identical no-op that
+    // refetches the same page forever. The dropped live tail is restored via
+    // the detached-window machinery ("Jump to Present"), mirroring
+    // setAroundMessages' window semantics.
     const wasTrimmed = combined.length > MAX_MESSAGES_PER_CHANNEL;
     if (wasTrimmed) {
-      combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
+      combined = combined.slice(0, MAX_MESSAGES_PER_CHANNEL);
     }
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, combined);
 
     const updatedHasMore = new Map(prev.hasMore);
-    // If we trimmed older messages, there are definitely more on the server above.
-    updatedHasMore.set(channelId, hasMore || wasTrimmed);
+    // Trimming drops rows below the window, never above it, so "more above"
+    // is exactly what the server said.
+    updatedHasMore.set(channelId, hasMore);
+
+    const updatedDetached = new Set(prev.detachedChannels);
+    if (wasTrimmed) {
+      updatedDetached.add(channelId);
+    }
 
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       hasMore: updatedHasMore,
+      detachedChannels: updatedDetached,
     };
   });
 }
@@ -605,45 +678,132 @@ export function clearChannelMessages(channelId: number): void {
   });
 }
 
+/**
+ * Apply a single reaction count/me delta to a channel's message list, or null
+ * when the message is not loaded (nothing to update). Shared by the
+ * server-echo path, the optimistic apply, and its rollback (which applies the
+ * inverse action) so the three can never disagree about the arithmetic.
+ */
+function applyReactionDelta(
+  prev: MessagesState,
+  { channelId, messageId, emoji, action }: PendingReaction,
+  isMe: boolean,
+): ReadonlyMap<number, readonly Message[]> | null {
+  const channelMessages = prev.messagesByChannel.get(channelId);
+  if (!channelMessages) return null;
+
+  const updatedList = channelMessages.map((msg) => {
+    if (msg.id !== messageId) return msg;
+
+    const existing = msg.reactions;
+    if (action === "add") {
+      const found = existing.find((r) => r.emoji === emoji);
+      if (found !== undefined) {
+        const updatedReactions = existing.map((r) =>
+          r.emoji === emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
+        );
+        return { ...msg, reactions: updatedReactions };
+      }
+      return { ...msg, reactions: [...existing, { emoji, count: 1, me: isMe }] };
+    }
+
+    // action === "remove"
+    const updatedReactions = existing
+      .map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r))
+      .filter((r) => r.count > 0);
+    return { ...msg, reactions: updatedReactions };
+  });
+
+  const updatedMessages = new Map(prev.messagesByChannel);
+  updatedMessages.set(channelId, updatedList);
+  return updatedMessages;
+}
+
+/**
+ * Apply the user's own reaction toggle locally before the server confirms it —
+ * the pill reacts to the click, not to the round-trip (ux/messaging §5) — and
+ * register it under the send's correlation id. updateReaction consumes the
+ * matching self-echo (instead of re-applying it), and rollbackReaction
+ * reverts the toggle when the send errors.
+ */
+export function addOptimisticReaction(correlationId: string, toggle: PendingReaction): void {
+  messagesStore.setState((prev) => {
+    const updatedMessages = applyReactionDelta(prev, toggle, true);
+    if (updatedMessages === null) return prev;
+    const updatedPending = new Map(prev.pendingReactions ?? []);
+    updatedPending.set(correlationId, toggle);
+    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
+  });
+}
+
+/**
+ * Roll back an optimistic reaction toggle whose send failed (server error
+ * reply or local transport failure) by applying the inverse delta. Returns
+ * whether the correlation id matched a pending toggle, so the dispatcher's
+ * error handler knows the failed envelope was a reaction's.
+ */
+export function rollbackReaction(correlationId: string): boolean {
+  let found = false;
+  messagesStore.setState((prev) => {
+    const toggle = prev.pendingReactions?.get(correlationId);
+    if (toggle === undefined) return prev;
+    found = true;
+    const updatedPending = new Map(prev.pendingReactions);
+    updatedPending.delete(correlationId);
+    const inverse: PendingReaction = {
+      ...toggle,
+      action: toggle.action === "add" ? "remove" : "add",
+    };
+    const updatedMessages = applyReactionDelta(prev, inverse, true);
+    if (updatedMessages === null) {
+      return { ...prev, pendingReactions: updatedPending };
+    }
+    return { ...prev, messagesByChannel: updatedMessages, pendingReactions: updatedPending };
+  });
+  return found;
+}
+
 /** Update reactions on a message from a reaction_update WS event. */
 export function updateReaction(payload: ReactionUpdatePayload, currentUserId: number): void {
   messagesStore.setState((prev) => {
-    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
-    if (!channelMessages) return prev;
+    const isMe = payload.user_id === currentUserId;
 
-    const updatedList = channelMessages.map((msg) => {
-      if (msg.id !== payload.message_id) return msg;
-
-      const isMe = payload.user_id === currentUserId;
-      const existing = msg.reactions;
-
-      if (payload.action === "add") {
-        const found = existing.find((r) => r.emoji === payload.emoji);
-        if (found !== undefined) {
-          const updatedReactions = existing.map((r) =>
-            r.emoji === payload.emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
-          );
-          return { ...msg, reactions: updatedReactions };
+    // The echo of an optimistic toggle: consume it instead of re-applying —
+    // the delta arithmetic above would double-count otherwise. Matched by
+    // content, not envelope id (broadcasts carry no request correlation).
+    if (isMe) {
+      for (const [cid, t] of prev.pendingReactions ?? []) {
+        if (
+          t.channelId === payload.channel_id &&
+          t.messageId === payload.message_id &&
+          t.emoji === payload.emoji &&
+          t.action === payload.action
+        ) {
+          const updatedPending = new Map(prev.pendingReactions);
+          updatedPending.delete(cid);
+          return { ...prev, pendingReactions: updatedPending };
         }
-        return {
-          ...msg,
-          reactions: [...existing, { emoji: payload.emoji, count: 1, me: isMe }],
-        };
       }
+    }
 
-      // action === "remove"
-      const updatedReactions = existing
-        .map((r) =>
-          r.emoji === payload.emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r,
-        )
-        .filter((r) => r.count > 0);
-      return { ...msg, reactions: updatedReactions };
-    });
-
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(payload.channel_id, updatedList);
+    const updatedMessages = applyReactionDelta(
+      prev,
+      {
+        channelId: payload.channel_id,
+        messageId: payload.message_id,
+        emoji: payload.emoji,
+        action: payload.action,
+      },
+      isMe,
+    );
+    if (updatedMessages === null) return prev;
     return { ...prev, messagesByChannel: updatedMessages };
   });
+}
+
+/** Reset the entire store to its initial (empty) state — e.g. on logout. */
+export function resetMessagesStore(): void {
+  messagesStore.setState(() => INITIAL_STATE);
 }
 
 // -----------------------------------------------------------------------------

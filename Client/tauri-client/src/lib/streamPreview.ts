@@ -23,6 +23,54 @@ interface PreviewState {
 
 const previewTimers = new WeakMap<HTMLElement, PreviewState>();
 
+/**
+ * Rows currently attached to each sidebar-lifetime AbortSignal, keyed by the
+ * user the row belongs to. One abort listener is registered per signal
+ * (below), not one per attachStreamPreview call — the sidebar re-renders on
+ * every structural voice change and re-attaches every previewable row to the
+ * same signal each time, so a per-call listener would accumulate one closure
+ * (pinning its row) forever.
+ *
+ * Keying by user id is what bounds the map: renderChannels() does a full
+ * clearChildren + rebuild, so a user's fresh row supersedes the detached one
+ * it replaces instead of stranding it here for the sidebar's lifetime (v091).
+ * Identity, not `isConnected`, decides that — ChannelSidebar attaches previews
+ * while the rebuilt rows are still in a detached subtree, so a liveness test
+ * at attach time would discard rows that are about to be inserted.
+ */
+const rowsBySignal = new WeakMap<AbortSignal, Map<number, HTMLElement>>();
+
+/** Track `row` against `signal`, registering the signal's shared abort
+ *  listener the first time it's seen and retiring the row this one replaces. */
+function trackRowForSignal(row: HTMLElement, userId: number, signal: AbortSignal): void {
+  let rows = rowsBySignal.get(signal);
+  if (rows === undefined) {
+    rows = new Map();
+    rowsBySignal.set(signal, rows);
+    signal.addEventListener(
+      "abort",
+      () => {
+        for (const trackedRow of rows!.values()) {
+          clearPreviewState(trackedRow);
+          removePreviewDom(trackedRow);
+        }
+        rows!.clear();
+      },
+      { once: true },
+    );
+  }
+  const superseded = rows.get(userId);
+  if (superseded !== undefined && superseded !== row) {
+    // The previous render's row for this user was discarded by
+    // renderChannels(); run the cleanup the abort handler would have run on
+    // it (debounce/animation timers plus any live MediaStreamTrack listeners
+    // an open preview registered) now that a replacement proves it is dead.
+    clearPreviewState(superseded);
+    removePreviewDom(superseded);
+  }
+  rows.set(userId, row);
+}
+
 /** Height the preview expands to. Set dynamically after DOM insertion. */
 /** Debounce delay before showing the preview. */
 const DEBOUNCE_MS = 300;
@@ -289,11 +337,8 @@ export function attachStreamPreview(
   row.addEventListener("focusin", startPreview, { signal });
   row.addEventListener("focusout", stopPreview, { signal });
 
-  // Cleanup on abort (sidebar teardown)
-  signal.addEventListener("abort", () => {
-    clearPreviewState(row);
-    removePreviewDom(row);
-  });
+  // Cleanup on abort (sidebar teardown) — one shared listener per signal.
+  trackRowForSignal(row, userId, signal);
 }
 
 /**

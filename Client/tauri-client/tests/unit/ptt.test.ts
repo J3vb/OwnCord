@@ -22,6 +22,10 @@ const testPrefs = new Map<string, unknown>();
 
 // voiceStore state
 let mockCurrentChannelId: number | null = null;
+let mockLocalMuted = false;
+let mockLocalDeafened = false;
+const mockSetPttGated = vi.fn();
+const mockSetPttPollingLive = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Module mocks (must be declared before importing the module under test)
@@ -44,8 +48,14 @@ vi.mock("@components/settings/helpers", () => ({
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: {
-    getState: () => ({ currentChannelId: mockCurrentChannelId }),
+    getState: () => ({
+      currentChannelId: mockCurrentChannelId,
+      localMuted: mockLocalMuted,
+      localDeafened: mockLocalDeafened,
+    }),
   },
+  setPttGated: (...args: unknown[]) => mockSetPttGated(...args),
+  setPttPollingLive: (...args: unknown[]) => mockSetPttPollingLive(...args),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -76,6 +86,10 @@ import { vkName, initPtt, stopPtt, updatePttKey, captureKeyPress } from "../../s
 function resetAll(): void {
   testPrefs.clear();
   mockCurrentChannelId = null;
+  mockLocalMuted = false;
+  mockLocalDeafened = false;
+  mockSetPttGated.mockReset();
+  mockSetPttPollingLive.mockReset();
   mockInvoke.mockReset();
   mockListen.mockReset();
   // Default: invoke resolves with undefined; listen resolves with a no-op unlistener
@@ -288,6 +302,45 @@ describe("initPtt", () => {
     expect(setKeyIdx).toBeGreaterThanOrEqual(0);
     expect(startIdx).toBeGreaterThanOrEqual(0);
     expect(setKeyIdx).toBeLessThan(startIdx);
+  });
+
+  // v007: livekitSession mutes the mic at join when PTT is armed, and only a
+  // real ptt-state event can lift that mute. ptt_start spawns its thread on
+  // every platform, so the frontend must gate on the backend's capability
+  // answer instead — otherwise macOS (is_key_down stub) and pure-Wayland Linux
+  // (no reachable display) join muted with no way to ever unmute.
+  it("reports the backend's polling capability so join-time muting is safe", async () => {
+    testPrefs.set("pttVk", 0x20);
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    await initPtt();
+
+    expect(mockInvoke).toHaveBeenCalledWith("ptt_polling_supported");
+    expect(mockSetPttPollingLive).toHaveBeenCalledWith(true);
+  });
+
+  it("reports polling as NOT live when the backend cannot observe key state", async () => {
+    testPrefs.set("pttVk", 0x20);
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? false : undefined),
+    );
+
+    await initPtt();
+
+    expect(mockSetPttPollingLive).toHaveBeenCalledWith(false);
+    expect(mockSetPttPollingLive).not.toHaveBeenCalledWith(true);
+  });
+
+  it("reports polling as NOT live when a backend command rejects", async () => {
+    testPrefs.set("pttVk", 0x20);
+    mockInvoke.mockRejectedValue(new Error("not in Tauri"));
+
+    await initPtt();
+
+    expect(mockSetPttPollingLive).toHaveBeenCalledWith(false);
+    expect(mockSetPttPollingLive).not.toHaveBeenCalledWith(true);
   });
 
   it("calls listen for 'ptt-state' events when key is non-zero", async () => {
@@ -535,6 +588,164 @@ describe("ptt-state event listener", () => {
 
     // Flush pending microtasks so a (wrong) dynamic-import path would have
     // had the chance to call setMuted before we assert it never happens.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetMuted).not.toHaveBeenCalled();
+  });
+
+  it("does not call setMuted(false) when PTT is pressed while the user is self-muted (v006)", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7;
+    mockLocalMuted = true; // user explicitly muted themselves via the widget
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+
+    capturedCallback!({ payload: true }); // key pressed
+
+    // Give the dynamic import a chance to resolve and (wrongly) call setMuted.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetMuted).not.toHaveBeenCalled();
+  });
+
+  it("does not call setMuted(false) when PTT is pressed while the user is deafened (v006)", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7;
+    mockLocalDeafened = true;
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+
+    capturedCallback!({ payload: true });
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetMuted).not.toHaveBeenCalled();
+  });
+
+  it("still unmutes on press when the user is not self-muted or deafened", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7;
+    mockLocalMuted = false;
+    mockLocalDeafened = false;
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+
+    capturedCallback!({ payload: true });
+
+    await vi.waitFor(() => {
+      expect(mockSetMuted).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("updates pttGated in the store on press and release", async () => {
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+    mockSetPttGated.mockClear();
+
+    capturedCallback!({ payload: true }); // pressed — gate open
+    expect(mockSetPttGated).toHaveBeenCalledWith(false);
+
+    capturedCallback!({ payload: false }); // released — gate closed
+    expect(mockSetPttGated).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps unmuting on every press even though a release writes localMuted (v006)", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockReset();
+    // livekitSession.setMuted() writes localMuted for every caller, PTT
+    // included — the self-mute guard must not read that write back as an
+    // explicit self-mute, or PTT unmutes exactly once and is dead after.
+    mockSetMuted.mockImplementation((muted: boolean) => {
+      mockLocalMuted = muted;
+    });
+
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+
+    capturedCallback!({ payload: true });
+    await vi.waitFor(() => expect(mockSetMuted).toHaveBeenCalledWith(false));
+    capturedCallback!({ payload: false });
+    await vi.waitFor(() => expect(mockLocalMuted).toBe(true));
+
+    mockSetMuted.mockClear();
+    capturedCallback!({ payload: true }); // second press
+    await vi.waitFor(() => {
+      expect(mockSetMuted).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("stays muted on the press after the user self-mutes mid-hold (v006)", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockReset();
+    mockSetMuted.mockImplementation((muted: boolean) => {
+      mockLocalMuted = muted;
+    });
+
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttVk", 0x20);
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+
+    capturedCallback!({ payload: true });
+    await vi.waitFor(() => expect(mockSetMuted).toHaveBeenCalledWith(false));
+    // The user hits the widget mute button while still holding the key.
+    mockLocalMuted = true;
+    capturedCallback!({ payload: false }); // release — mic was already muted
+    await new Promise((r) => setTimeout(r, 0));
+
+    mockSetMuted.mockClear();
+    capturedCallback!({ payload: true }); // next press must not republish
     await new Promise((r) => setTimeout(r, 0));
     expect(mockSetMuted).not.toHaveBeenCalled();
   });

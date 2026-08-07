@@ -1,6 +1,8 @@
 # Channel-Visibility Unification (backlog item 3) — Design
 
-**Status:** implemented 2026-07-20 (D9)
+**Status:** implemented 2026-07-20 (D9) — re-verified 2026-08-04
+(`permissions/checker.go:110` `VisibleChannelIDs`; four delegating call sites;
+REST/WS agreement test `Server/ws/channel_visibility_agreement_test.go`)
 **Decision:** D9 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-07 (backlog §6 item 3)
 

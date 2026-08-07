@@ -651,6 +651,64 @@ func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 	}
 }
 
+// Deleting a channel must evict its voice participants BEFORE the DB row goes
+// away: the voice_states FK cascade wipes the rows with the channel, after
+// which neither CleanupVoiceForChannel nor the stale sweeper can see who was
+// in the room — participants would keep their client voice state, voice-topic
+// subscription, and LiveKit session forever, with no voice_leave broadcast.
+func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	// The minimal admin schema has no voice_states; create it with the real
+	// FK cascade — the cascade IS the hazard: it wipes the rows the cleanup
+	// needs if the delete runs first.
+	if _, err := database.ExecContext(context.Background(), `
+		CREATE TABLE voice_states (
+			user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+			muted      INTEGER NOT NULL DEFAULT 0,
+			deafened   INTEGER NOT NULL DEFAULT 0,
+			speaking   INTEGER NOT NULL DEFAULT 0,
+			joined_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+			camera     INTEGER NOT NULL DEFAULT 0,
+			screenshare INTEGER NOT NULL DEFAULT 0,
+			server_muted INTEGER NOT NULL DEFAULT 0,
+			server_deafened INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		t.Fatalf("create voice_states: %v", err)
+	}
+
+	chID, _ := database.AdminCreateChannel(context.Background(), "del-voice", "voice", "", "", 0)
+	uid, _ := database.CreateUser(context.Background(), "del-voice-user", "hash", 1)
+	if err := database.JoinVoiceChannel(context.Background(), uid, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	rowsAtCleanup := -1
+	hub.onVoiceCleanup = func(channelID int64) {
+		states, err := database.GetChannelVoiceStates(context.Background(), channelID)
+		if err != nil {
+			t.Errorf("GetChannelVoiceStates during cleanup: %v", err)
+		}
+		rowsAtCleanup = len(states)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+
+	if len(hub.voiceCleanupIDs) != 1 || hub.voiceCleanupIDs[0] != chID {
+		t.Fatalf("CleanupVoiceForChannel calls = %v, want exactly [%d]", hub.voiceCleanupIDs, chID)
+	}
+	if rowsAtCleanup != 1 {
+		t.Errorf("voice_states rows visible at cleanup time = %d, want 1 (cleanup must run before the delete cascade)", rowsAtCleanup)
+	}
+}
+
 func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
@@ -1171,6 +1229,10 @@ type mockHub struct {
 	allVisibilityRefreshes int
 	rolesUpdates           [][]*db.Role
 	clientCount            int
+	voiceCleanupIDs        []int64
+	// onVoiceCleanup lets a test observe DB state at cleanup time (ordering
+	// vs. the channel-delete cascade).
+	onVoiceCleanup func(channelID int64)
 }
 
 type memberUpdateCall struct {
@@ -1197,6 +1259,13 @@ func (m *mockHub) BroadcastChannelUpdate(ch *db.Channel) {
 
 func (m *mockHub) BroadcastChannelDelete(channelID int64) {
 	m.channelDeleteIDs = append(m.channelDeleteIDs, channelID)
+}
+
+func (m *mockHub) CleanupVoiceForChannel(channelID int64) {
+	m.voiceCleanupIDs = append(m.voiceCleanupIDs, channelID)
+	if m.onVoiceCleanup != nil {
+		m.onVoiceCleanup(channelID)
+	}
 }
 
 func (m *mockHub) BroadcastMemberBan(userID int64) {

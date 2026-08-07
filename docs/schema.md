@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `026_emoji_mime.sql` | Adds `emoji.mime_type` — the sniffed image type, so the emoji image route can send a Content-Type without re-reading the file |
 | `027_user_profile_fields.sql` | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe |
 | `028_group_dms.sql` | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving |
+| `029_drop_sounds_table.sql` | Drops `sounds` — dead since 001; the soundboard it was created for was never built (A-2026-07-13) |
 
 ---
 
@@ -632,25 +633,6 @@ migration 026, because the table shipped in 001 with no server code at all.
 
 Writes are gated on `MANAGE_SERVER` (see api.md for why no new permission bit
 was added), and every mutation broadcasts the whole set as `emoji_update`.
-
----
-
-### sounds
-
-**Dead schema.** Created by the initial schema for the soundboard feature,
-which has since been removed; the table remains but nothing reads or writes it.
-Slated for a cleanup migration (audit A-2026-07-13).
-
-```sql
-CREATE TABLE sounds (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL,
-    filename    TEXT    NOT NULL,
-    duration_ms INTEGER NOT NULL,
-    uploaded_by INTEGER NOT NULL REFERENCES users(id),
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-```
 
 ---
 

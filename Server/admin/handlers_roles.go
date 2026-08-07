@@ -131,7 +131,12 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// but reading first keeps the invalidation correct even if a concurrent
 		// role assignment lands in between (the extra id is a wasted eviction,
 		// a missing one is a stale grant).
-		affected := roles.AffectedUserIDs(r.Context(), id)
+		affected, affectedOK := roles.AffectedUserIDs(r.Context(), id)
+
+		// The pre-update name is read the same way, so a rename can be
+		// detected below even though UpdateRole itself only reports whether
+		// permissions changed.
+		before, beforeErr := database.GetRoleByID(r.Context(), id)
 
 		role, permsChanged, err := roles.UpdateRole(r.Context(), actorFromContext(r), id, req.toInput())
 		if err != nil {
@@ -139,8 +144,28 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
+		// Clients key a member's role by NAME, not id (member_update /
+		// ready carry a role name string). A rename alone leaves every
+		// member of the role holding a name that no longer resolves against
+		// the post-rename role list — they lose their role color, member-list
+		// group and permission-gated affordances until they reconnect. A
+		// member_update per affected user re-keys them, exactly like a role
+		// delete's fallback move already does.
+		if beforeErr == nil && before != nil && before.Name != role.Name && affectedOK && hub != nil {
+			for _, uid := range affected {
+				hub.BroadcastMemberUpdate(uid, role.Name)
+			}
+		}
+
 		if permsChanged {
-			invalidateUsers(permInvalidator, affected)
+			if affectedOK {
+				invalidateUsers(permInvalidator, affected)
+			} else if permInvalidator != nil {
+				// The member list was unreadable, so per-user eviction cannot
+				// be trusted; drop every cached mask instead (what reorder
+				// does on every call) rather than leave revoked grants live.
+				permInvalidator.InvalidateAll()
+			}
 			// READ_MESSAGES may have moved in either direction, so every
 			// channel's audience for this role has to be re-derived.
 			if hub != nil {

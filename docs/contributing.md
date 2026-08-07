@@ -27,7 +27,6 @@ How to set up the development environment and contribute to OwnCord.
 | `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
 | `go build -tags otel .` | Build with OpenTelemetry SDK (requires `go get` first — see Phase B) |
 | `go build -tags wazero .` | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
-| `go build -tags postgres .` | Build with PostgreSQL backend (requires pgx in go.mod) |
 | `go test ./...` | Run all server tests |
 | `go test ./... -cover` | Run server tests with coverage |
 | `go test -race ./...` | Run server tests with race detection |
@@ -36,9 +35,15 @@ How to set up the development environment and contribute to OwnCord.
 
 | Command | Description |
 |---------|-------------|
+| `make test` | Run the test suite the way CI does (`-race`, 20 min timeout) |
+| `make test-deadlock` | Run the deadlock-detection pass CI also runs (`-tags deadlock`) |
+| `make cover` | Per-package coverage (what CI uploads) + a function summary |
+| `make cover-all` | Cross-package coverage — the honest number (also lists 0.0% functions) |
 | `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
-| `make sqlc-generate` | Regenerate type-safe Go for both SQLite (`db/dbgen/`) and PostgreSQL (`db/pgdbgen/`) engines |
-| `make sqlc-verify` | Fail if committed `dbgen` / `pgdbgen` output is stale (used by CI) |
+| `make sqlc-generate` | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine) |
+| `make sqlc-verify` | Fail if the committed `dbgen` output is stale (used by CI) |
+| `make protocol-generate` | Regenerate the WS message-type constants (Go + TS) from `docs/protocol-schema.json` |
+| `make protocol-verify` | Fail if the committed protocol constants are stale (used by CI) |
 | `make otel-up` | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
 | `make otel-down` | Stop and remove the OTel dev containers |
 
@@ -144,18 +149,47 @@ ci: add lint step to GitHub Actions
 
 ## Pull Request Process
 
-1. Branch from `main`
-2. PRs target `main`; releases are cut from tagged commits on `main`
+1. Branch from `dev` (the active development branch)
+2. PRs target `dev`; `dev` is merged to `main` for releases, which are cut from tagged commits on `main`
 3. CI must pass (build + test + lint)
 4. Request code review
 5. Squash merge preferred
 
 ## Testing
 
-Target **80%+ coverage**. Follow test-driven development workflow.
+The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;
+the Go suite has deliberately no floor (T-2026-07-25-19) — use `make cover-all`
+to see the honest cross-package number. Follow a test-driven workflow and never
+lower a threshold to make a change fit.
 
 ## Code Style
 
-- **TypeScript**: See [Client Architecture](client-architecture.md)
+- **TypeScript**: See [Client Architecture](architecture/client.md)
 - **Go**: `gofmt` + `golangci-lint`, standard library preferred
 - **Rust**: `cargo fmt` + `cargo clippy`, minimal code (native APIs only)
+
+## Dependency Policy
+
+The policy behind what the lockfiles already enforce (decided 2026-08-05,
+closing audit findings 2026-04-07 #8 / DC-11):
+
+- **Lockfiles are authoritative.** `package-lock.json`, `go.sum` and
+  `Cargo.lock` pin every transitive dependency; CI installs only from them
+  (`npm ci`, module/registry verification — never a bare `npm install` in CI
+  or hooks). `package.json` keeps ordinary caret ranges: exact-pinning it
+  would duplicate what the lockfile does while making every security patch a
+  manual edit.
+- **Upgrades arrive as reviewed PRs, not ambient drift.** Dependabot runs
+  weekly per ecosystem (`.github/dependabot.yml`) with semver-major updates
+  ignored across the board — majors are adopted deliberately, by a human,
+  reading the changelog. Peer-coupled groups (`vitest`/`@vitest/*`,
+  `@stryker-mutator/*`) update as one PR so exact peer pins cannot wedge.
+- **Security gates run on every PR:** `npm audit --omit=dev
+  --audit-level=high` (shipped deps only — dev-tooling advisories are
+  triaged in the workflow comment instead of blocking on unfixable pins),
+  `govulncheck` for Go, `cargo audit` for Rust, and `knip` refuses unused
+  client dependencies outright.
+- **Version skew is pinned at the toolchain level** too: `.nvmrc` + CI both
+  say Node 20, `Server/sqlc.version` pins sqlc, Go pins via `go.mod`
+  (`GOTOOLCHAIN=auto`), and GitHub Actions are SHA-pinned with Dependabot
+  bumping the pins.

@@ -137,8 +137,9 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 }
 
 // buildReady constructs the ready server→client message.
-// Per PROTOCOL.md, channels include unread_count and last_message_id per user,
-// and only protocol-specified fields (no slow_mode, archived, voice_* extras).
+// Per docs/protocol.md, channels include unread_count and last_message_id per
+// user, and only protocol-specified fields (no slow_mode, archived, voice_*
+// extras).
 func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
@@ -233,25 +234,11 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		channelPayloads = append(channelPayloads, entry)
 	}
 
-	// Collect voice states, filtered to only visible channels (BUG-095).
-	allVoiceStates, err := collectAllVoiceStates(ctx, database, channels)
-	if err != nil {
-		// Non-fatal: send empty list rather than failing the whole ready payload.
-		slog.Warn("buildReady collectAllVoiceStates", "err", err)
-		allVoiceStates = []db.VoiceState{}
-	}
-	visibleSet := make(map[int64]struct{}, len(visibleChannels))
-	for i := range visibleChannels {
-		visibleSet[visibleChannels[i].ID] = struct{}{}
-	}
-	voiceStates := make([]db.VoiceState, 0, len(allVoiceStates))
-	for i := range allVoiceStates {
-		if _, ok := visibleSet[allVoiceStates[i].ChannelID]; ok {
-			voiceStates = append(voiceStates, allVoiceStates[i])
-		}
-	}
-
-	// Load open DM channels for this user.
+	// Load open DM channels for this user. Hoisted above the voice-state
+	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
+	// (and therefore visibleChannels) deliberately skips DM channels, since
+	// their visibility is membership-based rather than role-based, so without
+	// this a DM voice call's voice_state rows would never make it into ready.
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		slog.Warn("buildReady GetUserDMChannels", "err", err)
@@ -263,6 +250,32 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	for i := range dmChannels {
 		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
 			dmChannels[i].MentionCount = u.MentionCount
+		}
+	}
+
+	// Collect voice states, filtered to visible channels (BUG-095) plus the
+	// user's own open DM channels — mirroring computeAllowedChannels, which
+	// layers DM IDs onto the same checker result for reconnect replay
+	// filtering. Without this, a DM voice call's voice_state rows are
+	// structurally unreachable: VisibleChannelIDs skips ch.Type == "dm", and
+	// nothing else re-adds them for this filter.
+	allVoiceStates, err := collectAllVoiceStates(ctx, database, channels)
+	if err != nil {
+		// Non-fatal: send empty list rather than failing the whole ready payload.
+		slog.Warn("buildReady collectAllVoiceStates", "err", err)
+		allVoiceStates = []db.VoiceState{}
+	}
+	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels))
+	for i := range visibleChannels {
+		visibleSet[visibleChannels[i].ID] = struct{}{}
+	}
+	for i := range dmChannels {
+		visibleSet[dmChannels[i].ChannelID] = struct{}{}
+	}
+	voiceStates := make([]db.VoiceState, 0, len(allVoiceStates))
+	for i := range allVoiceStates {
+		if _, ok := visibleSet[allVoiceStates[i].ChannelID]; ok {
+			voiceStates = append(voiceStates, allVoiceStates[i])
 		}
 	}
 

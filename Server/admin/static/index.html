@@ -1950,7 +1950,13 @@ async function renderUpdates(){
   else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
   else html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
   html+='</div>';
-  if(info&&info.update_available){
+  if(info&&info.update_available&&info.can_apply===false){
+    /* Container deployments: the binary is image content, so in-place apply is
+       refused server-side (503 CONTAINER_DEPLOYMENT) — say so instead of
+       offering a button that can only fail. */
+    html+='<div class="update-card"><div class="update-info"><div class="update-notes">In-place update is unavailable in container deployments — upgrade by pulling the new image and recreating the container.</div></div></div>';
+    html+='<div style="margin-top:16px"><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Check Again</button></div>';
+  }else if(info&&info.update_available){
     html+='<div style="display:flex;gap:8px"><button class="btn btn-danger" onclick="applyUpdate()" '+(state.updateApplying?'disabled':'')+'>'+(state.updateApplying?'<div class="spinner"></div> Applying...':'Apply Update & Restart')+'</button>';
     html+='<button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Check Again</button></div>';
   }else{

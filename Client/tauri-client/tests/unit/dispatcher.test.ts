@@ -6,6 +6,7 @@ import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/chann
 import {
   messagesStore,
   addOptimisticMessage,
+  addOptimisticReaction,
   getChannelMessages,
 } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -26,7 +27,8 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
-import type { WsClient, WsListener } from "../../src/lib/ws";
+import { setMarkReadSender } from "../../src/lib/read-state";
+import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 
 // Mock notifications and livekitSession to avoid side effects
@@ -44,6 +46,7 @@ vi.mock("@lib/livekitSession", () => ({
   isVoiceConnected: vi.fn(() => false),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
+  disableCamera: vi.fn(async () => {}),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
@@ -59,7 +62,12 @@ vi.mock("@lib/identity", () => ({
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
-import { setMuted as mockSetMuted, setDeafened as mockSetDeafened } from "@lib/livekitSession";
+import {
+  setMuted as mockSetMuted,
+  setDeafened as mockSetDeafened,
+  leaveVoice as mockLeaveVoice,
+  disableCamera as mockDisableCamera,
+} from "@lib/livekitSession";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -73,6 +81,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 function createMockWs() {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
   const sendFailureListeners = new Set<(id: string, code: string) => void>();
+  const stateListeners = new Set<(state: ConnectionState) => void>();
 
   const ws: WsClient = {
     connect: vi.fn(),
@@ -87,7 +96,10 @@ function createMockWs() {
         listeners.get(type)?.delete(listener as unknown as WsListener<ServerMessage["type"]>);
       };
     },
-    onStateChange: vi.fn(() => () => {}),
+    onStateChange(listener: (state: ConnectionState) => void): () => void {
+      stateListeners.add(listener);
+      return () => stateListeners.delete(listener);
+    },
     onSendFailure(listener: (id: string, code: string) => void): () => void {
       sendFailureListeners.add(listener);
       return () => sendFailureListeners.delete(listener);
@@ -116,7 +128,13 @@ function createMockWs() {
     }
   }
 
-  return { ws, dispatch, dispatchSendFailure, listeners };
+  function dispatchState(state: ConnectionState): void {
+    for (const listener of stateListeners) {
+      listener(state);
+    }
+  }
+
+  return { ws, dispatch, dispatchSendFailure, dispatchState, listeners };
 }
 
 describe("WS Dispatcher", () => {
@@ -188,6 +206,39 @@ describe("WS Dispatcher", () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.user?.username).toBe("alex");
     expect(state.serverName).toBe("TestServer");
+  });
+
+  it("re-sends channel_focus for the active channel on auth_ok", () => {
+    // The resume path can land with no ChannelTopic subscription (server
+    // restart / proxy close observed before the client's reconnect) — a
+    // channel already active on the client must be re-focused so the
+    // channel message stream doesn't silently die.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "Welcome!",
+    });
+
+    expect(mock.ws.send).toHaveBeenCalledWith({
+      type: "channel_focus",
+      payload: { channel_id: 42 },
+    });
+  });
+
+  it("sends no channel_focus on auth_ok when no channel is active", () => {
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: null }));
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "Welcome!",
+    });
+
+    expect(mock.ws.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "channel_focus" }),
+    );
   });
 
   it("wires auth_error to clear auth", () => {
@@ -384,6 +435,97 @@ describe("WS Dispatcher", () => {
     expect(member?.avatar).toBe("/api/v1/files/abc");
   });
 
+  describe("presence and user_update sync dmStore", () => {
+    const dmChannel = {
+      channelId: 50,
+      recipient: { id: 10, username: "bob", avatar: "old.png", status: "online" as const },
+      participants: [{ id: 10, username: "bob", avatar: "old.png", status: "online" as const }],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    };
+
+    beforeEach(() => {
+      dmStore.setState(() => ({
+        channels: [{ ...dmChannel, participants: [...dmChannel.participants] }],
+      }));
+    });
+
+    it("updates the DM partner's status on presence, in recipient and participants", () => {
+      mock.dispatch("presence", { user_id: 10, status: "dnd" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("dnd");
+      expect(dm?.participants[0]?.status).toBe("dnd");
+    });
+
+    it("leaves an unrelated DM partner's status alone", () => {
+      mock.dispatch("presence", { user_id: 999, status: "dnd" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("online");
+    });
+
+    it("updates the DM partner's username/avatar/displayName on user_update", () => {
+      mock.dispatch("user_update", {
+        user_id: 10,
+        username: "bobby",
+        avatar: "new.png",
+        display_name: "Bobby",
+        about: "",
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.username).toBe("bobby");
+      expect(dm?.recipient.avatar).toBe("new.png");
+      expect(dm?.recipient.displayName).toBe("Bobby");
+      expect(dm?.participants[0]?.username).toBe("bobby");
+    });
+
+    it("clears the DM partner's nickname when user_update reports it cleared", () => {
+      dmStore.setState((prev) => ({
+        channels: prev.channels.map((c) => ({
+          ...c,
+          recipient: { ...c.recipient, displayName: "Bobby" },
+          participants: c.participants.map((p) => ({ ...p, displayName: "Bobby" })),
+        })),
+      }));
+
+      mock.dispatch("user_update", {
+        user_id: 10,
+        username: "bob",
+        avatar: "old.png",
+        display_name: null,
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.displayName).toBe("");
+    });
+
+    // An older or partial server omits display_name entirely; that means
+    // "unchanged", not "cleared" — membersStore already guards it this way.
+    it("leaves the DM partner's nickname alone when user_update omits display_name", () => {
+      dmStore.setState((prev) => ({
+        channels: prev.channels.map((c) => ({
+          ...c,
+          recipient: { ...c.recipient, displayName: "Bobby" },
+          participants: c.participants.map((p) => ({ ...p, displayName: "Bobby" })),
+        })),
+      }));
+
+      mock.dispatch("user_update", { user_id: 10, username: "bobby", avatar: "new.png" });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.username).toBe("bobby");
+      expect(dm?.recipient.displayName).toBe("Bobby");
+      expect(dm?.participants[0]?.displayName).toBe("Bobby");
+    });
+  });
+
   it("wires typing to members store", () => {
     mock.dispatch("typing", { channel_id: 1, user_id: 42, username: "bob" });
     const typing = membersStore.getState().typingUsers.get(1);
@@ -564,7 +706,34 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBe(7);
   });
 
-  it("ready does NOT change active channel when one is already set", () => {
+  it("ready does NOT change active channel when it is still present in the payload", () => {
+    // Regression guard for the auto-select branch: an already-active channel
+    // that is STILL in the new snapshot must not be reassigned to the first
+    // text channel (99 sorts after 1, so a naive "pick first" would move it).
+    channelsStore.setState((prev) => ({
+      ...prev,
+      activeChannelId: 99,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [
+        { id: 1, name: "general", type: "text", category: null, position: 0 },
+        { id: 99, name: "kept", type: "text", category: null, position: 1 },
+      ],
+      members: [],
+      voice_states: [],
+      roles: [],
+    });
+
+    expect(channelsStore.getState().activeChannelId).toBe(99);
+  });
+
+  it("ready clears the active channel when it is no longer present in the payload", () => {
+    // Was locked as "does NOT change active channel when one is already
+    // set" — but 99 was never actually IN that payload, so this was really
+    // pinning the bug (BUG report #2): a channel deleted/closed while this
+    // client was offline stayed "active" forever, leaving its message list
+    // and composer mounted against a channel the server no longer knows.
     channelsStore.setState((prev) => ({
       ...prev,
       activeChannelId: 99,
@@ -577,7 +746,30 @@ describe("WS Dispatcher", () => {
       roles: [],
     });
 
-    expect(channelsStore.getState().activeChannelId).toBe(99);
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+  });
+
+  it("ready keeps the active DM channel when it is still present in dm_channels", () => {
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      dm_channels: [
+        {
+          channel_id: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          last_message_id: null,
+          last_message: "",
+          last_message_at: "",
+          unread_count: 0,
+        },
+      ],
+    });
+
+    expect(channelsStore.getState().activeChannelId).toBe(50);
   });
 
   it("ready with no text channels does not set active", () => {
@@ -591,7 +783,7 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBeNull();
   });
 
-  it("ready with no DM channels in payload skips setDmChannels", () => {
+  it("ready with no DM channels in payload leaves dmStore empty", () => {
     mock.dispatch("ready", {
       channels: [],
       members: [],
@@ -600,6 +792,178 @@ describe("WS Dispatcher", () => {
     });
 
     expect(dmStore.getState().channels).toHaveLength(0);
+  });
+
+  it("ready with an empty dm_channels array clears stale DM rows", () => {
+    // The server always sends dm_channels; [] is an authoritative "no open
+    // DMs" (all closed on another device), not "nothing to say".
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      dm_channels: [],
+    });
+
+    expect(dmStore.getState().channels).toHaveLength(0);
+  });
+
+  describe("ready re-marks the active channel read", () => {
+    afterEach(() => {
+      setMarkReadSender(null);
+    });
+
+    it("clears the resurrected badge and advances the server read state for the focused channel", () => {
+      // read_states go stale while a channel stays focused (channel_focus is
+      // sent once per mount), so a full-ready resync restates non-zero counts
+      // for the channel the user is currently reading.
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("ready", {
+        channels: [
+          {
+            id: 1,
+            name: "general",
+            type: "text",
+            category: null,
+            position: 0,
+            unread_count: 4,
+            mention_count: 2,
+          },
+        ],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.unreadCount).toBe(0);
+      expect(ch?.mentionCount).toBe(0);
+      expect(sender).toHaveBeenCalledWith(1);
+    });
+
+    it("clears the badge for the actively viewed DM too", () => {
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: 5,
+            last_message: "hello",
+            last_message_at: "2026-03-15T10:00:00Z",
+            unread_count: 3,
+            mention_count: 1,
+          },
+        ],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.unreadCount).toBe(0);
+      expect(dm?.mentionCount).toBe(0);
+      expect(sender).toHaveBeenCalledWith(50);
+    });
+
+    it("does not send mark_read when no channel was active before the ready", () => {
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+
+      mock.dispatch("ready", {
+        channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // Auto-select ran, but a first connect is not a resync — the payload's
+      // counts are fresh and the user was not yet reading anything.
+      expect(sender).not.toHaveBeenCalled();
+    });
+  });
+
+  it("fails every pending optimistic send when the connection drops", () => {
+    addOptimisticMessage({
+      correlationId: "corr-drop",
+      channelId: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "in flight",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    // Reaching connected must not fail anything…
+    mock.dispatchState("connected");
+    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.status).toBe("pending");
+
+    // …but the connection dropping can never deliver chat_send_ok for the
+    // pending frame, so the row must fail with retry instead of spinning.
+    mock.dispatchState("reconnecting");
+
+    const msg = messagesStore.getState().messagesByChannel.get(1)![0]!;
+    expect(msg.status).toBe("failed");
+    expect(msg.errorCode).toBe("OFFLINE");
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+
+  it("rolls back every pending optimistic reaction toggle when the connection drops", () => {
+    mock.dispatch("chat_message", {
+      id: 900,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "react to me",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    addOptimisticReaction("corr-react-drop", {
+      channelId: 1,
+      messageId: 900,
+      emoji: "👍",
+      action: "add",
+    });
+
+    const before = getChannelMessages(1)[0]!.reactions.find((r) => r.emoji === "👍");
+    expect(before?.count).toBe(1);
+    expect(before?.me).toBe(true);
+    expect(messagesStore.getState().pendingReactions?.has("corr-react-drop")).toBe(true);
+
+    // Same reasoning as pendingSends above: the frame is gone with the dying
+    // socket, so the toggle must roll back instead of leaving a permanently
+    // wrong pill and a stale pendingReactions entry.
+    mock.dispatchState("reconnecting");
+
+    const after = getChannelMessages(1)[0]!.reactions.find((r) => r.emoji === "👍");
+    expect(after).toBeUndefined();
+    expect(messagesStore.getState().pendingReactions?.has("corr-react-drop")).toBe(false);
   });
 
   it("wires chat_edited to messages store", () => {
@@ -787,6 +1151,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires channel_delete and redirects to first text channel when active is deleted", () => {
+    mockShowToast.mockClear();
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(10, {
@@ -828,6 +1193,54 @@ describe("WS Dispatcher", () => {
 
     expect(channelsStore.getState().channels.has(10)).toBe(false);
     expect(channelsStore.getState().activeChannelId).toBe(20);
+    // The redirect must say why it happened (ux/channels-members-dms §1.2).
+    expect(mockShowToast).toHaveBeenCalledWith("This channel was deleted", "info");
+  });
+
+  it("wires channel_delete without a toast when a non-active channel is deleted", () => {
+    mockShowToast.mockClear();
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(10, {
+        id: 10,
+        name: "active-ch",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      ch.set(20, {
+        id: 20,
+        name: "background",
+        type: "text" as const,
+        category: null,
+        position: 1,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 10 };
+    });
+
+    mock.dispatch("channel_delete", { id: 20 });
+
+    expect(channelsStore.getState().channels.has(20)).toBe(false);
+    expect(channelsStore.getState().activeChannelId).toBe(10);
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("wires channel_delete sets active to null when no text channels remain", () => {
@@ -872,6 +1285,40 @@ describe("WS Dispatcher", () => {
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
     expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+  });
+
+  it("syncs authStore.user.role when the member_update is about the signed-in user", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 42, username: "alice", avatar: null, role: "member" },
+    }));
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(42, {
+        id: 42,
+        username: "alice",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("member_update", { user_id: 42, role: "admin" });
+
+    expect(membersStore.getState().members.get(42)?.role).toBe("admin");
+    expect(authStore.getState().user?.role).toBe("admin");
+  });
+
+  it("leaves authStore.user.role untouched for a member_update about someone else", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("member_update", { user_id: 42, role: "admin" });
+
+    expect(authStore.getState().user?.role).toBe("member");
   });
 
   it("wires roles_update to replace the role list", () => {
@@ -1035,6 +1482,54 @@ describe("WS Dispatcher", () => {
     });
 
     expect(voiceStore.getState().currentChannelId).toBe(3);
+  });
+
+  // A server-initiated eviction (CONNECT_VOICE revocation sweep, channel
+  // delete) has no companion teardown message — voice_leave for the local
+  // user IS the signal that must also tear down the LiveKit session, or mic
+  // publish + E2EE key material stay live while the UI shows not-in-voice.
+  it("tears down the LiveKit session on a self voice_leave for the current channel", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+  });
+
+  // A stale voice_leave for a channel we've already left (and rejoined
+  // elsewhere) must not kill the newer join's live session.
+  it("does not tear down the session for a stale voice_leave from a channel already left", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // Currently in channel 9 (a newer join) — the incoming voice_leave is for
+    // the old channel 3.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
   });
 
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
@@ -1386,6 +1881,46 @@ describe("WS Dispatcher", () => {
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
   });
 
+  it("does not gate blockedByThem on a FORBIDDEN send in a group DM", () => {
+    // Group DMs are exempt from block checks server-side (a group FORBIDDEN
+    // means something else, e.g. stale membership) — recipient is just
+    // participants[0] for a group, so flagging it here would incorrectly
+    // gate an unrelated 1:1 DM with that same person.
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 8,
+          recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+          participants: [
+            { id: 5, username: "alice", avatar: "", status: "online" },
+            { id: 6, username: "bob", avatar: "", status: "online" },
+          ],
+          name: "Crew",
+          isGroup: true,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    addOptimisticMessage({
+      correlationId: "corr-group",
+      channelId: 8,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch("error", { code: "FORBIDDEN", message: "not a participant" }, "corr-group");
+
+    expect(blocksStore.getState().blockedByThem.has(5)).toBe(false);
+    // Still marks the row failed (existing behaviour preserved).
+    expect(getChannelMessages(8)[0]!.status).toBe("failed");
+  });
+
   it("on ready publishes the client's identity key when the server copy is stale", async () => {
     cleanup(); // tear down the no-api dispatcher wired in beforeEach
     mockEnsurePublished.mockClear();
@@ -1705,6 +2240,54 @@ describe("WS Dispatcher", () => {
 
       (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(false);
     });
+
+    it("increments the DM mention badge for an incoming @mention", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+
+      mock.dispatch("chat_message", {
+        id: 504,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "hey @me",
+        mentions: [5],
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      // The badge must fire live: dmStore's mentionCount is what DmSidebar
+      // renders (mute-immune), and channelsStore's incrementMention no-ops
+      // for DM ids. Without this, the badge appears only after a reconnect.
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.mentionCount).toBe(1);
+      expect(dm?.unreadCount).toBe(1);
+    });
+
+    it("does not badge a DM mention in the focused DM", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+
+      mock.dispatch("chat_message", {
+        id: 505,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "hey @me",
+        mentions: [5],
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.mentionCount).toBe(0);
+    });
   });
 
   // ── DM events ─────────────────────────────────────────
@@ -1793,6 +2376,110 @@ describe("WS Dispatcher", () => {
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
       expect(dmStore.getState().channels).toHaveLength(0);
+    });
+
+    it("falls back to another open DM when the closed DM was active", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+          {
+            channelId: 60,
+            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([60]);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+    });
+
+    it("falls back to the first text channel when the closed DM was active and no DMs remain", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(1, {
+          id: 1,
+          name: "general",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: ch, activeChannelId: 50 };
+      });
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
+    it("does not change the active channel when the closed DM was not active", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(1);
     });
   });
 
@@ -2001,6 +2688,17 @@ describe("WS Dispatcher", () => {
         "That voice channel has reached its video limit",
         "error",
       );
+    });
+
+    // max_video has no SFU-level enforcement — the server's VIDEO_LIMIT refusal
+    // only rejects the DB write. Without a client-side rollback the refused
+    // camera track keeps publishing (and streaming to everyone) while
+    // voice_state says camera=false, so VIDEO_LIMIT is otherwise cosmetic.
+    it("rolls back the local camera publish on VIDEO_LIMIT", async () => {
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" });
+      await vi.runAllTimersAsync();
+
+      expect(mockDisableCamera).toHaveBeenCalled();
     });
 
     // A capacity refusal is about the voice channel, not about the composer,

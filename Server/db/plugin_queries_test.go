@@ -320,3 +320,28 @@ func TestPluginKVScan(t *testing.T) {
 		t.Errorf("PluginKVScan with a non-matching prefix = %v, want empty", none)
 	}
 }
+
+func TestInstallPlugin_ReinstallReturnsCorrectID_AfterOtherWrites(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	id1, err := database.InstallPlugin(ctx, "rowid-plugin", "1.0", "{}")
+	if err != nil {
+		t.Fatalf("InstallPlugin: %v", err)
+	}
+
+	// Other INSERTs on the shared single writer connection move
+	// last_insert_rowid past the plugin's id; the upsert's UPDATE branch
+	// does not reset it.
+	seedUser(t, database, "rowid-mover-1")
+	seedUser(t, database, "rowid-mover-2")
+	seedUser(t, database, "rowid-mover-3")
+
+	id2, err := database.InstallPlugin(ctx, "rowid-plugin", "2.0", "{}")
+	if err != nil {
+		t.Fatalf("InstallPlugin reinstall: %v", err)
+	}
+	if id2 != id1 {
+		t.Errorf("reinstall returned id %d, want %d — EnablePlugin/plugin_kv would target a nonexistent row", id2, id1)
+	}
+}

@@ -5,7 +5,7 @@
 
 import { createElement } from "@lib/dom";
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { getChannelMessages } from "@stores/messages.store";
+import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import type { WsClient } from "@lib/ws";
 
 // ---------------------------------------------------------------------------
@@ -38,11 +38,17 @@ export function createReactionController(opts: ReactionControllerOptions): React
       showError("Slow down! Please wait before reacting again.");
       return;
     }
-    const msgs = getChannelMessages(getChannelId());
+    const channelId = getChannelId();
+    const msgs = getChannelMessages(channelId);
     const msg = msgs.find((m) => m.id === msgId);
     const existing = msg?.reactions.find((r) => r.emoji === emoji);
-    const type = existing?.me ? "reaction_remove" : "reaction_add";
-    ws.send({ type, payload: { message_id: msgId, emoji } });
+    const action = existing?.me ? ("remove" as const) : ("add" as const);
+    const type = action === "remove" ? "reaction_remove" : "reaction_add";
+    const correlationId = ws.send({ type, payload: { message_id: msgId, emoji } });
+    // Optimistic toggle (ux/messaging §5): the pill flips on the click; the
+    // server echo is consumed rather than re-applied, and an error reply (or
+    // transport failure) rolls back exactly this toggle via its envelope id.
+    addOptimisticReaction(correlationId, { channelId, messageId: msgId, emoji, action });
   }
 
   let activePickerDestroy: (() => void) | null = null;

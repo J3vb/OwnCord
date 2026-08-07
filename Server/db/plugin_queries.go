@@ -11,21 +11,19 @@ import (
 // unchanged.
 
 func (d *DB) InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error) {
-	res, err := d.writer.ExecContext(ctx,
+	// RETURNING instead of LastInsertId: last_insert_rowid is connection-
+	// scoped and NOT updated when the upsert takes the DO UPDATE branch, so
+	// on the shared writer connection a reinstall would return the rowid of
+	// some unrelated prior INSERT.
+	var id int64
+	err := d.writer.QueryRowContext(ctx,
 		`INSERT INTO plugins (name, version, enabled, manifest_json) VALUES (?, ?, 0, ?)
-		 ON CONFLICT(name) DO UPDATE SET version = excluded.version, manifest_json = excluded.manifest_json`,
+		 ON CONFLICT(name) DO UPDATE SET version = excluded.version, manifest_json = excluded.manifest_json
+		 RETURNING id`,
 		name, version, manifestJSON,
-	)
+	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("InstallPlugin: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil || id == 0 {
-		// On conflict path LastInsertId may be 0; look up by name.
-		row := d.reader.QueryRowContext(ctx, `SELECT id FROM plugins WHERE name = ?`, name)
-		if scanErr := row.Scan(&id); scanErr != nil {
-			return 0, fmt.Errorf("InstallPlugin lookup: %w", scanErr)
-		}
 	}
 	return id, nil
 }

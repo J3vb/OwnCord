@@ -19,8 +19,6 @@ import (
 	"github.com/owncord/server/service"
 )
 
-const MsgTypeChatCommand = "chat_command"
-
 // maxCommandArgs is the maximum number of arguments accepted in a
 // chat_command payload. This prevents a malicious client from flooding
 // the plugin's allocate/dispatch ABI with thousands of strings.
@@ -112,7 +110,7 @@ func buildCommandReply(reqID, text string) []byte {
 		Payload payload `json:"payload"`
 	}
 	raw, _ := json.Marshal(envelope{
-		Type:    "command_reply",
+		Type:    MsgTypeCommandReply,
 		ReqID:   reqID,
 		Payload: payload{Text: text},
 	})
@@ -132,7 +130,7 @@ func buildCommandBroadcast(channelID, userID int64, cmd, text string) []byte {
 		Payload payload `json:"payload"`
 	}
 	raw, _ := json.Marshal(envelope{
-		Type: "plugin_broadcast",
+		Type: MsgTypePluginBroadcast,
 		Payload: payload{
 			ChannelID: channelID,
 			UserID:    userID,

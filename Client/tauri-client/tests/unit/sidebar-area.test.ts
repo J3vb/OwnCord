@@ -1657,6 +1657,56 @@ describe("SidebarArea", () => {
 
       cleanup(result);
     });
+
+    it("onReorderChannel surfaces a failed write as an error toast", async () => {
+      // Previously fired with bare `void` and no .catch: a rejected PATCH left
+      // the sidebar showing an order the server never accepted, with nothing
+      // telling the admin.
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      (opts.api.adminUpdateChannel as MockedFn)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("forbidden"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      callArgs.onReorderChannel([
+        { channelId: 1, newPosition: 0 },
+        { channelId: 2, newPosition: 1 },
+      ]);
+
+      // Flush the Promise.allSettled(...).then(...) microtask chain.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, { position: 0 });
+      expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(2, { position: 1 });
+      expect(toast.show).toHaveBeenCalledWith("Failed to save channel order", "error");
+
+      cleanup(result);
+    });
+
+    it("onReorderChannel does not toast when every write succeeds", async () => {
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      callArgs.onReorderChannel([{ channelId: 1, newPosition: 0 }]);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(toast.show).not.toHaveBeenCalled();
+
+      cleanup(result);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"html"
 	"unicode/utf8"
 
 	"github.com/microcosm-cc/bluemonday"
@@ -152,12 +153,63 @@ func (s *MessageService) RunBackgroundInlineForTest() {
 	s.bg = func(fn func()) { fn() }
 }
 
+// sanitizePass is one unescape-sanitize-unescape cycle. Both unescapes are
+// load-bearing; do not drop either.
+//   - Inner: bluemonday's StrictPolicy treats "&lt;img ...&gt;" as inert
+//     escaped text and lets it through unchanged. Unescaping first turns
+//     smuggled entity-encoded markup into real markup *before* bluemonday
+//     sees it, so StrictPolicy actually strips it.
+//   - Outer: bluemonday writes surviving text tokens through
+//     html.EscapeString (Sanitize output is always HTML-escaped), so
+//     without this, plain punctuation like don't/>/"/& would be persisted
+//     and rendered as literal &#39;/&gt;/&#34;/&amp; entities.
+func sanitizePass(s string) string {
+	return html.UnescapeString(sanitizer.Sanitize(html.UnescapeString(s)))
+}
+
+// sanitizeToFixpoint repeats sanitizePass until it stops changing the
+// string. One pass is not enough on its own, for two reasons:
+//   - A multiply-encoded payload like "&amp;lt;script&amp;gt;" only has its
+//     outermost layer peeled by a single inner unescape, so it survives the
+//     first pass as still-escaped inert text and the *outer* unescape then
+//     turns the one remaining layer into a live "<script>". A second pass
+//     unescapes and strips it for real.
+//   - bluemonday's StrictPolicy is only self-stable in *escaped* space (its
+//     tokenizer decodes entities internally while reading a text node, then
+//     re-escapes uniformly on write, so Sanitize(Sanitize(x)) == Sanitize(x)
+//     always held, which is why the pre-fix code's fuzz idempotency check
+//     never caught this). Emitting a literal outer-unescaped "<" breaks
+//     that self-stability: e.g. bluemonday tag-strips the adversarial input
+//     "<<script>script>alert(1)<</script>/script>" down to escaped text
+//     "&lt;/script&gt;", and one outer unescape turns that into the literal
+//     substring "</script>" — inert as *this* pass's output, but a real end
+//     tag if it were ever sanitized again. Looping to a fixpoint here means
+//     sanitizeContent's own output is always already stable, so re-running
+//     it (which the edit path effectively does, on separately-submitted
+//     content) is a true no-op instead of merely "safe once".
+//
+// It always terminates: bluemonday only ever removes characters or shortens
+// escaped entities back down, so each pass's output length is
+// non-increasing. The iteration bound is a defensive backstop pathological
+// input can't actually reach, not what makes this safe.
+func sanitizeToFixpoint(raw string) string {
+	s := raw
+	for i := 0; i <= len(raw); i++ {
+		next := sanitizePass(s)
+		if next == s {
+			return next
+		}
+		s = next
+	}
+	return s
+}
+
 // sanitizeContent validates and sanitizes message content.
 func sanitizeContent(raw string, allowEmpty bool) (string, error) {
 	if len(raw) > maxMessageLen*4 {
 		return "", fmt.Errorf("%w: message content exceeds maximum length", ErrBadRequest)
 	}
-	content := sanitizer.Sanitize(raw)
+	content := sanitizeToFixpoint(raw)
 	if content == "" && !allowEmpty {
 		return "", fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
 	}

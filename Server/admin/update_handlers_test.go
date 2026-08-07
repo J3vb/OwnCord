@@ -357,3 +357,50 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 		t.Errorf("status = %d; expected download attempt to proceed (got 503/409 instead)", w.Code)
 	}
 }
+
+// ─── handleApplyUpdate — container deployments ───────────────────────────────
+
+// In a container the staged replacement dies with the container, so the
+// endpoint refuses before any updater logic runs — the answer must not
+// depend on whether an updater is configured (closes the long-standing
+// "disable this endpoint in docker builds?" TODO).
+func TestAdminAPI_ApplyUpdate_RefusedInContainer(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "1")
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "CONTAINER_DEPLOYMENT" {
+		t.Errorf("error code = %q, want CONTAINER_DEPLOYMENT", resp["error"])
+	}
+}
+
+// The explicit opt-out keeps in-place update available for operators who
+// bind-mount the binary and know what they are doing: with the variable set
+// to 0, the container guard steps aside and the nil-updater 503 answers.
+func TestAdminAPI_ApplyUpdate_ContainerOptOut(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "UPDATE_UNAVAILABLE" {
+		t.Errorf("error code = %q, want UPDATE_UNAVAILABLE (container guard must step aside)", resp["error"])
+	}
+}

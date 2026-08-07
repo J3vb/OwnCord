@@ -177,7 +177,7 @@ type Store interface {
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentByID(ctx context.Context, id string) (*db.Attachment, error)
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
-	DeleteOrphanedAttachments(ctx context.Context, cutoff string) ([]string, error)
+	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)

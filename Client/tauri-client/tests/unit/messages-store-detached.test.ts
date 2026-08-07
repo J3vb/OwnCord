@@ -215,6 +215,30 @@ describe("reattaching via a fresh tail fetch", () => {
   });
 });
 
+describe("prependMessages at the message cap", () => {
+  it("keeps the fetched older page and detaches instead of discarding it", () => {
+    // Fill to the 500-row cap: ids 101..600 (history endpoint is newest-first).
+    const initial: MessageResponse[] = [];
+    for (let id = 600; id >= 101; id--) initial.push(response(id));
+    setMessages(1, initial, true);
+    expect(getChannelMessages(1)).toHaveLength(500);
+
+    prependMessages(1, [response(100), response(99)], false);
+
+    const loaded = getChannelMessages(1);
+    expect(loaded).toHaveLength(500);
+    // The fetched page must survive at the head — trimming it away would make
+    // every scroll-up fetch at the cap a silent no-op that refetches forever.
+    expect(loaded[0]!.id).toBe(99);
+    expect(loaded[1]!.id).toBe(100);
+    // The live tail was dropped instead, so the window is detached and the
+    // "Jump to Present" pill restores it.
+    expect(isWindowDetached(1)).toBe(true);
+    // Nothing above was dropped, so "more above" is what the server said.
+    expect(hasMoreMessages(1)).toBe(false);
+  });
+});
+
 describe("hasMessageLoaded", () => {
   it("reports membership of the loaded window", () => {
     setAroundMessages(1, ascendingWindow(10, 12), true, true);

@@ -50,7 +50,19 @@ export async function saveIdentityKey(host: string, key: string): Promise<boolea
   }
 }
 
-/** Load the identity private-key blob for a host, or null if absent/unavailable. */
+/**
+ * Load the identity private-key blob for a host, or null when nothing is
+ * stored (a clean `load_identity_key` resolution with no value).
+ *
+ * A command REJECTION is rethrown, not swallowed to null: `secret_store::get`
+ * on the Rust side reports `Ok(None)` only when both the keyring and the
+ * fallback file genuinely hold nothing, and propagates a keyring read error
+ * as `Err` instead. A rejection here is therefore a real, unreadable store —
+ * not "nothing stored". Callers (see `loadOrGenerateIdentityKeyPair`) rely on
+ * that distinction to abort instead of minting and publishing a fresh
+ * identity keypair over an existing one, which would invalidate every peer's
+ * TOFU pin.
+ */
 export async function loadIdentityKey(host: string): Promise<string | null> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -60,8 +72,12 @@ export async function loadIdentityKey(host: string): Promise<string | null> {
     const result = await invoke("load_identity_key", { host });
     return typeof result === "string" ? result : null;
   } catch (err) {
-    log.error("Failed to load identity key", { host, error: String(err) });
-    return null;
+    log.error(
+      "Failed to load identity key — propagating so the caller does not treat an unreadable " +
+        'store as "no key stored"',
+      { host, error: String(err) },
+    );
+    throw err;
   }
 }
 
@@ -82,38 +98,75 @@ export async function deleteIdentityKey(host: string): Promise<boolean> {
 
 // ── Peer identity pins (identity_pins.json, TOFU) ──────────────────────────
 
+/**
+ * Result of a peer identity-pin write. Mirrors IdentityPinLookup's tri-state
+ * split: "no-store" (non-Tauri environment, no pin store by design) and
+ * "failed" (a real write error, e.g. disk full / unwritable pins file) are
+ * both falsy under a plain boolean, but callers that display a "verified"
+ * state on the strength of a pin write must be able to tell them apart —
+ * collapsing them let a write failure be silently treated the same as the
+ * no-store case and still show "verified" with no pin ever persisted.
+ */
+export type StoreIdentityPinResult = "stored" | "no-store" | "failed";
+
 /** Pin a peer's identity public key (base64) under `{host}:{userId}`. */
 export async function storeIdentityPin(
   host: string,
   userId: string,
   pin: string,
-): Promise<boolean> {
+): Promise<StoreIdentityPinResult> {
   const invoke = await getInvoke();
   if (!invoke) {
     log.warn("Tauri not available — identity pin not stored");
-    return false;
+    return "no-store";
   }
   try {
     await invoke("store_identity_pin", { host, userId, pin });
-    return true;
+    return "stored";
   } catch (err) {
     log.error("Failed to store identity pin", { host, userId, error: String(err) });
-    return false;
+    return "failed";
   }
 }
 
-/** Load a peer's pinned identity public key, or null if never pinned. */
-export async function getIdentityPin(host: string, userId: string): Promise<string | null> {
+/**
+ * Result of a peer identity-pin lookup. "unpinned" is a trust statement —
+ * the store was read and holds nothing for this peer (TOFU first sight) —
+ * while "unavailable" means the store could not be read at all, so NO trust
+ * statement can be made. Mirrors the Rust TLS-TOFU split (tofu.rs), where
+ * `load_stored_fingerprint` returns `Err` distinctly from `Ok(None)`.
+ */
+export type IdentityPinLookup =
+  | { readonly status: "pinned"; readonly pin: string }
+  | { readonly status: "unpinned" }
+  | { readonly status: "unavailable" };
+
+/**
+ * Look up a peer's pinned identity public key.
+ *
+ * A store read error is returned as "unavailable", NOT "unpinned" (DC-08,
+ * F3 follow-up 3): collapsing the two let a transient keyring error send a
+ * pinned peer down the first-sight path — silently verifying against, and
+ * then re-pinning, whatever key the server delivered. Callers must fail
+ * closed on "unavailable". In non-Tauri environments (tests, browser) there
+ * is no pin store by design, so the result is "unpinned" — consistent with
+ * every other wrapper in this module no-oping there.
+ */
+export async function getIdentityPin(host: string, userId: string): Promise<IdentityPinLookup> {
   const invoke = await getInvoke();
   if (!invoke) {
-    return null;
+    return { status: "unpinned" };
   }
   try {
     const result = await invoke("get_identity_pin", { host, userId });
-    return typeof result === "string" ? result : null;
+    return typeof result === "string" ? { status: "pinned", pin: result } : { status: "unpinned" };
   } catch (err) {
-    log.error("Failed to load identity pin", { host, userId, error: String(err) });
-    return null;
+    log.error("Failed to load identity pin — treating as unavailable, not unpinned", {
+      host,
+      userId,
+      error: String(err),
+    });
+    return { status: "unavailable" };
   }
 }
 
@@ -183,8 +236,18 @@ async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPai
     // docs/credential-storage.md), so reaching the branch below now means the
     // secret survived neither store. Kept because this is the failure a
     // resolved promise cannot express, and its only other symptom is peers
-    // flagging the user as a MITM after a restart.
-    if ((await loadIdentityKey(host)) !== blob) {
+    // flagging the user as a MITM after a restart. A read error here (as
+    // opposed to loadIdentityKey's first call above, which decides whether to
+    // regenerate) is treated the same as a mismatch, not rethrown — we
+    // already have a freshly generated keypair for this session, so there is
+    // nothing left to abort.
+    let persisted: boolean;
+    try {
+      persisted = (await loadIdentityKey(host)) === blob;
+    } catch {
+      persisted = false;
+    }
+    if (!persisted) {
       log.error(
         "Identity key did not persist — the credential store accepted the write but did not return it. " +
           "This session works, but peers will see a new identity (and prompt to re-verify) every restart.",

@@ -5,6 +5,7 @@
  */
 
 import { setActiveChannel, clearUnread, channelsStore } from "@stores/channels.store";
+import { clearDmUnread } from "@stores/dm.store";
 
 /**
  * Activate `channelId`, clearing its unread and mention badges.
@@ -17,6 +18,13 @@ export function navigateToChannel(channelId: number): void {
   if (!channelsStore.getState().channels.has(channelId)) return;
   setActiveChannel(channelId);
   clearUnread(channelId);
+  // findChannelById does not filter out DM mirrors, so a jump (permalink,
+  // search, pinned, reply) can land on a `type: "dm"` channel. Its unread
+  // badge lives in dmStore, not channelsStore — clearUnread alone leaves the
+  // DM sidebar row lit while the user is reading it. No-op for a non-DM id
+  // (dmStore has no matching channel), mirroring markChannelRead's dual
+  // clear (read-state.ts).
+  clearDmUnread(channelId);
 }
 
 /**

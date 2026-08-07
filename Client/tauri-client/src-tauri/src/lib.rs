@@ -125,6 +125,7 @@ pub fn run() {
             ptt::ptt_stop,
             ptt::ptt_set_key,
             ptt::ptt_get_key,
+            ptt::ptt_polling_supported,
             ptt::ptt_listen_for_key,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,

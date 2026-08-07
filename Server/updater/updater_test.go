@@ -1300,3 +1300,19 @@ func TestDownloadFile_RefusesPreExistingDest(t *testing.T) {
 		t.Errorf("pre-existing file must be left untouched")
 	}
 }
+
+// The chatserver.exe.sig asset is consumed only by the Windows verify path;
+// Linux integrity comes entirely from the signed manifest + checksum. Gating
+// linux updates on a Windows-only asset makes any release without it report
+// UpdateAvailable=false on Linux forever.
+func TestHasRequiredServerAssets_SignatureGOOSAware(t *testing.T) {
+	if !hasRequiredServerAssetsFor("linux", "d", "c", "", "m", "ms") {
+		t.Error("linux update gated on the windows-only .sig asset")
+	}
+	if hasRequiredServerAssetsFor("windows", "d", "c", "", "m", "ms") {
+		t.Error("windows update must still hard-require the .sig asset")
+	}
+	if !hasRequiredServerAssetsFor("windows", "d", "c", "s", "m", "ms") {
+		t.Error("complete windows asset set refused")
+	}
+}

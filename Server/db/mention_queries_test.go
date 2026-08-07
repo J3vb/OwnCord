@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/db"
 )
@@ -213,6 +214,135 @@ func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
 	}
 	if _, ok := got["ghost"]; ok {
 		t.Error("unknown username must not resolve")
+	}
+}
+
+// TestGetUserIDsByUsernames_LapsedTempBan_StillResolves locks the "reconverged
+// raw column" fix: nothing clears users.banned when a temp ban's ban_expires
+// lapses (that's decided lazily, at login, by auth.IsEffectivelyBanned), so a
+// raw `banned = 0` filter would leave a reinstated user permanently
+// unresolvable as an @mention target even though they can log in and post
+// again.
+func TestGetUserIDsByUsernames_LapsedTempBan_StillResolves(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	past := time.Now().Add(-1 * time.Hour)
+	if err := database.BanUser(ctx, 2, "temp ban", &past); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if got["bob"] != 2 {
+		t.Errorf("bob = %d, want 2 (a lapsed temp ban must not hide the user from mention resolution)", got["bob"])
+	}
+}
+
+// TestGetUserIDsByUsernames_ActiveTempBan_Excluded is the complement: a temp
+// ban that has NOT yet lapsed must still exclude the user, same as today.
+func TestGetUserIDsByUsernames_ActiveTempBan_Excluded(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	future := time.Now().Add(1 * time.Hour)
+	if err := database.BanUser(ctx, 2, "temp ban", &future); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if _, ok := got["bob"]; ok {
+		t.Error("actively temp-banned user must not resolve as a mention target")
+	}
+}
+
+// TestGetUserIDsByUsernames_ActiveTempBan_SQLiteTimeFormat_Excluded pins the
+// expiry filter against the second ban_expires spelling auth.IsEffectivelyBanned
+// accepts (and that auth/helpers_test.go locks): SQLite's space-separated
+// "2006-01-02 15:04:05". The comparison in the SQL filter is lexical and ' '
+// sorts BELOW 'T', so an unnormalised clause reads any same-day space-form
+// expiry as already lapsed and fails OPEN — a genuinely banned user back in
+// the fan-out. The expiry here is deliberately later on the *same UTC day* so
+// only the separator, not the date, can decide the comparison.
+func TestGetUserIDsByUsernames_ActiveTempBan_SQLiteTimeFormat_Excluded(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	// End of the current UTC day: still in the future, still the same date, so
+	// the ' ' vs 'T' separator is the only thing that can flip the comparison.
+	now := time.Now().UTC()
+	future := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, time.UTC)
+	if !future.After(now) {
+		t.Skip("run within the last second of the UTC day; no same-day future instant exists")
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE users SET banned = 1, ban_reason = 'temp ban', ban_expires = ? WHERE id = ?`,
+		future.Format("2006-01-02 15:04:05"), 2,
+	); err != nil {
+		t.Fatalf("seed space-format ban_expires: %v", err)
+	}
+
+	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if _, ok := got["bob"]; ok {
+		t.Error("temp ban stored in SQLite's space-separated time format must still exclude the user")
+	}
+}
+
+// TestGetUserIDsByUsernames_PermanentBan_Excluded locks the nil-expiry case:
+// a permanent ban (ban_expires NULL) must keep excluding the user forever.
+func TestGetUserIDsByUsernames_PermanentBan_Excluded(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	if err := database.BanUser(ctx, 2, "permanent ban", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if _, ok := got["bob"]; ok {
+		t.Error("permanently banned user must not resolve as a mention target")
+	}
+}
+
+// TestListMentionTargetsByRoles_LapsedTempBan_Included covers the same
+// expiry-aware fix on the @everyone/@here fan-out path.
+func TestListMentionTargetsByRoles_LapsedTempBan_Included(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	past := time.Now().Add(-1 * time.Hour)
+	if err := database.BanUser(ctx, 2, "temp ban", &past); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	targets, err := database.ListMentionTargetsByRoles(ctx, []int64{4})
+	if err != nil {
+		t.Fatalf("ListMentionTargetsByRoles: %v", err)
+	}
+	found := false
+	for _, tgt := range targets {
+		if tgt.UserID == 2 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("user with a lapsed temp ban must still appear in the @everyone/@here fan-out")
 	}
 }
 

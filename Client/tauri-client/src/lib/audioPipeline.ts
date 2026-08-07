@@ -21,6 +21,11 @@ export class AudioPipeline {
 
   /** Monotonic counter incremented on teardown — used to discard stale async results. */
   private _pipelineGeneration = 0;
+  /** Monotonic counter incremented on stopVadPolling — narrower than
+   *  _pipelineGeneration (which only bumps on a full pipeline teardown), so it
+   *  also invalidates an in-flight startVadPolling()'s addModule when VAD is
+   *  stopped without tearing down the pipeline (e.g. setVoiceSensitivity(100)). */
+  private _vadGeneration = 0;
 
   // Pipeline nodes
   private audioPipelineCtx: AudioContext | null = null;
@@ -270,15 +275,18 @@ export class AudioPipeline {
 
     // Try AudioWorklet first
     const gen = this._pipelineGeneration;
+    const vadGen = this._vadGeneration;
     this.audioPipelineCtx.audioWorklet
       .addModule("/vad-worklet.js")
       .then(() => {
         if (gen !== this._pipelineGeneration) return; // Torn down while loading
+        if (vadGen !== this._vadGeneration) return; // stopVadPolling() while loading
         if (this.audioPipelineCtx === null) return;
         this.startVadWorklet(threshold);
       })
       .catch((err) => {
         if (gen !== this._pipelineGeneration) return;
+        if (vadGen !== this._vadGeneration) return;
         log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
         this.startVadFallback(threshold);
       });
@@ -389,6 +397,7 @@ export class AudioPipeline {
 
   /** Stop VAD (both worklet and fallback). Pipeline stays intact. */
   stopVadPolling(): void {
+    this._vadGeneration++;
     // Stop setTimeout fallback
     if (this.vadTimer !== null) {
       clearTimeout(this.vadTimer);

@@ -426,6 +426,22 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("file picker accept attribute only advertises extensions the MIME allowlist accepts", () => {
+    const opts = makeOptions({
+      onUploadFile: vi.fn(async () => ({ id: "a1", url: "http://x.png", filename: "x.png" })),
+    });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    // .rar/.7z were advertised here but rejected by ALLOWED_TYPES on pick —
+    // an always-rejected picker option.
+    expect(fileInput.accept).not.toContain(".rar");
+    expect(fileInput.accept).not.toContain(".7z");
+
+    comp.destroy?.();
+  });
+
   it("file upload shows preview and sends attachment ID with message", async () => {
     const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
@@ -617,6 +633,45 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("remove button removes attachment preview after the upload has completed", async () => {
+    const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
+    const onUploadFile = vi.fn(async () => uploadResult);
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const testFile = new File(["image data"], "test.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // Wait for the upload to resolve — the entry's id is now the server id,
+    // not the tempId the remove button was created with.
+    await vi.waitFor(() => {
+      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+    });
+    const previewBar = container.querySelector(".attachment-preview-bar");
+    await vi.waitFor(() => {
+      expect(previewBar!.querySelector(".uploading")).toBeNull();
+    });
+
+    const removeBtn = container.querySelector('[data-testid="attachment-remove"]') as HTMLElement;
+    expect(removeBtn).not.toBeNull();
+    removeBtn.click();
+
+    expect(previewBar!.classList.contains("visible")).toBe(false);
+    expect(previewBar!.querySelector(".attachment-preview-item")).toBeNull();
+
+    // Sending now must not include the removed attachment.
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "no attachment";
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+    expect(opts.onSend).toHaveBeenCalledWith("no attachment", null, []);
+
+    comp.destroy?.();
+  });
+
   // ── setReplyTo clears edit mode ──
 
   it("setReplyTo hides edit bar if editing", () => {
@@ -766,6 +821,28 @@ describe("MessageInput", () => {
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
     expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+
+    comp.destroy?.();
+  });
+
+  it("selecting a GIF sends it without discarding a typed draft", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "wait for it...";
+
+    const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
+    gifBtn.click();
+    expect(lastGifPickerOptions).not.toBeNull();
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
+
+    // The GIF is sent as its own message...
+    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    // ...and the user's typed draft survives, instead of being overwritten
+    // and thrown away.
+    expect(textarea.value).toBe("wait for it...");
 
     comp.destroy?.();
   });
@@ -1104,6 +1181,18 @@ describe("MessageInput", () => {
 
     it("does not mistake a short selection for a wrapped one", () => {
       expect(wrapWithMarker("**", 0, 2, "**").value).toBe("******");
+    });
+
+    it("wraps rather than mangles a selection spanning multiple already-wrapped spans", () => {
+      // The selection starts and ends with "*" but is not itself a single
+      // wrapped span — unwrapping it would destroy both interior spans.
+      const result = wrapWithMarker("*hello* world *bye*", 0, 19, "*");
+      expect(result.value).toBe("**hello* world *bye**");
+    });
+
+    it("wraps rather than downgrades bold text when italicizing", () => {
+      const result = wrapWithMarker("**bold**", 0, 8, "*");
+      expect(result.value).toBe("***bold***");
     });
   });
 });

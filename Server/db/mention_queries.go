@@ -18,6 +18,27 @@ type mentionExecer interface {
 // storage-side backstop so a caller cannot widen the fan-out.
 const maxMentionsPerMessage = 20
 
+// notBannedClause is the mention resolution's "is this user reachable" test.
+// A raw `banned = 0` reads a temp-banned user as unreachable forever: nothing
+// clears the column when ban_expires lapses (that happens lazily, at login,
+// via auth.IsEffectivelyBanned — see db/account.go's anonymiseUser comment on
+// the same split), so a reinstated user could log in and post yet never
+// resolve as an @mention target or appear in an @everyone/@here fan-out. This
+// mirrors IsEffectivelyBanned's own rule (permanent when ban_expires is NULL,
+// lapsed once ban_expires is in the past) so the two never disagree.
+//
+// The comparison is lexical, so the two ban_expires spellings
+// IsEffectivelyBanned accepts must both sort correctly against the reference
+// string. BanUser writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), but the
+// SQLite space form ("2006-01-02 15:04:05") is equally accepted there and
+// test-locked (auth/helpers_test.go), and a bare ' ' sorts BELOW 'T' — so an
+// unnormalised space-form expiry later on the same day would compare as
+// already lapsed and fail OPEN, un-hiding a genuinely banned user. replace()
+// normalises the separator first; the trailing 'Z' only ever makes the
+// reference string longer at an equal instant, which the `<=` already treats
+// as lapsed. Those two are the only spellings any writer produces.
+const notBannedClause = `(banned = 0 OR (ban_expires IS NOT NULL AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`
+
 // MentionTarget is a candidate recipient of a mention fan-out: the user id, the
 // presence status @here filters on, and the role the user holds (so the caller
 // can apply the ADMINISTRATOR bypass when a per-user channel override would
@@ -238,8 +259,8 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, username FROM users WHERE banned = 0 AND username IN (%s)`,
-			strings.Join(placeholders, ",")),
+			`SELECT id, username FROM users WHERE %s AND username IN (%s)`,
+			notBannedClause, strings.Join(placeholders, ",")),
 		args...,
 	)
 	if err != nil {
@@ -277,8 +298,8 @@ func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, status, role_id FROM users WHERE banned = 0 AND role_id IN (%s)`,
-			strings.Join(placeholders, ",")),
+			`SELECT id, status, role_id FROM users WHERE %s AND role_id IN (%s)`,
+			notBannedClause, strings.Join(placeholders, ",")),
 		args...,
 	)
 	if err != nil {
@@ -319,8 +340,8 @@ func (d *DB) ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) (
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, status, role_id FROM users WHERE banned = 0 AND id IN (%s)`,
-			strings.Join(placeholders, ",")),
+			`SELECT id, status, role_id FROM users WHERE %s AND id IN (%s)`,
+			notBannedClause, strings.Join(placeholders, ",")),
 		args...,
 	)
 	if err != nil {

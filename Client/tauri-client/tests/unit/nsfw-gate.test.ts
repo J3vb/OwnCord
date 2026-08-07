@@ -4,6 +4,7 @@ import {
   acknowledgeNsfw,
   clearNsfwAcknowledgements,
   nsfwGateRequired,
+  setNsfwGateHost,
 } from "@lib/nsfw-gate";
 import { createNsfwGate } from "@components/NsfwGate";
 
@@ -66,6 +67,34 @@ describe("nsfw-gate acknowledgements", () => {
     });
     expect(() => acknowledgeNsfw(1)).not.toThrow();
     spy.mockRestore();
+  });
+
+  describe("host scoping", () => {
+    afterEach(() => {
+      // currentHost is module-level state that outlives a single test.
+      setNsfwGateHost(null);
+    });
+
+    // Regression for v076: an in-app server switch is SPA navigation, not a
+    // reload, so sessionStorage survives it. An unscoped key meant an ack for
+    // channel N on server A silently suppressed the gate for the unrelated
+    // channel N on server B.
+    it("does not leak an acknowledgement across two server hosts", () => {
+      setNsfwGateHost("a.example.com");
+      acknowledgeNsfw(12);
+      expect(isNsfwAcknowledged(12)).toBe(true);
+
+      setNsfwGateHost("b.example.com");
+      expect(isNsfwAcknowledged(12)).toBe(false);
+
+      setNsfwGateHost("a.example.com");
+      expect(isNsfwAcknowledged(12)).toBe(true);
+    });
+
+    it("falls back to the legacy unscoped key when no host has been set", () => {
+      acknowledgeNsfw(5);
+      expect(sessionStorage.getItem("owncord:nsfw-ack:5")).toBe("1");
+    });
   });
 
   describe("nsfwGateRequired", () => {

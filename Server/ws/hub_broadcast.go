@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"sync/atomic"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -59,7 +58,25 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // The audience is resolved here, on the caller's goroutine, so the hub's
 // dispatch loop never blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
-	h.broadcastChannelScoped(ctx, channelID, msg, "voice event")
+	// A room's own participants must always receive its voice_state /
+	// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
+	// READ filter can exclude a live participant — whose client then keeps a
+	// stale E2EE key holder, stalling rotation and locking new joiners out
+	// until e2ee_timeout. Union the READ audience with the room's current
+	// participants; what outsiders may observe is unchanged.
+	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience))
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, c := range h.clients {
+		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
 }
 
 // broadcastChannelScoped enqueues msg for exactly the connected clients whose
@@ -266,6 +283,35 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, permissions.ReadMessages)
 	}
 
+	// userCanSend mirrors channelCanSend (serve_ready.go) — the value the ready
+	// payload ships per channel — but expressed as per-user permission checks
+	// so it works in both the service and bare-hub branches without needing a
+	// resolved *db.Role. HasChannelPerm already bypasses for admins and fails
+	// closed on a lookup error, matching channelCanSend's own admin shortcut.
+	//
+	// Without this, can_send is only ever computed at connect time, so a role
+	// edit or override edit leaves every connected client's composer stuck on
+	// its stale connect-time verdict until the socket is rebuilt.
+	userCanSend := func(userID, roleID int64) bool {
+		has := func(perm int64) bool {
+			if h.perms != nil {
+				return h.perms.HasChannelPerm(ctx, userID, ch.ID, perm)
+			}
+			role, err := h.db.GetRoleByID(ctx, roleID)
+			if err != nil || role == nil {
+				return false
+			}
+			return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, perm)
+		}
+		if !has(permissions.ReadMessages) || !has(permissions.SendMessages) {
+			return false
+		}
+		if ch.Type == "announcement" {
+			return has(permissions.ManageMessages)
+		}
+		return true
+	}
+
 	for _, c := range clients {
 		if c.user == nil {
 			continue
@@ -295,7 +341,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
-			c.sendMsg(buildChannelCreate(ch))
+			// Addressed per client so it can carry this recipient's own
+			// can_send verdict — the whole point of this fan-out is that a
+			// permission change just made those verdicts diverge.
+			c.sendMsg(buildChannelCreateFor(ch, userCanSend(c.user.ID, c.user.RoleID)))
 			continue
 		}
 		c.sendMsg(buildChannelDelete(ch.ID))
@@ -309,9 +358,11 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 
 	// Clients not connected right now missed the targeted sends above. Move
 	// the watermark so any resume from a seq at or before this point is
-	// forced onto the full-ready path instead of replay (stored after the
-	// sends so a concurrent seq advance errs toward re-syncing more clients).
-	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+	// forced onto the full-ready path instead of replay. Ratcheted upward
+	// only — see bumpVisibilityWatermark — so a concurrent writer that read
+	// an older seq cannot regress a watermark another writer already pushed
+	// higher.
+	h.bumpVisibilityWatermark()
 }
 
 // RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every
@@ -436,11 +487,14 @@ func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 // Only the topics the socket actually holds are examined — a blanket sweep over
 // every channel would disclose the full channel-ID list to a demoted user.
 func (h *Hub) revokeUnreadableChannels(userID int64) {
-	// Stored after the targeted sends (as in RefreshChannelVisibility) so a
-	// concurrent seq advance errs toward re-syncing more clients. Deferred
-	// because it must cover the early returns too: a user who is offline, or
-	// whose socket is closed below, converges via the full-ready path.
-	defer h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+	// Ratcheted upward only (see bumpVisibilityWatermark), and evaluated at
+	// defer-RUN time — not the plain Store(Load(&h.seq)) this used to be,
+	// whose argument would have been evaluated at this defer STATEMENT,
+	// capturing entry-time seq and stomping any higher watermark stored by a
+	// concurrent writer during the per-topic DB loop below. Deferred because
+	// it must cover the early returns too: a user who is offline, or whose
+	// socket is closed below, converges via the full-ready path.
+	defer h.bumpVisibilityWatermark()
 
 	if h.db == nil {
 		return
@@ -540,10 +594,17 @@ func (h *Hub) BroadcastToAllLow(msg []byte) {
 	h.pubsub.PublishGlobalLow(msg)
 }
 
-// sendSequencedToUsersHigh stamps msg with a monotonic seq, stores it in the
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
 // replay buffer under channelID, and fans the wrapped payload out to the
-// provided users with high-priority delivery.
-func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+// provided users on the normal-priority queue.
+//
+// Sequenced frames must all share one per-client FIFO: writePump drains
+// sendHigh before send, so a seq-stamped frame on the high queue would reach
+// the socket ahead of lower-seq frames still queued in send. The client acks
+// max(seq) and replay is strictly seq > last_seq, so a disconnect in that
+// window would silently lose the overtaken events. The high queue remains for
+// unsequenced targeted messages only.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
 
@@ -553,7 +614,7 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
-		h.SendToUserHigh(userID, wrapped)
+		h.SendToUser(userID, wrapped)
 	}
 }
 
@@ -566,6 +627,18 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
 		h.seqMu.Lock()
 		defer h.seqMu.Unlock()
+
+		// Channel-scoped sends consult the topic limiter BEFORE a seq is
+		// allocated: a shed frame that consumed a seq would sit in the replay
+		// buffer as a number no client ever saw live, and since clients ack
+		// only max(seq), it could never be requested back.
+		if bm.recipients == nil && bm.channelID != 0 {
+			if !h.topicLimiter.Allow(ChannelTopic(bm.channelID)) {
+				slog.Warn("hub: topic rate limit exceeded, dropping message",
+					"channel_id", bm.channelID)
+				return 0, 0, false
+			}
+		}
 
 		seq = h.nextSeq()
 		msg := wrapWithSeq(bm.msg, seq)
@@ -598,14 +671,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 			// Global broadcast — deliver to every connected client.
 			h.pubsub.PublishGlobal(msg)
 		default:
-			// Channel-scoped broadcast — deliver to subscribers of the channel topic.
-			topic := ChannelTopic(bm.channelID)
-			if !h.topicLimiter.Allow(topic) {
-				slog.Warn("hub: topic rate limit exceeded, dropping message",
-					"channel_id", bm.channelID, "seq", seq)
-				return seq, 0, false
-			}
-			delivered = h.pubsub.Publish(topic, msg, 0)
+			// Channel-scoped broadcast — deliver to subscribers of the channel
+			// topic. The rate limiter already passed above, before the seq
+			// was allocated.
+			delivered = h.pubsub.Publish(ChannelTopic(bm.channelID), msg, 0)
 			channelSend = true
 		}
 		return seq, delivered, channelSend

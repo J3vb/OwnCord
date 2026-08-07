@@ -156,6 +156,13 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 func (rb *RingBuffer) Snapshot() []LogEntry {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
+	return rb.snapshotLocked()
+}
+
+// snapshotLocked is Snapshot's body, callable by callers that already hold
+// rb.mu (SnapshotAndSubscribe needs the copy and the subscription to happen
+// under the same critical section).
+func (rb *RingBuffer) snapshotLocked() []LogEntry {
 	out := make([]LogEntry, rb.count)
 	if rb.count < len(rb.entries) {
 		// Not yet wrapped: entries [0, count) are already in order.
@@ -171,17 +178,43 @@ func (rb *RingBuffer) Snapshot() []LogEntry {
 // Subscribe creates a buffered channel for a new SSE client.
 // Returns the channel and an unsubscribe function.
 func (rb *RingBuffer) Subscribe() (<-chan LogEntry, func()) {
+	rb.mu.Lock()
+	ch, unsub := rb.subscribeLocked()
+	rb.mu.Unlock()
+	return ch, unsub
+}
+
+// subscribeLocked is Subscribe's body, callable by callers that already hold
+// rb.mu.
+func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
 	ch := make(chan LogEntry, 64)
 	chp := &ch
-	rb.mu.Lock()
 	rb.subscribers[chp] = struct{}{}
-	rb.mu.Unlock()
 
 	return ch, func() {
 		rb.mu.Lock()
 		delete(rb.subscribers, chp)
 		rb.mu.Unlock()
 	}
+}
+
+// SnapshotAndSubscribe atomically copies the current backfill entries and
+// registers a new subscriber channel under a single lock acquisition.
+//
+// Doing this as two separate calls (Snapshot() then Subscribe()) leaves a
+// window between them where Write's fan-out — which only reaches entries
+// already in rb.subscribers — cannot deliver to a caller that has not
+// subscribed yet, while the caller's snapshot was already taken and will
+// never include it either. Any entry written in that window is lost from
+// both the backfill and the live feed. handleLogStream's window is not
+// instantaneous: a token-resolution DB round-trip runs per backfilled entry
+// before the (formerly) separate Subscribe() call.
+func (rb *RingBuffer) SnapshotAndSubscribe() ([]LogEntry, <-chan LogEntry, func()) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	out := rb.snapshotLocked()
+	ch, unsub := rb.subscribeLocked()
+	return out, ch, unsub
 }
 
 // multiHandler is an slog.Handler that tees records to two handlers:
@@ -404,8 +437,15 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
+		// Snapshot the backfill and subscribe to new entries atomically: the
+		// per-entry principalStillAuthorized() check below is a DB round-trip,
+		// so the backfill loop is slow enough that a Snapshot()-then-Subscribe()
+		// gap would silently drop any entry written in between (v059).
+		backfill, ch, unsub := ringBuf.SnapshotAndSubscribe()
+		defer unsub()
+
 		// Send backfill.
-		for _, entry := range ringBuf.Snapshot() {
+		for _, entry := range backfill {
 			if !principalStillAuthorized() {
 				return
 			}
@@ -414,10 +454,6 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			}
 		}
 		flusher.Flush()
-
-		// Subscribe for new entries.
-		ch, unsub := ringBuf.Subscribe()
-		defer unsub()
 
 		// Keepalive ticker to avoid WriteTimeout (30s).
 		keepalive := time.NewTicker(15 * time.Second)

@@ -90,6 +90,17 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
+		// A ban can land inside the partial-token window; the login path
+		// refuses banned users right after the password compare, so the
+		// second factor must refuse them too.
+		if auth.IsEffectivelyBanned(user) {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "your account has been suspended",
+			})
+			return
+		}
+
 		secret, decErr := auth.DecryptTOTPSecret(totpKey, *user.TOTPSecret)
 		if decErr != nil {
 			slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
@@ -287,14 +298,19 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		}
 		pendingStore.Delete(user.ID)
 
-		// BUG-108: Revoke all other sessions after 2FA state change.
-		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
-			// Security tail of the 2FA change: once the secret update committed,
-			// revoking the other sessions must not be aborted by a dead request.
-			n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, sess.ID)
-			if n > 0 {
-				slog.Info("revoked other sessions after totp enable", "user_id", user.ID, "revoked", n)
-			}
+		// BUG-108: Revoke all other sessions after 2FA state change. An
+		// API-token principal has a nil session; keep=0 matches no row, so
+		// every login session is revoked — same semantics as change-password.
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
+		keepSessionID := int64(0)
+		if sess != nil {
+			keepSessionID = sess.ID
+		}
+		// Security tail of the 2FA change: once the secret update committed,
+		// revoking the other sessions must not be aborted by a dead request.
+		n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, keepSessionID)
+		if n > 0 {
+			slog.Info("revoked other sessions after totp enable", "user_id", user.ID, "revoked", n)
 		}
 
 		slog.Info("totp enabled", "user_id", user.ID)
@@ -372,14 +388,19 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 			return
 		}
 
-		// BUG-108: Revoke all other sessions after 2FA state change.
-		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
-			// Security tail of the 2FA change: once the secret update committed,
-			// revoking the other sessions must not be aborted by a dead request.
-			n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, sess.ID)
-			if n > 0 {
-				slog.Info("revoked other sessions after totp disable", "user_id", user.ID, "revoked", n)
-			}
+		// BUG-108: Revoke all other sessions after 2FA state change. An
+		// API-token principal has a nil session; keep=0 matches no row, so
+		// every login session is revoked — same semantics as change-password.
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
+		keepSessionID := int64(0)
+		if sess != nil {
+			keepSessionID = sess.ID
+		}
+		// Security tail of the 2FA change: once the secret update committed,
+		// revoking the other sessions must not be aborted by a dead request.
+		n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, keepSessionID)
+		if n > 0 {
+			slog.Info("revoked other sessions after totp disable", "user_id", user.ID, "revoked", n)
 		}
 
 		slog.Info("totp disabled", "user_id", user.ID)

@@ -109,6 +109,23 @@ func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID
 	if w == nil {
 		return
 	}
+	// run() stops reading w.queue the instant it exits, but the channel keeps
+	// its buffer and keeps accepting sends — without this check a caller that
+	// enqueues after Stop has returned (main.go closes the DB right after)
+	// would land silently in a dead channel, violating D8. w.done closes only
+	// when run() has actually exited, so this is exact, not a best guess.
+	select {
+	case <-w.done:
+		w.dropped.Add(1)
+		slog.Error("audit log dropped: writer stopped",
+			"action", action,
+			"actor_id", actorID,
+			"target_type", targetType,
+			"target_id", targetID,
+		)
+		return
+	default:
+	}
 	select {
 	case w.queue <- pendingAudit{actorID: actorID, action: action, targetType: targetType, targetID: targetID, detail: detail}:
 	default:
@@ -151,6 +168,26 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	}
 	// Always wait for the goroutine to exit — never race it against ctx.
 	<-w.done
+
+	// A concurrent Enqueue can win the race between run()'s last drain
+	// attempt and the close of w.done above: it observes w.done not yet
+	// closed and sends into w.queue just as run() is exiting, so nothing
+	// ever reads that entry. Sweep whatever the race stranded here so it is
+	// dropped loudly (D8) instead of silently.
+	for {
+		select {
+		case a := <-w.queue:
+			w.dropped.Add(1)
+			slog.Error("audit log dropped: writer stopped",
+				"action", a.action,
+				"actor_id", a.actorID,
+				"target_type", a.targetType,
+				"target_id", a.targetID,
+			)
+		default:
+			return
+		}
+	}
 }
 
 // Stats returns lifetime counters.

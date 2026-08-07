@@ -3,8 +3,9 @@
  * in the chat or member list. Shows avatar, username, role badge, status dot,
  * about section, join date, and Message/Call action buttons.
  *
- * Position: anchored to click point, flips if <100px from viewport edge.
- * Animation: fade+scale 100ms.
+ * Position: anchored to the click point, flipped to the other side and clamped
+ * against the measured card height so it always lands fully on screen.
+ * Animation: fade+scale, defined in CSS so reduced-motion can drop it.
  * Close: outside click or Escape.
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
@@ -57,8 +58,10 @@ export type UserProfilePopupComponent = MountableComponent & {
 // ---------------------------------------------------------------------------
 
 const POPUP_WIDTH = 300;
-const EDGE_THRESHOLD = 100;
-const ANIMATION_DURATION_MS = 100;
+/** Keeps the card clear of the window edges on both axes. */
+const VIEWPORT_MARGIN = 8;
+/** Breathing room between the click point and the card. */
+const ANCHOR_GAP = 8;
 
 const STATUS_COLORS: Record<UserStatus, string> = {
   online: "#3ba55d",
@@ -110,28 +113,37 @@ export function createUserProfilePopup(
     }
   }
 
-  function computePosition(anchorX: number, anchorY: number): { left: number; top: number } {
+  /**
+   * Place the card beside the anchor, flipping and clamping so it always lands
+   * fully on screen — Discord opens its popout away from whichever edge the
+   * clicked row is nearest.
+   *
+   * The height is measured rather than assumed. The previous version guessed
+   * 300px and only clamped the top edge, so a member clicked low in the list
+   * opened a card that ran off the bottom of the window.
+   */
+  function position(el: HTMLElement, anchorX: number, anchorY: number): void {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const height = el.offsetHeight;
 
-    let left = anchorX;
+    // Prefer the right of the anchor and flip left when there is no room. The
+    // member list sits against the right edge, so flipping is the usual case.
+    let left = anchorX + ANCHOR_GAP;
+    if (left + POPUP_WIDTH > vw - VIEWPORT_MARGIN) {
+      left = anchorX - POPUP_WIDTH - ANCHOR_GAP;
+    }
+    left = Math.max(VIEWPORT_MARGIN, Math.min(left, vw - POPUP_WIDTH - VIEWPORT_MARGIN));
+
+    // Align the top with the click, then lift the card just enough to fit.
     let top = anchorY;
-
-    // Flip horizontally if too close to right edge
-    if (vw - anchorX < EDGE_THRESHOLD) {
-      left = anchorX - POPUP_WIDTH;
+    if (top + height > vh - VIEWPORT_MARGIN) {
+      top = vh - height - VIEWPORT_MARGIN;
     }
+    top = Math.max(VIEWPORT_MARGIN, top);
 
-    // Flip vertically if too close to bottom edge
-    if (vh - anchorY < EDGE_THRESHOLD) {
-      top = anchorY - 300; // approximate popup height
-    }
-
-    // Clamp to viewport
-    left = Math.max(8, Math.min(left, vw - POPUP_WIDTH - 8));
-    top = Math.max(8, top);
-
-    return { left, top };
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
   }
 
   function buildAvatar(user: UserProfileData): HTMLDivElement {
@@ -182,16 +194,7 @@ export function createUserProfilePopup(
       "data-testid": "user-profile-popup",
     });
 
-    // Position the popup
-    const pos = computePosition(options.anchorX, options.anchorY);
-    popup.style.left = `${pos.left}px`;
-    popup.style.top = `${pos.top}px`;
     popup.style.width = `${POPUP_WIDTH}px`;
-
-    // Animation: fade + scale
-    popup.style.opacity = "0";
-    popup.style.transform = "scale(0.95)";
-    popup.style.transition = `opacity ${ANIMATION_DURATION_MS}ms ease, transform ${ANIMATION_DURATION_MS}ms ease`;
 
     // --- Content ---
 
@@ -298,10 +301,12 @@ export function createUserProfilePopup(
       actions.appendChild(callBtn);
     }
 
-    // Assemble popup
+    // Assemble the card: a banner strip and a body, with the avatar straddling
+    // the seam between them the way Discord's popout does.
+    const banner = createElement("div", { class: "upp-banner" });
+    const body = createElement("div", { class: "upp-body" });
     appendChildren(
-      popup,
-      avatar,
+      body,
       nameEl,
       handleEl,
       customStatusEl,
@@ -311,17 +316,24 @@ export function createUserProfilePopup(
       joinSection,
     );
     if (actions.childElementCount > 0) {
-      appendChildren(popup, divider, actions);
+      appendChildren(body, divider, actions);
     }
+    // The avatar hangs off the body's top edge, so it is a child of the card
+    // rather than the body — the body scrolls, and a scroll container clips.
+    // Appending it last puts it over the banner without needing a z-index.
+    appendChildren(popup, banner, body, avatar);
 
     overlay.appendChild(popup);
     container.appendChild(overlay);
 
-    // Trigger animation
+    // Measure, then place: the card has to be in the document before it has a
+    // height to clamp against.
+    position(popup, options.anchorX, options.anchorY);
+
+    // The fade+scale itself lives in CSS so `prefers-reduced-motion` can drop it.
     requestAnimationFrame(() => {
       if (popup !== null) {
-        popup.style.opacity = "1";
-        popup.style.transform = "scale(1)";
+        popup.classList.add("open");
       }
     });
 

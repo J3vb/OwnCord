@@ -418,6 +418,7 @@ func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                {}
 func (m *mockHubWB) RefreshAllChannelVisibility()                           {}
 func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                  {}
+func (m *mockHubWB) CleanupVoiceForChannel(channelID int64)                 {}
 func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
 // isolateSpawnedTestBinary makes it safe for a test to re-exec the test binary

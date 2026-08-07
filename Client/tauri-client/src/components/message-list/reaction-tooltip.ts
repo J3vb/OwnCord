@@ -221,6 +221,33 @@ interface HoverState {
 
 const hoverStates = new WeakMap<HTMLElement, HoverState>();
 
+/**
+ * Chips currently mid-hover (debounce timer running or tooltip showing),
+ * keyed by the message list's AbortSignal. A single abort listener per signal
+ * hides whatever is in the set instead of registering a bare, never-removed
+ * `abort` listener per chip on every render — the latter permanently pinned
+ * every past chip (and, via parentNode, its whole detached row) in memory for
+ * the rest of the channel visit. start()/stop() add/remove the chip, so the
+ * set only ever holds the handful of chips actually being hovered.
+ */
+const hoveringChips = new WeakMap<AbortSignal, Set<HTMLElement>>();
+
+function chipSetFor(signal: AbortSignal): Set<HTMLElement> {
+  const existing = hoveringChips.get(signal);
+  if (existing !== undefined) return existing;
+  const set = new Set<HTMLElement>();
+  hoveringChips.set(signal, set);
+  signal.addEventListener(
+    "abort",
+    () => {
+      for (const chip of set) hide(chip);
+      set.clear();
+    },
+    { once: true },
+  );
+  return set;
+}
+
 function removeTooltip(chip: HTMLElement): void {
   chip.querySelector(".reaction-tooltip")?.remove();
 }
@@ -261,21 +288,25 @@ export function attachReactionTooltip(
     });
   };
 
+  const chips = chipSetFor(signal);
+
   const start = (): void => {
     hide(chip);
     const existing = hoverStates.get(chip);
     const generation = existing === undefined ? 0 : existing.generation;
     const timer = window.setTimeout(show, REACTION_TOOLTIP_DEBOUNCE_MS);
     hoverStates.set(chip, { timer, generation });
+    chips.add(chip);
   };
 
-  const stop = (): void => hide(chip);
+  const stop = (): void => {
+    chips.delete(chip);
+    hide(chip);
+  };
 
   chip.addEventListener("mouseenter", start, { signal });
   chip.addEventListener("mouseleave", stop, { signal });
   // Keyboard accessibility: focus mirrors hover.
   chip.addEventListener("focusin", start, { signal });
   chip.addEventListener("focusout", stop, { signal });
-
-  signal.addEventListener("abort", () => hide(chip));
 }

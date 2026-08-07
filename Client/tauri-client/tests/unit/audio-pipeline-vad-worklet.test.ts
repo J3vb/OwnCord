@@ -455,6 +455,93 @@ describe("AudioPipeline", () => {
       // Worklet should NOT have been started (generation mismatch)
       expect(pipeline.vadUsingWorklet).toBe(false);
     });
+
+    it("discards worklet addModule result if stopVadPolling is called without a teardown", async () => {
+      // Same setup as above, but this time only stopVadPolling() runs (e.g. the
+      // user set sensitivity to 100) — teardownAudioPipeline() is NOT called, so
+      // the pipeline (and _pipelineGeneration) stays intact. The in-flight
+      // addModule from the earlier startVadPolling must still be invalidated by
+      // its own generation, or it resurrects VAD with the stale threshold.
+      let resolveAddModule: () => void;
+      const addModulePromise = new Promise<void>((resolve) => {
+        resolveAddModule = resolve;
+      });
+
+      const mockAnalyser = {
+        fftSize: 0,
+        smoothingTimeConstant: 0,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        getFloatTimeDomainData: vi.fn(),
+      };
+      const mockGainNode = {
+        gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      const mockAudioCtx = {
+        resume: vi.fn().mockResolvedValue(undefined),
+        createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
+        createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
+        createGain: vi.fn().mockReturnValue(mockGainNode),
+        createMediaStreamDestination: vi.fn().mockReturnValue({
+          stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
+          disconnect: vi.fn(),
+        }),
+        currentTime: 0,
+        close: vi.fn().mockResolvedValue(undefined),
+        state: "running",
+        audioWorklet: { addModule: vi.fn().mockReturnValue(addModulePromise) },
+      };
+      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
+      vi.stubGlobal(
+        "AudioWorkletNode",
+        vi.fn().mockImplementation(() => ({
+          port: { postMessage: vi.fn(), onmessage: null },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        })),
+      );
+
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "voiceSensitivity") return 50;
+        if (key === "inputVolume") return 100;
+        return defaultVal;
+      });
+
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              mediaStreamTrack: { id: "t" },
+              sender: { replaceTrack: vi.fn().mockResolvedValue(undefined) },
+              getProcessor: vi.fn(),
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+
+      // Stop VAD (not a full teardown) while addModule is still in flight —
+      // e.g. the user dragged sensitivity to 100.
+      pipeline.stopVadPolling();
+
+      // Now resolve addModule — should be discarded because stopVadPolling
+      // invalidated the in-flight call.
+      resolveAddModule!();
+      await addModulePromise;
+
+      // Yield to microtasks
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Worklet should NOT have been (re)started — VAD is meant to be off.
+      expect(pipeline.vadUsingWorklet).toBe(false);
+    });
   });
 
   describe("worklet gate message deduplication", () => {

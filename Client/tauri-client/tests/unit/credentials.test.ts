@@ -9,6 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { authStore } from "@stores/auth.store";
 
 const invoke = vi.fn();
 
@@ -16,7 +17,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args) as unknown,
 }));
 
-const { saveCredential, loadCredential, deleteCredential } = await import("@lib/credentials");
+const { saveCredential, loadCredential, deleteCredential, createUserUpdateCredentialSaver } =
+  await import("@lib/credentials");
 
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(undefined);
@@ -61,6 +63,63 @@ describe("saveCredential", () => {
     invoke.mockRejectedValue(new Error("keychain locked"));
 
     await expect(saveCredential("h.example", "alice", "tok")).resolves.toBe(false);
+  });
+});
+
+// ── createUserUpdateCredentialSaver ──────────────────────────────────────────
+
+describe("createUserUpdateCredentialSaver", () => {
+  beforeEach(() => {
+    authStore.setState(() => ({
+      token: "sess-token",
+      user: { id: 1, username: "alice", avatar: null, role: "member" },
+      serverName: null,
+      motd: null,
+      isAuthenticated: true,
+    }));
+  });
+
+  it("does not save when the session declined to remember the password (BUG-135)", () => {
+    const listener = createUserUpdateCredentialSaver("h.example", false, "s3cret");
+
+    listener({ user_id: 1, username: "alice2" });
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("saves the refreshed username with the session's password when opted in", async () => {
+    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+
+    listener({ user_id: 1, username: "alice2" });
+
+    // saveCredential is fire-and-forget and itself awaits a dynamic import
+    // before calling invoke — wait for it rather than guessing a microtask
+    // count.
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("save_credential", {
+        host: "h.example",
+        username: "alice2",
+        token: "sess-token",
+        password: "s3cret",
+      });
+    });
+  });
+
+  it("ignores a user_update for someone else", () => {
+    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+
+    listener({ user_id: 999, username: "bob" });
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when there is no current session token", () => {
+    authStore.setState((prev) => ({ ...prev, token: null }));
+    const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
+
+    listener({ user_id: 1, username: "alice2" });
+
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 

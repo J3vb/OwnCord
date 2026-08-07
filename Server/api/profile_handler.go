@@ -77,10 +77,10 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
-		r.With(RateLimitMiddleware(limiter, profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster))
 
-		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter))
 
 		if store != nil {
@@ -241,11 +241,23 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 		}
 
 		if req.IdentityPublicKey != nil {
-			updated, err = svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
-			if err != nil {
-				writeServiceError(r.Context(), w, err)
+			// Captured into a separate variable rather than reassigned into
+			// updated: on failure below, updated still holds the profile
+			// snapshot that DID commit, so it can still be broadcast instead
+			// of discarded.
+			withKey, keyErr := svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
+			if keyErr != nil {
+				// The username/avatar/display_name/about write above already
+				// committed — only the identity key failed. Broadcasting the
+				// committed half keeps every other connected client in sync
+				// even though this request reports failure; leaving it
+				// unbroadcast would strand them on the old profile until
+				// their next ready.
+				broadcastUserUpdate(broadcaster, updated)
+				writeServiceError(r.Context(), w, keyErr)
 				return
 			}
+			updated = withKey
 		}
 
 		broadcastUserUpdate(broadcaster, updated)
@@ -383,13 +395,9 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		sess, ok := r.Context().Value(SessionKey).(*db.Session)
-		if !ok || sess == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error: "UNAUTHORIZED", Message: "not authenticated",
-			})
-			return
-		}
+		// An API-token principal has a nil session (middleware.go); the list
+		// still works — no row is marked current. Only IsCurrent needs it.
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
 		if err != nil {
@@ -407,7 +415,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 				IP:        s.IP,
 				CreatedAt: s.CreatedAt,
 				LastUsed:  s.LastUsed,
-				IsCurrent: s.ID == sess.ID,
+				IsCurrent: sess != nil && s.ID == sess.ID,
 			})
 		}
 

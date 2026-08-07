@@ -228,6 +228,51 @@ func TestAuditWriter_StopWaitsForGoroutineExit(t *testing.T) {
 	}
 }
 
+// TestAuditWriter_EnqueueAfterStopDropsLoudly locks D8 ("a drop is never
+// silent") against the post-shutdown race: main.go's deferred Stop can
+// return while a WS handler on another goroutine is still mid-flight (hub
+// GracefulStop and http.Server.Shutdown do not wait for hijacked WebSocket
+// conns), so Enqueue can be called after run() has fully exited. Before the
+// fix that entry landed silently in the still-buffered, now-unread queue: no
+// dropped-counter bump, no log line.
+func TestAuditWriter_EnqueueAfterStopDropsLoudly(t *testing.T) {
+	store := &fakeAuditStore{}
+	w := db.NewAuditWriter(store, 64, 50, time.Hour)
+	w.Start(context.Background())
+	w.Stop(context.Background())
+
+	_, droppedBefore, _, _ := w.Stats()
+
+	out := captureLogs(t, func() {
+		w.Enqueue(9, "post_stop_action", "user", 99, "secret detail")
+	})
+
+	_, droppedAfter, _, _ := w.Stats()
+	if droppedAfter != droppedBefore+1 {
+		t.Errorf("dropped counter = %d, want %d (post-Stop Enqueue must count as a loud drop)", droppedAfter, droppedBefore+1)
+	}
+	for _, want := range []string{
+		"audit log dropped",
+		"action=post_stop_action",
+		"actor_id=9",
+		"target_type=user",
+		"target_id=99",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("post-Stop drop log missing %q; got: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "secret detail") {
+		t.Errorf("detail string leaked into post-Stop drop log: %s", out)
+	}
+
+	// The entry must genuinely never reach the store — no goroutine is left
+	// to read the queue.
+	if batches, _ := store.snapshot(); batches != 0 {
+		t.Errorf("post-Stop entry reached the store via %d batch(es); want it dropped, not written", batches)
+	}
+}
+
 // TestAuditWriter_StopDrainsBeforeStoreClose reproduces main.go's LIFO
 // shutdown ordering (AuditWriter.Stop, then database.Close) and asserts the
 // fix: because Stop returns only after the goroutine exits, no flush can run

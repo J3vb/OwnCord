@@ -26,12 +26,42 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		return true
 	}
 
+	// drainChannel writes every message still buffered on ch without blocking.
+	// Returns false only when a write failed; empty or closed is true.
+	drainChannel := func(ch chan []byte) bool {
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return true
+				}
+				if !writeMsg(msg) {
+					return false
+				}
+			default:
+				return true
+			}
+		}
+	}
+
+	// drainAndClose flushes whatever the kick paths queued before closing the
+	// send channels (e.g. the BANNED error frame that makes the client clear
+	// its credentials) — serve.go and hub_broadcast.go both document that
+	// writePump drains remaining messages after closeSend. Returning on the
+	// first closed channel would drop those frames.
+	drainAndClose := func() {
+		if drainChannel(c.sendHigh) && drainChannel(c.send) {
+			drainChannel(c.sendLow)
+		}
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}
+
 	for {
 		// Priority 1: drain all pending high-priority messages first.
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -41,13 +71,43 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		default:
 		}
 
-		// Priority 2: try high or normal (high still gets priority via the
-		// first case in the select, but Go's select is random when both are
-		// ready — the outer drain-high loop above ensures high is truly first).
+		// Priority 2: try high or normal, non-blocking. Go's select among
+		// ready cases is uniformly random, so sendLow cannot be a peer here —
+		// a case that fires the moment any low-priority frame is queued would
+		// let it win the coin flip against a pending normal frame roughly
+		// half the time, contradicting "low-priority messages are only sent
+		// when no higher-priority work is pending". Only fall through to
+		// sendLow (via the blocking select below) once this default proves
+		// neither high nor normal has anything ready right now.
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
+			continue
+		case msg, ok := <-c.send:
+			if !ok {
+				drainAndClose()
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
+			continue
+		default:
+		}
+
+		// Priority 3: nothing high or normal is ready — block on all three
+		// (plus shutdown) so an idle connection still gets its typing/presence
+		// frames instead of busy-looping.
+		select {
+		case msg, ok := <-c.sendHigh:
+			if !ok {
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -55,7 +115,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 			}
 		case msg, ok := <-c.send:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -63,7 +123,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 			}
 		case msg, ok := <-c.sendLow:
 			if !ok {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+				drainAndClose()
 				return
 			}
 			if !writeMsg(msg) {
@@ -134,7 +194,13 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				// read time, where a member with no live connection renders
 				// offline no matter what the column says.
 				_ = hub.db.MarkUserDisconnected(cleanupCtx, c.userID)
-				hub.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, c.user.CustomStatus))
+				// custom_status is nil, not c.user.CustomStatus: that field is a
+				// snapshot taken once at auth (client.go) and never updated, so
+				// broadcasting it here would resurrect a status the user changed
+				// or cleared mid-session. presentableMembers applies the same
+				// rule for a fresh ready payload (serve_ready.go) — a member with
+				// no live connection shows no custom status.
+				hub.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, nil))
 			}
 		}
 	}()

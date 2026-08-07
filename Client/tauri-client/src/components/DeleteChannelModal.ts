@@ -3,6 +3,7 @@
  * Shows channel name and requires explicit confirmation.
  */
 
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -18,6 +19,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
   const { channelName, onConfirm, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
+  let restoreFocus: (() => void) | null = null;
 
   function mount(container: Element): void {
     overlay = createElement("div", {
@@ -26,13 +28,17 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
     });
 
     const modal = createElement("div", { class: "modal" });
+    applyDialogSemantics(modal, { labelledBy: "delete-channel-title" });
+    trapFocus(modal, ac.signal);
 
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", {}, "Delete Channel");
+    const title = createElement("h3", { id: "delete-channel-title" }, "Delete Channel");
+    // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
+      "aria-label": "Close",
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
@@ -109,7 +115,24 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
       { signal: ac.signal },
     );
 
+    // Escape cancels — it must never stand in for the destructive confirm.
+    // Document-level so it works wherever focus sits; guarded on the overlay
+    // still being attached because the listener lives until destroy() aborts it.
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && overlay?.isConnected === true) {
+          onClose();
+        }
+      },
+      { signal: ac.signal },
+    );
+
     container.appendChild(overlay);
+
+    // Move focus in (lands on the header's close button, safely away from the
+    // destructive confirm) and remember the opener for destroy() to restore.
+    restoreFocus = focusDialog(modal);
   }
 
   function destroy(): void {
@@ -118,6 +141,11 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
       overlay.remove();
       overlay = null;
     }
+    // Every close path (X, Cancel, backdrop, Escape) funnels through the
+    // caller's onClose, which calls destroy() — the single place focus
+    // returns to the opener.
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };

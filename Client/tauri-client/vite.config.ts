@@ -42,5 +42,13 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    watch: {
+      // Never watch the Rust tree. `tauri dev` runs Vite as its
+      // `beforeDevCommand`, so without this the watcher picks up
+      // `src-tauri/target/` and dies with EBUSY the moment cargo writes the
+      // output DLL on Windows — taking the whole dev session with it. Tauri
+      // already watches `src-tauri` itself for rebuilds.
+      ignored: ["**/src-tauri/**"],
+    },
   },
 });

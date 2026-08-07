@@ -185,25 +185,19 @@ func logCRSMatchesAggregate(tx types.Transaction) {
 	slog.Debug("waf: CRS detect-mode matched rule ids", "rule_ids", ids)
 }
 
-// NewWAFMiddleware creates a Coraza WAF middleware with OWASP CRS rules.
-// paranoiaLevel controls rule sensitivity (1=low, 2=default, 3=strict, 4=paranoid).
-// Returns nil middleware if WAF creation fails (logged as error, server continues).
-// The OWASP CRS layer runs in its default detect mode; use NewWAFMiddlewareCRS
-// to select a mode explicitly.
-func NewWAFMiddleware(paranoiaLevel int) func(http.Handler) http.Handler {
-	return NewWAFMiddlewareCRS(paranoiaLevel, CRSModeDetect)
-}
-
-// NewWAFMiddlewareCRS is NewWAFMiddleware with an explicit OWASP CRS layer
-// mode ("off" | "detect" | "block", see the CRSMode* constants). Unknown or
-// empty modes fall back to detect.
+// NewWAFMiddlewareCRS creates a Coraza WAF middleware with OWASP CRS rules.
+// paranoiaLevel controls rule sensitivity (1=low, 2=default, 3=strict,
+// 4=paranoid); crsMode selects the CRS layer mode ("off" | "detect" |
+// "block", see the CRSMode* constants — unknown or empty modes fall back to
+// detect). Returns nil middleware if WAF creation fails (logged as error,
+// server continues).
 func NewWAFMiddlewareCRS(paranoiaLevel int, crsMode string) func(http.Handler) http.Handler {
 	return newWAFMiddleware(paranoiaLevel, crsMode, nil)
 }
 
-// newWAFMiddleware is the implementation behind NewWAFMiddleware /
-// NewWAFMiddlewareCRS. onCRSMatch overrides the CRS match logger (used by
-// tests to observe detect-mode matches); nil means log via slog.
+// newWAFMiddleware is the implementation behind NewWAFMiddlewareCRS.
+// onCRSMatch overrides the CRS match logger (used by tests to observe
+// detect-mode matches); nil means log via slog.
 func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.MatchedRule)) func(http.Handler) http.Handler {
 	if paranoiaLevel < 1 || paranoiaLevel > 4 {
 		paranoiaLevel = 2

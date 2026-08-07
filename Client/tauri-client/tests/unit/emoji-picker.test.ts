@@ -203,4 +203,87 @@ describe("EmojiPicker", () => {
 
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("marks the scrollable results area as a listbox named Emoji", () => {
+    const { picker } = makePicker();
+    const listbox = picker.element.querySelector("[role='listbox']");
+    expect(listbox).not.toBeNull();
+    expect(listbox!.getAttribute("aria-label")).toBe("Emoji");
+    picker.destroy();
+  });
+
+  it("gives every cell role=option with an aria-label mirroring its title", () => {
+    const { picker } = makePicker();
+    const cells = Array.from(picker.element.querySelectorAll(".ep-emoji"));
+    expect(cells.length).toBeGreaterThan(0);
+    for (const cell of cells) {
+      expect(cell.getAttribute("role")).toBe("option");
+      expect(cell.getAttribute("aria-label")).toBe(cell.getAttribute("title"));
+    }
+    picker.destroy();
+  });
+
+  it("makes exactly one cell tabbable (roving tabindex)", () => {
+    const { picker } = makePicker();
+    const cells = Array.from(picker.element.querySelectorAll(".ep-emoji"));
+    const tabbable = cells.filter((c) => c.getAttribute("tabindex") === "0");
+    expect(tabbable.length).toBe(1);
+    expect(tabbable[0]).toBe(cells[0]);
+    expect(cells.slice(1).every((c) => c.getAttribute("tabindex") === "-1")).toBe(true);
+    picker.destroy();
+  });
+
+  it("re-applies the roving tabindex when search replaces the cells", () => {
+    const { picker } = makePicker();
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "fire";
+    input.dispatchEvent(new Event("input"));
+
+    const cells = Array.from(picker.element.querySelectorAll(".ep-emoji"));
+    expect(cells.length).toBeGreaterThan(0);
+    const tabbable = cells.filter((c) => c.getAttribute("tabindex") === "0");
+    expect(tabbable.length).toBe(1);
+    expect(tabbable[0]).toBe(cells[0]);
+    picker.destroy();
+  });
+
+  it("ArrowRight moves focus and the tabbable cell to the next emoji", () => {
+    const { picker } = makePicker();
+    const cells = picker.element.querySelectorAll(".ep-emoji") as NodeListOf<HTMLElement>;
+    expect(cells.length).toBeGreaterThan(1);
+
+    cells[0]!.focus();
+    cells[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+
+    expect(document.activeElement).toBe(cells[1]);
+    expect(cells[0]!.getAttribute("tabindex")).toBe("-1");
+    expect(cells[1]!.getAttribute("tabindex")).toBe("0");
+    picker.destroy();
+  });
+
+  it("Enter on a focused cell fires the same onSelect as click", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const firstEmoji = picker.element.querySelector(".ep-emoji") as HTMLElement;
+
+    firstEmoji.focus();
+    firstEmoji.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(firstEmoji.getAttribute("title"));
+    picker.destroy();
+  });
+
+  it("Space on a focused cell fires the same onSelect as click", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const firstEmoji = picker.element.querySelector(".ep-emoji") as HTMLElement;
+
+    firstEmoji.focus();
+    firstEmoji.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(firstEmoji.getAttribute("title"));
+    picker.destroy();
+  });
 });

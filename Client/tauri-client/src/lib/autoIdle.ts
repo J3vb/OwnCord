@@ -86,8 +86,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   let destroyed = false;
   /** True while the timer is the reason the status is idle. Kept in memory so
    *  the hot path (one mousemove per pixel) is a boolean check rather than a
-   *  preference read. */
-  let idleByTimer = false;
+   *  preference read. Seeded from the persisted status/origin so a session
+   *  that starts already auto-idle (app restart, MainPage remount) can still
+   *  be un-idled by activity — otherwise the latch starts false and apply(false)
+   *  is unreachable until the user manually reselects a status. */
+  let idleByTimer = loadUserStatus() === "idle" && loadUserStatusOrigin() === "auto";
 
   function apply(idle: boolean): void {
     const next = nextAutoStatus(loadUserStatus(), loadUserStatusOrigin(), idle);

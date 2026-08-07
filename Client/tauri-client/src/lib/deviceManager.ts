@@ -70,11 +70,19 @@ export class DeviceManager {
   }
 
   private async handleDeviceChange(): Promise<void> {
-    if (this.room === null) return;
+    // Snapshot the room this attempt started for. `this.room` is a mutable
+    // field that a system-driven reconnect (or session teardown) can
+    // reassign out from under an in-flight await below — re-reading it
+    // after each await would apply the fallback to the wrong Room, or throw
+    // a null-deref that surfaces as a misleading "No audio input device
+    // available" error after the user already left voice (v096).
+    const room = this.room;
+    if (room === null) return;
     log.info("Device change detected");
 
     try {
       const devices = await Room.getLocalDevices("audioinput");
+      if (this.room !== room) return;
       const savedInput = loadPref<string>("audioInputDevice", "");
 
       // Check if the saved input device was removed
@@ -84,8 +92,10 @@ export class DeviceManager {
         savePref("audioInputDevice", "");
         // Switch to default device
         try {
-          await this.room.localParticipant.setMicrophoneEnabled(false);
-          await this.room.localParticipant.setMicrophoneEnabled(true);
+          await room.localParticipant.setMicrophoneEnabled(false);
+          if (this.room !== room) return;
+          await room.localParticipant.setMicrophoneEnabled(true);
+          if (this.room !== room) return;
           try {
             this.audioPipeline?.setupAudioPipeline();
           } catch (pipelineErr) {
@@ -94,6 +104,7 @@ export class DeviceManager {
           }
           this.onToast?.("Audio device disconnected — switched to default");
         } catch (err) {
+          if (this.room !== room) return;
           log.error("Failed to fallback to default input device", err);
           this.onErrorCallback?.("No audio input device available");
         }
@@ -101,6 +112,7 @@ export class DeviceManager {
 
       // Check output device
       const outputDevices = await Room.getLocalDevices("audiooutput");
+      if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
@@ -113,17 +125,20 @@ export class DeviceManager {
   }
 
   async switchInputDevice(deviceId: string): Promise<void> {
-    if (this.room === null) {
+    const room = this.room;
+    if (room === null) {
       log.debug("Skipping input device switch — no active voice session");
       return;
     }
     try {
       if (deviceId) {
-        await this.room.switchActiveDevice("audioinput", deviceId);
+        await room.switchActiveDevice("audioinput", deviceId);
       } else {
-        await this.room.localParticipant.setMicrophoneEnabled(false);
-        await this.room.localParticipant.setMicrophoneEnabled(true);
+        await room.localParticipant.setMicrophoneEnabled(false);
+        if (this.room !== room) return;
+        await room.localParticipant.setMicrophoneEnabled(true);
       }
+      if (this.room !== room) return;
       // Rebuild audio pipeline (source track changed after device switch)
       try {
         this.audioPipeline?.setupAudioPipeline();
@@ -140,13 +155,15 @@ export class DeviceManager {
       }
       log.info("Switched input device", { deviceId });
     } catch (err) {
+      if (this.room !== room) return;
       log.error("Failed to switch input device", err);
       this.onErrorCallback?.("Failed to switch microphone");
     }
   }
 
   async switchOutputDevice(deviceId: string): Promise<void> {
-    if (this.room === null) {
+    const room = this.room;
+    if (room === null) {
       log.debug("Skipping output device switch — no active voice session");
       return;
     }
@@ -155,9 +172,11 @@ export class DeviceManager {
     // so an unhandled rejection would leave the user staring at a selection
     // that never took effect.
     try {
-      await this.room.switchActiveDevice("audiooutput", deviceId);
+      await room.switchActiveDevice("audiooutput", deviceId);
+      if (this.room !== room) return;
       log.info("Switched output device", { deviceId });
     } catch (err) {
+      if (this.room !== room) return;
       log.error("Failed to switch output device", err);
       this.onErrorCallback?.("Failed to switch speaker");
     }

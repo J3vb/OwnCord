@@ -433,6 +433,12 @@ export function buildTauriMockScript(opts: {
     voice_states?: unknown[];
     dm_channels?: unknown[];
   };
+  /** Pinned peer identity keys served by get_identity_pin, keyed by userId
+   *  (string). Absent key = null = "never pinned". */
+  identityPins?: Record<string, string>;
+  /** Make get_identity_pin REJECT — models a transient keyring failure, the
+   *  DC-08 fail-closed path. */
+  identityPinError?: boolean;
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
 
@@ -457,6 +463,13 @@ export function buildTauriMockScript(opts: {
       }
     }
     window.__tauriEmitEvent = __tauriEmitEvent;
+    // Exposed so tests can wait until a listener is registered before
+    // emitting — registration goes through an async invoke roundtrip, so
+    // emitting straight after page load races it.
+    window.__tauriEventListeners = __eventListeners;
+    // Chronological record of every IPC invoke ({ cmd, args }) — lets tests
+    // assert side effects with no DOM footprint (pin writes, restart calls).
+    window.__invokeLog = [];
 
     // -----------------------------------------------------------------------
     // HTTP mock state
@@ -495,6 +508,10 @@ export function buildTauriMockScript(opts: {
       },
 
       invoke: async (cmd, args) => {
+        // Every IPC call is recorded so tests can assert side effects that
+        // have no DOM footprint (e.g. store_identity_pin, plugin:process|restart).
+        window.__invokeLog.push({ cmd, args });
+
         // ---- Events ----
         if (cmd === "plugin:event|listen") {
           const eventName = args?.event;
@@ -648,9 +665,18 @@ export function buildTauriMockScript(opts: {
         // ---- E2EE identity (keyring blob + TOFU pins) ----
         // null = "no stored key/pin". ensureIdentityKeyPublished on the ready
         // event is fire-and-forget (void), so a null store is safe and just
-        // exercises the fresh-key path.
+        // exercises the fresh-key path. Pins are configurable per test:
+        // identityPins seeds get_identity_pin per userId, identityPinError
+        // makes the read REJECT (the DC-08 "store unreadable" path).
         if (cmd === "save_identity_key" || cmd === "load_identity_key" || cmd === "delete_identity_key") return null;
-        if (cmd === "store_identity_pin" || cmd === "get_identity_pin") return null;
+        if (cmd === "get_identity_pin") {
+          ${
+            opts.identityPinError === true
+              ? `throw new Error("keyring unavailable (mock)");`
+              : `return ${JSON.stringify(opts.identityPins ?? {})}[String(args?.userId)] ?? null;`
+          }
+        }
+        if (cmd === "store_identity_pin") return null;
 
         // ---- Window/webview plugin stubs ----
         if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;

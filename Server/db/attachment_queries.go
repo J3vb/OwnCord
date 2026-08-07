@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/owncord/server/db/dbgen"
 )
@@ -178,15 +179,20 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 }
 
 // DeleteOrphanedAttachments atomically removes attachment records where
-// message_id IS NULL and uploaded_at is older than the given cutoff time
-// string (ISO 8601). Returns the stored_as filenames of deleted records
-// so the caller can remove files.
+// message_id IS NULL and uploaded_at is older than the given cutoff. Live
+// avatars are excluded by the query itself. Returns the stored_as filenames
+// of deleted records so the caller can remove files.
+//
+// The cutoff is a time.Time, not a string, because uploaded_at is stored in
+// SQLite's own 'YYYY-MM-DD HH:MM:SS' shape and the comparison is bytewise:
+// a caller formatting RFC3339 instead silently collapses the grace period to
+// "same date". Formatting it here is what keeps that unrepresentable.
 //
 // BUG-132: Uses DELETE ... RETURNING to make select+delete atomic,
 // preventing a race where an attachment linked between SELECT and DELETE
 // would have its file deleted while the DB row survives.
-func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff string) ([]string, error) {
-	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff)
+func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {
+	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff.UTC().Format(sqliteTimeLayout))
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanedAttachments: %w", err)
 	}

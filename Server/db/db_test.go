@@ -114,7 +114,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 	expectedTables := []string{
 		"users", "sessions", "roles", "channels", "channel_overrides",
 		"messages", "attachments", "reactions", "invites", "read_states",
-		"audit_log", "login_attempts", "settings", "emoji", "sounds",
+		"audit_log", "login_attempts", "settings", "emoji",
 	}
 
 	for _, table := range expectedTables {

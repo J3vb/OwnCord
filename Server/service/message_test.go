@@ -207,6 +207,51 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	}
 }
 
+func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mallory", Status: "online"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	checker := permissions.NewChecker(database)
+	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+
+	if err := database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty content is normally rejected, but sanitizeContent waives that
+	// check whenever attachment ids are requested. Here every requested id
+	// misses the link UPDATE (foreign owner, plus a nonexistent id), so the
+	// send must not silently commit and broadcast a blank message.
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member",
+		Content:       "",
+		AttachmentIDs: []string{"att-foreign", "att-missing"},
+	})
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("err = %v, want ErrBadRequest", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %v, want nil", result)
+	}
+
+	rows, err := database.GetMessages(context.Background(), 10, 0, 50)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("channel history = %d messages, want 0 (blank message must be compensating-deleted, not visible)", len(rows))
+	}
+}
+
 func TestSendMessage_EmptyContent(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 

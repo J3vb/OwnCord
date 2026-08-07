@@ -3,12 +3,17 @@
  * Creates a modal with backdrop, optional click-outside and Escape key
  * dismissal, and clean lifecycle management via AbortController.
  *
+ * Every factory modal carries the dialog accessibility contract (DC-13):
+ * role="dialog" + aria-modal on the container, focus moved into the dialog on
+ * open and restored on close, and a Tab-cycling focus trap (lib/a11y.ts).
+ *
  * CSS classes match the existing project convention:
  *   - div.modal-overlay.visible  (backdrop)
  *   - div.modal                  (content container)
  */
 
 import { createElement } from "./dom";
+import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 
 export interface ModalOptions {
   /** The content element to place inside the modal container. */
@@ -23,6 +28,8 @@ export interface ModalOptions {
   readonly className?: string;
   /** Additional attributes on the overlay element (e.g. data-testid). */
   readonly overlayAttrs?: Readonly<Record<string, string>>;
+  /** Accessible name for the dialog (aria-label on the .modal container). */
+  readonly ariaLabel?: string;
   /** AbortSignal for automatic cleanup when the parent component is destroyed. */
   readonly signal?: AbortSignal;
 }
@@ -53,6 +60,7 @@ export function createModal(
     closeOnEscape = true,
     className,
     overlayAttrs,
+    ariaLabel,
     signal,
   } = options;
 
@@ -70,16 +78,20 @@ export function createModal(
   // Build modal container
   const modalClass = className !== undefined ? `modal ${className}` : "modal";
   const modal = createElement("div", { class: modalClass });
+  applyDialogSemantics(modal, ariaLabel !== undefined ? { label: ariaLabel } : {});
+  trapFocus(modal, ac.signal);
   modal.appendChild(content);
   overlay.appendChild(modal);
 
   let closed = false;
+  let restoreFocus: (() => void) | null = null;
 
   function handleClose(): void {
     if (closed) return;
     closed = true;
     overlay.remove();
     ac.abort();
+    restoreFocus?.();
     if (onClose !== undefined) {
       onClose();
     }
@@ -119,6 +131,7 @@ export function createModal(
         if (!closed) {
           closed = true;
           overlay.remove();
+          restoreFocus?.();
           onClose?.();
           if (!ac.signal.aborted) {
             ac.abort();
@@ -130,6 +143,11 @@ export function createModal(
   }
 
   container.appendChild(overlay);
+
+  // After append: move focus into the dialog and remember where it came from.
+  // Callers that focus a specific control afterwards (e.g. the prompt input)
+  // simply override the initial target; the restore still works.
+  restoreFocus = focusDialog(modal);
 
   return {
     overlay,
@@ -211,7 +229,7 @@ export function createPromptModal(
   content.appendChild(row);
 
   const instance = createModal(
-    { content, onClose: options.onClose, className: "modal-prompt" },
+    { content, onClose: options.onClose, className: "modal-prompt", ariaLabel: options.title },
     container,
   );
 

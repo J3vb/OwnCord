@@ -147,6 +147,84 @@ describe("unreadChannelIds / markAllRead", () => {
     expect(markAllRead()).toBe(0);
     expect(sent).toEqual([]);
   });
+
+  // Regression for v056: the server's mark_read handler shares a 5/s budget
+  // with channel_focus and silently drops frames over it. Marking more
+  // channels than the budget synchronously used to clear every local badge
+  // up front while the server dropped the excess — the dropped channels'
+  // badges then resurrected on the next `ready`. Bursts must stay paced.
+  it("paces a burst larger than the server's per-second mark_read budget", () => {
+    vi.useFakeTimers();
+    try {
+      setChannels([
+        channel(1, 1),
+        channel(2, 1),
+        channel(3, 1),
+        channel(4, 1),
+        channel(5, 1),
+        channel(6, 1),
+      ]);
+
+      expect(markAllRead()).toBe(6);
+
+      // Only the first burst goes out synchronously.
+      expect(sent.length).toBeLessThanOrEqual(4);
+      const firstBurst = new Set(sent);
+      const deferredId = [1, 2, 3, 4, 5, 6].find((id) => !firstBurst.has(id))!;
+
+      // A channel whose send hasn't fired yet must not have had its local
+      // badge cleared early — clearing must track the send, not precede it.
+      expect(hasUnread(deferredId)).toBe(true);
+
+      // The rest lands only after the pacing interval, one budget-window later.
+      vi.advanceTimersByTime(2000);
+      expect(sent.length).toBe(6);
+      expect(new Set(sent)).toEqual(new Set([1, 2, 3, 4, 5, 6]));
+      expect(hasUnread(deferredId)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The pacing above defers sends past the point where the connection can be
+  // replaced. Channel ids are only unique per server, so a queued send that
+  // survives a server switch would mark the NEW server's same-numbered channel
+  // read. Registering a sender is the one signal read-state gets that the
+  // connection changed (MainPage does it once per session).
+  it("drops queued sends when a new connection registers its sender", () => {
+    vi.useFakeTimers();
+    try {
+      setChannels([channel(1, 1), channel(2, 1), channel(3, 1), channel(4, 1), channel(5, 1)]);
+      markAllRead();
+      expect(sent.length).toBeLessThanOrEqual(4);
+
+      // New session: new sender, new (unrelated) channel list reusing the ids.
+      const next: number[] = [];
+      setMarkReadSender((id) => next.push(id));
+      setChannels([channel(1, 1), channel(2, 1), channel(3, 1), channel(4, 1), channel(5, 1)]);
+
+      vi.advanceTimersByTime(5000);
+      expect(next).toEqual([]);
+      expect(unreadChannelIds()).toHaveLength(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supersedes an in-flight burst rather than double-sending it", () => {
+    vi.useFakeTimers();
+    try {
+      setChannels([channel(1, 1), channel(2, 1), channel(3, 1), channel(4, 1), channel(5, 1)]);
+      markAllRead();
+      markAllRead();
+
+      vi.advanceTimersByTime(5000);
+      expect(sent.length).toBe(5);
+      expect(new Set(sent)).toEqual(new Set([1, 2, 3, 4, 5]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("mark_read wiring", () => {

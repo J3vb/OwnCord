@@ -232,6 +232,50 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
+  // ── dialog accessibility contract (DC-13) ──────────────────────────────────
+
+  it("stamps dialog semantics named by the header title", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    const dialog = container.querySelector(".modal") as HTMLElement;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-labelledby")).toBe("invite-manager-title");
+    expect(container.querySelector("#invite-manager-title")?.textContent).toBe("Server Invites");
+
+    mgr.destroy?.();
+  });
+
+  it("labels the icon-only close button", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+
+    mgr.destroy?.();
+  });
+
+  it("moves focus into the modal on mount and restores it on destroy", () => {
+    const trigger = document.createElement("button");
+    container.appendChild(trigger);
+    trigger.focus();
+
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    // First focusable in DOM order is the header close button.
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+    expect(document.activeElement).toBe(closeBtn);
+
+    mgr.destroy?.();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("revoke failure calls onError", async () => {
     const opts = makeOptions({
       onRevokeInvite: vi.fn(() => Promise.reject(new Error("fail"))),

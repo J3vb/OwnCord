@@ -1,6 +1,6 @@
 # Settings & Admin — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md).
 
 Covers: the settings overlay and its tabs, account operations (profile, password,
@@ -71,14 +71,14 @@ committed, the operation is a **success** even if the session-revocation step
 fails — the UI must never present a committed change as an error (that would walk
 the user into the confirm-lockout). The partial-success `200 {warning}` maps to a
 success message with a soft note, never a red error. (Server contract:
-`profile_handler.go:237-248`; client already toasts success, `MainPage.ts:280-283`.)
+`handleUpdateProfile()` in `Server/api/profile_handler.go`; client already toasts success, the `onUpdateProfile` handler in `pages/MainPage.ts`.)
 
 ### 2.3 Two-factor (TOTP)
 
 | Flow | Steps |
 |------|-------|
 | Enable | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true` |
-| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already `AccountTab.ts:442-451`) |
+| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
@@ -111,12 +111,18 @@ and (b) confirm destructive actions.
 | Invites | Invite manager modal | `GET/POST/DELETE /invites` | List with masked codes, copy, revoke; empty state "No active invites" |
 
 **Target rules:**
-- Destructive admin actions should show an **in-flight** state (today the
-  two-click label reverts immediately and only a toast reports the result —
-  `AdminActions.ts:54-78`; add a pending state so a slow ban doesn't look ignored).
-- **Ban should collect a reason.** `adminBanMember` accepts a `reason` but the
-  menu passes none (`SidebarMemberSection.ts:159-166`). Target: a small reason
-  prompt on ban, since the server stores and displays it.
+- **✓ Destructive admin actions show an in-flight state (2026-08).**
+  `withConfirmation` (`AdminActions.ts`) keeps the item in a pending
+  label/class while the promise settles and ignores further clicks, so a slow
+  ban no longer looks ignored; unblock, ban submit, purge, and the role-change
+  submenu carry their own equivalent guards (a role change in flight also
+  inerts the other role options — `currentRole` only updates when the
+  `member_update` echoes).
+- **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
+  reason input plus a duration choice (`appendBanFlow()` in `components/AdminActions.ts`),
+  and the menu passes both through
+  (the `onBan` handler in `createSidebarMemberSection()`, `pages/main-page/SidebarMemberSection.ts` → `api.adminBanMember(userId, reason,
+  durationHours)`), so temporary bans and stored reasons work from the client.
 
 ### 3.1 What is *not* in the client (by design)
 
@@ -124,7 +130,11 @@ The full admin panel — user list, audit log, server settings, channel
 permissions, plugin management, backups, updates, first-run setup — is the
 **server-rendered web panel** under `/admin`, gated by IP restriction + admin
 auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
-audit/settings/permissions/setup calls in `api.ts`).
+audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
+does have is a deep-link: `lib/admin-panel.ts` opens
+`https://{host}/admin#{section}` in the OS browser (wired from
+the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
+`lib/permissions.ts::canViewAuditLog`).
 
 > **Decision point.** If the target is for admins to manage the server from the
 > desktop app (audit log, settings, plugins) rather than the web panel, that is a
@@ -170,7 +180,7 @@ sequenceDiagram
 | State | Presentation |
 |-------|--------------|
 | checking | Silent (no UI until a result) |
-| available | Non-modal banner with version + Update Now / Later (already `UpdateNotifier.ts:30-62`) |
+| available | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`) |
 | downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known) |
 | applied | App relaunches automatically |
 | failed | "Update failed. Please try again later." + Dismiss |
@@ -182,6 +192,17 @@ sequenceDiagram
 > for it and forwards to `UpdateNotifier`, whose `formatDownloadProgress` renders a
 > percentage when `total` is known and falls back to bytes (MB) otherwise, so the
 > banner never looks hung. (Rust change is minimal and CI-gated only.)
+
+---
+
+## 6. System tray
+
+The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
+**Show/Hide** toggles the main window, a **Status** submenu
+(Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
+the TS side applies through the same presence path as the user-bar picker
+(`lib/userStatus.ts` / `components/StatusPicker.ts`), and **Quit** exits the
+app.
 
 ---
 

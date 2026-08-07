@@ -188,25 +188,48 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	h.mu.RUnlock()
 
 	if exists {
-		currentChID, currentJoinToken := c.getVoiceState()
-		if currentChID == channelID && currentJoinToken != "" && currentJoinToken == joinToken {
-			// Double-check voice state to guard against a concurrent voice_join
-			// that updated the state between the read above and clearVoiceState (L8).
-			if reChID, reJT := c.getVoiceState(); reChID == channelID && reJT == joinToken {
-				c.clearVoiceState()
+		// Atomic compare-and-clear under c.voiceMu, replacing the previous
+		// read-then-read-then-clear: two independent unlocked getVoiceState
+		// snapshots followed by an unconditional clearVoiceState is not a
+		// guard at all — no lock spans the second read and the clear, so a
+		// voice_join committed on the readPump goroutine in between (a
+		// channel switch, or a same-channel rejoin with a fresh token) is
+		// wiped out from under the new session, dropping its VoiceTopic
+		// subscription along with it. client.go's clearVoiceStateIfMatch
+		// only compares the channel, not the token, so it would still be
+		// fooled by a same-channel rejoin — this compares both, inlined here
+		// via direct field access (same package as client.go) under the
+		// client's own voiceMu.
+		c.voiceMu.Lock()
+		matched := c.voiceChID == channelID && c.voiceJoinToken != "" && c.voiceJoinToken == joinToken
+		if matched {
+			c.voiceChID = 0
+			c.voiceJoinToken = ""
+			c.e2eePubKey = ""
+			c.e2eeSignature = ""
+		}
+		c.voiceMu.Unlock()
 
-				if h.db != nil {
-					if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
-						slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
-							"error", err, "user_id", userID, "channel_id", channelID)
-					}
+		if matched {
+			h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
+
+			if h.db != nil {
+				if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
+					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
+						"error", err, "user_id", userID, "channel_id", channelID)
 				}
-
-				h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
-				slog.Info("livekit webhook: cleaned up stale voice state",
-					"user_id", userID,
-					"channel_id", channelID)
 			}
+
+			// This participant is out of voice, so the E2EE key holder may
+			// need to move. Without this the map keeps naming the departed
+			// user and the real lowest-uid participant's rekey offers are
+			// rejected with NOT_KEY_HOLDER. Safe here: no locks are held.
+			h.updateKeyHolder(channelID)
+
+			h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
+			slog.Info("livekit webhook: cleaned up stale voice state",
+				"user_id", userID,
+				"channel_id", channelID)
 		} else if h.db != nil {
 			// Client has voiceChID=0 or moved to a different channel (e.g.
 			// after F5 reload), or this webhook is for an older join instance.

@@ -165,6 +165,33 @@ describe("createInviteManagerController", () => {
     expect(mockInviteManagerMount).toHaveBeenCalledWith(root);
   });
 
+  it("filters out revoked invites before handing the list to InviteManager", async () => {
+    // Redemption enforces `revoked = 0` server-side (UseInviteAtomic), so a
+    // revoked invite rendered like a live one hands out a code that always
+    // fails. The list endpoint deliberately still includes revoked invites
+    // (for admin visibility elsewhere), so the client must filter here.
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([
+          makeInviteResponse({ code: "live1" }),
+          makeInviteResponse({ code: "dead1", revoked: true }),
+        ]),
+    });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot: () => root,
+    });
+
+    await controller.open();
+
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+    };
+    expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
+  });
+
   it("onRevokeInvite catches API error and re-throws for component handling", async () => {
     const api = makeMockApi({
       revokeInvite: vi.fn().mockRejectedValue(new Error("network error")),
@@ -446,6 +473,29 @@ describe("createPinnedPanelController", () => {
     controller.cleanup();
 
     expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
+  });
+
+  it("does not mount a second panel from a double-click while getPins is in flight", async () => {
+    let resolvePins: (value: { messages: unknown[] }) => void;
+    const pending = new Promise<{ messages: unknown[] }>((resolve) => {
+      resolvePins = resolve;
+    });
+    const api = makeMockApi({ getPins: vi.fn().mockReturnValue(pending) });
+
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+
+    const first = controller.toggle();
+    const second = controller.toggle(); // fires while getPins is still pending
+
+    resolvePins!({ messages: [] });
+    await Promise.all([first, second]);
+
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+    expect(api.getPins).toHaveBeenCalledOnce();
   });
 
   it("cleanup is safe when no panel is open", () => {
@@ -846,6 +896,32 @@ describe("createInviteManagerController (additional)", () => {
     await controller.open();
 
     expect(createInviteManager).toHaveBeenCalledOnce();
+  });
+
+  it("does not mount a second overlay from a double-click while getInvites is in flight", async () => {
+    // `instance` is only assigned after the await, so a synchronous
+    // `instance !== null` guard alone lets a second call in while the first
+    // is still fetching — this is the concurrent case the sequential test
+    // above does not exercise.
+    let resolveInvites: (value: unknown[]) => void;
+    const pending = new Promise<unknown[]>((resolve) => {
+      resolveInvites = resolve;
+    });
+    const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot: () => root,
+    });
+
+    const first = controller.open();
+    const second = controller.open(); // fires while getInvites is still pending
+
+    resolveInvites!([makeInviteResponse()]);
+    await Promise.all([first, second]);
+
+    expect(createInviteManager).toHaveBeenCalledOnce();
+    expect(api.getInvites).toHaveBeenCalledOnce();
   });
 
   it("cleanup destroys instance when open", async () => {

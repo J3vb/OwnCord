@@ -176,15 +176,10 @@ type ServerConfig struct {
 
 // DatabaseConfig holds database settings.
 //
-// Type selects the backend: "sqlite" (default, zero-config) or "postgres"
-// (community-hub scale, requires a running PostgreSQL server). The Path field
-// is only used by sqlite. The remaining fields apply to postgres only.
-//
-// PostgreSQL support is currently scaffolding-only: the schema, config plumbing,
-// and migrations are in place, but the store query layer is gated on the
-// in-progress sqlc adoption (Phase A Step 2). Setting Type to "postgres" will
-// cause the server to refuse to start with a clear error pointing at the
-// follow-up work — see Server/main.go.
+// SQLite is the only supported backend. The PostgreSQL scaffolding that once
+// motivated the Type field has been removed (see Server/main.go); the field
+// survives so an explicit "sqlite" keeps working and anything else fails
+// startup with a clear error instead of being silently ignored.
 type DatabaseConfig struct {
 	// Type selects the database backend. "sqlite" (or empty, which defaults
 	// to it) is the only supported value.
@@ -541,6 +536,12 @@ func validateYAML(raw []byte) error {
 //	tls_cert_file      -> tls.cert_file
 //	upload_max_size_mb -> upload.max_size_mb
 func envKeyToKoanf(s string) string {
+	// event_persistence is the only multi-word section; cutting at the first
+	// underscore would produce the dead path event.persistence_* and koanf
+	// would drop the documented override silently.
+	if rest, ok := strings.CutPrefix(s, "event_persistence_"); ok {
+		return "event_persistence." + rest
+	}
 	before, after, ok := strings.Cut(s, "_")
 	if !ok {
 		return s

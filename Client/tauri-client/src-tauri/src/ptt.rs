@@ -298,9 +298,54 @@ mod linux {
     }
 }
 
+/// Decide whether the polling loop must emit a `ptt-state` event this tick.
+///
+/// Returns `Some(new_state)` on a press/release edge, `None` when nothing
+/// changed.
+///
+/// The `vk == 0` (unbound) case is folded into `pressed` here rather than
+/// guarding the whole tick: clearing the binding while the key is physically
+/// held must still produce the `true -> false` falling edge. With the guard
+/// outside, `was_pressed` freezes at `true`, no final `ptt-state=false` is
+/// ever emitted, and the microphone stays published.
+fn ptt_transition(vk: i32, key_down: bool, was_pressed: bool) -> Option<bool> {
+    let pressed = vk != 0 && key_down;
+    (pressed != was_pressed).then_some(pressed)
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
+
+/// Whether this platform can actually observe global key state, i.e. whether
+/// the polling loop can ever emit a `ptt-state` event.
+///
+/// `ptt_start` spawns its thread unconditionally, so a live thread is NOT
+/// evidence that PTT works: on macOS `is_key_down` is a compile-time stub that
+/// always returns false, and on a pure-Wayland Linux session
+/// `DeviceState::checked_new()` returns None. The frontend gates its join-time
+/// PTT mute on this, because muting at join where no event can ever arrive
+/// would close the microphone for the whole session with no way to reopen it.
+#[tauri::command]
+pub fn ptt_polling_supported() -> bool {
+    #[cfg(windows)]
+    {
+        true
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use device_query::DeviceState;
+        // Mirrors the availability check inside `is_key_down`: no reachable
+        // X11/XWayland display means key state is never observable.
+        DeviceState::checked_new().is_some()
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
+}
 
 /// Start the PTT polling loop. Emits `ptt-state` (bool) events.
 ///
@@ -329,12 +374,14 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
 
             while !thread_shutdown.load(Ordering::SeqCst) {
                 let vk = PTT_VKEY.load(Ordering::SeqCst);
-                if vk != 0 {
-                    let pressed = is_key_down(vk);
-                    if pressed != was_pressed {
-                        was_pressed = pressed;
-                        let _ = app.emit("ptt-state", pressed);
-                    }
+                // Evaluated on every tick, including vk == 0: clearing the PTT
+                // key while it is physically held must still produce a falling
+                // edge, otherwise was_pressed freezes at true and the mic never
+                // gets its final `ptt-state=false`. `is_key_down` short-circuits
+                // to false for vk == 0 on every platform, so this costs nothing.
+                if let Some(pressed) = ptt_transition(vk, is_key_down(vk), was_pressed) {
+                    was_pressed = pressed;
+                    let _ = app.emit("ptt-state", pressed);
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -521,6 +568,31 @@ mod tests {
         ptt_stop_internal(); // idempotent
         let g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
         assert!(g.is_none(), "slot must stay empty when nothing was running");
+    }
+
+    // The loop must emit only on edges, never on every tick — a repeat emit
+    // would re-run the mute logic (and its user-mute guard) 50x/second.
+    #[test]
+    fn ptt_transition_reports_edges_only() {
+        assert_eq!(ptt_transition(0x41, true, false), Some(true), "rising edge");
+        assert_eq!(ptt_transition(0x41, true, true), None, "still held");
+        assert_eq!(ptt_transition(0x41, false, true), Some(false), "falling edge");
+        assert_eq!(ptt_transition(0x41, false, false), None, "still idle");
+    }
+
+    // Regression for the "hot mic after Clear while the PTT key is held" bug:
+    // clearing the binding (vk -> 0) with the key still physically down must
+    // still yield the falling edge that emits the final ptt-state=false. The
+    // old loop wrapped the whole comparison in `if vk != 0`, so this case
+    // produced no transition at all and the mic stayed published.
+    #[test]
+    fn ptt_transition_emits_release_when_binding_cleared_while_key_held() {
+        assert_eq!(ptt_transition(0, true, true), Some(false));
+        // The release is reported once, then the unbound key stays quiet — an
+        // unbound key must never read as pressed no matter what the raw
+        // key-down probe says.
+        assert_eq!(ptt_transition(0, true, false), None);
+        assert_eq!(ptt_transition(0, false, false), None);
     }
 
     #[test]

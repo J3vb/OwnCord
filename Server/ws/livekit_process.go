@@ -31,7 +31,7 @@ type LiveKitProcess struct {
 	cmd      *exec.Cmd
 	cancel   context.CancelFunc
 	stopped  bool
-	runDone  chan struct{} // closed by runLoop when cmd.Run() returns
+	runDone  chan struct{} // closed by runLoop when cmd.Wait() returns
 	loopDone chan struct{} // closed when runLoop exits entirely
 }
 
@@ -258,22 +258,30 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		cmd.Stderr = os.Stderr
 		cmd.WaitDelay = 6 * time.Second // bound Wait to prevent goroutine leak on Windows
 
-		p.mu.Lock()
-		if p.stopped {
-			p.mu.Unlock()
-			return
-		}
-		p.cmd = cmd
-		p.runDone = make(chan struct{})
-		p.mu.Unlock()
-
 		slog.Info("livekit: starting process",
 			"binary", binPath,
 			"config", cfgPath,
 			"rapid_failures", rapidFailures)
 
 		startTime := time.Now()
-		err := cmd.Run()
+		p.mu.Lock()
+		if p.stopped {
+			p.mu.Unlock()
+			return
+		}
+		// Start inside the critical section that publishes p.cmd: Start is
+		// what writes cmd.Process, which IsRunning and Stop read under p.mu —
+		// started after the unlock, that write races every such read.
+		err := cmd.Start()
+		if err == nil {
+			p.cmd = cmd
+			p.runDone = make(chan struct{})
+		}
+		p.mu.Unlock()
+
+		if err == nil {
+			err = cmd.Wait()
+		}
 
 		p.mu.Lock()
 		p.cmd = nil
@@ -356,9 +364,9 @@ func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
 
 // Stop gracefully stops the companion process.
 // It cancels the context (which signals runLoop) and waits up to 5 seconds
-// for the process to exit. The actual cmd.Wait() is done by runLoop via
-// cmd.Run() — we only monitor the process via cmd.Process.Wait() here to
-// avoid calling exec.Cmd.Wait() twice (which has undefined behavior).
+// for the process to exit. The actual cmd.Wait() is done by runLoop — we only
+// monitor the process here to avoid calling exec.Cmd.Wait() twice (which has
+// undefined behavior).
 func (p *LiveKitProcess) Stop() {
 	p.mu.Lock()
 	p.stopped = true
@@ -372,7 +380,7 @@ func (p *LiveKitProcess) Stop() {
 		cancel()
 	}
 
-	// Wait for runLoop's cmd.Run() to return (which closes runDone).
+	// Wait for runLoop's cmd.Wait() to return (which closes runDone).
 	// This avoids calling cmd.Wait() or cmd.Process.Wait() from a second
 	// goroutine, which is unsafe on Windows.
 	if done != nil {

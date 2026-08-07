@@ -5,13 +5,16 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/owncord/server/permissions"
 )
 
 // DeleteAccount anonymises and disables a user account within a single
-// transaction.  Because the messages, invites, emoji, and sounds tables
+// transaction.  Because the messages, invites, and emoji tables
 // reference users(id) with no ON DELETE CASCADE, we cannot simply DELETE
 // the row.  Instead we:
 //
@@ -34,9 +37,13 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	// ── Guard: last admin/owner check ────────────────────────────────────
-	// Dynamically resolve admin-class role IDs from the roles table.
+	// Resolve admin-class roles by the canonical criteria — the seeded
+	// Owner/Admin role IDs plus any custom role holding the Administrator
+	// bypass bit. Names are user-editable (the Owner can rename the seeded
+	// Admin role), so a name lookup would silently disable the guard.
 	adminRows, err := tx.QueryContext(ctx,
-		`SELECT id FROM roles WHERE name IN ('Owner', 'Admin')`,
+		`SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0`,
+		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator,
 	)
 	if err != nil {
 		return fmt.Errorf("DeleteAccount fetch admin roles: %w", err)
@@ -91,12 +98,38 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		}
 	}
 
+	// Snapshot the user's DM channels before the participant rows go away,
+	// so channels left with zero participants can be removed below —
+	// LeaveGroupDM's invariant: a participant-less DM channel is an
+	// unreachable, undeletable row.
+	var dmChannelIDs []int64
+	dmRows, err := tx.QueryContext(ctx,
+		`SELECT channel_id FROM dm_participants WHERE user_id = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("DeleteAccount list dm channels: %w", err)
+	}
+	for dmRows.Next() {
+		var chID int64
+		if scanErr := dmRows.Scan(&chID); scanErr != nil {
+			dmRows.Close() //nolint:errcheck
+			return fmt.Errorf("DeleteAccount scan dm channel: %w", scanErr)
+		}
+		dmChannelIDs = append(dmChannelIDs, chID)
+	}
+	dmRows.Close() //nolint:errcheck
+	if dmRows.Err() != nil {
+		return fmt.Errorf("DeleteAccount dm channels rows: %w", dmRows.Err())
+	}
+
 	// ── Purge related data ───────────────────────────────────────────────
 	stmts := []struct {
 		label string
 		query string
 	}{
 		{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
+		// API tokens authenticate independently of sessions; leaving them
+		// active would keep the deleted account usable.
+		{"api_tokens", `UPDATE api_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`},
 		{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
 		{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 		{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
@@ -105,6 +138,69 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {
 			return fmt.Errorf("DeleteAccount %s: %w", s.label, err)
+		}
+	}
+
+	// Close and, where emptied, remove the deleted user's DM channels.
+	for _, chID := range dmChannelIDs {
+		var isGroup bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT is_group FROM channels WHERE id = ?`, chID,
+		).Scan(&isGroup); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // channel already gone
+			}
+			return fmt.Errorf("DeleteAccount dm channel is_group: %w", err)
+		}
+
+		if !isGroup {
+			// The purge above removed only this user's dm_participants row, so
+			// a 1:1 DM with a live other side is untouched: its dm_participants
+			// row (and the channel) survive, but the survivor's own
+			// dm_open_state row does too. Left alone that renders as a
+			// sidebar entry with a blank, unnamed recipient (GetDMParticipantsForUser
+			// skips the viewer's own row and this user has none left to
+			// return) that the survivor can still open and send into. Closing
+			// it for them removes it from their sidebar, same as if they had
+			// closed it themselves.
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM dm_open_state WHERE channel_id = ? AND user_id != ?`,
+				chID, userID,
+			); err != nil {
+				return fmt.Errorf("DeleteAccount close dm for survivor: %w", err)
+			}
+		}
+
+		// Hard-delete DM channels the deletion left with zero participants
+		// (always true for the last member of a group DM; true for a 1:1 DM
+		// only when the other side had already deleted their own account).
+		//
+		// Unlink attachments first: messages.channel_id and
+		// attachments.message_id both cascade ON DELETE (migrations/001), so
+		// deleting the channel row destroys the attachment rows too. Those
+		// rows are the only handle DeleteOrphanedAttachments (the periodic
+		// sweep in main.go) has on the uploaded files — once the cascade
+		// removes them the files are stranded on disk forever. Setting
+		// message_id to NULL first turns them into ordinary orphaned
+		// attachments the sweep already knows how to reclaim.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE attachments SET message_id = NULL
+			   WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)
+			     AND EXISTS (
+			       SELECT 1 FROM channels
+			        WHERE channels.id = ? AND channels.type = 'dm'
+			          AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = channels.id)
+			     )`,
+			chID, chID,
+		); err != nil {
+			return fmt.Errorf("DeleteAccount unlink dm attachments: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM channels WHERE id = ? AND type = 'dm'
+			   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = channels.id)`,
+			chID,
+		); err != nil {
+			return fmt.Errorf("DeleteAccount empty dm channel: %w", err)
 		}
 	}
 
@@ -146,14 +242,22 @@ const anonymiseUserAttempts = 4
 // suffix so no third party can pin the account in place by squatting a
 // predictable string.
 func anonymiseUser(ctx context.Context, tx *sql.Tx, userID int64) error {
+	// ban_expires must be cleared: a stale lapsed temp-ban timestamp would
+	// make banned=1 read as NOT banned (IsEffectivelyBanned), reviving the
+	// deleted account for any credential that survives.
 	const anonymise = `UPDATE users
-		 SET username    = ?,
-		     password    = '',
-		     avatar      = NULL,
-		     totp_secret = NULL,
-		     status      = 'offline',
-		     banned      = 1,
-		     ban_reason  = 'account deleted'
+		 SET username            = ?,
+		     password            = '',
+		     avatar              = NULL,
+		     totp_secret         = NULL,
+		     display_name        = NULL,
+		     about               = NULL,
+		     custom_status       = NULL,
+		     identity_public_key = NULL,
+		     status              = 'offline',
+		     banned              = 1,
+		     ban_expires         = NULL,
+		     ban_reason          = 'account deleted'
 		 WHERE id = ?`
 
 	var lastErr error

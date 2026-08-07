@@ -94,6 +94,22 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
 
+  it("mounts the container as a polite live region", () => {
+    const region = container.querySelector(".toast-container");
+    expect(region).not.toBeNull();
+    expect(region!.getAttribute("role")).toBe("status");
+    expect(region!.getAttribute("aria-live")).toBe("polite");
+    expect(region!.getAttribute("aria-atomic")).toBe("false");
+  });
+
+  it("announces toasts by appending them inside the live region", () => {
+    toast.show("Announced");
+
+    const region = container.querySelector(".toast-container");
+    const toastEl = container.querySelector(".toast");
+    expect(toastEl!.parentElement).toBe(region);
+  });
+
   it("destroy clears all toasts and removes root", () => {
     toast.show("Will be destroyed");
     toast.destroy?.();

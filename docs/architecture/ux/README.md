@@ -1,7 +1,7 @@
 # OwnCord Client UX Specification (target state)
 
-**Verified against:** commit `da4acc5`, 2026-07-19
-**Companion:** [../client.md](../client.md) (structural module map) · [../../audit-2026-07-19.md](../../audit-2026-07-19.md)
+**Verified against:** commit `5630aa1`, 2026-08-04
+**Companion:** [../client.md](../client.md) (structural module map) · [../../audit-2026-08-04-docs-and-coverage.md](../../audit-2026-08-04-docs-and-coverage.md)
 
 This directory specifies **how the Tauri client should behave** — what every UI
 step does, and how each view reacts to server events, permission state, and
@@ -80,7 +80,8 @@ source of truth in `ui.store.connectionStatus`
 `onStateChange`, and read by any control that needs a live socket.
 
 > **✓ Implemented (2026-07).** `ui.store.connectionStatus` is now the single
-> source of truth: `main.ts` registers the one writer
+> source of truth: `main.ts` calls `wireConnectionStatus(ws)`, whose writer
+> lives in `lib/dispatcher.ts`
 > (`ws.onStateChange` → `toConnectionStatus` → `setConnectionStatus`), mapping
 > the internal 5-state machine onto the 3-state status (`connecting` /
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes
@@ -126,16 +127,25 @@ detail each; this is the index.
 | `chat_message` | `messages.addMessage` (+ unread/DM/notify) | Append; reconcile a pending optimistic row if it's our echo |
 | `chat_send_ok` | `messages.confirmSend` | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md)) |
 | `chat_edited` / `chat_deleted` | `messages.editMessage` / `deleteMessage` | In-place edit / tombstone |
+| `chat_bulk_deleted` | `messages.bulkDeleteMessages` | Remove every purged row in one pass |
 | `reaction_update` | `messages.updateReaction` | Toggle the pill + count, reflect `me` |
 | `typing` | `members.setTyping` (5 s auto-clear) | Typing indicator |
 | `presence` / `member_update` / `user_update` | `members.*` | Live member-list update |
 | `member_join` / `member_leave` / `member_ban` | `members.add/remove` | Member-list add/remove |
 | `channel_create` / `channel_update` / `channel_delete` | `channels.*` | Sidebar update; redirect if the active channel was deleted |
+| `roles_update` | `channels.setRoles` | Refresh name colors + permission-gated affordances |
+| `emoji_update` | `emoji.setCustomEmoji` | Refresh picker, autocomplete, and rendered custom emoji |
 | `voice_state` / `voice_leave` / `voice_config` / `voice_speakers` | `voice.*` | Voice roster + speaking rings |
+| `voice_moved` / `voice_disconnected` | `voice.*` + `livekitSession` | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
 | `voice_token` / `voice_e2ee_*` | `livekitSession.*` | Drive the voice-join + securing indicators |
 | `dm_channel_open` / `dm_channel_close` | `dm.*` | DM list add/remove |
 | `server_restart` | `ui.setTransientError` | Restart banner with countdown |
 | `error` | `ui.setTransientError` (+ `clearAuth` on `BANNED`) | Map the code → the reaction in §5 |
+
+`call_incoming` / `call_declined` are deliberately *not* routed through the
+dispatcher: `MainPage.ts` subscribes to them directly (page-scoped listeners)
+and drives the ring state machine in `lib/call-ring.ts` +
+`components/IncomingCallBanner.ts`.
 
 > **✓ Implemented (2026-07).** Error codes are no longer silently dropped for
 > sends: the server echoes the request id on error replies, so `SLOW_MODE`,
@@ -149,7 +159,7 @@ detail each; this is the index.
 ## 5. Error & permission reaction matrix
 
 One canonical reaction per failure class, applied everywhere. Today error
-handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes only
+handling is per-call-site with no shared mapper (`doFetch()` in `lib/api.ts` centralizes only
 401); this matrix is the target contract.
 
 | Class | Source | Target reaction |
@@ -159,12 +169,12 @@ handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes onl
 | **403 Suspended/Banned** | login REST / WS `BANNED` | Transient-error store → connect page: "Your account has been suspended." Force logout, no reconnect |
 | **429 Rate-limited** | REST/WS `RATE_LIMITED` | Non-destructive toast "You're doing that too fast — try again in a moment." Keep the user's input; re-enable the control after a short cooldown |
 | **Slow-mode** | WS `SLOW_MODE` | Disable send with a live countdown in the composer; do not drop the drafted message |
-| **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars, `LoginForm.ts:598`; apply everywhere) |
+| **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars in the `handleFormSubmit()` catch block, `pages/connect-page/LoginForm.ts`; apply everywhere) |
 | **Conflict/Not-found (404/409)** | REST/WS | Contextual inline message + refresh the affected view (the target moved/vanished) |
 | **5xx / network** | REST | Inline section error + **Retry**; for one-shot actions, a toast "Couldn't reach the server." Never a silent drop |
 | **Transport backpressure** | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent) |
-| **Cert first-use** | Rust `cert-tofu: trusted_first_use` | 8 s informational banner (already: `main.ts:105-129`) |
-| **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: `main.ts:133-164`) |
+| **Cert first-use** | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy *rejects* the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: the `ws.onCertFirstUse(...)` handler in `main.ts`) |
+| **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: the `ws.onCertMismatch(...)` handler in `main.ts`) |
 
 ---
 

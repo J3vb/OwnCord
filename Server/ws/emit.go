@@ -21,8 +21,9 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case SequencedDMEvent:
-			// High priority: DMs are time-sensitive.
-			h.sendSequencedToUsersHigh(e.ChannelID(), e.ParticipantIDs(), e.Payload())
+			// Normal priority: sequenced frames must share the per-client FIFO
+			// so the max-seq ack watermark never passes an undelivered event.
+			h.sendSequencedToUsers(e.ChannelID(), e.ParticipantIDs(), e.Payload())
 		case VoiceChannelGuardedEvent:
 			h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.TargetUserID(), e.Payload())
 		case VoiceChannelEvent:
@@ -32,6 +33,19 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
+			// dm_channel_open is unsequenced and targeted, so replay can never
+			// deliver it — an addressee mid-reconnect would be left with an
+			// unreachable DM channel. Bump the visibility watermark so any
+			// client resuming from a seq at or before the open takes the
+			// full-ready path (whose payload includes DM channels).
+			if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
+				// Ratcheted upward only: see bumpVisibilityWatermark on Hub.
+				// A plain Store(Load(&h.seq)) here (as on the other two
+				// writers) let a writer that read an older h.seq overwrite a
+				// concurrently stored higher watermark, silently regressing
+				// mustFullResync's boundary.
+				h.bumpVisibilityWatermark()
+			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
 		case ChannelEvent:
 			h.BroadcastToChannel(e.ChannelID(), e.Payload())

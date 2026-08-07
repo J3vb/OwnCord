@@ -760,6 +760,101 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  // --- Dialog & tablist semantics (DC-13) ---
+
+  it("stamps dialog semantics on the settings panel", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const panel = container.querySelector(".settings-panel") as HTMLElement;
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-modal")).toBe("true");
+    expect(panel.getAttribute("aria-label")).toBe("Settings");
+
+    overlay.destroy?.();
+  });
+
+  it("marks the sidebar as a vertical tablist", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const sidebar = container.querySelector(".settings-sidebar") as HTMLElement;
+    expect(sidebar.getAttribute("role")).toBe("tablist");
+    expect(sidebar.getAttribute("aria-orientation")).toBe("vertical");
+    expect(sidebar.getAttribute("aria-label")).toBe("Settings sections");
+
+    overlay.destroy?.();
+  });
+
+  it("moves the roving tabindex to the tab activated by setActiveTab", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const accountTab = getTab(container, 0);
+    const appearanceTab = getTab(container, 1);
+    expect(accountTab.getAttribute("tabindex")).toBe("0");
+    expect(appearanceTab.getAttribute("tabindex")).toBe("-1");
+
+    appearanceTab.click();
+
+    expect(accountTab.getAttribute("tabindex")).toBe("-1");
+    expect(appearanceTab.getAttribute("tabindex")).toBe("0");
+
+    overlay.destroy?.();
+  });
+
+  it("ArrowDown moves focus and activation to the next tab", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const accountTab = getTab(container, 0);
+    const appearanceTab = getTab(container, 1);
+    accountTab.focus();
+    accountTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    expect(document.activeElement).toBe(appearanceTab);
+    expect(appearanceTab.classList.contains("active")).toBe(true);
+    expect(appearanceTab.getAttribute("aria-selected")).toBe("true");
+    expect(accountTab.classList.contains("active")).toBe(false);
+
+    overlay.destroy?.();
+  });
+
+  it("labels the content tabpanel with the active tab", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const content = container.querySelector(".settings-content") as HTMLElement;
+    expect(content.getAttribute("role")).toBe("tabpanel");
+    expect(getTab(container, 0).id).toBe("settings-tab-account");
+    expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-account");
+
+    // "Text & Images" — the slugged id drops the ampersand
+    getTab(container, 3).click();
+    expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-text-images");
+
+    overlay.destroy?.();
+  });
+
+  it("restores focus to the opener when the overlay closes", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    const panel = container.querySelector(".settings-panel") as HTMLElement;
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    overlay.close();
+    expect(document.activeElement).toBe(opener);
+
+    overlay.destroy?.();
+    opener.remove();
+  });
+
   // --- Username validation ---
 
   it("rejects single-character username (min 2)", () => {

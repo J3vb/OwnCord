@@ -5,13 +5,21 @@
  */
 
 import { loadPref, savePref } from "@components/settings/helpers";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, setPttGated, setPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "./logger";
 
 const log = createLogger("ptt");
 
 let listening = false;
 let pttUnsubscribe: (() => void) | null = null;
+
+/** True when the mute currently in effect is the one a PTT release applied,
+ *  rather than one the user asked for. livekitSession.setMuted() writes
+ *  localMuted for every caller, so that flag alone cannot tell "the user
+ *  muted themselves" (which a press must never lift — v006) from "the last
+ *  release muted the mic" (which it must). Reset on init/stop so a mute that
+ *  outlived the previous PTT binding is treated as the user's. */
+let pttOwnsMute = false;
 
 // Well-known virtual key code names for display
 const VK_NAMES: ReadonlyMap<number, string> = new Map([
@@ -89,9 +97,22 @@ export async function initPtt(): Promise<void> {
     await invoke("ptt_set_key", { vkCode: vk });
     await invoke("ptt_start");
 
+    // ptt_start spawns its thread unconditionally, so a running thread is NOT
+    // evidence that PTT works — on macOS is_key_down is a stub and on
+    // pure-Wayland Linux there is no reachable display. Ask the backend what
+    // it can actually observe, so livekitSession only applies its join-time
+    // PTT mute where a press can genuinely lift it again.
+    const supported = await invoke<boolean>("ptt_polling_supported");
+    setPttPollingLive(supported);
+    if (!supported) {
+      log.warn("PTT key polling unsupported on this platform — mic will not be gated at join");
+    }
+
     // Clean up previous listener if any
     pttUnsubscribe?.();
     pttUnsubscribe = null;
+    // A mute left over from a previous binding is no longer PTT's to lift.
+    pttOwnsMute = false;
 
     // Listen for press/release events
     const unsub = await listen<boolean>("ptt-state", (event) => {
@@ -99,14 +120,39 @@ export async function initPtt(): Promise<void> {
       const channelId = voiceStore.getState().currentChannelId;
       if (channelId === null) return;
 
+      const pressed = event.payload;
+      // Track the PTT gate in the store regardless of whether we end up
+      // calling setMuted below — this is the source of truth other code
+      // (e.g. the widget) can read without depending on localMuted.
+      setPttGated(!pressed);
+
       // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
       // loaded lazily so it stays out of the startup path. In a voice channel
       // the module is necessarily already loaded, so this import resolves
       // from the module cache in a microtask.
       void import("./livekitSession")
         .then(({ setMuted }) => {
-          setMuted(!event.payload);
-          log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
+          const { localMuted, localDeafened } = voiceStore.getState();
+          if (pressed) {
+            // Never let PTT lift a mute the user asked for — that would
+            // republish the mic to every peer while voice_states.muted (and
+            // every remote UI) still shows the user muted (v006). The mute a
+            // previous release applied is PTT's own, so lifting that is fine.
+            if (localDeafened || (localMuted && !pttOwnsMute)) {
+              log.debug("PTT pressed — staying muted (user is self-muted or deafened)");
+              return;
+            }
+            setMuted(false);
+            pttOwnsMute = false;
+            log.debug("PTT pressed — unmuted");
+            return;
+          }
+          // Muting is always safe. setMuted() writes localMuted, so record
+          // whether this release is what muted the mic — only then may the
+          // next press lift it.
+          setMuted(true);
+          pttOwnsMute = !localMuted;
+          log.debug("PTT released — muted");
         })
         .catch((e) => log.warn("Failed to apply PTT mute", e));
     });
@@ -115,7 +161,10 @@ export async function initPtt(): Promise<void> {
     listening = true;
     log.info("PTT started", { vk, name: vkName(vk) });
   } catch (err) {
-    // Not in Tauri environment (dev mode)
+    // Not in Tauri environment (dev mode), or the backend rejected a command.
+    // Either way no ptt-state event can arrive, so the poller is not live —
+    // leaving a stale `true` here would let a later join mute the mic for good.
+    setPttPollingLive(false);
     log.debug("PTT not available", { error: err });
   }
 }
@@ -126,6 +175,10 @@ export async function stopPtt(): Promise<void> {
   try {
     pttUnsubscribe?.();
     pttUnsubscribe = null;
+    pttOwnsMute = false;
+    // No further ptt-state events once the loop is torn down; clear the flag
+    // before the await so a concurrent join cannot observe a stale `true`.
+    setPttPollingLive(false);
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("ptt_stop");
     listening = false;

@@ -24,6 +24,7 @@ import {
   markSendFailed,
   removeOptimistic,
   reattachToPresent,
+  isWindowDetached,
 } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
@@ -39,6 +40,7 @@ import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
+import { markChannelRead } from "@lib/read-state";
 
 const log = createLogger("channel-ctrl");
 
@@ -106,6 +108,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
+  // Optimistic send: keep the raw payload per correlation id so a failed send
+  // can be retried (including its attachments). Controller-scoped rather than
+  // per-mount: correlation ids are globally unique (crypto.randomUUID), and a
+  // failed row survives a channel switch (messages.store carries non-"sent"
+  // rows across refetches), so its draft must survive the switch too — a
+  // per-mount map left Retry on a failed row that outlived a remount silently
+  // inert. Entries are dropped on retry, discard, and the chat_send_ok ack, so
+  // controller scope does not turn it into a session-long transcript.
+  const draftByCorrelation = new Map<
+    string,
+    { content: string; replyTo: number | null; attachments: readonly string[] }
+  >();
+
   function destroyChannel(): void {
     pendingDeleteManager.cleanup();
 
@@ -143,8 +158,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
     if (_currentChannelId === channelId) return;
 
+    const previousChannelId = _currentChannelId;
     destroyChannel();
     _currentChannelId = channelId;
+    // channel_focus (sent below) is the only thing that advances the *new*
+    // channel's server-side read state; leaving one never does. Without this,
+    // messages read while focused here restate as unread/mention badges on
+    // the next full `ready`. mark_read is a local no-op (already zeroed on
+    // open) — it only repairs the server's view.
+    if (previousChannelId !== null) {
+      markChannelRead(previousChannelId);
+    }
 
     log.info("Switching channel", { channelId, channelName });
 
@@ -156,14 +180,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     channelAbort = new AbortController();
     const signal = channelAbort.signal;
     const userId = getCurrentUserId();
-
-    // Optimistic send: keep the raw payload per correlation id so a failed
-    // send can be retried (including its attachments). Channel-scoped — cleared
-    // when the channel unmounts.
-    const draftByCorrelation = new Map<
-      string,
-      { content: string; replyTo: number | null; attachments: readonly string[] }
-    >();
 
     function currentMessageUser(): MessageUser | null {
       const u = authStore.getState().user;
@@ -178,6 +194,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     ): void {
       const user = currentMessageUser();
       if (user === null) return;
+      // Sending while viewing a detached history window jumps to present: the
+      // optimistic row belongs in the live tail, and addMessage would refuse
+      // to append the echo into a detached window anyway. Mirrors
+      // onJumpToPresent — reattach clears "loaded" so the tail is refetched.
+      if (isWindowDetached(channelId)) {
+        reattachToPresent(channelId);
+        if (channelAbort !== null) {
+          void msgCtrl.loadMessages(channelId, channelAbort.signal);
+        }
+      }
       const timestamp = new Date().toISOString();
       if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a
@@ -220,8 +246,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       currentUserId: userId,
       onScrollTop: () => {
         if (channelAbort !== null) {
-          void msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
+          return msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
         }
+        return undefined;
       },
       onRetryLoad: () => {
         if (channelAbort !== null) {
@@ -415,7 +442,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // The server accepted a message — the next one is subject to the cooldown.
     composerGatingUnsubs.push(
-      ws.on("chat_send_ok", () => {
+      ws.on("chat_send_ok", (_payload, correlationId) => {
+        // An accepted send can never be retried, so its draft is dead weight.
+        // The map is controller-scoped (a failed row outlives a channel
+        // switch, so its draft must too), which means nothing else would ever
+        // drop it — every message sent in the session would be retained.
+        if (correlationId !== undefined && correlationId !== "") {
+          draftByCorrelation.delete(correlationId);
+        }
         const ch = channelsStore.getState().channels.get(channelId);
         if (ch !== undefined && ch.id === channelsStore.getState().activeChannelId) {
           startSlowMode(ch.slowMode);
@@ -500,21 +534,42 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
-      const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      // A group has no single presence to show, so the subtitle lists who is
-      // in it instead — that is the fact a group header is asked for, and a
-      // first member's status presented as the group's would be a lie.
-      let subtitle = "Offline";
-      if (dmChannel !== undefined && dmChannel.isGroup) {
-        const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
-        subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
-      } else if (dmChannel !== undefined) {
-        const member = membersStore.getState().members.get(dmChannel.recipient.id);
-        const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
-        subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+      const refreshDmHeader = (): void => {
+        const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+        // A group has no single presence to show, so the subtitle lists who is
+        // in it instead — that is the fact a group header is asked for, and a
+        // first member's status presented as the group's would be a lie.
+        let subtitle = "Offline";
+        if (dmChannel !== undefined && dmChannel.isGroup) {
+          const names = dmChannel.participants.map((p) => (p.displayName ?? "") || p.username);
+          subtitle = `${names.length + 1} members: You, ${names.join(", ")}`;
+        } else if (dmChannel !== undefined) {
+          const member = membersStore.getState().members.get(dmChannel.recipient.id);
+          const status = member?.status ?? dmChannel.recipient.status ?? "Offline";
+          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+        const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
+        updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
+      };
+      refreshDmHeader();
+      // Keep the subtitle live across presence and roster changes — otherwise
+      // it is set once from a snapshot and never updated until the channel is
+      // re-mounted, same as the topic subscription below does for text
+      // channels. destroyChannel already tears these down.
+      if (dmRecipientId !== null) {
+        composerGatingUnsubs.push(
+          membersStore.subscribeSelector(
+            (s) => s.members.get(dmRecipientId)?.status,
+            refreshDmHeader,
+          ),
+        );
       }
-      const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
-      updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
+      composerGatingUnsubs.push(
+        dmStore.subscribeSelector(
+          (s) => s.channels.find((c) => c.channelId === channelId),
+          refreshDmHeader,
+        ),
+      );
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
       if (chatHeaderName !== null) {

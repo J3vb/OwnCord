@@ -339,6 +339,20 @@ func (d *DB) LeaveGroupDM(ctx context.Context, userID, channelID int64) (deleted
 		return false, fmt.Errorf("LeaveGroupDM count: %w", err)
 	}
 	if remaining == 0 {
+		// Unlink attachments before the channel delete below: messages.channel_id
+		// and attachments.message_id both cascade ON DELETE (migrations/001), so
+		// without this the cascade destroys the attachment rows along with the
+		// channel — the only handle the orphan sweep (main.go's maintenance
+		// tick, DeleteOrphanedAttachments) has on the uploaded files, stranding
+		// them on disk forever. Setting message_id to NULL first turns them
+		// into ordinary orphaned attachments the sweep already reclaims.
+		if _, err = tx.ExecContext(ctx,
+			`UPDATE attachments SET message_id = NULL
+			   WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)`,
+			channelID,
+		); err != nil {
+			return false, fmt.Errorf("LeaveGroupDM unlink attachments: %w", err)
+		}
 		if _, err = tx.ExecContext(ctx, `DELETE FROM channels WHERE id = ?`, channelID); err != nil {
 			return false, fmt.Errorf("LeaveGroupDM delete channel: %w", err)
 		}

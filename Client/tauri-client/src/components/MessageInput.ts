@@ -90,7 +90,16 @@ export function wrapWithMarker(
   const len = marker.length;
 
   // Already wrapped — pressing the shortcut again takes the markers back off.
-  if (selected.length > 2 * len && selected.startsWith(marker) && selected.endsWith(marker)) {
+  // The interior must not itself contain the marker: otherwise a selection
+  // that merely starts and ends with it (e.g. multiple already-wrapped spans,
+  // or a longer marker like "**" matching the outer edge of "*x*") would be
+  // mistaken for a single wrapped span and have its interior markers stripped.
+  if (
+    selected.length > 2 * len &&
+    selected.startsWith(marker) &&
+    selected.endsWith(marker) &&
+    !selected.slice(len, selected.length - len).includes(marker)
+  ) {
     const inner = selected.slice(len, selected.length - len);
     return {
       value: value.slice(0, start) + inner + value.slice(end),
@@ -127,6 +136,22 @@ const ALLOWED_TYPES = [
   "application/x-zip-compressed",
   "application/json",
 ];
+
+/**
+ * Keys that move the caret without an open autocomplete popup claiming them,
+ * so the popup has to be resynced against the new caret on keyup. The popup's
+ * own keys are deliberately absent: it consumes ArrowUp/ArrowDown/Enter/Tab
+ * (so the caret does not move) and Escape closes it, and resyncing after any
+ * of those would reset the highlighted row or reopen what Escape dismissed.
+ */
+const CARET_MOVE_KEYS: ReadonlySet<string> = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
 
 /** Disable the GIF button and say why, instead of silently doing nothing. */
 function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
@@ -198,7 +223,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Replace the token under the caret with "@token ". */
   function insertMention(token: string): void {
-    if (textarea === null || mentionStart < 0) {
+    // The popup can outlive the token it was opened over: a caret move the
+    // composer never observed (Ctrl+A, a programmatic selection) leaves
+    // mentionStart pointing at an offset the caret no longer follows, and
+    // splicing there garbles the draft instead of completing it. Re-derive
+    // the token and only commit while it still starts where the popup thinks.
+    const active = activeMentionToken();
+    if (textarea === null || mentionStart < 0 || active === null || active.start !== mentionStart) {
       closeMentionPopup();
       return;
     }
@@ -242,7 +273,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Replace the `:token` under the caret with the chosen emoji, plus a space. */
   function insertEmoji(insert: string): void {
-    if (textarea === null || emojiStart < 0) {
+    // Same staleness guard as insertMention: never splice at an anchor the
+    // caret has since moved away from.
+    const active = activeEmojiToken();
+    if (textarea === null || emojiStart < 0 || active === null || active.start !== emojiStart) {
       closeEmojiPopup();
       return;
     }
@@ -270,6 +304,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       emojiPopup = createEmojiAutocomplete({
         onSelect: insertEmoji,
         onClose: closeEmojiPopup,
+        // The popup manages combobox/aria-activedescendant state on the
+        // textarea for as long as it is open.
+        comboboxInput: textarea ?? undefined,
       });
       root?.appendChild(emojiPopup.element);
     }
@@ -306,6 +343,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
         onClose: closeMentionPopup,
+        // The popup manages combobox/aria-activedescendant state on the
+        // textarea for as long as it is open.
+        comboboxInput: textarea ?? undefined,
       });
       root?.appendChild(mentionPopup.element);
     }
@@ -452,8 +492,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Unique counter for preview items (before upload completes and we have a server ID). */
   let previewCounter = 0;
 
-  function removePreviewItem(tempId: string): void {
-    const idx = pendingAttachments.findIndex((a) => a.id === tempId);
+  function removePreviewItem(el: HTMLDivElement): void {
+    const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
     const att = idx !== -1 ? pendingAttachments[idx] : undefined;
     if (att !== undefined) {
       const img = att.previewEl.querySelector("img");
@@ -540,7 +580,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "click",
       (e) => {
         e.stopPropagation();
-        removePreviewItem(tempId);
+        removePreviewItem(item);
       },
       { signal },
     );
@@ -566,7 +606,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
     } catch (err) {
       // Upload failed — remove preview and show error
-      removePreviewItem(tempId);
+      removePreviewItem(item);
       const errMsg = err instanceof Error ? err.message : "Upload failed";
       showUploadError(`Upload failed: ${errMsg}`);
     } finally {
@@ -643,7 +683,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const fileInput = createElement("input", {
         type: "file",
         style: "display: none;",
-        accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.rar,.7z",
+        accept: "image/*,video/*,audio/*,.pdf,.txt,.zip",
       });
       fileInput.addEventListener(
         "change",
@@ -764,8 +804,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       { signal },
     );
 
-    // Caret moves that aren't typing (click, blur) also decide the popup's fate.
+    // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
+    // decide the popup's fate — without this, completing a mention/emoji
+    // after moving the caret away with the keyboard splices at a stale offset.
     textarea.addEventListener("click", syncAutocomplete, { signal });
+    textarea.addEventListener(
+      "keyup",
+      (e: KeyboardEvent) => {
+        if (CARET_MOVE_KEYS.has(e.key)) syncAutocomplete();
+      },
+      { signal },
+    );
     textarea.addEventListener(
       "blur",
       () => {
@@ -881,9 +930,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           markGifUnavailable(gifBtn, reason);
         },
         onSelect: (gifUrl: string) => {
-          if (textarea !== null) {
-            textarea.value = gifUrl;
-            handleSend();
+          // Send the GIF directly instead of routing it through the textarea
+          // (handleSend's read of textarea.value): that overwrote — and
+          // discarded — whatever draft the user had typed, and on slow
+          // mode / mid-upload / debounced sends left the raw GIF URL sitting
+          // in the composer instead of the draft. Guarded by the same
+          // disabledReason/debounce checks as a normal send; an in-progress
+          // edit and any typed draft are left untouched.
+          if (disabledReason === null) {
+            const now = Date.now();
+            if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
+              lastSendTime = now;
+              options.onSend(gifUrl, state.replyTo?.messageId ?? null, []);
+              clearReply();
+            }
           }
           closeGifPicker();
         },

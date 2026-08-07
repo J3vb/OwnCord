@@ -1,6 +1,6 @@
 # Connection & Authentication — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md). Shared vocabulary, feedback
 primitives, and the error matrix live in the [README](README.md) and are not
 repeated here.
@@ -31,7 +31,7 @@ stateDiagram-v2
 
 **Target rule:** the transition `Connect → Main` is gated by the **connected
 overlay**, which resolves only on the `ready` event — never navigate to Main on a
-bare socket-open. (Already the case: `main.ts:270-286`.) This guarantees Main
+bare socket-open. (Already the case: `wirePostAuth()` inside `renderPage()` in `main.ts`.) This guarantees Main
 never renders against empty stores.
 
 ---
@@ -51,25 +51,26 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 | health: reachable | `GET /api/v1/health` ok within 3 s | Green dot + server name/MOTD preview |
 | health: unreachable | timeout/opaque error | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
 
-Health polls every 15 s (`profiles.ts`); auto-connect, if enabled for the active
-profile, drives the login form's `auto-connecting` state.
+Health polls every 15 s (interval wired in `main.ts`, profile data via
+`profiles.ts`); auto-connect, if enabled for the active profile, drives the
+login form's `auto-connecting` state.
 
 ### 2.2 Login form — state machine
 
 The form is an explicit FSM: `idle | loading | totp | connecting | error |
-auto-connecting` (`LoginForm.ts:12`). This is the model other views should
+auto-connecting` (the `FormState` type in `pages/connect-page/LoginForm.ts`). This is the model other views should
 follow.
 
 | State | Presentation | Exit |
 |-------|--------------|------|
 | `idle` | Enabled fields; Login/Register toggle | submit → validate |
-| `loading` | Submit shows spinner, fields disabled (`LoginForm.ts:232-235,443-446`) | `auth.login` resolves |
+| `loading` | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`) | `auth.login` resolves |
 | `totp` | 6-digit overlay, Verify/Cancel | code → `verifyTotp` |
 | `connecting` | "Connecting…" while WS handshakes | ws `connected` |
 | `auto-connecting` | Dedicated spinner card for saved-profile auto-login | any key/click cancels to `idle` |
-| `error` | Shake-animated banner, server message capped 200 chars (`LoginForm.ts:590-606`) | user edits → `idle` |
+| `error` | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle` |
 
-**Client-side validation before any request** (`LoginForm.ts:536-560`): host,
+**Client-side validation before any request** (`validateForm()` in `LoginForm.ts`): host,
 username, password required; password ≥ 8; register mode also requires the invite
 code. Validation failures never hit the network.
 
@@ -107,7 +108,7 @@ sequenceDiagram
 | Server result | Target reaction |
 |---------------|-----------------|
 | `200 {token, user}` | Proceed to WS connect |
-| `200 {partial_token, requires_2fa}` | TOTP overlay; on cancel, clear the partial token (already cleared in `finally`, `main.ts:377-380`) |
+| `200 {partial_token, requires_2fa}` | TOTP overlay; on cancel, clear the partial token (already cleared: the `onTotpSubmit` handler's `finally` in `main.ts` resets `pendingTotpPartialToken`) |
 | `403` banned/suspended | Error banner with the server message; remain on the form |
 | `403` require-2FA-but-none-set | Error banner directing the user to set up 2FA on the web panel |
 | `400` invalid input | Inline field error |
@@ -153,7 +154,7 @@ It exists specifically so Main never renders mid-populate. Everything else
 ## 4. Reconnect UX
 
 The WS client auto-reconnects with exponential backoff (base 1 s, cap 30 s, no
-jitter/cap; `ws.ts:123-126`), preserving `last_seq` for replay. The user-facing
+jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. The user-facing
 contract:
 
 ```mermaid
@@ -169,10 +170,10 @@ stateDiagram-v2
 
 | Phase | Target reaction |
 |-------|-----------------|
-| `reconnecting` | `ServerBanner.showReconnecting()` (already `MainPage.ts:199-211`); **live-only controls disable** via connection status (§3 of README); drafted input preserved |
-| replay resync | Silent when the ring buffer covers `last_seq`; deduped so no double-render (`ws.ts:212-231`); unread suppressed during replay (`dispatcher.ts:195`) |
+| `reconnecting` | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved |
+| replay resync | Silent when the ring buffer covers `last_seq`; deduped so no double-render (the replay-dedup block inside `handleMessage()`, `lib/ws.ts`); unread suppressed during replay (the `chat_message` handler's `!ws.isReplaying()` guard in `wireDispatcher()`, `lib/dispatcher.ts`) |
 | full resync | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action |
-| `server_restart` | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`ServerBanner.ts:28-43`) |
+| `server_restart` | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`) |
 | fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page |
 
 **Target rule:** reconnection is invisible on the happy path and honest on the
@@ -186,14 +187,18 @@ a click and failing.
 
 ## 5. Cert trust (TOFU) prompts
 
-The Rust proxies pin the server cert on first use and emit `cert-tofu` events.
-The HTTP proxy usually establishes the pin first (login precedes WS).
+The Rust proxies validate the server cert against the per-host pin store and
+emit `cert-tofu` events. **Deciding never writes a pin** (`tofu.rs`): an
+unknown host's first connection is *rejected* until the user confirms the
+fingerprint, so no credential is ever sent to an unconfirmed host. The HTTP
+proxy usually sees the host first (the connect page's health check precedes
+login and WS).
 
 | Event | Target reaction | Current |
 |-------|-----------------|---------|
-| `trusted_first_use` | 8 s informational banner "Trusting this server's certificate" | Implemented ad hoc in `main.ts:105-129` |
+| `first_use` | **Blocking trust modal** (`createCertFirstUseModal`) showing host + fingerprint; **Accept** stores the pin (`accept_cert_fingerprint`), re-runs the connect-page health check and resumes a pending connect; **Cancel** leaves the host untrusted (health stays "unreachable") | Implemented in the `ws.onCertFirstUse(...)` handler in `main.ts`; shares a `certModalActive` guard with the mismatch modal so the two never stack |
 | `trusted` | No UI (silent, expected) | — |
-| `mismatch` | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page | Implemented `main.ts:133-164`; reconnect blocked until resolved (`certMismatchBlock`) |
+| `mismatch` | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page | Implemented in the `ws.onCertMismatch(...)` handler in `main.ts`; reconnect blocked until resolved (`certMismatchBlock`) |
 
 ```mermaid
 sequenceDiagram

@@ -128,10 +128,16 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("creating file %s: %w", dst, err)
 	}
-	closed := false
+	// Any failure after this point must remove the partial file: the orphan
+	// sweep is DB-row-driven, so a file without a DB row is never reclaimed.
+	// Close before remove — Windows cannot delete an open file.
+	success := false
 	defer func() {
-		if !closed {
-			_ = f.Close()
+		_ = f.Close()
+		if !success {
+			if removeErr := os.Remove(dst); removeErr != nil {
+				slog.Error("storage: failed to remove partial file", "path", dst, "err", removeErr)
+			}
 		}
 	}()
 
@@ -147,17 +153,13 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if written == maxBytes {
 		var probe [1]byte
 		if n, _ := full.Read(probe[:]); n > 0 {
-			_ = f.Close()
-			closed = true
-			if removeErr := os.Remove(dst); removeErr != nil {
-				slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
-			}
 			return 0, fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 		}
 	}
 	if syncErr := f.Sync(); syncErr != nil {
 		return 0, fmt.Errorf("syncing file %s: %w", dst, syncErr)
 	}
+	success = true
 	return written, nil
 }
 

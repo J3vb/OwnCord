@@ -1,19 +1,19 @@
 # Client Architecture (Tauri)
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
-Desktop client built on Tauri v2: a TypeScript webview (~31.7k LOC, vanilla TS —
-no UI framework) plus ~2.3k LOC of Rust commands. State lives in a hand-rolled
-reactive store (`src/lib/store.ts`: immutable updates, microtask-batched
-notifications, selector subscriptions). Components are factory functions
-returning `{ element, mount, destroy }` built with the `@lib/dom` helpers; a
-2-page state machine (`src/lib/router.ts`) switches between the Connect and
-Main pages.
+Desktop client built on Tauri v2: a TypeScript webview (~42k LOC, vanilla TS —
+no UI framework) plus ~4.7k LOC of Rust across 16 modules. State lives in a
+hand-rolled reactive store (`src/lib/store.ts`: immutable updates,
+microtask-batched notifications, selector subscriptions). Components are
+factory functions returning `{ element, mount, destroy }` built with the
+`@lib/dom` helpers; a 2-page state machine (`src/lib/router.ts`) switches
+between the Connect and Main pages.
 
-> `docs/client-architecture.md` still describes a SolidJS-based client. The
-> Solid migration was **abandoned** (per CHANGELOG); only a 154-LOC beachhead
-> remains under `src/components/solid/`. This document reflects the actual
-> state.
+> `docs/client-architecture.md` is a 15-line redirect stub kept for old links;
+> this document is the client architecture reference. The abandoned SolidJS
+> beachhead that used to live under `src/components/solid/` was fully removed
+> (audit A-2026-07-12, closed 2026-07-19).
 
 ## D7 — Module map
 
@@ -24,37 +24,40 @@ flowchart TB
     end
 
     subgraph rust ["Rust (src-tauri)"]
-        WSP["ws_proxy.rs<br/>WSS + TOFU cert pinning"]
-        LKP["livekit_proxy.rs<br/>loopback TLS tunnel"]
-        CRED["credentials.rs<br/>OS keychain"]
+        TOFU["tofu.rs<br/>shared TOFU core:<br/>3 rustls verifiers + pure decide"]
+        WSP["ws_proxy.rs<br/>WSS proxy"]
+        HTP["http_proxy.rs<br/>loopback TCP→TLS REST tunnel"]
+        LKP["livekit_proxy.rs<br/>loopback TLS tunnel (pin required)"]
+        CRED["credentials.rs + secret_store.rs<br/>OS keychain + verified fallback"]
         PTT["ptt.rs<br/>push-to-talk polling"]
         UPDC["update_commands.rs<br/>self-hosted updater"]
-        SET["commands.rs<br/>settings store (key allowlist)"]
+        SET["commands.rs<br/>settings + cert/identity pin stores"]
     end
 
     subgraph comm ["Communication layer (src/lib)"]
-        API["api.ts<br/>REST client (tauri-plugin-http,<br/>allowSelfSigned=true)"]
-        WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters"]
-        DISP["dispatcher.ts<br/>~30 msg types → store mutators"]
-        LKS["livekitSession.ts (1.7k LOC)<br/>voice state machine + E2EE"]
+        API["api.ts<br/>REST client via httpProxy.ts<br/>(TOFU-pinned Rust tunnel)"]
+        WSC["ws.ts<br/>reconnect w/ backoff, seq replay,<br/>generation counters, cert-tofu events"]
+        DISP["dispatcher.ts<br/>34 msg types → store mutators"]
+        LKS["livekitSession.ts (1.4k LOC)<br/>voice state machine"]
+        LKE["livekitE2EE.ts<br/>key-holder election, room-key<br/>wrap/unwrap, peer verification"]
     end
 
-    subgraph state ["Stores (8 singletons)"]
+    subgraph state ["Stores (9 singletons)"]
         AUTH2["auth"]
-        CHAN["channels"]
+        CHAN["channels<br/>(incl. roles)"]
         MSG["messages"]
         MEM["members"]
         VOICE["voice"]
         DM["dm"]
-        ROLES["roles"]
+        BLK["blocks"]
+        EMO["emoji"]
         UIS["ui"]
     end
 
     subgraph ui ["UI (imperative DOM)"]
         CP["ConnectPage<br/>profiles + health polling"]
-        MP["MainPage<br/>SidebarArea / ChatArea /<br/>controllers"]
-        COMP["~30 component families<br/>message-list, settings tabs,<br/>voice widgets, overlays"]
-        SOLID["components/solid/<br/>abandoned beachhead"]
+        MP["MainPage<br/>SidebarArea / ChatArea /<br/>15 controllers"]
+        COMP["~60 component files<br/>message-list, settings tabs,<br/>voice widgets, overlays"]
     end
 
     MAIN --> CP
@@ -62,38 +65,46 @@ flowchart TB
     MAIN --> API
     MAIN --> WSC
     WSC --> WSP
+    API --> HTP
+    WSP --> TOFU
+    HTP --> TOFU
+    LKP --> TOFU
     WSC --> DISP
-    DISP --> AUTH2 & CHAN & MSG & MEM & VOICE & DM & ROLES & UIS
+    DISP --> AUTH2 & CHAN & MSG & MEM & VOICE & DM & BLK & EMO & UIS
     state --> ui
     LKS --> LKP
+    LKS --> LKE
     VOICE --> LKS
     MP --> COMP
-    API -.->|"no cert pinning<br/>(unlike WS path)"| SRV["Go server"]
-    WSP --> SRV
+    WSP --> SRV["Go server"]
+    HTP --> SRV
     CRED -.-> MAIN
     UPDC -.-> MAIN
 
     %% cross-store coupling (audit finding)
     AUTH2 -.->|clearAuth → leaveVoice| VOICE
     VOICE -.-> MEM
-
-    classDef dead fill:none,stroke-dasharray: 5 5,opacity:0.6
-    class SOLID dead
 ```
 
 **What this shows.** Data flows one way in the happy path: WS frame → Rust
 `ws_proxy` → `ws.ts` → `dispatcher.ts` → store mutators → subscribed components
-re-render. The dashed edges mark the audit findings: the HTTP path accepts any
-certificate (`allowSelfSigned` hardcoded, no TOFU pinning — unlike the WS and
-LiveKit paths, which pin fingerprints in Rust), the stores cross-import each
-other (auth→voice→members), and the Solid beachhead is dead weight.
+re-render. All three network paths — WebSocket, REST, and LiveKit — terminate
+TLS inside Rust proxies that share one TOFU core (`tofu.rs`): the WS and HTTP
+proxies use a capture-then-decide verifier, and the LiveKit proxy refuses to
+start without an existing pin. Deciding never writes a pin — a first
+connection is *rejected* and surfaced to the user as a blocking trust prompt
+before any pin is stored (the former auto-pin-on-first-use behavior was
+removed in the 2026-07-22 security remediation). The remaining dashed edges
+mark cross-store coupling (auth→voice→members) — known structural debt, not
+yet scheduled.
 
 ### Key mechanisms
 
 | Concern | Where | How |
 |---------|-------|-----|
 | Reconnect | `src/lib/ws.ts` | Exponential backoff (cap 30s), heartbeat 30s, `last_seq` replay + bounded dedup set, generation counter invalidates stale listeners |
-| Cert trust | `src-tauri/src/ws_proxy.rs` | TOFU: first fingerprint pinned per host (`certs.json`); mismatch → modal (`CertMismatchModal`) |
+| Cert trust | `src-tauri/src/tofu.rs` (shared by `ws_proxy.rs`, `http_proxy.rs`, `livekit_proxy.rs`) | TOFU with explicit consent: fingerprints stored per host in `certs.json`, but *deciding never writes a pin* — first use and mismatch both reject the connection and emit a `cert-tofu` event; the TS side shows a blocking modal (`CertMismatchModal.ts`) and only an explicit Accept stores/updates the pin. The updater uses a fourth, host-scoped verifier (pin for the OwnCord host, WebPKI for GitHub). |
+| Voice E2EE identity | `src/lib/identity.ts` + `src-tauri/src/commands.rs` | Long-term ECDSA identity key in the OS keyring (`identity:{host}`); peer identity keys pinned in `identity_pins.json`; changed peer key → blocking identity-mismatch modal with safety-number comparison |
 | Credentials | `src-tauri/src/credentials.rs` | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS |
 | Multi-server | `src/lib/profiles.ts` | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels |
 | HTTP capability | `src-tauri/capabilities/default.json` | `http:allow-fetch` is the only URL-scoped identifier (the other two `fetch_*` commands take a validated `ResourceId`); allows `https://*` + `http://127.0.0.1:*`, denies https loopback. Wildcard is required by link previews — see [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md) |
@@ -104,11 +115,13 @@ other (auth→voice→members), and the Solid beachhead is dead weight.
 
 ### Quality tooling
 
-157 test files (~63k LOC — about 2× the source): Vitest unit + integration,
-Playwright E2E (web and native Tauri suites), Stryker mutation testing, oxlint +
-type-checked ESLint, Prettier, Knip, strict `tsc`. The client unit suite is
-green and blocking; it must pass 100% before a push (audit item A-2026-07-04,
-closed 2026-07-20).
+224 test files (~83k LOC — about 2× the source): Vitest unit + integration
+(70% coverage gate, blocking in CI), Playwright E2E (web suite in CI —
+non-blocking full run plus a blocking `@parity` subset — and a native Tauri
+suite that is deliberately not wired to CI), Stryker mutation testing
+(manual-only), oxlint + type-checked ESLint, Prettier, Knip (non-blocking),
+strict `tsc`. Rust: 84 `cargo test --lib` tests across 10 of the 16 modules,
+blocking in CI together with `cargo clippy -D warnings`.
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts`,

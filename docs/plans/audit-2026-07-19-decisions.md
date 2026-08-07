@@ -1,5 +1,9 @@
 # Audit 2026-07-19 — Maintainer Decisions
 
+> **Status (verified 2026-08-04): Shipped (decision record).** All 13
+> decisions carry an Implemented status below; spot-verified against the code
+> (D2 `db/dbgen` wiring, D9 `VisibleChannelIDs`, D13 `HasServerPerm`).
+
 **Date decided:** 2026-07-19 (D1–D8); 2026-07-20 (D9–D12); 2026-07-21 (D13)
 **Decided by:** J3vb
 **Status:** decisions recorded; greenlit items (D4, D7, D8) implemented 2026-07-19 — see per-row Status. **2026-07-20:** backlog items 3 and 11 (D9, D10) implemented — channel-visibility unified through `permissions.Checker`; V2 dispatch migration finished and V1 deleted. **2026-07-20 (P3):** the five plugin CRITICALs carried over from audit-2026-04-07 dispositioned (D11) — four closed, one accepted as residual risk, which keeps plugins default-disabled at the beta gate. **2026-07-23:** D13 implemented — server-scoped permission rule unified in `permissions.HasServerPerm`; override-fetch errors fail closed instead of dropping (and caching the loss of) every channel `deny`; the fifth D9 site routed through the `Checker`.

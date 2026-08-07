@@ -45,8 +45,14 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err := u.ValidateDownloadURL(checksumURL); err != nil {
 		return "", fmt.Errorf("validating checksum URL: %w", err)
 	}
-	if err := u.ValidateDownloadURL(signatureURL); err != nil {
-		return "", fmt.Errorf("validating signature URL: %w", err)
+	// The detached binary signature is consumed only by the Windows verify
+	// path; Linux integrity comes from the signed manifest + checksum, so a
+	// release without the .sig asset must not block the Linux path here.
+	needSignature := runtime.GOOS == "windows"
+	if needSignature {
+		if err := u.ValidateDownloadURL(signatureURL); err != nil {
+			return "", fmt.Errorf("validating signature URL: %w", err)
+		}
 	}
 	if err := u.ValidateDownloadURL(manifestURL); err != nil {
 		return "", fmt.Errorf("validating manifest URL: %w", err)
@@ -59,9 +65,12 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err != nil {
 		return "", fmt.Errorf("fetching checksums: %w", err)
 	}
-	signatureData, err := u.fetchBody(ctx, signatureURL)
-	if err != nil {
-		return "", fmt.Errorf("fetching signature: %w", err)
+	var signatureData []byte
+	if needSignature {
+		signatureData, err = u.fetchBody(ctx, signatureURL)
+		if err != nil {
+			return "", fmt.Errorf("fetching signature: %w", err)
+		}
 	}
 	manifestData, err := u.fetchBody(ctx, manifestURL)
 	if err != nil {

@@ -179,9 +179,16 @@ function buildVoiceAudioTabInner(
       const onUp = (): void => {
         meterThreshold.removeEventListener("pointermove", onMove);
         meterThreshold.removeEventListener("pointerup", onUp);
+        meterThreshold.removeEventListener("pointercancel", onUp);
       };
       meterThreshold.addEventListener("pointermove", onMove, { signal });
       meterThreshold.addEventListener("pointerup", onUp, { signal });
+      // A touch/pen drag that the OS claims as a pan (or any other
+      // mid-drag pointer loss) fires pointercancel instead of pointerup.
+      // Without this, onMove stays attached for the tab's lifetime and
+      // every later hover over the handle silently rewrites and persists
+      // voiceSensitivity with no button held (v097).
+      meterThreshold.addEventListener("pointercancel", onUp, { signal });
     },
     { signal },
   );
@@ -411,10 +418,14 @@ function buildVoiceAudioTabInner(
     { signal },
   );
 
-  // Race guard: prevent stale getUserMedia results from overwriting a newer request
+  // Race guard: prevent stale getUserMedia results from overwriting a newer
+  // request. cleanupMic() invalidates both counters, so a stream resolving
+  // after teardown is stopped instead of re-arming state nobody cleans up.
   let cameraRequestId = 0;
+  let micRequestId = 0;
   registerCameraInvalidation(() => {
     cameraRequestId += 1;
+    micRequestId += 1;
   });
 
   function stopCameraPreview(): void {
@@ -482,6 +493,7 @@ function buildVoiceAudioTabInner(
 
   // Start mic level monitoring for visual feedback
   void (async () => {
+    const thisRequest = ++micRequestId;
     try {
       const savedDevice = loadPref<string>("audioInputDevice", "");
       const constraints: MediaStreamConstraints = {
@@ -489,6 +501,13 @@ function buildVoiceAudioTabInner(
         video: false,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Race guard: teardown (cleanup or abort) may have run while we awaited
+      // — opening the mic now would leave it hot with nobody left to stop it,
+      // and registerMic would re-arm state cleanupMic() already cleared.
+      if (signal.aborted || thisRequest !== micRequestId) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
       const audioCtx = new AudioContext();
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;

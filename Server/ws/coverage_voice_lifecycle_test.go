@@ -206,6 +206,8 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	}
 	ws.SetVoiceChIDForTest(c1, vcID)
 	ws.SetVoiceChIDForTest(c2, vcID)
+	hub.SubscribeVoiceTopicForTest(c1, vcID) // as the real voice_join flow does
+	hub.SubscribeVoiceTopicForTest(c2, vcID)
 
 	hub.CleanupVoiceForChannel(vcID)
 
@@ -215,10 +217,51 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	if got := ws.GetClientVoiceChIDForTest(c2); got != 0 {
 		t.Errorf("c2 voiceChID = %d, want 0", got)
 	}
+	// Channel deletion must also drop the voice-topic subscriptions, or the
+	// clients keep receiving stale voice_e2ee_announce relays for the dead room.
+	if hub.SubscribedToVoiceTopicForTest(c1, vcID) {
+		t.Error("c1 still subscribed to the deleted channel's voice topic")
+	}
+	if hub.SubscribedToVoiceTopicForTest(c2, vcID) {
+		t.Error("c2 still subscribed to the deleted channel's voice topic")
+	}
 
 	states, _ := database.GetChannelVoiceStates(context.Background(), vcID)
 	if len(states) != 0 {
 		t.Errorf("expected 0 voice states after cleanup, got %d", len(states))
+	}
+}
+
+// A user who moved to another voice channel between the cleanup's DB snapshot
+// and its per-participant loop must not be clobbered: the deleted channel's
+// stale row goes away, but the live client state and the new channel's
+// voice-topic subscription are untouched.
+func TestCleanupVoiceForChannel_DoesNotClobberMovedParticipant(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "cvfc-moved")
+	oldVC := seedVoiceChannel(t, database, "cvfc-moved-old")
+	newVC := seedVoiceChannel(t, database, "cvfc-moved-new")
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// DB row still on the old channel (the snapshot the cleanup reads), but
+	// the client has already moved on to the new channel.
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, oldVC); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c, newVC)
+	hub.SubscribeVoiceTopicForTest(c, newVC)
+
+	hub.CleanupVoiceForChannel(oldVC)
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != newVC {
+		t.Errorf("moved participant's client voiceChID = %d, want %d", got, newVC)
+	}
+	if !hub.SubscribedToVoiceTopicForTest(c, newVC) {
+		t.Error("moved participant lost the new channel's voice-topic subscription")
 	}
 }
 

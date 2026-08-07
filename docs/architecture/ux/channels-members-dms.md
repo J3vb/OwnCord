@@ -1,6 +1,6 @@
 # Channels, Members & Direct Messages — target UX
 
-**Verified against:** commit `da4acc5`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 Part of the [Client UX Specification](README.md).
 
 Covers the sidebar surfaces: the channel list (switch, categories, reorder,
@@ -18,7 +18,7 @@ category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`)
 | State | Trigger | Target reaction |
 |-------|---------|-----------------|
 | `ready` | Channels loaded from `ready` | Grouped, collapsible category list |
-| `empty` | Zero channels | "No channels yet" + hint (already `ChannelSidebar.ts:422-430`) |
+| `empty` | Zero channels | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
 | category collapsed | User toggles | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state |
 | active channel | `setActiveChannel` | Highlighted; unread cleared |
 | unread | `chat_message` in a non-active channel | Unread pill; badge on the channel |
@@ -33,6 +33,18 @@ Each channel type gets a distinct icon and interaction:
 | `announcement` | megaphone (D1) | Focus → load messages; **composer read-only unless MANAGE_MESSAGES** (see [messaging.md §2](messaging.md)) |
 | `voice` | speaker | Join voice (see [voice-and-e2ee.md](voice-and-e2ee.md)); shows the participant roster inline |
 | `dm` | — | Not in the channel list; lives in DM mode |
+
+### 1.1a Per-channel notification mutes
+
+The channel context menu offers "Mute Channel" / "Unmute Channel"
+(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/channel-mutes.ts`).
+Discord semantics, deliberately: a mute silences the channel's *noise* — no
+desktop notification, no chime — while the unread badge still counts but
+renders dimmed, and a message that mentions you still notifies and shows the
+red mention badge. It is a client-side preference on purpose (stored in
+`localStorage` under `mutedChannels`): the server has no per-user channel
+settings table, and "which of my devices bothers me" is a property of the
+device, not the account.
 
 ### 1.2 Channel switching
 
@@ -55,7 +67,9 @@ sequenceDiagram
   state for uncached history ([messaging.md §1](messaging.md)), never a global block.
 - If the active channel is **deleted** server-side (`channel_delete`), redirect to
   the first text channel by position and toast "This channel was deleted."
-  (redirect already exists, `dispatcher.ts:286-292`; add the toast).
+  (**✓ implemented 2026-08** — the `channel_delete` handler in
+  `wireDispatcher()`, `lib/dispatcher.ts`, redirects and toasts; a non-active
+  deletion stays silent).
 
 ### 1.3 Reorder & CRUD (admin)
 
@@ -74,10 +88,10 @@ role grouping.
 | State | Trigger | Target reaction |
 |-------|---------|-----------------|
 | `ready` | `ready.members` | Grouped by role, sorted; presence dot per member |
-| `empty` | No online members | "No members online" (already `MemberList.ts:167-170`) |
+| `empty` | No online members | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`) |
 | presence change | `presence` event | Live dot update; offline members styled distinctly |
 | role change | `member_update` | Re-group live |
-| profile change | `user_update` | Name/avatar update; if it's us, also patch `auth.store` (already `dispatcher.ts:334-341`) |
+| profile change | `user_update` | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
 | join/leave/ban | `member_join`/`member_leave`/`member_ban` | Add/remove with no reflow flash |
 
 ### 2.1 Typing indicator
@@ -85,7 +99,7 @@ role grouping.
 `typing` events populate `members.typingUsers` with a 5 s auto-clear timer.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
-`TypingIndicator.ts:35`). The client emits `typing_start` while composing
+`formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
 (debounced), never per-keystroke.
 
 ### 2.2 Member actions (context menu)
@@ -112,10 +126,10 @@ recipient, last-message preview, unread).
 |-------|---------|-----------------|
 | `ready` | `ready.dm_channels` | DM list sorted by recency |
 | `empty` | No DMs | "No direct messages yet" + "Start one from a member's profile" |
-| open DM | `dm_channel_open` | Prepend/move-to-top, dedup (already `dm.store.ts:38`) |
+| open DM | `dm_channel_open` | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`) |
 | close DM | `dm_channel_close` | Remove from list |
 | new DM message | `chat_message` in a DM | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active |
-| last-message empty | Never messaged | "No messages yet" fallback (already `SidebarDmHelpers.ts:127`) |
+| last-message empty | Never messaged | "No messages yet" fallback (already the `lastMessage` fallback in `buildDmConversations()`, `pages/main-page/SidebarDmHelpers.ts`) |
 
 ### 3.1 Opening a DM
 
@@ -132,6 +146,20 @@ sequenceDiagram
     P->>DM: open DM mode + focus channel
     Note over U,DM: server also broadcasts dm_channel_open to both parties
 ```
+
+### 3.1a Group DMs
+
+One picker covers 1:1 and group creation
+(`pages/main-page/MemberPickerModal.ts`): selecting a single member opens a
+1:1 DM, selecting two or more creates a group (cap
+the `MAX_GROUP_DM_PARTICIPANTS = 10` constant in `lib/constants.ts`) — "new conversation"
+is one intent, so the user is not asked to choose DM-vs-group up front. Group
+DMs are `channels` rows with `type='dm'` and `is_group=1` server-side
+(migration 028), so leaving a two-person group does not collapse it back into
+a 1:1. "Rename Group" / "Leave Group" affordances live in the DM row context
+menu (the contextmenu handler in `renderDmItem()`, `components/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
+ring/incoming calls work the same as 1:1 DMs (`call_ring` fans out to every
+other participant).
 
 ### 3.2 Blocking
 
@@ -155,11 +183,12 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 > `blocks.store`, so an unblock (shrunken `GET /blocks`) re-enables the composer
 > live. `blockedByMe` takes precedence when both directions apply.
 >
-> **Remaining gap.** There is no in-client **block button** yet (the block/unblock
-> REST surface exists server-side; blocks made from the web panel or a prior
-> session are honoured via `GET /blocks`). Adding the block affordance to the DM
-> profile sidebar would call `PUT/DELETE /blocks/{userId}` and update `blocks.store`
-> directly for an instant local un-gate.
+> **✓ Implemented (2026-07/08).** The in-client **Block/Unblock** affordance now
+> lives in the member context menu (`AdminActions.ts` renders the item;
+> `MemberList.ts` passes it through; the `onToggleBlock` handler in `createSidebarMemberSection()` (`pages/main-page/SidebarMemberSection.ts`) calls
+> `api.blockUser`/`api.unblockUser`, updates `blocks.store` via
+> `setUserBlockedByMe` for an instant local un-gate, and confirms with a
+> success toast — or an error toast on failure).
 
 ---
 

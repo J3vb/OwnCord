@@ -359,13 +359,32 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/password");
       expect(fetchCallOpts().method).toBe("PUT");
       const body = JSON.parse(fetchCallOpts().body as string);
-      expect(body).toEqual({ current_password: "oldpw", new_password: "newpw" });
+      // The server decodes json:"old_password" (Server/api/profile_handler.go),
+      // and Go's encoding/json has no alias matching: any other key is a 400.
+      expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
     });
 
     it("getSessions calls correct endpoint", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([]));
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/sessions");
+    });
+
+    // Regression for v112: the server wraps the list in a {sessions: [...]}
+    // envelope (Server/api/profile_handler.go's sessionsListResponse); a bare
+    // array would make every consumer's .map/.length fail or read undefined.
+    it("getSessions unwraps the {sessions: [...]} envelope", async () => {
+      const session = {
+        id: 1,
+        device: "Chrome on Linux",
+        ip: "127.0.0.1",
+        created_at: "2026-01-01T00:00:00Z",
+        last_used: "2026-01-02T00:00:00Z",
+        is_current: true,
+      };
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [session] }));
+      const result = await api.getSessions();
+      expect(result).toEqual([session]);
     });
 
     it("revokeSession calls DELETE with session ID", async () => {
@@ -754,23 +773,6 @@ describe("API Client", () => {
     });
   });
 
-  describe("sound endpoints", () => {
-    it("getSounds calls GET /sounds", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([{ id: 1, name: "beep" }]));
-      const result = await api.getSounds();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/sounds");
-      expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual([{ id: 1, name: "beep" }]);
-    });
-
-    it("deleteSound calls DELETE /sounds/{id}", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
-      await api.deleteSound(3);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/sounds/3");
-      expect(fetchCallOpts().method).toBe("DELETE");
-    });
-  });
-
   describe("DM endpoints", () => {
     it("getDmChannels calls GET /dms", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ channels: [] }));
@@ -1033,7 +1035,7 @@ describe("API Client", () => {
 
   describe("doFetch body serialization", () => {
     it("omits body when body is undefined (GET requests)", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([]));
+      mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
       await api.getSessions();
       expect(fetchCallOpts().body).toBeUndefined();
     });

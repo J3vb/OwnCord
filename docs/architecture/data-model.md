@@ -1,26 +1,29 @@
 # Data Model
 
-**Verified against:** commit `ddc49f0`, 2026-07-19
+**Verified against:** commit `5630aa1`, 2026-08-04
 
-The canonical schema is the ordered migration set `Server/migrations/001–015`
+The canonical schema is the ordered migration set `Server/migrations/001–029`
 (embedded via `go:embed`, applied by the custom runner in `Server/db/migrate.go`,
 tracked in the `schema_versions` table). SQLite is the only supported engine —
 `Server/main.go` rejects any other `database.type` at startup.
 
 ## D5 — Entity-relationship overview
 
-All 23 application tables, grouped by domain. Junction/leaf detail columns are
-elided; the goal is the relationship graph, not full DDL (see `docs/schema.md`
-for DDL — note it is currently 6 migrations behind, see
-[audit-2026-07-19.md §2](../audit-2026-07-19.md)).
+All 25 application tables, grouped by domain. Junction/leaf detail columns are
+elided; the goal is the relationship graph, not full DDL — see
+[`docs/schema.md`](../schema.md) for per-table DDL (current through
+migration 028).
 
 ```mermaid
 erDiagram
     %% ── Identity & access ──
     roles ||--o{ users : "role_id"
     users ||--o{ sessions : "user_id"
+    users ||--o{ api_tokens : "user_id"
     roles ||--o{ channel_overrides : "role_id"
     channels ||--o{ channel_overrides : "channel_id"
+    users ||--o{ channel_user_overrides : "user_id"
+    channels ||--o{ channel_user_overrides : "channel_id"
     users ||--o{ user_blocks : "blocker_id / blocked_id"
     users ||--o{ invites : "created_by / redeemed_by"
 
@@ -56,7 +59,6 @@ erDiagram
     login_attempts
     rate_lockouts
     emoji
-    sounds
 
     users {
         int id PK
@@ -74,7 +76,8 @@ erDiagram
     channels {
         int id PK
         string name
-        string type "text | voice | dm (trigger-enforced)"
+        string type "text | voice | announcement | dm (trigger-enforced)"
+        bool is_group "028: marks a group DM"
     }
     messages {
         int id PK
@@ -99,13 +102,13 @@ erDiagram
 
 | Domain | Tables | Notes |
 |--------|--------|-------|
-| Identity & access | `roles`, `users`, `sessions`, `channel_overrides`, `user_blocks`, `invites`, `login_attempts`, `rate_lockouts` | Sessions store only SHA-256 token hashes. Permissions are a bitfield on `roles.permissions`; channel overrides use Discord semantics `(role &^ deny) \| allow`. `rate_lockouts` (011) persists rate-limiter lockouts across restarts. |
+| Identity & access | `roles`, `users`, `sessions`, `api_tokens`, `channel_overrides`, `channel_user_overrides`, `user_blocks`, `invites`, `login_attempts`, `rate_lockouts` | Sessions store only SHA-256 token hashes. `api_tokens` (018) are long-lived bearer credentials (owner-minted, hash-stored) that deliberately live outside the session table. Permissions are a bitfield on `roles.permissions`; channel overrides use Discord semantics `(role &^ deny) \| allow`, with `channel_user_overrides` (024) as a per-user final layer on top of the role layer. `users` gained `identity_public_key` (017) for voice E2EE identity pinning and `display_name`/`about`/`custom_status` (027). `rate_lockouts` (011) persists rate-limiter lockouts across restarts. |
 | Messaging | `channels`, `messages`, `attachments`, `reactions`, `read_states`, `message_mentions`, `emoji` | `message_mentions` (022) stores server-resolved `@username` mentions per message; `messages.mentions_everyone` flags an authorized `@everyone`/`@here`, and `read_states.mention_count` is the per-user unread badge those two drive. `channels.type` is constrained to `text \| voice \| announcement \| dm` by INSERT/UPDATE triggers (migration 013, extended by 016 to allow `announcement`). Announcement channels read like text but require `MANAGE_MESSAGES` to post. `attachments.uploader_id` (010) backs upload-ownership checks. |
-| Direct messages | `dm_participants`, `dm_open_state` | DMs are `channels` rows with `type='dm'`; these tables track membership and per-user open/closed UI state (009). |
+| Direct messages | `dm_participants`, `dm_open_state` | DMs are `channels` rows with `type='dm'`; these tables track membership and per-user open/closed UI state (009). `channels.is_group` (028) marks a group DM so group-ness survives participants leaving. |
 | Voice | `voice_states` | One row per user (`user_id` is the PK) — a user occupies at most one voice channel. |
 | Real-time replay | `events` | Cold tier of the 3-tier reconnect replay ([websocket.md](websocket.md)); written by the async `EventPersister`, pruned by retention. Hub seq counter is seeded from `MAX(events.seq)` at startup so seqs stay monotonic across restarts. |
 | Plugins | `plugins`, `plugin_kv` | 015. `plugin_kv` is per-plugin namespaced KV via composite PK `(plugin_id, key)`. |
-| Ops | `settings`, `audit_log`, `sounds` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. `sounds` is **dead schema** — the soundboard feature was removed but the table remains. |
+| Ops | `settings`, `audit_log` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. (The dead `sounds` table was dropped by migration 029, closing A-2026-07-13.) |
 
 ### How the schema is accessed
 

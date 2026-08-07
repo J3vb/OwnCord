@@ -2559,90 +2559,179 @@ ul.md-list-nested {
   filter: saturate(0.3);
 }
 
-/* ── User Profile Popup ── */
-.user-popup {
+/* ── User Profile Popup ──
+   Discord's popout shape: a floating card anchored to the click, a banner strip
+   across the top, and the avatar straddling the banner/body seam inside a ring
+   punched out of the card background.
+
+   `position: fixed` on both layers is load-bearing. These rules replaced an
+   earlier `.up-*` set that no longer matched the component's markup, so the
+   card rendered unstyled: `static` positioning discarded the computed
+   left/top and both layers laid out in normal flow at the end of <body>,
+   pushing the whole app up the page. */
+.upp-overlay {
   position: fixed;
+  inset: 0;
   z-index: 200;
+}
+.upp-popup {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  width: 300px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  display: none;
+  box-shadow: var(--elevation-high);
   overflow: hidden;
+  /* A long "about me" scrolls inside the card instead of growing it off the
+     bottom of the screen. */
+  max-height: calc(100vh - 16px);
+  opacity: 0;
+  transform: scale(0.95);
+  transform-origin: top left;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
 }
-.user-popup.open {
-  display: block;
+.upp-popup.open {
+  opacity: 1;
+  transform: scale(1);
 }
-.up-banner {
+.upp-banner {
   height: 60px;
+  flex-shrink: 0;
+  background: var(--accent-gradient);
 }
-.up-body {
-  padding: 36px 16px 16px;
+.upp-body {
   position: relative;
+  padding: 44px 16px 16px;
+  overflow-y: auto;
 }
-.up-avatar {
-  width: 64px;
-  height: 64px;
-  border-radius: var(--radius-circle);
+/* Positioned against the card, not the body. The body scrolls, and an
+   `overflow-y: auto` box also clips horizontally, so an avatar overhanging its
+   top edge would be sliced in half. Offset = banner height minus half the
+   avatar, so it straddles the seam. */
+.upp-avatar {
   position: absolute;
-  top: -32px;
+  top: 24px;
   left: 16px;
+  box-sizing: border-box;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-circle);
+  /* The ring is the card background rather than a border colour — that is what
+     makes the avatar read as punched through the banner. */
+  border: 6px solid var(--bg-primary);
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: var(--font-size-xxl);
   font-weight: 700;
-  font-size: 24px;
-  color: white;
+  color: #fff;
+}
+.upp-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-circle);
   border: 4px solid var(--bg-primary);
 }
-.up-name {
-  font-size: 18px;
+.upp-username {
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  color: white;
+  line-height: 1.2;
+  color: var(--header-primary);
+  overflow-wrap: anywhere;
 }
-.up-role {
-  font-size: 12px;
-  margin-top: 2px;
-}
-.up-section {
-  margin-top: 12px;
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  padding: 12px;
-}
-.up-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
-}
-.up-section-text {
-  font-size: 13px;
-  color: var(--text-normal);
-}
-.up-roles {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-.up-role-tag {
-  display: flex;
+.upp-role-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  margin-top: 8px;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   background: var(--bg-hover);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-normal);
 }
-.up-role-dot {
+.upp-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.upp-role-dot,
+.upp-status-dot-inline {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
+}
+/* Both sections are always built and left empty when the user has no data for
+   them, so they have to collapse rather than render as blank panels. */
+.upp-about,
+.upp-join-date {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.upp-about:empty,
+.upp-join-date:empty {
+  display: none;
+}
+.upp-section-title {
+  margin-bottom: 6px;
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.upp-about-text,
+.upp-join-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.upp-divider {
+  height: 1px;
+  margin: 12px 0;
+  background: var(--border);
+}
+.upp-actions {
+  display: flex;
+  gap: 8px;
+}
+.upp-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.upp-action-btn:hover {
+  background: var(--accent-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .upp-popup {
+    transition: none;
+  }
 }
 
 /* ── Emoji Picker ── */

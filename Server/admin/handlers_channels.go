@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -35,6 +36,32 @@ func validateChannelType(channelType string) string {
 
 // ─── Channel Handlers ────────────────────────────────────────────────────────
 
+// getAdminChannel loads the channel targeted by an admin channel mutation and
+// writes the error response when it is missing — or when it is a DM. DMs and
+// group DMs share the channels table and id space with guild channels, but
+// they belong to their participants, not to MANAGE_CHANNELS holders: listing,
+// renaming or deleting one from the admin surface would leak or destroy a
+// private conversation (A-2026-08-02). A DM id answers 404 rather than 403 so
+// the surface does not confirm which ids are private conversations. Returns
+// nil when a response has already been written.
+func getAdminChannel(database *db.DB, w http.ResponseWriter, r *http.Request) *db.Channel {
+	id, err := pathInt64(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
+		return nil
+	}
+	ch, err := database.GetChannel(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
+		return nil
+	}
+	if ch == nil || ch.Type == "dm" {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
+		return nil
+	}
+	return ch
+}
+
 func handleListChannels(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channels, err := database.ListChannels(r.Context())
@@ -42,7 +69,18 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
 			return
 		}
-		writeJSON(w, http.StatusOK, channels)
+		// The admin surface manages guild channels. DM rows live in the same
+		// table but are private conversations — enumerating them here exposed
+		// ids and user-chosen group names to any MANAGE_CHANNELS holder
+		// (A-2026-08-02). Filtered in Go because the sqlc ListChannels query is
+		// shared with the ready path, which applies its own visibility rules.
+		guildChannels := make([]db.Channel, 0, len(channels))
+		for i := range channels {
+			if channels[i].Type != "dm" {
+				guildChannels = append(guildChannels, channels[i])
+			}
+		}
+		writeJSON(w, http.StatusOK, guildChannels)
 	}
 }
 
@@ -158,21 +196,11 @@ func nsfwAuditSuffix(before, after bool) string {
 
 func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathInt64(r, "id")
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
-			return
-		}
-
-		existing, err := database.GetChannel(r.Context(), id)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
-			return
-		}
+		existing := getAdminChannel(database, w, r)
 		if existing == nil {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
 			return
 		}
+		id := existing.ID
 
 		// Start from existing values so a partial body is safe.
 		req := updateChannelRequest{
@@ -227,6 +255,17 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			// metadata — send targeted channel_create/channel_delete so
 			// connected clients re-sync without a reconnect.
 			if existing.Archived != updated.Archived {
+				// Archiving hides a voice channel the same way deleting it
+				// does — nobody can see it or reach it afterward — so live
+				// participants must be evicted the same way handleDeleteChannel
+				// evicts them, or they keep their DB row, VoiceTopic
+				// subscription and LiveKit session in a room nothing shows.
+				// Order matches handleDeleteChannel: evict before the
+				// visibility change so a voice_leave lands on clients that
+				// still have the channel subscribed.
+				if !existing.Archived && updated.Archived {
+					hub.CleanupVoiceForChannel(id)
+				}
 				hub.RefreshChannelVisibility(updated)
 			}
 		}
@@ -236,20 +275,17 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathInt64(r, "id")
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
-			return
-		}
-
-		existing, err := database.GetChannel(r.Context(), id)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
-			return
-		}
+		existing := getAdminChannel(database, w, r)
 		if existing == nil {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
 			return
+		}
+		id := existing.ID
+
+		// Evict voice participants BEFORE deleting the row: the voice_states
+		// FK cascade wipes the rows the cleanup reads, and the stale sweeper
+		// cannot recover participants of a channel that no longer exists.
+		if hub != nil {
+			hub.CleanupVoiceForChannel(id)
 		}
 
 		if err := database.AdminDeleteChannel(r.Context(), id); err != nil {
@@ -269,8 +305,8 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 func handleGetAuditLog(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := queryInt(r, "limit", 50, 1)
-		offset := queryInt(r, "offset", 0, 0)
+		limit := queryInt(r, "limit", 50, 1, 500)
+		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 
 		entries, err := database.GetAuditLog(r.Context(), limit, offset)
 		if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
 )
 
@@ -287,6 +288,39 @@ func TestVoice_Join_MissingChannelID_SendsError(t *testing.T) {
 	}
 }
 
+// TestVoice_Join_RejectsNonVoiceChannel locks the fix for v030: a voice_join
+// targeting a text (or other non-voice, non-dm) channel must be refused
+// before any state is persisted — hasChannelAccess only knows CONNECT_VOICE,
+// not channel type, so without an explicit type check a crafted voice_join
+// for a text channel would otherwise mint a LiveKit room and voice_state
+// broadcast for a channel the UI can never render.
+func TestVoice_Join_RejectsNonVoiceChannel(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "text-join")
+	chanID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+		t.Fatalf("error code = %q, want BAD_REQUEST", code)
+	}
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Error("voice_states row persisted for a voice_join against a text channel")
+	}
+}
+
 func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	chanID := seedVoiceChan(t, database, "vc-noperm")
@@ -542,6 +576,77 @@ func TestVoice_Camera_UpdatesState(t *testing.T) {
 	}
 }
 
+// TestVoice_Camera_DisableAllowedAfterPermissionRevoked locks the fix for
+// v033: only the enable direction is gated on USE_VIDEO, mirroring
+// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate. If disable were
+// still gated too, a moderator revoking USE_VIDEO mid-call would leave
+// voice_states.camera stuck at 1 — permanently burning a voice_max_video slot
+// — because the user could never send a voice_camera{enabled:false} that
+// passes the permission check.
+func TestVoice_Camera_DisableAllowedAfterPermissionRevoked(t *testing.T) {
+	hub, database := newVoiceHub(t)
+
+	// A custom role carrying USE_VIDEO (the test schema's default Member role
+	// does not, unlike production's migration 007).
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (100, 'hasvideo', NULL, ?, 5, 0)`,
+		permissions.ReadMessages|permissions.ConnectVoice|permissions.UseVideo,
+	); err != nil {
+		t.Fatalf("seed hasvideo role: %v", err)
+	}
+	user := seedVoiceUserWithRole(t, database, "cam-revoked", 100)
+	chanID := seedVoiceChan(t, database, "vc-cam-revoked")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chanID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(c, voiceCameraMsg(true))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil || !state.Camera {
+		t.Fatal("camera should be enabled before the permission is revoked")
+	}
+
+	// Revoke USE_VIDEO mid-call by reassigning to a role that lacks it.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (101, 'novideo', NULL, ?, 5, 0)`,
+		permissions.ReadMessages|permissions.ConnectVoice,
+	); err != nil {
+		t.Fatalf("seed novideo role: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET role_id = 101 WHERE id = ?`, user.ID); err != nil {
+		t.Fatalf("reassign user role: %v", err)
+	}
+
+	hub.HandleMessageForTest(c, voiceCameraMsg(false))
+
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
+	for _, m := range msgs {
+		if extractType(t, m) == "error" {
+			t.Fatalf("unexpected error disabling camera after permission revocation: %s", extractCode(t, m))
+		}
+	}
+	state, err = database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after disable: %v", err)
+	}
+	if state == nil || state.Camera {
+		t.Error("camera still enabled after voice_camera(false), permission revocation must not block disabling")
+	}
+}
+
 // TestVoice_Camera_NoPermission: Member without USE_VIDEO gets FORBIDDEN.
 func TestVoice_Camera_NoPermission(t *testing.T) {
 	hub, _ := newVoiceHub(t)
@@ -656,6 +761,76 @@ func TestVoice_Screenshare_UpdatesState(t *testing.T) {
 	}
 	if !foundVoiceState {
 		t.Error("voice_state broadcast not received after voice_screenshare toggle")
+	}
+}
+
+// TestVoice_Screenshare_DisableAllowedAfterPermissionRevoked locks the fix
+// for v082: only the enable direction is gated on SHARE_SCREEN, mirroring
+// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate. If disable were
+// still gated too, a moderator revoking SHARE_SCREEN mid-share would leave
+// voice_states.screenshare stuck at 1, so every subsequent voice_state kept
+// advertising a stream nobody can watch.
+func TestVoice_Screenshare_DisableAllowedAfterPermissionRevoked(t *testing.T) {
+	hub, database := newVoiceHub(t)
+
+	// A custom role carrying SHARE_SCREEN (the test schema's default Member
+	// role does not, unlike production's migration 007).
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (200, 'hasscreenshare', NULL, ?, 5, 0)`,
+		permissions.ReadMessages|permissions.ConnectVoice|permissions.ShareScreen,
+	); err != nil {
+		t.Fatalf("seed hasscreenshare role: %v", err)
+	}
+	user := seedVoiceUserWithRole(t, database, "ss-revoked", 200)
+	chanID := seedVoiceChan(t, database, "vc-ss-revoked")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chanID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil || !state.Screenshare {
+		t.Fatal("screenshare should be enabled before the permission is revoked")
+	}
+
+	// Revoke SHARE_SCREEN mid-share by reassigning to a role that lacks it.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (102, 'noscreenshare', NULL, ?, 5, 0)`,
+		permissions.ReadMessages|permissions.ConnectVoice,
+	); err != nil {
+		t.Fatalf("seed noscreenshare role: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET role_id = 102 WHERE id = ?`, user.ID); err != nil {
+		t.Fatalf("reassign user role: %v", err)
+	}
+
+	hub.HandleMessageForTest(c, voiceScreenshareMsg(false))
+
+	msgs := drainChanTimeout(send, 30*time.Millisecond)
+	for _, m := range msgs {
+		if extractType(t, m) == "error" {
+			t.Fatalf("unexpected error disabling screenshare after permission revocation: %s", extractCode(t, m))
+		}
+	}
+	state, err = database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after disable: %v", err)
+	}
+	if state == nil || state.Screenshare {
+		t.Error("screenshare still enabled after voice_screenshare(false), permission revocation must not block disabling")
 	}
 }
 
@@ -942,6 +1117,64 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 		t.Error("user should be in channel B after switching")
 	}
 }
+
+// TestVoice_Join_SwitchChannel_PreservesServerMute locks the fix for v029: a
+// moderator-imposed server mute/deafen must survive a channel switch. The
+// switch path deletes and re-inserts the voice_states row (via
+// handleVoiceLeave then JoinVoiceChannel), which would otherwise never reach
+// the ON CONFLICT branch voice.sql relies on to keep server_muted sticky —
+// silently lifting the mute the moment the user changes channels.
+func TestVoice_Join_SwitchChannel_PreservesServerMute(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "switch-muted")
+	chanA := seedVoiceChan(t, database, "vc-switch-muted-a")
+	chanB := seedVoiceChan(t, database, "vc-switch-muted-b")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chanA, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	if err := database.SetVoiceServerMute(context.Background(), user.ID, true); err != nil {
+		t.Fatalf("SetVoiceServerMute: %v", err)
+	}
+	if err := database.SetVoiceServerDeafen(context.Background(), user.ID, true); err != nil {
+		t.Fatalf("SetVoiceServerDeafen: %v", err)
+	}
+
+	// Switch to channel B.
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanB))
+
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after switch: %v", err)
+	}
+	if state == nil || state.ChannelID != chanB {
+		t.Fatalf("user should be in channel B after switching, got %+v", state)
+	}
+	if !state.ServerMuted {
+		t.Error("ServerMuted was cleared by the channel switch, want it to survive")
+	}
+	if !state.ServerDeafened {
+		t.Error("ServerDeafened was cleared by the channel switch, want it to survive")
+	}
+}
+
+// NOTE on v088 (BUG-088, the join/sweep ghost race): handleVoiceJoin now
+// calls c.setVoiceState immediately after the DB row commits instead of after
+// the permission checks and LiveKit token generation that used to follow it,
+// and re-checks (channel, join token) before subscribing and broadcasting so
+// an eviction that lands during the token round trip is not undone. Neither
+// half is tested here: HandleMessageForTest runs the handler synchronously to
+// completion on the calling goroutine, so any assertion made after it returns
+// reflects only the final state and cannot distinguish the old ordering from
+// the new one — a genuine repro needs a second goroutine to land inside a
+// live handler call. What remains after this change is the window before the
+// row commits, which only a grace-period guard in sweepStaleVoiceStates
+// (hub_sweep.go, outside this batch) can close — see cross_batch.
 
 // TestVoice_Join_SameChannel_IsIdempotent verifies that joining the same channel
 // twice returns ALREADY_JOINED.

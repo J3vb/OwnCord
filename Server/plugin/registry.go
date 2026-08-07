@@ -71,6 +71,11 @@ type Instance struct {
 	// module is the wazero compiled module in the wazero-tagged build, or
 	// nil in the default build.
 	module any //nolint:unused // assigned by wazero-tagged build
+
+	// compiled is the wazero CompiledModule behind module. Retained so
+	// teardown can close it — the shared runtime otherwise keeps every
+	// compile from every re-activation cycle until process exit.
+	compiled any //nolint:unused // assigned by wazero-tagged build
 }
 
 // UITabBinding is the public projection of a plugin's declared UI tab,

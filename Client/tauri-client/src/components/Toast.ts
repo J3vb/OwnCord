@@ -100,7 +100,16 @@ export function createToastContainer(): ToastContainer {
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "toast-container", "data-testid": "toast-container" });
+    // One polite live region for all toasts (DC-13): screen readers announce
+    // each toast as it is appended without interrupting current speech.
+    // aria-atomic="false" so only the newly added toast is read, not the stack.
+    root = createElement("div", {
+      class: "toast-container",
+      "data-testid": "toast-container",
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "false",
+    });
     container.appendChild(root);
   }
 

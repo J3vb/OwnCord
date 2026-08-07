@@ -88,17 +88,31 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	// Permission check.
-	if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
-		return *r
-	}
-
 	enabled := cameraCmd.Enabled()
+
+	// Only the enable direction is gated on USE_VIDEO — mirrors
+	// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate: once a
+	// moderator revokes the permission mid-call, the user must still be able
+	// to turn their camera off, or voice_states.camera stays stuck at 1 —
+	// permanently burning a voice_max_video slot — until they leave voice,
+	// since nothing else ever clears it.
+	if enabled {
+		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
+			return *r
+		}
+	}
 
 	// Enforce MaxVideo limit when enabling camera using an atomic check-and-update.
 	if enabled {
 		ch, chErr := d.DB.GetChannel(ctx, voiceChID)
-		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 {
+		if chErr != nil {
+			// Fail closed: an unreadable channel row is not "no cap
+			// configured" — falling through to the unconditional enable
+			// bypasses the per-channel video limit.
+			slog.Error("handleVoiceCameraV2 GetChannel", "err", chErr, "channel_id", voiceChID)
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
+		}
+		if ch != nil && ch.VoiceMaxVideo > 0 {
 			ok, limitErr := d.DB.EnableCameraIfUnderLimit(ctx, userID, voiceChID, ch.VoiceMaxVideo)
 			if limitErr != nil {
 				slog.Error("handleVoiceCameraV2 EnableCameraIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
@@ -143,16 +157,25 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	// Permission check.
-	if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
-		return *r
+	enabled := ssCmd.Enabled()
+
+	// Only the enable direction is gated on SHARE_SCREEN — mirrors
+	// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate: once a
+	// moderator revokes the permission mid-share, the user must still be able
+	// to stop sharing, or voice_states.screenshare stays stuck at 1 — every
+	// subsequent voice_state keeps advertising a stream nobody can watch —
+	// until they leave voice.
+	if enabled {
+		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
+			return *r
+		}
 	}
 
-	if err := d.DB.UpdateVoiceScreenshare(ctx, userID, ssCmd.Enabled()); err != nil {
+	if err := d.DB.UpdateVoiceScreenshare(ctx, userID, enabled); err != nil {
 		slog.Error("ws handleVoiceScreenshareV2 UpdateVoiceScreenshare", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update screenshare state"}}
 	}
-	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", ssCmd.Enabled(), "channel_id", voiceChID)
+	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
 
 	return voiceStateBroadcast(ctx, d, userID)
 }

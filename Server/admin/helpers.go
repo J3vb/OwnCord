@@ -35,8 +35,11 @@ func pathInt64(r *http.Request, param string) (int64, error) { //nolint:unparam 
 }
 
 // queryInt parses an integer query parameter with a minimum and maximum bound.
-// Use minVal=1 for limit parameters, minVal=0 for offset parameters.
-func queryInt(r *http.Request, key string, defaultVal, minVal int) int {
+// Use minVal=1 for limit parameters, minVal=0 for offset parameters. maxVal
+// caps limit parameters to prevent unbounded result sets; offset callers pass
+// a large bound — clamping offset with the limit cap would make pagination
+// unable to advance past row maxVal+limit.
+func queryInt(r *http.Request, key string, defaultVal, minVal, maxVal int) int {
 	raw := r.URL.Query().Get(key)
 	if raw == "" {
 		return defaultVal
@@ -45,10 +48,8 @@ func queryInt(r *http.Request, key string, defaultVal, minVal int) int {
 	if err != nil || n < minVal {
 		return defaultVal
 	}
-	// Cap to prevent unbounded result sets exhausting memory.
-	const maxLimit = 500
-	if n > maxLimit {
-		return maxLimit
+	if n > maxVal {
+		return maxVal
 	}
 	return n
 }

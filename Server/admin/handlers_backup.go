@@ -176,6 +176,19 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		dbPath := filepath.Join("data", "chatserver.db")
 
+		actor := actorFromContext(r)
+		// Audit the restore BEFORE the pre-restore safety copy is taken, and
+		// synchronously (LogAudit, not WriteAudit): the restore overwrites the
+		// live database file, so the only durable home for this row is the
+		// pre_restore_* backup captured below — an entry enqueued on the async
+		// WriteAudit path could still be sitting in the writer's buffer when
+		// BackupTo snapshots the DB. Best-effort per policy D8: a failed write
+		// is logged, never a reason to refuse the restore.
+		if err := database.LogAudit(context.WithoutCancel(r.Context()), actor, "backup_restore", "server", 0,
+			fmt.Sprintf("restoring backup %s", name)); err != nil {
+			slog.Error("audit log write failed", "action", "backup_restore", "actor_id", actor, "error", err)
+		}
+
 		// Safety: create a pre-restore backup before overwriting. WithoutCancel:
 		// the restore proceeds regardless of client disconnect (Close/copyFile
 		// below are not ctx-aware), so the safety backup must not be skippable
@@ -205,7 +218,6 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
 		}
 
-		actor := actorFromContext(r)
 		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
 
 		if err := database.Close(); err != nil {
@@ -217,7 +229,23 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
 		if err := copyFile(target, dbPath); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to restore database file")
+			// copyFile truncates the destination with os.Create before it can know
+			// whether the read will succeed, so the live database file is already
+			// destroyed by the time we get here — and the DB is closed, so nothing
+			// is holding the old contents. Put the safety copy back rather than
+			// leaving the operator with a zero-byte database.
+			slog.Error("restore copy failed — rolling back to the pre-restore safety copy", "backup", name, "err", err)
+			msg := "failed to restore database file — the pre-restore safety copy was put back, server restarting"
+			if rbErr := copyFile(preRestore, dbPath); rbErr != nil {
+				slog.Error("rollback from the pre-restore safety copy failed — recover manually",
+					"safety_copy", preRestore, "err", rbErr)
+				msg = "failed to restore database file AND failed to roll back — recover manually from " + filepath.Base(preRestore)
+			}
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", msg)
+			// The database was closed before the copy: this process cannot serve
+			// anything more either way, so it must respawn exactly as it does on
+			// the success path.
+			go requestRestart("backup_restore_failed")
 			return
 		}
 

@@ -1,14 +1,38 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   dmStore,
   setDmChannels,
   addDmChannel,
   removeDmChannel,
+  closeDmLocally,
   updateDmLastMessage,
   updateDmLastMessagePreview,
   clearDmUnread,
+  updateDmParticipant,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { channelsStore } from "../../src/stores/channels.store";
+import type { Channel } from "../../src/stores/channels.store";
+
+function makeMirrorChannel(overrides: Partial<Channel> = {}): Channel {
+  return {
+    id: 5,
+    name: "bob",
+    type: "dm",
+    category: null,
+    position: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+    lastMessageId: null,
+    canSend: true,
+    slowMode: 0,
+    topic: "",
+    nsfw: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
+    ...overrides,
+  };
+}
 
 function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
@@ -110,6 +134,168 @@ describe("dmStore", () => {
       removeDmChannel(1);
       const after = dmStore.getState().channels;
       expect(after).not.toBe(before);
+    });
+  });
+
+  // ── closeDmLocally ─────────────────────────────────────
+
+  describe("closeDmLocally", () => {
+    beforeEach(() => {
+      channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    });
+
+    it("removes the channel and does not run the fallback when it was not active", () => {
+      setDmChannels([makeDm({ channelId: 5 }), makeDm({ channelId: 6 })]);
+      const fallback = vi.fn();
+
+      closeDmLocally(5, fallback);
+
+      expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([6]);
+      expect(fallback).not.toHaveBeenCalled();
+    });
+
+    it("removes the channel and runs the fallback when it was the active channel", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+      const fallback = vi.fn();
+
+      closeDmLocally(5, fallback);
+
+      expect(dmStore.getState().channels).toHaveLength(0);
+      expect(fallback).toHaveBeenCalledOnce();
+    });
+
+    // Regression: addDmToChannelsStore synthesizes a `type: "dm"` mirror row
+    // into channelsStore on selection, which setChannels re-carries across
+    // every `ready`. closeDmLocally must remove that mirror too, or its
+    // unread count survives the close and keeps "Mark All as Read" lit for a
+    // DM that is no longer open anywhere.
+    it("also removes the channelsStore mirror row for the closed DM", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(5, makeMirrorChannel({ id: 5, unreadCount: 3 }));
+        return { ...prev, channels: next };
+      });
+
+      closeDmLocally(5, vi.fn());
+
+      expect(channelsStore.getState().channels.has(5)).toBe(false);
+    });
+
+    it("clears activeChannelId on the channelsStore mirror when it was active there too", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(5, makeMirrorChannel({ id: 5 }));
+        return { ...prev, channels: next, activeChannelId: 5 };
+      });
+      const fallback = vi.fn();
+
+      closeDmLocally(5, fallback);
+
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+      expect(fallback).toHaveBeenCalledOnce();
+    });
+
+    it("does not touch an unrelated channelsStore mirror row", () => {
+      setDmChannels([makeDm({ channelId: 5 }), makeDm({ channelId: 6 })]);
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(5, makeMirrorChannel({ id: 5 }));
+        next.set(6, makeMirrorChannel({ id: 6 }));
+        return { ...prev, channels: next };
+      });
+
+      closeDmLocally(5, vi.fn());
+
+      expect(channelsStore.getState().channels.has(6)).toBe(true);
+    });
+  });
+
+  // ── updateDmParticipant ─────────────────────────────────
+
+  describe("updateDmParticipant", () => {
+    it("patches the recipient's status across matching DM channels", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+        }),
+      ]);
+
+      updateDmParticipant(10, { status: "dnd" });
+
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.recipient.status).toBe("dnd");
+      expect(ch.participants[0]!.status).toBe("dnd");
+    });
+
+    it("patches username/avatar/displayName on a profile change", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          recipient: { id: 10, username: "bob", avatar: "old.png", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "old.png", status: "online" }],
+        }),
+      ]);
+
+      updateDmParticipant(10, { username: "bobby", avatar: "new.png", displayName: "Bobby" });
+
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.recipient.username).toBe("bobby");
+      expect(ch.recipient.avatar).toBe("new.png");
+      expect(ch.recipient.displayName).toBe("Bobby");
+    });
+
+    it("updates a non-recipient participant of a group DM", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          isGroup: true,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [
+            { id: 10, username: "bob", avatar: "", status: "online" },
+            { id: 11, username: "carol", avatar: "", status: "online" },
+          ],
+        }),
+      ]);
+
+      updateDmParticipant(11, { status: "idle" });
+
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.recipient.status).toBe("online");
+      expect(ch.participants.find((p) => p.id === 11)?.status).toBe("idle");
+    });
+
+    it("is a no-op when the user id matches no participant anywhere", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      const before = dmStore.getState();
+
+      updateDmParticipant(999, { status: "dnd" });
+
+      expect(dmStore.getState()).toBe(before);
+    });
+
+    it("does not modify channels the user is not part of", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+        }),
+        makeDm({
+          channelId: 6,
+          recipient: { id: 20, username: "carol", avatar: "", status: "online" },
+          participants: [{ id: 20, username: "carol", avatar: "", status: "online" }],
+        }),
+      ]);
+
+      updateDmParticipant(10, { status: "dnd" });
+
+      const other = dmStore.getState().channels.find((c) => c.channelId === 6)!;
+      expect(other.recipient.status).toBe("online");
     });
   });
 

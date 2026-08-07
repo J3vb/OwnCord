@@ -52,6 +52,13 @@ function defaultNextFrame(): Promise<void> {
 export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
   const nextFrame = opts.nextFrame ?? defaultNextFrame;
 
+  // Generation counter: every jumpTo() call claims the latest generation at
+  // entry. Concurrent jumps to the same channel are not serialized, so
+  // without this an older request whose response lands after a newer jump
+  // already applied its window would silently overwrite it (last network
+  // reply wins instead of last click).
+  let jumpGen = 0;
+
   /** Scroll the mounted list to a message, if that list is showing `channelId`. */
   function scrollIfMounted(channelId: number, messageId: number): boolean {
     const ctrl = opts.getChannelCtrl();
@@ -61,6 +68,8 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
   }
 
   async function jumpTo(channelId: number, messageId: number): Promise<boolean> {
+    const gen = ++jumpGen;
+
     // A permalink to a channel this user cannot see must degrade quietly
     // rather than blank the chat area on an unknown id.
     if (findChannelById(channelId) === null) {
@@ -86,6 +95,10 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       const resp = await opts.api.getMessagesAround(channelId, messageId, {
         limit: AROUND_WINDOW,
       });
+      // A newer jump was fired (and possibly already resolved) while this
+      // fetch was in flight — its response landing now must not clobber the
+      // window the newer jump already applied.
+      if (gen !== jumpGen) return false;
       setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 404) {
@@ -106,6 +119,7 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
 
     // The store update re-renders the list; scroll on the next frame.
     await nextFrame();
+    if (gen !== jumpGen) return false;
     if (scrollIfMounted(channelId, messageId)) return true;
 
     log.warn("Around-window loaded but the row did not render", { channelId, messageId });

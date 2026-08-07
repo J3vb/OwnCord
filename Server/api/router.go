@@ -49,7 +49,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// unconditionally.
 	r.Use(telemetry.HTTPMiddleware())
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {
@@ -236,7 +236,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
 	r.With(AuthMiddleware(database),
 		RequirePermission(permissions.Administrator),
-		RateLimitMiddleware(limiter, 5, time.Minute, cfg.Server.TrustedProxies)).
+		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 

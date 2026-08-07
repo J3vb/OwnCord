@@ -54,19 +54,28 @@ describe("identity keyring wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("delete_identity_key", { host: "chat.example" });
   });
 
-  it("returns false/null and swallows errors when a command rejects", async () => {
+  it("returns false and swallows errors when a command rejects (save/delete)", async () => {
     invokeMock.mockRejectedValue(new Error("keyring boom"));
     expect(await saveIdentityKey("h", "k")).toBe(false);
-    expect(await loadIdentityKey("h")).toBeNull();
     expect(await deleteIdentityKey("h")).toBe(false);
+  });
+
+  it("loadIdentityKey rethrows (does not swallow) when the command rejects", async () => {
+    // A keyring read error must not be indistinguishable from "nothing
+    // stored" — loadOrGenerateIdentityKeyPair uses a null return to decide
+    // whether to mint a brand-new identity keypair, so swallowing an error
+    // into null here mints and publishes a fresh identity on every transient
+    // store failure, invalidating every peer's TOFU pin.
+    invokeMock.mockRejectedValueOnce(new Error("keyring boom"));
+    await expect(loadIdentityKey("h")).rejects.toThrow("keyring boom");
   });
 });
 
 describe("identity pin wrappers", () => {
   it("storeIdentityPin invokes store_identity_pin with { host, userId, pin }", async () => {
     invokeMock.mockResolvedValue(undefined);
-    const ok = await storeIdentityPin("chat.example", "42", "pubkey");
-    expect(ok).toBe(true);
+    const result = await storeIdentityPin("chat.example", "42", "pubkey");
+    expect(result).toBe("stored");
     expect(invokeMock).toHaveBeenCalledWith("store_identity_pin", {
       host: "chat.example",
       userId: "42",
@@ -74,15 +83,48 @@ describe("identity pin wrappers", () => {
     });
   });
 
-  it("getIdentityPin returns the pinned key, or null when never pinned", async () => {
+  it("storeIdentityPin reports 'failed' (not silently truthy/falsy) when the write rejects", async () => {
+    // The whole point of the tri-state result: a real write error (disk
+    // full, unwritable pins file) must be distinguishable from "no-store"
+    // (non-Tauri, by design) — collapsing both to `false` let a caller
+    // treat a failed write the same as "nothing to persist" and still show
+    // "verified" with no pin ever saved.
+    invokeMock.mockRejectedValueOnce(new Error("disk full"));
+    const result = await storeIdentityPin("chat.example", "42", "pubkey");
+    expect(result).toBe("failed");
+    expect(logMock.error).toHaveBeenCalledWith(
+      "Failed to store identity pin",
+      expect.objectContaining({ host: "chat.example", userId: "42" }),
+    );
+  });
+
+  it("getIdentityPin returns the pinned key when one is stored", async () => {
     invokeMock.mockResolvedValueOnce("pubkey");
-    expect(await getIdentityPin("chat.example", "42")).toBe("pubkey");
-    invokeMock.mockResolvedValueOnce(null);
-    expect(await getIdentityPin("chat.example", "42")).toBeNull();
+    expect(await getIdentityPin("chat.example", "42")).toEqual({
+      status: "pinned",
+      pin: "pubkey",
+    });
     expect(invokeMock).toHaveBeenCalledWith("get_identity_pin", {
       host: "chat.example",
       userId: "42",
     });
+  });
+
+  it("getIdentityPin reports 'unpinned' when the store holds nothing (first sight)", async () => {
+    invokeMock.mockResolvedValueOnce(null);
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unpinned" });
+  });
+
+  it("getIdentityPin reports a store error as 'unavailable', never 'unpinned' (DC-08)", async () => {
+    // The distinction is the whole fix: a transient keyring failure must not
+    // masquerade as "never pinned", or verification silently falls through to
+    // the first-sight path and re-pins whatever key the server delivered.
+    invokeMock.mockRejectedValueOnce(new Error("keyring boom"));
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unavailable" });
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringContaining("unavailable"),
+      expect.objectContaining({ host: "chat.example", userId: "42" }),
+    );
   });
 });
 
@@ -186,6 +228,18 @@ describe("getOrCreateIdentityKeyPair", () => {
     });
   });
 
+  it("aborts instead of regenerating when the keyring read fails (does not overwrite an unreadable identity)", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.reject(new Error("keychain locked"));
+      return Promise.resolve(undefined);
+    });
+
+    await expect(getOrCreateIdentityKeyPair("chat.example")).rejects.toThrow("keychain locked");
+    // Must not have minted and saved a brand-new identity over the top of an
+    // unreadable (not necessarily absent) stored key.
+    expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
+  });
+
   it("stays quiet when the store round-trips the key", async () => {
     let savedBlob: string | undefined;
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
@@ -274,6 +328,20 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
 
     expect(published).toBe(false);
     expect(second).not.toHaveBeenCalled();
+  });
+
+  it("does not mint/publish a new identity key when the keyring read fails (fire-and-forget)", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.reject(new Error("keychain locked"));
+      return Promise.resolve(undefined);
+    });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    expect(published).toBe(false);
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
   });
 
   it("swallows a failing profile update (fire-and-forget, never throws)", async () => {

@@ -5,6 +5,83 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## Unreleased
+
+- **fix(client):** the user profile popup is styled correctly again
+  (`a308f81`).
+- **fix(client):** Vite no longer watches `src-tauri/`, so a running dev
+  server does not rebuild the frontend when Rust sources or build artifacts
+  change (`cdcfc03`).
+- **fix(release):** the stripped Linux AppImage is signed from the
+  environment-provided key instead of a temporary key file (`9d75890`) —
+  release-pipeline only, no operator action needed.
+- **docs:** full documentation audit against `5630aa1` — reference docs,
+  architecture pages, and UX specs corrected; plans and prior audits given
+  verified statuses; see `docs/audit-2026-08-04-docs-and-coverage.md`.
+- **security(server):** closed the three 2026-08-04 review findings — the
+  channel role-override **DELETE** now enforces the same hierarchy guard as
+  PUT (A-2026-08-01); the admin channel list/edit/delete surface no longer
+  sees DM channels, answering 404 for their ids (A-2026-08-02); DM call
+  rings respect blocks like every other DM interaction (A-2026-08-03).
+  Behavioural note: deleting a channel override for a *nonexistent* role now
+  returns 404 (was 204), matching PUT.
+- **server:** migration **029** drops the never-used `sounds` table (dead
+  since the initial schema; A-2026-07-13). Applies automatically on first
+  start; no operator action.
+- **protocol:** the plugin command family (`chat_command`, `command_reply`,
+  `plugin_broadcast`) is now part of `protocol-schema.json` and the
+  generated constants (27 client→server / 39 server→client). Wire strings
+  are unchanged — no client or plugin impact.
+- **chore(client):** dead modules deleted (`ServerStrip`, `FileUpload`,
+  `reconcile`, a stray worklet copy, orphan sounds API methods) and the
+  unused tauri-typegen pipeline retired (`src/generated/**`, its CI steps,
+  config block, and build-dependency).
+- **ci:** knip is now blocking; Playwright specs are typechecked
+  (`typecheck:e2e`); three orphaned native e2e specs run again;
+  `claude.yml` actions are SHA-pinned; the PR template asks for docs
+  updates per the architecture maintenance rule.
+- **tests(client):** the TOFU certificate ceremony has e2e coverage
+  (first-use + mismatch journeys), and `modalFactory` is fully covered.
+- **security(client):** the voice-E2EE identity pin lookup fails **closed**
+  on keyring errors (DC-08): a transient store failure used to read as
+  "never pinned", silently sending a pinned peer down the first-sight path
+  and re-pinning whatever key the server delivered. An unreadable pin store
+  now rejects the peer's announce, writes nothing, and shows a distinct
+  amber "could not check" badge until the store recovers.
+- **feat(client):** accessibility pass over the modal/overlay stack
+  (DC-13): every modal is a labelled `role="dialog"` with a focus trap and
+  focus restore, Escape maps to each dialog's safe action, the settings
+  sidebar is a keyboard-navigable tablist, the quick switcher and composer
+  autocompletes are wired as combobox/listbox, the emoji/GIF pickers are
+  keyboard-operable, and toasts/typing announce via polite live regions.
+- **feat(client):** UX polish (DC-12): deleting the active channel now
+  says so in a toast; reactions toggle optimistically with rollback on
+  failure; the role-change menu can no longer double-fire; a document-level
+  listener leak in channel drag-reorder is fixed.
+- **feat(admin):** restoring a backup now writes a `backup_restore`
+  audit-log row (DC-09). The row is written before the pre-restore safety
+  copy, so it lives inside the `pre_restore_*.db` backup — the restored
+  database itself cannot carry it (the restore replaces the file).
+- **ci:** the `-tags wazero` / `-tags otel` Go tests now actually run in CI
+  (DC-06) — previously those variants were only compiled, leaving ~600
+  lines of plugin/telemetry tests permanently dark.
+- **tests(client):** e2e journeys for voice-E2EE identity verification
+  (badge states + mismatch modal, driven through the real crypto path) and
+  the updater (banner → progress → auto-relaunch), plus an accessibility
+  smoke; full web suite now 291 tests.
+
+- **server/admin:** in-place self-update is refused in container
+  deployments (503 `CONTAINER_DEPLOYMENT`; the shipped image sets
+  `OWNCORD_CONTAINER=1`, bind-mount operators can set `0` to opt back in).
+  Container upgrades are image pulls; `GET /admin/api/updates` now reports
+  `can_apply` and the admin panel says so instead of offering the button.
+- **ci:** the full client e2e suite now blocks merges (DC-07); a new
+  non-blocking `admin-e2e` job drives the admin panel against a real server
+  (first-run wizard, channel CRUD, audit log, re-login).
+- **docs:** the dependency pinning/review policy is written down in
+  `docs/contributing.md`, closing the last 2026-04 audit carryover that was
+  still undecided.
+
 ## v1.2.0-alpha.1 — Discord feature parity
 
 > **Project reset note:** OwnCord has re-entered alpha. The `v1.0.0` release is
@@ -256,6 +333,6 @@ claimed behaviour — no product code changed and no assertion weakened.
 The project is under a feature freeze until the beta reset completes.
 Explicitly deferred (not abandoned unless noted): real OpenTelemetry SDK
 wiring, the Postgres backend (scaffolding removed pending real demand),
-the slash-command dispatcher (`docs/plans/slash-commands.md`), and the
-Solid.js migration (abandoned — the experiment is being removed in favor
-of the established vanilla component pattern).
+and the slash-command dispatcher (`docs/plans/slash-commands.md`). The
+Solid.js migration was abandoned and its experiment fully removed
+(2026-07-19) in favor of the established vanilla component pattern.

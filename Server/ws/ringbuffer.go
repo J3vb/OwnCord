@@ -58,6 +58,15 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 		return nil
 	}
 
+	// Likewise if the client claims events newer than anything we ever held:
+	// its counter and ours disagree (a restart can reseed seq below a client's
+	// remembered lastSeq), so an empty slice here would be read as "caught up"
+	// and freeze that client. afterSeq == newestSeq is the legitimate caught-up
+	// case and still returns an empty replay.
+	if afterSeq > rb.newestSeqLocked() {
+		return nil
+	}
+
 	result := make([][]byte, 0)
 	for i := 0; i < rb.count; i++ {
 		idx := (oldestIdx + i) % rb.size
@@ -67,6 +76,12 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 		}
 	}
 	return result
+}
+
+// newestSeqLocked returns the highest sequence number in the buffer. Callers
+// must hold rb.mu and must have checked rb.count > 0.
+func (rb *EventRingBuffer) newestSeqLocked() uint64 {
+	return rb.entries[(rb.pos-1+rb.size)%rb.size].seq
 }
 
 // EventsSinceFiltered returns events with seq > afterSeq whose channelID is
@@ -84,6 +99,12 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 	oldestSeq := rb.entries[oldestIdx].seq
 
 	if afterSeq <= oldestSeq {
+		return nil
+	}
+
+	// See EventsSince: a client ahead of everything we ever buffered must get a
+	// full ready, not a silent "caught up".
+	if afterSeq > rb.newestSeqLocked() {
 		return nil
 	}
 

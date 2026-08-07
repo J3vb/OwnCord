@@ -73,6 +73,27 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
+	// channel_id is attacker-controlled and requireChannelAccess above only
+	// gates CONNECT_VOICE, which says nothing about channel type — a text or
+	// announcement channel would otherwise accept a join, persist a
+	// voice_states row, mint a LiveKit room and broadcast voice_state for a
+	// channel the UI can never render or moderate. 'dm' stays allowed: DM and
+	// group voice calls join through this same handler.
+	if ch.Type != "voice" && ch.Type != "dm" {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "not a voice channel"))
+		return
+	}
+
+	// Archived channels are hidden from every client and their voice states are
+	// dropped from `ready`, but `archived` was consulted only by the visibility
+	// predicate — so a caller still holding the id could join the room of a
+	// channel nobody can see or moderate. Refuse the join outright; the sibling
+	// archive transition also evicts whoever is already inside.
+	if ch.Archived {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel is archived"))
+		return
+	}
+
 	// Ensure authenticated user is present before any state changes.
 	// This guard covers all downstream paths (LiveKit configured or not)
 	// that dereference c.user (e.g. c.user.Username in the success log).
@@ -105,6 +126,26 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
+	// A moderator-imposed mute/deafen must survive a channel switch.
+	// voice.sql's ON CONFLICT branch preserves server_muted/server_deafened
+	// across a plain re-join, but the switch below deletes the row via
+	// handleVoiceLeave and lets JoinVoiceChannel(IfCapacity) re-insert it, so
+	// that branch is never reached: the flags are snapshotted here and
+	// reapplied once the new row exists.
+	//
+	// This covers the self-switch only. voice_mod_move deletes the row on the
+	// moderator's goroutine (DisconnectFromVoice) before the target's client
+	// re-joins, so by the time this handler runs there is nothing left to read
+	// and currentChID is already 0 — preserving the flags across a move needs
+	// state that outlives the row (see the cross-batch note on v029).
+	var wasServerMuted, wasServerDeafened bool
+	if currentChID > 0 {
+		if prevState, prevErr := h.db.GetVoiceState(ctx, c.userID); prevErr == nil && prevState != nil {
+			wasServerMuted = prevState.ServerMuted
+			wasServerDeafened = prevState.ServerDeafened
+		}
+	}
+
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
 		h.handleVoiceLeave(ctx, c)
@@ -124,8 +165,15 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
 				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
-			// Restore client voice state so the user knows they're still in the old channel.
+			// Restore client voice state so the user knows they're still in the
+			// old channel. The failed leave already dropped the voice-topic
+			// subscription and key-holder entry, and voice state and topic
+			// subscription must move as a pair (see clearVoiceAndUnsubscribe)
+			// — without them the restored session silently misses every
+			// voice_e2ee relay for its channel.
 			c.setVoiceState(vs.ChannelID, vs.JoinedAt)
+			h.pubsub.Subscribe(c, VoiceTopic(vs.ChannelID))
+			h.updateKeyHolder(vs.ChannelID)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
 			return
 		}
@@ -162,11 +210,55 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
+	// BUG-088: set the client's voice channel as soon as the DB row is
+	// confirmed committed, before the permission checks and LiveKit token
+	// generation below (which can take several round trips). Leaving this
+	// until after those steps left a window where the concurrent stale-voice
+	// sweep sees c.getVoiceChID() still 0 while the row already exists,
+	// misclassifies the in-flight join as a ghost and deletes it — leaving
+	// the joiner live on the hub and in the SFU with no DB row. A failure
+	// further down still unwinds this via rollbackVoiceJoin's
+	// c.clearVoiceChID(), same as before.
+	c.setVoiceState(channelID, state.JoinedAt)
+
+	// Restore a moderator-imposed mute/deafen that predates this switch (see
+	// the snapshot above). Best-effort: a failure here is logged but does not
+	// fail the join, matching every other SetVoiceServerMute/Deafen call site.
+	if wasServerMuted || wasServerDeafened {
+		if wasServerMuted {
+			if err := h.db.SetVoiceServerMute(ctx, c.userID, true); err != nil {
+				slog.Error("ws handleVoiceJoin SetVoiceServerMute (restore)", "err", err, "user_id", c.userID)
+			}
+		}
+		if wasServerDeafened {
+			if err := h.db.SetVoiceServerDeafen(ctx, c.userID, true); err != nil {
+				slog.Error("ws handleVoiceJoin SetVoiceServerDeafen (restore)", "err", err, "user_id", c.userID)
+			}
+		}
+		// Re-read so the voice_state broadcast below carries the restored
+		// flags rather than the plain-insert defaults — that broadcast is what
+		// makes the mute effective on the target's own client and visible to
+		// everyone else.
+		//
+		// No SFU mute is applied here: MuteParticipantAudio resolves the
+		// participant in the destination room first, and this join has not even
+		// minted its token yet, so the call could only fail (after a LiveKit
+		// round trip on the read pump). As everywhere else in the voice
+		// moderation path, the persisted server_muted is the authority — it
+		// blocks the target's own unmute and is re-applied at the SFU whenever
+		// the moderator next acts.
+		if refreshed, refErr := h.db.GetVoiceState(ctx, c.userID); refErr == nil && refreshed != nil {
+			state = refreshed
+		}
+	}
+
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
-	// NOTE: setVoiceState is deferred until after token send succeeds, so
-	// rollback does not broadcast a spurious voice_leave for an unannounced join.
+	// NOTE: the joiner's own state was already set above (BUG-088), but
+	// nobody else has been told about the join yet — rollbackVoiceJoin below
+	// is still called with broadcast=false, so a failure here does not
+	// broadcast a spurious voice_leave for a join no other client ever saw.
 	if h.livekit != nil {
 		// Derive publish permissions from role — prevents SFU-level bypass
 		// when client connects directly via direct_url (BUG-128). With a
@@ -220,8 +312,20 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), isKeyHolder))
 	}
 
-	// Set voice channel on the client AFTER token is sent successfully.
-	c.setVoiceState(channelID, state.JoinedAt)
+	// Voice channel state itself was already set above (BUG-088), immediately
+	// after the DB row committed — which also means a concurrent eviction (the
+	// revocation sweep, a participant_left webhook, a moderator kick/move) can
+	// now land on THIS join instance while the token round trip above is in
+	// flight. Those all clear the client's voice state and delete the row after
+	// deciding against it, so completing the join here would resurrect a
+	// membership that was deliberately torn down: subscribed to the voice
+	// topic and broadcast as present, with no row behind it. Their decision
+	// wins; a same-instance state is the only thing this join may finish.
+	if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
+		slog.Info("ws handleVoiceJoin: join superseded before completion",
+			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
+		return
+	}
 
 	// Subscribe to voice topic for voice-scoped events.
 	h.pubsub.Subscribe(c, VoiceTopic(channelID))
@@ -359,6 +463,13 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 // voice_leave so other clients don't see a ghost participant.
 func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, broadcast bool) {
 	c.clearVoiceChID()
+	// The client's voice state is now set before token generation (BUG-088),
+	// so a concurrent join/leave in the same channel can have elected this
+	// half-joined client key holder. Re-run the election after taking it back
+	// out, or the map keeps naming a user who never reached the SFU and the
+	// real lowest-uid participant's rekey offers are rejected with
+	// NOT_KEY_HOLDER until the next join or leave.
+	h.updateKeyHolder(channelID)
 	// The compensating delete must run even when the join failed BECAUSE the
 	// connection died — that cancellation is the most common rollback trigger.
 	if err := h.db.LeaveVoiceChannel(context.WithoutCancel(ctx), c.userID); err != nil {

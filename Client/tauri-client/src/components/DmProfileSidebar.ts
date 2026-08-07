@@ -31,6 +31,16 @@ export interface DmProfileData {
 export interface DmProfileSidebarOptions {
   readonly user: DmProfileData;
   readonly onClose: () => void;
+  /**
+   * The connected server's host, used to scope the note's localStorage key.
+   * User ids are per-server, so without this a note about user 5 on one
+   * server is shown for, and overwritten by, the unrelated user 5 on
+   * another — real in the multi-profile client (see profiles.ts). Optional,
+   * and falls back to the legacy unscoped key, so a caller that has not
+   * been updated to pass it yet keeps today's single-profile behavior
+   * exactly (including any note already saved under the old key).
+   */
+  readonly host?: string;
 }
 
 export type DmProfileSidebarComponent = MountableComponent & {
@@ -67,17 +77,34 @@ const STATUS_LABELS: Readonly<Record<UserStatus, string>> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function loadNote(userId: number): string {
+/** The legacy unscoped key, from before per-server notes (or when the caller
+ *  has not yet been updated to pass a host). */
+function legacyNoteKey(userId: number): string {
+  return NOTE_STORAGE_PREFIX + String(userId);
+}
+
+function scopedNoteKey(userId: number, host: string): string {
+  return `${NOTE_STORAGE_PREFIX}${host}:${userId}`;
+}
+
+function loadNote(userId: number, host: string): string {
   try {
-    return localStorage.getItem(NOTE_STORAGE_PREFIX + String(userId)) ?? "";
+    if (host !== "") {
+      const scoped = localStorage.getItem(scopedNoteKey(userId, host));
+      if (scoped !== null) return scoped;
+    }
+    // Fall back to the legacy key so a note saved before per-server scoping
+    // (or while the host was unknown) is not silently lost.
+    return localStorage.getItem(legacyNoteKey(userId)) ?? "";
   } catch {
     return "";
   }
 }
 
-function saveNote(userId: number, text: string): void {
+function saveNote(userId: number, host: string, text: string): void {
   try {
-    localStorage.setItem(NOTE_STORAGE_PREFIX + String(userId), text);
+    const key = host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId);
+    localStorage.setItem(key, text);
   } catch {
     // localStorage may be unavailable or full -- silently ignore
   }
@@ -92,7 +119,7 @@ export function createDmProfileSidebar(
 ): DmProfileSidebarComponent {
   const ac = new AbortController();
   const { signal } = ac;
-  const { user, onClose } = options;
+  const { user, onClose, host = "" } = options;
 
   let panel: HTMLDivElement | null = null;
   let open = false;
@@ -328,12 +355,12 @@ export function createDmProfileSidebar(
     noteInput.style.fontSize = "13px";
     noteInput.style.padding = "8px";
     noteInput.style.fontFamily = "inherit";
-    noteInput.value = loadNote(user.id);
+    noteInput.value = loadNote(user.id, host);
 
     noteInput.addEventListener(
       "input",
       () => {
-        saveNote(user.id, noteInput.value);
+        saveNote(user.id, host, noteInput.value);
       },
       { signal },
     );

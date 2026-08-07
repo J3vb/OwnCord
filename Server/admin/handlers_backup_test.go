@@ -12,6 +12,7 @@ import (
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 )
 
 // chdirTemp changes the working directory to a fresh temp directory for the
@@ -308,14 +309,114 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir backups: %v", err)
 	}
-	found := false
+	preRestore := ""
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "pre_restore_") {
-			found = true
+			preRestore = filepath.Join(backupDir, e.Name())
 		}
 	}
-	if !found {
-		t.Error("no pre_restore_*.db safety backup was created")
+	if preRestore == "" {
+		t.Fatal("no pre_restore_*.db safety backup was created")
+	}
+
+	// The backup_restore audit row must be INSIDE the safety copy — the live
+	// DB file is replaced by the restore, so the pre_restore backup is that
+	// row's only durable home. Asserting against the reopened backup file (not
+	// the handler's DB, which is closed by now) proves both the write and its
+	// ordering before BackupTo.
+	restoredDB, err := db.Open(preRestore)
+	if err != nil {
+		t.Fatalf("db.Open(pre-restore backup): %v", err)
+	}
+	defer restoredDB.Close() //nolint:errcheck
+	audits, err := restoredDB.GetAuditLog(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog on pre-restore backup: %v", err)
+	}
+	foundAudit := false
+	for _, e := range audits {
+		if e.Action == "backup_restore" {
+			foundAudit = true
+		}
+	}
+	if !foundAudit {
+		t.Error("expected a backup_restore audit entry inside the pre-restore safety backup")
+	}
+}
+
+// TestHandleRestoreBackup_RollsBackWhenCopyFails verifies the live database file
+// is not left destroyed when the copy fails partway. copyFile truncates the live
+// DB with os.Create before it can know whether the read will succeed, so a
+// failure there leaves a closed DB and a zero-byte file underneath it; the
+// pre-restore safety copy must be put back, and the process must still respawn
+// because the DB is closed either way.
+//
+// The failure is injected by making the "backup" a directory: it passes the
+// handler's existence check and opens, but reading it fails after the truncate.
+func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	if err := os.WriteFile(dbPath, []byte("live database contents"), 0o600); err != nil {
+		t.Fatalf("WriteFile live db: %v", err)
+	}
+
+	backupName := "chatserver_20240102_120000.db"
+	if err := os.MkdirAll(filepath.Join(backupDir, backupName), 0o750); err != nil {
+		t.Fatalf("MkdirAll fake backup: %v", err)
+	}
+
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("ReadDir backups: %v", err)
+	}
+	preRestore := ""
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			preRestore = filepath.Join(backupDir, e.Name())
+		}
+	}
+	if preRestore == "" {
+		t.Fatal("no pre_restore_*.db safety backup was created")
+	}
+	want, err := os.Stat(preRestore)
+	if err != nil {
+		t.Fatalf("Stat pre-restore backup: %v", err)
+	}
+
+	got, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("Stat live db after failed restore: %v", err)
+	}
+	if got.Size() == 0 {
+		t.Error("live database file was left truncated after the failed restore")
+	}
+	if got.Size() != want.Size() {
+		t.Errorf("live db size = %d, want %d (the safety copy should have been put back)", got.Size(), want.Size())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("failed restore did not request a process restart, but the database is closed")
 	}
 }
 

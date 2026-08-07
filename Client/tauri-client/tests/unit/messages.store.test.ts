@@ -9,6 +9,8 @@ import {
   bulkDeleteMessages,
   setMessagePinned,
   updateReaction,
+  addOptimisticReaction,
+  rollbackReaction,
   addPendingSend,
   confirmSend,
   addOptimisticMessage,
@@ -17,6 +19,7 @@ import {
   getChannelMessages,
   isChannelLoaded,
   hasMoreMessages,
+  isWindowDetached,
   clearChannelMessages,
   setChannelLoading,
   setChannelLoadError,
@@ -230,6 +233,45 @@ describe("messages store", () => {
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(1);
       expect(msgs[0]!.id).toBe(20);
+    });
+
+    it("keeps a newer live broadcast that landed while the history fetch was in flight", () => {
+      // The broadcast arrives over the open WS after the server ran the GET
+      // query but before the response reaches the client.
+      addMessage(makeChatPayload({ id: 300, channel_id: 1, content: "live" }));
+
+      setMessages(1, [makeMessageResponse({ id: 201 }), makeMessageResponse({ id: 200 })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual([200, 201, 300]);
+      expect(msgs[2]!.content).toBe("live");
+    });
+
+    it("keeps pending and failed optimistic rows across setMessages", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "in flight",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "SLOW_MODE");
+
+      setMessages(1, [makeMessageResponse({ id: 200 })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
+      expect(msgs[1]!.status).toBe("pending");
+      expect(msgs[2]!.status).toBe("failed");
     });
   });
 
@@ -798,6 +840,99 @@ describe("messages store", () => {
     });
   });
 
+  // 13b. optimistic reactions (ux/messaging §5)
+  describe("optimistic reactions", () => {
+    const toggle = (action: "add" | "remove") => ({
+      channelId: 1,
+      messageId: 100,
+      emoji: "👍",
+      action,
+    });
+
+    it("applies an optimistic add immediately as the current user's pill", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+    });
+
+    it("consumes the self-echo instead of double-counting it", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      // The server broadcasts the toggle back to its sender too.
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
+    });
+
+    it("still applies another user's identical reaction while one is pending", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toEqual([{ emoji: "👍", count: 2, me: true }]);
+      // The pending toggle is NOT consumed by someone else's echo.
+      expect(messagesStore.getState().pendingReactions?.size).toBe(1);
+    });
+
+    it("rolls back a failed optimistic add (pill disappears)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+
+      expect(rollbackReaction("corr-1")).toBe(true);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(0);
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
+    });
+
+    it("rolls back a failed optimistic remove (pill restored)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      // Someone else's reaction plus mine.
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      addOptimisticReaction("corr-1", toggle("remove"));
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 1, me: false }]);
+
+      expect(rollbackReaction("corr-1")).toBe(true);
+
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 2, me: true }]);
+    });
+
+    it("rollback of an unknown correlation id reports false and changes nothing", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      const before = messagesStore.getState();
+
+      expect(rollbackReaction("nope")).toBe(false);
+
+      expect(messagesStore.getState()).toBe(before);
+    });
+
+    it("a late error after the echo was consumed cannot roll back (no ghost revert)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addOptimisticReaction("corr-1", toggle("add"));
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+
+      expect(rollbackReaction("corr-1")).toBe(false);
+
+      expect(getChannelMessages(1)[0]!.reactions).toEqual([{ emoji: "👍", count: 1, me: true }]);
+    });
+
+    it("does not register a pending toggle for an unloaded channel", () => {
+      addOptimisticReaction("corr-1", { channelId: 99, messageId: 1, emoji: "👍", action: "add" });
+
+      expect(messagesStore.getState().pendingReactions?.size).toBe(0);
+    });
+  });
+
   // 14. addMessage eviction beyond MAX_MESSAGES_PER_CHANNEL
   describe("addMessage eviction", () => {
     it("evicts oldest messages when exceeding cap (500)", () => {
@@ -869,7 +1004,10 @@ describe("messages store", () => {
       expect(msgs).toHaveLength(500);
     });
 
-    it("sets hasMore to true when trimming on prepend", () => {
+    it("keeps the server's hasMore and detaches when trimming on prepend", () => {
+      // Trimming on prepend drops the live tail (rows BELOW the window), not
+      // older history, so "more above" stays whatever the server said and the
+      // channel becomes a detached window instead.
       const initial: MessageResponse[] = [];
       for (let i = 301; i <= 500; i++) {
         initial.push(makeMessageResponse({ id: i, channel_id: 1 }));
@@ -882,7 +1020,8 @@ describe("messages store", () => {
       }
       prependMessages(1, older, false);
 
-      expect(hasMoreMessages(1)).toBe(true);
+      expect(hasMoreMessages(1)).toBe(false);
+      expect(isWindowDetached(1)).toBe(true);
     });
   });
 
@@ -996,10 +1135,49 @@ describe("messages store", () => {
       expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
     });
 
+    it("removeOptimistic drops an already-failed row, whose channel is no longer in pendingSends", () => {
+      // markSendFailed deletes the correlationId from pendingSends when it
+      // flips the row to "failed" — the Retry/Delete buttons only render for
+      // failed rows, so this is the path every UI-driven removeOptimistic call
+      // actually takes.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+
+      removeOptimistic("c1");
+      expect(getChannelMessages(1)).toHaveLength(0);
+    });
+
     it("addMessage is idempotent by real id (replay-safe)", () => {
       addMessage(makeChatPayload({ id: 700, content: "once" }));
       addMessage(makeChatPayload({ id: 700, content: "once" }));
       expect(getChannelMessages(1)).toHaveLength(1);
+    });
+
+    it("does not consume a pending row for a same-author broadcast with different content", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "mine, still sending",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      // Same author, different content: a replayed message from another
+      // session of this account, not the echo of the pending send.
+      addMessage(makeChatPayload({ id: 800, user: TEST_USER, content: "from my other device" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("pending");
+      expect(msgs.find((m) => m.id === 800)!.content).toBe("from my other device");
     });
 
     it("defensively reconciles a broadcast that raced ahead of its ack", () => {

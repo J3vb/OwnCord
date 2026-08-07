@@ -42,6 +42,8 @@ import {
   clearReactionUsersCache,
 } from "@components/message-list/reaction-tooltip";
 import { setMarkReadSender } from "@lib/read-state";
+import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setNsfwGateHost } from "@lib/nsfw-gate";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -93,6 +95,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setServerHost(apiConfig.host);
     setLiveKitServerHost(apiConfig.host);
   }
+
+  // Channel ids are only unique per server, so anything persisted under a bare
+  // channel id collides across profiles in the multi-server client. Scope both
+  // stores to the connected host — including the null case, so a disconnect
+  // cannot leave the previous server's scope armed for the next connection.
+  setChannelMutesHost(apiConfig.host ?? null);
+  setNsfwGateHost(apiConfig.host ?? null);
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
@@ -686,6 +695,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
               resolveChannelName(active.id, active.name, active.type),
               active.type,
             );
+          } else {
+            // The active channel was cleared with nothing to replace it
+            // (deleted, or a DM closed while offline) — without this the
+            // previous channel's MessageList/composer stayed mounted and
+            // enabled against a channel the server no longer recognizes.
+            closeDmProfile();
+            channelCtrl?.destroyChannel();
           }
         } catch (err) {
           log.error("Channel mount failed", err);

@@ -62,6 +62,12 @@ const filePragmas = "_pragma=busy_timeout(5000)" + // wait up to 5s for the writ
 	"&_pragma=mmap_size(268435456)" +
 	"&_pragma=cache_size(-64000)"
 
+// sqliteTimeLayout is how SQLite's own datetime('now') writes a timestamp, and
+// therefore the only shape a Go-side cutoff may take when it is compared against
+// such a column: the comparison is bytewise TEXT, so RFC3339's 'T' separator
+// sorts after the space and quietly turns "older than X" into "any earlier date".
+const sqliteTimeLayout = "2006-01-02 15:04:05"
+
 // isMemoryPath reports whether path names an in-memory database
 // (":memory:", "file::memory:" or any URI carrying mode=memory).
 func isMemoryPath(path string) bool {

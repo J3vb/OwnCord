@@ -130,7 +130,6 @@ FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.banned = 0
 ORDER BY u.username ASC
-LIMIT 1000
 `
 
 type ListMembersRow struct {
@@ -144,6 +143,11 @@ type ListMembersRow struct {
 	CustomStatus      *string `json:"customStatus"`
 }
 
+// The ready payload's member roster. docs/protocol.md documents members[] as
+// "All registered users", so this must not silently truncate: the previous
+// LIMIT 1000 dropped every member past the first thousand with no has_more
+// signal, leaving those users unrenderable and unmentionable on the client
+// with nothing to indicate the list was incomplete.
 func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listMembers)
 	if err != nil {

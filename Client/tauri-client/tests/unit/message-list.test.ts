@@ -357,6 +357,48 @@ describe("MessageList", () => {
     expect(options.onScrollTop).toHaveBeenCalledTimes(2);
   });
 
+  it("clears loadingOlder once the onScrollTop promise settles, even when no new messages arrived (failed fetch)", async () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    // Flush this setup notification now — store notifications are deferred to
+    // a microtask, and without this it would land during the first `await`
+    // below and reset loadingOlder for an unrelated reason (prevMessageCount
+    // syncing from its initial 0), masking the bug this test targets.
+    messagesStore.flush();
+    let resolveLoad: () => void = () => {};
+    const onScrollTop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    // Recreate with the overriding onScrollTop — it's declared readonly, so
+    // it must be set at construction rather than mutated on the shared
+    // `options` object from beforeEach.
+    msgList = createMessageList({ ...options, onScrollTop });
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+
+    // A second scroll-to-top while the fetch is still in flight must not
+    // re-trigger it.
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+
+    // The fetch settles WITHOUT any new messages arriving — the failure path
+    // (a real onScrollTop catches its own error and never rejects, so the
+    // promise resolves either way; the store just never changed).
+    resolveLoad();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // loadingOlder must now be false — scrolling to top again re-triggers it.
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(2);
+  });
+
   it("scrollToMessage returns false before mount", () => {
     // scrollToMessage should be safe to call before mount
     const unmounted = createMessageList(options);

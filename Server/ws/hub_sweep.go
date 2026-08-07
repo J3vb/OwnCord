@@ -16,6 +16,14 @@ import (
 // a ping every 30s, so 90s (3x) gives plenty of margin.
 const staleClientTimeout = 90 * time.Second
 
+// onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
+func (h *Hub) onStaleTick() {
+	h.sweepStaleClients()
+	// Per-channel token buckets are created on first broadcast; prune idle
+	// ones here or the bucket map grows for the process lifetime.
+	h.topicLimiter.Cleanup(10 * time.Minute)
+}
+
 // kickClient forcibly removes a client from the hub and closes its send channel,
 // which causes writePump to exit and the WebSocket connection to close.
 // It is safe to call from any goroutine.
@@ -25,8 +33,12 @@ func (h *Hub) kickClient(c *Client) {
 		delete(h.clients, c.userID)
 	}
 	h.mu.Unlock()
-	h.pubsub.UnsubscribeAll(c)
+	// closeSend BEFORE UnsubscribeAll: Subscribe's only re-take guard is
+	// isSendClosed, so a Subscribe racing this kick either lands before the
+	// close (and UnsubscribeAll below removes it) or sees the closed channel
+	// and refuses. The reverse order leaves the dead client holding the topic.
 	c.closeSend()
+	h.pubsub.UnsubscribeAll(c)
 }
 
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
@@ -147,13 +159,35 @@ func (h *Hub) sweepStaleVoiceStates() {
 	h.mu.RUnlock()
 	for _, c := range inVoice {
 		chID := c.getVoiceChID()
-		if chID == 0 || h.hasChannelPerm(ctx, c, chID, permissions.ConnectVoice) {
+		if chID == 0 {
 			continue
 		}
-		slog.Warn("sweepStaleVoiceStates: evicting participant whose CONNECT_VOICE was revoked",
+		allowed, err := h.hasChannelPermChecked(ctx, c.userID, chID, permissions.ConnectVoice)
+		if err != nil {
+			// A transient read failure (I/O error, lock contention, a
+			// maintenance window) is not a revocation — hasChannelPerm and
+			// permissions.Checker.HasChannelPerm both collapse any DB error
+			// to "denied", which would otherwise evict every in-voice
+			// participant on one bad read. Skip this client this tick; the
+			// next tick retries. Mirrors sweepRevokedSessions' guard on its
+			// own batch lookup below.
+			slog.Warn("sweepStaleVoiceStates: permission check failed, skipping this tick",
+				"user_id", c.userID, "channel_id", chID, "err", err)
+			continue
+		}
+		if allowed {
+			continue
+		}
+		// The permission check is a DB round-trip; a voice_join to a
+		// still-permitted channel may have committed while it ran. The
+		// eviction is conditional on the client still being in the checked
+		// channel — never on whatever channel it is in by now.
+		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID) {
+			continue
+		}
+		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
 			"user_id", c.userID, "channel_id", chID)
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
-		h.handleVoiceLeave(ctx, c)
 	}
 
 	allStates, err := h.db.GetAllVoiceStates(ctx)
@@ -199,10 +233,56 @@ func (h *Hub) sweepStaleVoiceStates() {
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
 		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
+		// Re-elect the key holder now that this ghost row is gone — every
+		// other path that removes a voice participant does this
+		// (finishVoiceLeave, the LiveKit webhook, registerNow,
+		// handleVoiceJoin). Without it, a departed user stripped out here
+		// while still named as key holder leaves the remaining lowest-uid
+		// participant self-promoting and rotating the room key locally, and
+		// its voice_e2ee_offers are rejected with NOT_KEY_HOLDER until the
+		// next join/leave in the channel. No locks are held here, matching
+		// the webhook call site.
+		h.updateKeyHolder(s.channelID)
 		if h.livekit != nil {
 			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
 		}
 	}
+}
+
+// hasChannelPermChecked is hasChannelPerm's error-aware counterpart: it
+// distinguishes a genuine permission denial (role missing, or the effective
+// permission bits don't include perm) from a DB read failure, by inlining the
+// same resolution hasChannelPerm/permissions.Checker.HasChannelPerm perform —
+// both of which collapse any error into "denied", indistinguishable from a
+// real revocation. sweepStaleVoiceStates needs that distinction: unlike a
+// handler answering one client's request, it evicts a live voice session on
+// "denied", so a transient read failure must not be treated as a revocation.
+func (h *Hub) hasChannelPermChecked(ctx context.Context, userID, channelID int64, perm int64) (allowed bool, err error) {
+	role, err := h.db.GetRoleForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if role == nil {
+		// No role row is a genuine deny, not an error — mirrors
+		// hasChannelPerm's role == nil case.
+		return false, nil
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true, nil
+	}
+	allow, deny, err := h.db.GetChannelPermissions(ctx, channelID, role.ID)
+	if err != nil {
+		return false, err
+	}
+	o := permissions.ChannelOverride{Allow: allow, Deny: deny}
+	if userID != 0 {
+		uAllow, uDeny, uErr := h.db.GetUserChannelPermissions(ctx, channelID, userID)
+		if uErr != nil {
+			return false, uErr
+		}
+		o.UserAllow, o.UserDeny = uAllow, uDeny
+	}
+	return permissions.EffectiveChannelPerms(role.Permissions, o)&perm == perm, nil
 }
 
 // CleanupVoiceForChannel removes all voice participants from the given channel.
@@ -220,18 +300,22 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		return
 	}
 
-	// Clean up DB state and LiveKit for each participant.
+	// Clean up DB state and LiveKit for each participant. Both the row delete
+	// and the client-state clear are conditional on the participant still
+	// being in THIS channel: a user who moved to another voice channel
+	// between the snapshot above and this loop must not be clobbered.
 	for _, vs := range states {
-		if err := h.db.LeaveVoiceChannel(ctx, vs.UserID); err != nil {
-			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveVoiceChannelIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
-		// Clear client voice state.
+		// Clear client voice state and its voice-topic subscription.
 		h.mu.RLock()
-		if client, ok := h.clients[vs.UserID]; ok {
-			client.clearVoiceChID()
-		}
+		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()
+		if ok && client.getVoiceChID() == channelID {
+			h.clearVoiceAndUnsubscribe(client)
+		}
 
 		// Remove from LiveKit (best-effort).
 		if h.livekit != nil {
@@ -241,7 +325,21 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Broadcast voice_leave for each participant. All leaves target the same
 	// channel, so resolve the READ audience once and reuse it per message.
+	// The evicted participants themselves must always be in it (their client
+	// state is already cleared, so broadcastVoiceEvent's participant union
+	// cannot see them): the voice_leave is what drives their own E2EE
+	// teardown, and voice membership never required READ_MESSAGES.
 	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience))
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	for _, vs := range states {
+		if _, ok := seen[vs.UserID]; !ok {
+			seen[vs.UserID] = struct{}{}
+			audience = append(audience, vs.UserID)
+		}
+	}
 	for _, vs := range states {
 		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
 	}

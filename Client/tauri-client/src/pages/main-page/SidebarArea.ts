@@ -42,7 +42,7 @@ import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.sto
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { dmStore, removeDmChannel } from "@stores/dm.store";
+import { dmStore, closeDmLocally } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canViewAuditLog } from "@lib/permissions";
@@ -336,9 +336,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         modal.mount(document.body);
       },
       onReorderChannel: (reorders) => {
-        for (const r of reorders) {
-          void api.adminUpdateChannel(r.channelId, { position: r.newPosition });
-        }
+        // The store already applied the optimistic order (drag-reorder.ts,
+        // on mouseup). Aggregate the per-channel PATCHes and surface a single
+        // failure toast — same try/catch+toast contract as onSave/onDelete
+        // above — instead of a bare `void` per call, which left a rejected or
+        // failed write unreported and the sidebar showing an order the
+        // server never accepted.
+        void Promise.allSettled(
+          reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
+        ).then((results) => {
+          if (results.some((r) => r.status === "rejected")) {
+            getToast()?.show("Failed to save channel order", "error");
+          }
+        });
       },
       onPurgeChannel: async (channel, count) => {
         try {
@@ -442,12 +452,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * (the next `ready` restores the truth either way).
    */
   function closeOrLeaveDm(channelId: number): void {
-    const wasActive = channelsStore.getState().activeChannelId === channelId;
-    removeDmChannel(channelId);
+    closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
       getToast()?.show("Could not leave that conversation", "error");
     });
-    if (wasActive) fallBackFromDm();
   }
 
   /** Rename a group DM (participants only; the server refuses a 1:1). */

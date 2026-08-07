@@ -609,6 +609,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   async function handleTotpSubmit(): Promise<void> {
+    // Re-entrancy guard: the click path is protected by the button's
+    // disabled attribute, but the Enter-key listener on totpInput (below) is
+    // not — key auto-repeat or a fast double-Enter during the verify round
+    // trip would otherwise fire a second request with the same one-time code,
+    // which the server 401s (codes are single-use) and paints a spurious
+    // "invalid two-factor code" error over a login that already succeeded.
+    // The disabled flag already brackets exactly the in-flight window, so
+    // reusing it covers both paths with one check.
+    if (totpSubmitBtn.disabled) return;
+
     const code = totpInput.value.trim();
     if (code.length !== 6 || !/^\d{6}$/.test(code)) {
       // Simple inline feedback — add error class to the input

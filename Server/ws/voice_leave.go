@@ -6,17 +6,54 @@ import (
 	"time"
 )
 
+// clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic
+// subscription, returning the cleared channel ID and join token. Every path
+// that takes a client out of voice while its WS stays up must use this pair:
+// clearing state without unsubscribing leaves the socket receiving that room's
+// voice_e2ee_announce relays (which carry no channel_id to filter on) for the
+// connection's lifetime, polluting a later session's peer-key store.
+func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
+	oldChID, oldJoinToken := c.clearVoiceState()
+	if oldChID != 0 {
+		h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
+	}
+	return oldChID, oldJoinToken
+}
+
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
-// 1. Gets old voiceChID from clearVoiceChID().
+// 1. Gets old voiceChID from clearVoiceAndUnsubscribe.
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
 func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
-	oldChID, oldJoinToken := c.clearVoiceState()
+	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
 		return
 	}
+	h.finishVoiceLeave(ctx, c, oldChID, oldJoinToken)
+}
 
+// handleVoiceLeaveIfStillIn is handleVoiceLeave conditioned on the channel: it
+// evicts only if chID is still the client's current voice channel, reporting
+// whether it did. An eviction decided against a snapshotted channel (the
+// revocation sweep's DB-backed permission check) must not clear a newer
+// membership committed while the decision was in flight — the same rule
+// LeaveVoiceChannelIfMatch applies to the DB row.
+func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64) bool {
+	oldJoinToken, ok := c.clearVoiceStateIfMatch(chID)
+	if !ok {
+		return false
+	}
+	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
+	h.finishVoiceLeave(ctx, c, chID, oldJoinToken)
+	return true
+}
+
+// finishVoiceLeave is the shared tail of the leave paths, run after the
+// client's voice state and topic subscription are cleared: DB row removal
+// (with retry), voice_leave broadcast, key-holder re-election and LiveKit
+// participant removal.
+func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken string) {
 	username := ""
 	if c.user != nil {
 		username = c.user.Username
@@ -28,14 +65,38 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		"remote", c.remoteAddr,
 	)
 
-	// Unsubscribe from voice topic.
-	h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
-
 	if err := leaveVoiceChannelWithRetry(ctx, h, c.userID, oldChID, oldJoinToken); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}
 
-	h.broadcastVoiceEvent(ctx, oldChID, buildVoiceLeave(oldChID, c.userID))
+	// Audience = broadcastVoiceEvent's (READ ∪ still-in-the-room) plus the
+	// leaver themselves. The union of the room's remaining participants is
+	// what broadcastVoiceEvent provides and must be kept: voice membership is
+	// gated on CONNECT_VOICE alone, so a participant without READ would
+	// otherwise miss the departure and keep a stale E2EE key holder. The extra
+	// term is the leaver: the caller has already cleared their client voice
+	// state, so that union can no longer see them, yet for a server-initiated
+	// eviction (revocation sweep, moderator kick/move, token-refresh refusal)
+	// this voice_leave IS their only teardown signal. Mirrors
+	// CleanupVoiceForChannel, which appends the evicted participants for
+	// exactly the same reason.
+	audience := h.channelReadAudience(ctx, oldChID)
+	seen := make(map[int64]struct{}, len(audience)+1)
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, other := range h.clients {
+		if _, ok := seen[uid]; !ok && other.getVoiceChID() == oldChID {
+			seen[uid] = struct{}{}
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	if _, ok := seen[c.userID]; !ok {
+		audience = append(audience, c.userID)
+	}
+	h.broadcastChannelScopedTo(oldChID, buildVoiceLeave(oldChID, c.userID), audience, "voice event")
 
 	// Re-elect key holder now that this user has left the channel.
 	h.updateKeyHolder(oldChID)

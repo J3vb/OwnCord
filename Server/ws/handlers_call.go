@@ -70,6 +70,12 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	d := deps.(CallDeps)
 	declineCmd := cmd.(CallDeclineCmd)
 
+	// Same cost shape as call_ring (participant + block lookups, fan-out to
+	// every other participant), so it carries the same limit.
+	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("call_decline", info.UserID), callRingRateLimit, callRingWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many call actions"}}
+	}
+
 	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, declineCmd.ChannelID())
 	if err != nil {
 		return serviceErrorToResult(err)

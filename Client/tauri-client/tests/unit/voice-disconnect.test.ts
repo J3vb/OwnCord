@@ -6,11 +6,18 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
-import { authStore } from "../../src/stores/auth.store";
+import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
+
+// clearAuth (used below to test the real logoutWasInVoice ordering fix)
+// lazily imports livekitSession when a voice session is active — mock it so
+// that stays a fire-and-forget call instead of pulling in the real SDK.
+vi.mock("@lib/livekitSession", () => ({
+  leaveVoice: vi.fn(),
+}));
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -147,6 +154,34 @@ describe("Voice disconnect — logout cleanup", () => {
     expect(wsSend).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
     expect(wsDisconnect).toHaveBeenCalledTimes(1);
     expect(callOrder).toEqual(["send", "disconnect"]);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("gates voice_leave on clearAuth's logoutWasInVoice snapshot, not the already-reset voiceStore", () => {
+    const wsSend = vi.fn();
+
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "testuser", avatar: null, role: "member" },
+      isAuthenticated: true,
+    }));
+    joinVoiceChannel(42);
+
+    // Real clearAuth (auth.store.ts) — applies state (including the
+    // isAuthenticated flip) synchronously and resets voiceStore in the same
+    // call, before main.ts's isAuthenticated subscriber ever runs (store
+    // notifications are microtask-deferred). By the time such a subscriber
+    // fires, voiceStore.getState().currentChannelId is already null.
+    clearAuth();
+
+    // Simulate main.ts's subscriber body (post-fix): gates on the snapshot
+    // clearAuth left on authStore instead of re-reading voiceStore.
+    if (authStore.getState().logoutWasInVoice === true) {
+      wsSend({ type: "voice_leave", payload: {} });
+    }
+
+    expect(wsSend).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    // Proves the race is real: voiceStore was already reset by clearAuth.
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 

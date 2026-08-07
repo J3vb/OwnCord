@@ -289,6 +289,128 @@ describe("streamPreview", () => {
     expect(getPreview(row)).toBeNull();
   });
 
+  // Abort-listener accumulation (leak fix)
+  it("registers only one abort listener per signal, not one per attach call", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    const addSpy = vi.spyOn(ac.signal, "addEventListener");
+    const row1 = createRow(1);
+    const row2 = createRow(2);
+
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+    // A re-render re-attaches the same row to the same sidebar-lifetime signal.
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+
+    const abortCalls = addSpy.mock.calls.filter(([type]) => type === "abort");
+    expect(abortCalls).toHaveLength(1);
+  });
+
+  // v091: a structural re-render (clearChildren + rebuild) detaches the old
+  // row from the DOM without running any preview cleanup on it. Without
+  // retiring it, that row (and any live track-event listeners it registered)
+  // is retained by the shared rowsBySignal map for the sidebar's entire
+  // lifetime instead of being cleaned up as soon as the next render proves
+  // it's dead.
+  it("cleans up a superseded row's track listeners as soon as the next attach call sees it (v091)", () => {
+    const stream = createMockMediaStream();
+    const track = stream.getVideoTracks()[0]!;
+    const removeSpy = vi.spyOn(track, "removeEventListener");
+    mockGetRemoteVideoStream.mockReturnValue(stream);
+
+    const row1 = createRow(1);
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    row1.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row1)).not.toBeNull();
+
+    // Simulate renderChannels()'s clearChildren + rebuild: the old row (and
+    // its preview sibling) is removed from the DOM directly, without going
+    // through hidePreview/mouseleave.
+    row1.remove();
+    expect(removeSpy).not.toHaveBeenCalled();
+
+    // The next render re-attaches a fresh row for (possibly) the same user
+    // to the same sidebar-lifetime signal.
+    const row2 = createRow(1);
+    attachStreamPreview(row2, 1, "Alice", false, true, ac.signal);
+
+    // Retiring the dead row1 entry must have run its cleanup immediately —
+    // not deferred until the signal eventually aborts.
+    expect(removeSpy).toHaveBeenCalledWith("ended", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("mute", expect.any(Function));
+  });
+
+  it("leaves another user's live row alone when a new row attaches", () => {
+    mockGetRemoteVideoStream.mockReturnValue(createMockMediaStream());
+    const row1 = createRow(1);
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    row1.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row1)).not.toBeNull();
+
+    // A second row attaches to the same signal while row1 is still live.
+    const row2 = createRow(2);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+
+    // row1's preview must be untouched — only the row a re-render replaced
+    // for the *same* user is retired.
+    expect(getPreview(row1)).not.toBeNull();
+  });
+
+  // ChannelSidebar builds a whole category subtree (rows included) and only
+  // appends it to the live channel list afterwards, so every row is still
+  // disconnected when attachStreamPreview runs. Deciding which tracked rows
+  // are dead by liveness at that moment therefore drops rows that are about
+  // to be inserted, losing their abort-time cleanup entirely (v091).
+  it("still tracks rows attached before their subtree is inserted (v091)", () => {
+    const stream = createMockMediaStream();
+    const track = stream.getVideoTracks()[0]!;
+    const removeSpy = vi.spyOn(track, "removeEventListener");
+    mockGetRemoteVideoStream.mockReturnValue(stream);
+
+    const group = document.createElement("div");
+    const row1 = document.createElement("div");
+    row1.className = "voice-user-item";
+    const row2 = document.createElement("div");
+    row2.className = "voice-user-item";
+    group.appendChild(row1);
+    group.appendChild(row2);
+
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+    document.body.appendChild(group);
+
+    row1.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row1)).not.toBeNull();
+
+    ac.abort();
+
+    expect(getPreview(row1)).toBeNull();
+    expect(removeSpy).toHaveBeenCalledWith("ended", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("mute", expect.any(Function));
+  });
+
+  it("still cleans up every row attached to a signal when it aborts", () => {
+    mockGetRemoteVideoStream.mockReturnValue(createMockMediaStream());
+    const row1 = createRow(1);
+    const row2 = createRow(2);
+    attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
+    attachStreamPreview(row2, 2, "Bob", false, true, ac.signal);
+
+    row1.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    row2.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row1)).not.toBeNull();
+    expect(getPreview(row2)).not.toBeNull();
+
+    ac.abort();
+
+    expect(getPreview(row1)).toBeNull();
+    expect(getPreview(row2)).toBeNull();
+  });
+
   // Track mute event → placeholder
   it("swaps to placeholder on track mute event", () => {
     const stream = createMockMediaStream();

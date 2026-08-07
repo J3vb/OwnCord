@@ -1,6 +1,8 @@
 # Finish the V2 Dispatch Migration (backlog item 11) — Design
 
-**Status:** implemented 2026-07-20 (D10)
+**Status:** implemented 2026-07-20 (D10) — re-verified 2026-08-04
+(`Server/ws/registry.go` holds only `handlersV2`; no V1 registry symbols
+remain)
 **Decision:** D10 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-09 (backlog §6 item 11)
 

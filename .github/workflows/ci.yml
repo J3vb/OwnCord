@@ -75,6 +75,19 @@ jobs:
       - name: Run tests with deadlock detection
         run: go test -tags deadlock -count=1 ./...
 
+      # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
+      # only COMPILES the otel/wazero variants; the tests behind those tags
+      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go) ran
+      # nowhere until this step. Scoped to the two packages that carry tagged
+      # files — every other package is tag-invariant and already covered by the
+      # race run above. One leg is enough; no -race (the runtime under the tag
+      # is the concern, not new concurrency).
+      - name: Run tag-gated tests (-tags wazero, -tags otel)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test -tags wazero -count=1 ./plugin/...
+          go test -tags otel -count=1 ./telemetry/...
+
       - name: Upload Go coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -107,25 +120,6 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Patch auto-generated Tauri TypeScript bindings
-        working-directory: Client/tauri-client/
-        # tauri-typegen generates an Event type that is intentionally unused in app code.
-        # Rename it to _Event so @typescript-eslint/no-unused-vars does not fail.
-        run: |
-          node -e "
-          const fs = require('fs');
-          const p = 'src/generated/events.ts';
-          if (fs.existsSync(p)) {
-            let c = fs.readFileSync(p, 'utf8');
-            c = c.replace(/^type Event\b/gm, 'type _Event').replace(/^interface Event\b/gm, 'interface _Event');
-            c = c.replace(/,\s*type Event\s*(?=\})/g, ' '); // unused named import from @tauri-apps/api/event
-            fs.writeFileSync(p, c);
-            console.log('Patched: renamed Event -> _Event in generated/events.ts');
-          } else {
-            console.log('src/generated/events.ts not found, skipping patch.');
-          }
-          "
-
       # Scoped to shipped dependencies. The remaining high findings are all one
       # advisory, brace-expansion <=5.0.7, reaching us only through dev tooling
       # (eslint, @vitest/coverage-v8, stryker). Those are already on their
@@ -144,6 +138,12 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: TypeScript check (Playwright specs)
+        # The main tsconfig excludes tests/e2e from the app graph; this
+        # project typechecks the 47 spec files + fixtures + the three
+        # playwright configs so type rot cannot hide there.
+        run: npx tsc -p tsconfig.e2e.json --noEmit
+
       - name: ESLint (type-aware rules)
         run: npx eslint src/
 
@@ -151,7 +151,9 @@ jobs:
         run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
 
       - name: Knip (unused code & deps)
-        run: npx knip || true
+        # Blocking since the 2026-08-04 remediation: the '|| true' era let a
+        # real unused-export finding sit invisible in every green run.
+        run: npx knip
 
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
@@ -228,24 +230,23 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
-  # Playwright e2e against the mocked-Tauri dev server. The suite is green
-  # since the mock repair (start_http_proxy stub + voice-premise rewrite):
-  # a full 255-test run passes locally in ~7.5 min at 1 worker. Runaway
-  # protection lives in playwright.config.ts (maxFailures: 20 aborts a
-  # systemic cascade early; globalTimeout: 20 min self-terminates with a
-  # usable report) with timeout-minutes below as the outer backstop.
+  # Playwright e2e against the mocked-Tauri dev server. Runaway protection
+  # lives in playwright.config.ts (maxFailures: 20 aborts a systemic cascade
+  # early; globalTimeout: 20 min self-terminates with a usable report) with
+  # timeout-minutes below as the outer backstop.
   #
-  # Still continue-on-error for now: a newly-revived 255-test browser suite
-  # may harbor rare flakes (retries: 2 covers them, but confidence needs a
-  # few green pushes first). Flip this job to blocking once it has been
-  # stably green across several pushes.
+  # BLOCKING since 2026-08-05 (DC-07): the post-repair soak recorded green
+  # full-suite runs at 270, 276 and 291 tests across the 08-04/08-05 audit
+  # branches, and the one hard CI failure in that window was a real spec bug
+  # (updater install-settle race), which a non-blocking job would have let
+  # rot. retries: 2 absorbs the known rare flake class (see E2E-ISSUES.md's
+  # flake accounting).
   # See docs/audit-test-coverage-2026-07-25.md T-2026-07-25-21.
   # The native config (playwright.config.native.ts) is deliberately not wired
   # up — it needs a real server and a built desktop binary.
   client-e2e:
-    name: Client E2E (Playwright, non-blocking)
+    name: Client E2E (Playwright)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 25
     defaults:
       run:
@@ -273,6 +274,53 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
+          path: |
+            Client/tauri-client/playwright-report/
+            Client/tauri-client/test-results/
+          retention-days: 7
+
+  # Admin-panel journey against a REAL server (no mocks): start-server.sh
+  # builds the Go binary and boots it with a fresh temp data dir, and the
+  # suite drives the embedded SPA through the first-run wizard, dashboard,
+  # channel CRUD, audit log and re-login — the one DC-04 surface the mocked
+  # suites cannot reach. Non-blocking while it earns its soak, same
+  # graduation convention client-e2e followed.
+  admin-e2e:
+    name: Admin Panel E2E (real server, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run admin-panel journey
+        run: npx playwright test --config=playwright.config.admin.ts
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: admin-e2e-report
           path: |
             Client/tauri-client/playwright-report/
             Client/tauri-client/test-results/
@@ -413,30 +461,6 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
-
-      - name: Install tauri-typegen
-        run: cargo install tauri-typegen@0.5.0 --quiet
-
-      - name: Generate TypeScript IPC bindings
-        working-directory: Client/tauri-client/
-        run: cargo tauri-typegen generate
-
-      - name: Fix generated TypeScript bindings (tauri-typegen 0.5.0 workaround)
-        working-directory: Client/tauri-client/
-        # tauri-typegen 0.5.0 cannot map serde_json::Value to a TS type — patch post-generation.
-        # Duplicate events are avoided at source by using one emit() call site per event name.
-        run: |
-          node -e "
-          const fs = require('fs');
-          const tp = fs.readFileSync('src/generated/types.ts', 'utf8');
-          if (!tp.includes('export type Value')) {
-            fs.writeFileSync('src/generated/types.ts', tp.replace(
-              'export interface CredentialData',
-              'export type Value = unknown;\n\nexport interface CredentialData'
-            ));
-          }
-          console.log('Generated bindings patched.');
-          "
 
       - name: Clippy lint (Rust)
         working-directory: Client/tauri-client/src-tauri/

@@ -1,6 +1,7 @@
 // Step 8.60 — Quick switcher modal (Ctrl+K) for fast channel navigation.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
@@ -22,6 +23,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   let activeIndex = 0;
   let filteredChannels: readonly Channel[] = [];
   let unsubscribe: (() => void) | null = null;
+  let restoreFocus: (() => void) | null = null;
 
   function getChannelIcon(ch: Channel): SVGSVGElement {
     return ch.type === "voice" ? createIcon("volume-2", 14) : createIcon("hash", 14);
@@ -29,7 +31,11 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
   function getFilteredChannels(query: string): readonly Channel[] {
     const state = channelsStore.getState();
-    const all = Array.from(state.channels.values());
+    // DM rows are synthesized into channelsStore once opened, but they have
+    // their own sidebar path (full clearDmUnread/setSidebarMode handling) —
+    // listing them here too would select via a bare setActiveChannel and
+    // leave their unread/mention badge lit forever.
+    const all = Array.from(state.channels.values()).filter((ch) => ch.type !== "dm");
     const sorted = [...all].toSorted((a, b) => a.position - b.position);
 
     if (query.length === 0) return sorted;
@@ -51,6 +57,12 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
           ? "quick-switcher__item quick-switcher__item--active"
           : "quick-switcher__item",
         "data-channelid": String(ch.id),
+        // Combobox option wiring: the id feeds aria-activedescendant so a
+        // screen reader tracks the roving --active highlight without the
+        // input ever losing DOM focus.
+        id: `qs-option-${i}`,
+        role: "option",
+        "aria-selected": isActive ? "true" : "false",
       });
 
       const icon = createElement("span", { class: "quick-switcher__icon" });
@@ -78,6 +90,16 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
       );
 
       resultsDiv.appendChild(item);
+    }
+
+    // Re-point aria-activedescendant on every render — arrow keys, filtering
+    // and store refreshes all funnel through here, so it can never go stale.
+    // An empty result set clears it; pointing at a missing id is worse than
+    // pointing at nothing.
+    if (filteredChannels.length > 0) {
+      input.setAttribute("aria-activedescendant", `qs-option-${activeIndex}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
     }
   }
 
@@ -154,20 +176,38 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
     // Modal container
     const modal = createElement("div", { class: "quick-switcher" });
+    applyDialogSemantics(modal, { label: "Quick switcher" });
+    trapFocus(modal, signal);
 
-    // Search input
+    // Search input — combobox over the results listbox: the input keeps DOM
+    // focus while aria-activedescendant (set in renderResults) names the row
+    // the arrow keys have highlighted. The list is always rendered, so
+    // aria-expanded is statically true.
     input = createElement("input", {
       class: "quick-switcher__input",
       type: "text",
       placeholder: "Where do you want to go?",
+      role: "combobox",
+      "aria-expanded": "true",
+      "aria-autocomplete": "list",
+      "aria-controls": "quick-switcher-results",
     });
 
     // Results list
-    resultsDiv = createElement("div", { class: "quick-switcher__results" });
+    resultsDiv = createElement("div", {
+      class: "quick-switcher__results",
+      id: "quick-switcher-results",
+      role: "listbox",
+    });
 
     appendChildren(modal, input, resultsDiv);
     root.appendChild(modal);
     container.appendChild(root);
+
+    // Capture the opener before anything inside grabs focus — Ctrl+K comes
+    // from the composer, and a keyboard user needs destroy() to land them
+    // back there, not at the top of the document.
+    restoreFocus = focusDialog(modal);
 
     // Initial render
     filteredChannels = getFilteredChannels("");
@@ -194,6 +234,10 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     }
     root?.remove();
     root = null;
+    // Restore after the overlay is gone, so focus cannot land on a node the
+    // removal is about to detach.
+    restoreFocus?.();
+    restoreFocus = null;
   }
 
   return { mount, destroy };

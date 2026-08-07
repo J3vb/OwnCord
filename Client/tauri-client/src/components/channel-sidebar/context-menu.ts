@@ -182,7 +182,10 @@ export function attachChannelContextMenu(
         menu.remove();
         menuAc.abort();
       };
-      signal.addEventListener("abort", () => menuAc.abort());
+      // Tie this bridge listener's own lifetime to menuAc so it does not
+      // outlive the menu it belongs to — closeMenu (which aborts menuAc)
+      // already fires far more often than the sidebar's own teardown.
+      signal.addEventListener("abort", () => menuAc.abort(), { signal: menuAc.signal });
       // Defer so this click event doesn't immediately close it
       setTimeout(() => {
         if (menuAc.signal.aborted) return;

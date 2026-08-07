@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/telemetry"
 )
@@ -51,6 +52,16 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	recipient, err := s.st.GetUserByID(ctx, recipientID)
 	if err != nil || recipient == nil {
+		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
+	}
+	// GetUserByID has no banned filter (unlike the lookups that normally
+	// surface a user to a caller, e.g. ListMembers), and a hand-crafted
+	// recipient_id naming a deleted/banned account otherwise creates a
+	// dead-end DM channel plus participant rows for the tombstone user.
+	// Gated on IsEffectivelyBanned rather than the raw flag so a lapsed
+	// temporary ban — which login/WS already treat as not-banned — still
+	// permits the DM once it expires.
+	if auth.IsEffectivelyBanned(recipient) {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
 
@@ -230,6 +241,12 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		if err != nil || user == nil {
 			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 		}
+		// See the matching check in CreateDM: gate on effective ban status,
+		// not the raw flag, so a lapsed temporary ban does not wrongly
+		// refuse the group.
+		if auth.IsEffectivelyBanned(user) {
+			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
+		}
 		blocked, err := s.st.IsEitherBlocked(ctx, userID, rid)
 		if err != nil {
 			return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
@@ -343,6 +360,13 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	}
 	if !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
+	}
+	// A ring is a DM interaction like any other sink: without this check a
+	// blocked user could still make the blocker's client ring (A-2026-08-03).
+	// Group DMs are exempt inside requireDMNotBlocked, matching every other
+	// sink — blocks are enforced at group creation instead.
+	if err := requireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+		return nil, err
 	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)

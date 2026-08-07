@@ -28,28 +28,43 @@ type Client struct {
 	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
 	userID         int64
 	user           *db.User
-	channelID      int64          // currently viewed channel for channel-scoped broadcasts
-	voiceChID      int64          // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	voiceJoinToken string         // opaque join-instance token for the current voice session; guarded by voiceMu
-	e2eePubKey     string         // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	e2eeSignature  string         // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
-	roleName       string         // cached role name for chat_message broadcasts
-	tokenHash      string         // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq        uint64         // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
-	connectedAt    time.Time      // when the WS connection was established
-	remoteAddr     string         // client IP:port from the HTTP upgrade request
-	msgCount       int            // count of messages processed; resets after session check
-	msgsReceived   int64          // total messages received over the lifetime of this connection
-	msgsSent       int64          // total messages sent over the lifetime of this connection
-	msgsDropped    int64          // messages dropped due to full send buffer
-	invalidCount   int            // consecutive invalid messages; reset on valid parse
-	lastActivity   time.Time      // last message received from this client; guarded by mu
-	sendClosed     bool           // true after all send channels have been closed
-	send           chan []byte    // normal-priority outbound messages (chat messages, reactions)
-	sendHigh       chan []byte    // high-priority outbound messages (DMs, mentions)
-	sendLow        chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
-	mu             syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
-	voiceMu        syncutil.Mutex // guards voiceChID and voiceJoinToken
+	channelID      int64  // currently viewed channel for channel-scoped broadcasts
+	voiceChID      int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
+	voiceJoinToken string // opaque join-instance token for the current voice session; guarded by voiceMu
+	e2eePubKey     string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
+	e2eeSignature  string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
+	roleName       string // cached role name for chat_message broadcasts
+	tokenHash      string // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq        uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// authChannelID is the channel the client says it had open when it
+	// disconnected, sent alongside last_seq in the auth frame (0 = none).
+	//
+	// It exists to close a resume-only hole: registerNow copies the channel
+	// subscription from the OLD client entry, but when the server already
+	// observed the previous socket close there is no old entry to copy from,
+	// so the resumed connection holds NO ChannelTopic subscription until its
+	// post-auth_ok channel_focus round trip completes. Every channel broadcast
+	// published in that window reaches nobody on this socket and is
+	// unrecoverable afterwards, because the client only ever reports max(seq).
+	//
+	// UNTRUSTED — it is attacker-controlled like any other auth-frame field.
+	// handleReconnect promotes it to channelID only after checking it against
+	// the freshly computed allowed-channel set, and never on a fresh connect.
+	authChannelID int64
+	connectedAt   time.Time      // when the WS connection was established
+	remoteAddr    string         // client IP:port from the HTTP upgrade request
+	msgCount      int            // count of messages processed; resets after session check
+	msgsReceived  int64          // total messages received over the lifetime of this connection
+	msgsSent      int64          // total messages sent over the lifetime of this connection
+	msgsDropped   int64          // messages dropped due to full send buffer
+	invalidCount  int            // consecutive invalid messages; reset on valid parse
+	lastActivity  time.Time      // last message received from this client; guarded by mu
+	sendClosed    bool           // true after all send channels have been closed
+	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
+	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
+	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
+	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
+	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
@@ -140,6 +155,24 @@ func (c *Client) clearVoiceState() (int64, string) {
 	c.e2eePubKey = ""
 	c.e2eeSignature = ""
 	return oldChID, oldJoinToken
+}
+
+// clearVoiceStateIfMatch clears the voice state only when the current channel
+// is chID, returning the join token and whether it cleared. Delayed evictions
+// decided against a snapshotted channel use it so a membership committed after
+// the snapshot survives — the in-memory analogue of LeaveVoiceChannelIfMatch.
+func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	if c.voiceChID != chID {
+		return "", false
+	}
+	oldJoinToken := c.voiceJoinToken
+	c.voiceChID = 0
+	c.voiceJoinToken = ""
+	c.e2eePubKey = ""
+	c.e2eeSignature = ""
+	return oldJoinToken, true
 }
 
 // setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
@@ -251,6 +284,13 @@ func (c *Client) closeSend() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closeAllSendLocked()
+}
+
+// isSendClosed reports whether the client's send channels have been closed.
+func (c *Client) isSendClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sendClosed
 }
 
 // closeAllSendLocked closes all three send channels. Caller must hold c.mu.

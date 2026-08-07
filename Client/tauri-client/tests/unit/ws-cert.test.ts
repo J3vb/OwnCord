@@ -68,6 +68,47 @@ describe("cert mismatch blocking", () => {
     expect(reconnectCalls).toHaveLength(0);
   });
 
+  it("blocks reconnect when the profile host carries an explicit :443 that the Rust proxy normalizes away", async () => {
+    // Regression for v052: config.host is stored verbatim (e.g. a profile
+    // saved as "example.com:443"), but the Rust proxies emit the event host
+    // through tofu::cert_store_key, which strips a trailing ":443". An
+    // un-normalized comparison would miss this match and the reconnect loop
+    // would keep re-handshaking the untrusted host every backoff interval.
+    client.connect({ host: "example.com:443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Rust-normalized event host — no ":443" suffix.
+    emitTauriEvent("cert-tofu", {
+      host: "example.com",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls).toHaveLength(0);
+  });
+
   it("should unblock after acceptCertFingerprint", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -184,6 +225,172 @@ describe("cert mismatch blocking", () => {
 
     const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
     expect(reconnects).toHaveLength(0);
+  });
+  it("does not latch or drop state on a mismatch for a different (unrelated) host", async () => {
+    const mismatchEvents: unknown[] = [];
+    client.onCertMismatch((evt) => mismatchEvents.push(evt));
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+    expect(client.getState()).toBe("connected");
+
+    // A rotated cert on a DIFFERENT saved profile (e.g. the connect page's
+    // 15s health-check loop probing another server) must not touch this
+    // connection at all.
+    emitTauriEvent("cert-tofu", {
+      host: "other.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    // Still notified — so a connect-page prompt for that OTHER host works...
+    expect(mismatchEvents).toHaveLength(1);
+    // ...but this unrelated connection must not be latched or disconnected.
+    expect(client.getState()).toBe("connected");
+
+    // And it must keep reconnecting normally after a later drop.
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls.length).toBeGreaterThan(0);
+  });
+
+  it("connect() resets certMismatchBlock even when not preceded by disconnect()", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+    });
+    expect(client.getState()).toBe("disconnected");
+
+    // A fresh connect() call — not preceded by disconnect() or
+    // acceptCertFingerprint() (e.g. the suppressed-modal path where a second
+    // host's mismatch latched the flag while a first-use modal was open, and
+    // the user logs in anyway) — must clear the stale latch itself.
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent("ws-state", "closed"); // drop again, still unauthenticated
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls.length).toBeGreaterThan(0);
+  });
+
+  it("a mismatch latched while a reconnect is already pending cannot be bypassed by that timer", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Socket drops first: a reconnect timer is now armed and counting down.
+    emitTauriEvent("ws-state", "closed");
+    expect(client.getState()).toBe("reconnecting");
+
+    // The mismatch arrives DURING that backoff (e.g. the connect page's
+    // 15s health check re-probing this same host). Latching the flag is not
+    // enough on its own — the already-armed timer still fires connect(),
+    // which clears the latch, so the reconnect loop resumes against a host
+    // whose certificate just changed. The latch must cancel it.
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+    });
+    expect(client.getState()).toBe("disconnected");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const bypassed = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(bypassed).toHaveLength(0);
+  });
+});
+
+describe("disconnect() resets reconnectAttempt", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("resets the backoff exponent so a later session's first retry uses the short delay", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    // One drop before auth_ok, letting the scheduled retry fire — grows
+    // reconnectAttempt to 1 (the next backoff would double to 2s).
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(1000);
+    emitTauriEvent("ws-state", "open");
+
+    // Abandon this session mid-backoff (reconnectAttempt is now 1).
+    client.disconnect();
+
+    // A brand new session — its first handshake also drops before auth_ok.
+    mockInvoke.mockClear();
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent("ws-state", "closed");
+
+    // If reconnectAttempt carried over (still 1) the next backoff would be
+    // 2000ms; reset to 0 it is the base 1000ms — so a reconnect must have
+    // fired by exactly 1000ms.
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(1000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls.length).toBeGreaterThan(0);
   });
 });
 

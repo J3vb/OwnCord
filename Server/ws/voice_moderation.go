@@ -132,6 +132,32 @@ func requireTargetInChannel(state *db.VoiceState, channelID int64) *Result {
 	return &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 }
 
+// voiceChannelDisconnector is the channel-scoped form of
+// VoiceModerator.DisconnectFromVoice. The bare interface method takes no
+// channel, so it evicts the target from whatever channel their live connection
+// is in at that instant — not the channel voiceModTarget authorized against.
+// A channel switch on the target's own read-pump goroutine, concurrent with
+// the moderator's DB round trips, therefore redirects a kick or a move onto a
+// channel that was never checked, up to and including a DM call the actor is
+// not a participant of (the case voiceModTarget's IsDMParticipant guard
+// exists to refuse).
+//
+// Widening VoiceModerator itself lives in deps.go; until then *Hub also
+// satisfies this optional extension and disconnectFromVoiceIn prefers it,
+// falling back to the unscoped method for any other implementation.
+type voiceChannelDisconnector interface {
+	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool
+}
+
+// disconnectFromVoiceIn evicts targetID from channelID, reporting false when
+// the target has no connection on this node or has already left that channel.
+func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, channelID int64) bool {
+	if scoped, ok := mod.(voiceChannelDisconnector); ok {
+		return scoped.DisconnectFromVoiceInChannel(ctx, targetID, channelID)
+	}
+	return mod.DisconnectFromVoice(ctx, targetID)
+}
+
 // handleVoiceModMuteV2 processes a voice_mod_mute command. The DB row is the
 // authority for the UI; the SFU mute is what makes it more than cosmetic, so a
 // LiveKit failure is logged but does not fail the action — the persisted
@@ -203,6 +229,19 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	// undeafen — accepted as the simplest correct behavior given the schema.
 	if err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), c.Deafened()); err != nil {
 		slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+		// The deafen write above already committed as its own statement (no
+		// transaction spans the two — a single UPDATE covering both columns
+		// needs a db-change; see cross_batch). Best-effort undo it rather
+		// than leave server_deafened=1 with server_muted=0: that combination
+		// is not SFU-muted yet still refuses the target's own undeafen
+		// (refuseIfServerSilenced), for a deafen nobody was ever told about.
+		// Detached from ctx — the cancellation that most likely caused the
+		// failure above (the moderator's socket dropping mid-request) must
+		// not also abort the rollback.
+		if compErr := d.DB.SetVoiceServerDeafen(context.WithoutCancel(ctx), c.TargetID(), !c.Deafened()); compErr != nil {
+			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
+				"err", compErr, "target_id", c.TargetID())
+		}
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 	}
 	if d.Mod != nil {
@@ -282,9 +321,11 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
-	if !d.Mod.DisconnectFromVoice(ctx, c.TargetID()) {
+	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
 		// No live connection on this node — the voice_states row is a ghost the
-		// sweeper owns, and there is nobody to send voice_moved to.
+		// sweeper owns, and there is nobody to send voice_moved to — or the
+		// target left the checked channel while this handler was deciding, in
+		// which case the move must not follow them.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	d.Mod.SendToUser(c.TargetID(), buildVoiceMoved(c.ToChannelID()))
@@ -318,7 +359,9 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
-	if !d.Mod.DisconnectFromVoice(ctx, c.TargetID()) {
+	// Scoped to the channel the gate above authorized: a target who switched
+	// channels mid-decision must not be kicked out of the new one.
+	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	d.Mod.SendToUser(c.TargetID(),
@@ -375,4 +418,20 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	}
 	h.handleVoiceLeave(ctx, c)
 	return true
+}
+
+// DisconnectFromVoiceInChannel is DisconnectFromVoice conditioned on the
+// channel the caller authorized against, satisfying voiceChannelDisconnector.
+// The comparison and the clear happen together under the client's voiceMu
+// (handleVoiceLeaveIfStillIn -> clearVoiceStateIfMatch), so a channel switch
+// committed on the target's own goroutine after the moderator's checks either
+// loses the race outright or is left untouched — never evicted in place of the
+// channel that was checked. Reports false in both of those cases, which the
+// callers already treat as "user is not connected".
+func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool {
+	c := h.GetClient(userID)
+	if c == nil {
+		return false
+	}
+	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID)
 }

@@ -530,6 +530,46 @@ func TestVoiceMod_Move_TextChannelDestination_BadRequest(t *testing.T) {
 	}
 }
 
+// TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel locks the fix for
+// v024: voiceModTarget authorizes against a DB snapshot, but the eviction ran
+// through the unscoped VoiceModerator.DisconnectFromVoice, which drops the
+// target from whatever channel their live connection reports at that instant.
+// A channel switch committed on the target's own read-pump goroutine while the
+// moderator's checks were in flight therefore redirected the kick onto a
+// channel nobody authorized — up to a DM call the actor is not part of.
+//
+// The interleaving itself is microseconds wide and cannot be forced from a
+// test, so the post-condition it produces is staged directly: the DB row (what
+// the moderator authorized against) names channel A while the client's
+// in-memory voice state — the only thing DisconnectFromVoice reads — already
+// names channel B. The eviction must refuse rather than tear the target out of
+// B.
+func TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanA := seedVoiceChan(t, database, "vc-kick-scope-a")
+	chanB := seedVoiceChan(t, database, "vc-kick-scope-b")
+	actor := seedVoiceUserWithRole(t, database, "admin-kick-scope", 2)
+	target := seedVoiceUserWithRole(t, database, "member-kick-scope", 4)
+
+	targetClient, _ := joinVoice(t, hub, target, chanA)
+	ws.SetClientVoiceStateForTest(targetClient, chanB, "join-token-b")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, chanA, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModKickMsg(target.ID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+		t.Fatalf("error code = %q, want VOICE_ERROR", code)
+	}
+	if got := ws.GetClientVoiceChIDForTest(targetClient); got != chanB {
+		t.Errorf("target voice channel = %d after a kick authorized for channel %d, want %d (the newer membership must survive)",
+			got, chanA, chanB)
+	}
+}
+
 // ─── self-service controls under a server mute ───────────────────────────────
 
 func TestVoiceMute_SelfUnmuteWhileServerMuted_Refused(t *testing.T) {

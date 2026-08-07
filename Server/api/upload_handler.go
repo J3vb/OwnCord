@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"image"
@@ -263,6 +264,36 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		if aa == nil {
 			http.NotFound(w, r)
 			return
+		}
+
+		// A soft-deleted message's attachments must stop being servable the
+		// moment the message is deleted — the client shows a tombstone, but
+		// without this check the file stays reachable by URL forever (no
+		// sweep can ever reclaim a linked row either, since the only reaper
+		// requires message_id IS NULL). Checked before the ACL branch so it
+		// also covers admins, matching the tombstone applying to everyone.
+		//
+		// Queried directly rather than through database.GetMessage: that
+		// wrapper's SELECT list carries every message column, and the
+		// `deleted` flag is the only one this check needs.
+		if aa.MessageID != nil {
+			var deleted bool
+			deletedErr := database.QueryRowContext(r.Context(),
+				`SELECT deleted FROM messages WHERE id = ?`, *aa.MessageID).Scan(&deleted)
+			switch {
+			case errors.Is(deletedErr, sql.ErrNoRows):
+				// No message row — leave ACL to decide (unlinked-shaped by now).
+			case deletedErr != nil:
+				slog.Error("failed to look up message for attachment", "id", fileID, "error", deletedErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL_ERROR",
+					Message: "internal server error",
+				})
+				return
+			case deleted:
+				http.NotFound(w, r)
+				return
+			}
 		}
 
 		// ── Access control ──────────────────────────────────────────────

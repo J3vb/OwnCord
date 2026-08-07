@@ -313,4 +313,45 @@ describe("attachReactionTooltip", () => {
 
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  // Regression: a full MessageList rebuild re-attaches every visible chip
+  // against the same visit-long signal. A bare per-chip `abort` listener
+  // never got removed, so every past rebuild's chips (and their detached
+  // rows) stayed pinned in memory for the rest of the channel visit.
+  it("registers only one abort listener per signal no matter how many chips attach", () => {
+    const ac = new AbortController();
+    const addEventListenerSpy = vi.spyOn(ac.signal, "addEventListener");
+
+    // Simulate many rebuilds, each re-creating a fresh chip element and
+    // re-attaching tooltip behaviour against the same long-lived signal.
+    for (let i = 0; i < 50; i++) {
+      const chip = document.createElement("span");
+      document.body.appendChild(chip);
+      attachReactionTooltip(
+        chip,
+        { channelId: 5, messageId: 42, emoji: "👍", count: 2 },
+        ac.signal,
+      );
+    }
+
+    const abortRegistrations = addEventListenerSpy.mock.calls.filter(([type]) => type === "abort");
+    expect(abortRegistrations).toHaveLength(1);
+  });
+
+  it("hides every currently-hovering chip on a signal when it aborts, not just the first attached", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const chipA = document.createElement("span");
+    const chipB = document.createElement("span");
+    document.body.append(chipA, chipB);
+    attachReactionTooltip(chipA, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    attachReactionTooltip(chipB, { channelId: 5, messageId: 43, emoji: "🎉", count: 1 }, ac.signal);
+
+    chipA.dispatchEvent(new Event("mouseenter"));
+    chipB.dispatchEvent(new Event("mouseenter"));
+    ac.abort();
+    vi.advanceTimersByTime(REACTION_TOOLTIP_DEBOUNCE_MS * 2);
+
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });

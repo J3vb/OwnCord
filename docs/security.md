@@ -4,15 +4,14 @@ Security guidelines and vulnerability reporting for OwnCord.
 
 ## Reporting Vulnerabilities
 
-Use GitHub Security Advisories to report vulnerabilities: go to Settings > Security > Advisories and create a new advisory.
+Report privately via GitHub Security Advisories:
+[github.com/J3vb/OwnCord/security/advisories/new](https://github.com/J3vb/OwnCord/security/advisories/new).
 
 **Do NOT open public issues for security bugs.**
 
-## Response Timeline
-
-- **Acknowledgment:** Within 48 hours
-- **Critical fixes:** Within 7 days
-- **Non-critical fixes:** Included in the next release
+The repository-root [SECURITY.md](../SECURITY.md) is the canonical reporting
+policy — what to include and the response timeline (initial response within
+7 days) live there, so the two files cannot disagree.
 
 ## Two-Factor Authentication
 
@@ -33,18 +32,24 @@ Users can delete their own account via `DELETE /api/v1/auth/account` with passwo
 
 Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
 
-- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`
-- **Admin:** `role_change`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`
-- **Content:** `channel_create`, `channel_update`, `channel_delete`, `message_delete`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`
+- **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
+- **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
+
+Note: `backup_restore` is written synchronously to the live database *before*
+the pre-restore safety copy is taken, so the row survives inside the
+`pre_restore_*.db` backup. The restored database itself will not contain it —
+the restore replaces the database file wholesale.
 
 ## Client Security Hardening
 
 The Tauri desktop client implements the following security measures:
 
 ### Credential Storage
-- Credentials are stored in Windows Credential Manager via DPAPI (per-user scope, `CRED_PERSIST_ENTERPRISE`)
+- Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
 - Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript
 - Auto-login uses stored tokens for reconnection, not passwords
 
@@ -86,8 +91,7 @@ The Tauri desktop client implements the following security measures:
 
 ## Known Limitations
 
-- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
-- The Tenor API key is hardcoded (Google's public anonymous key) — consider build-time injection for production
+- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
 - CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time). Because of this, narrowing the Tauri `http:allow-fetch` scope alone would not bound exfiltration from a compromised renderer — the webview's own `fetch` reaches the same hosts without going through the plugin. Closing that requires narrowing `connect-src` and moving the link-preview fetch into Rust in the same change
 
 ## Security Hardening Checklist for Operators
@@ -98,6 +102,6 @@ The Tauri desktop client implements the following security measures:
 - [ ] Configure rate limits (defaults are sensible but review for your use case)
 - [ ] Run regular backups via the admin panel
 - [ ] Keep the server updated (admin panel shows available updates)
-- [ ] Firewall: only expose port 8443 (HTTPS) and 7880 (LiveKit WebSocket for voice/video)
+- [ ] Firewall: only expose port 8443 (HTTPS); for voice/video also 7880-7881/TCP and 50000-60000/UDP (LiveKit signaling + media — see [deployment.md](deployment.md)); port 80 only when using ACME
 - [ ] Enable server-wide 2FA requirement once all users have enrolled
 - [ ] Set `admin_allowed_cidrs` to restrict admin panel access to trusted networks

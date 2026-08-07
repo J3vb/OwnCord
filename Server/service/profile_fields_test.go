@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -56,6 +59,72 @@ func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
 	}
 	if u.DisplayName != nil || u.About != nil {
 		t.Fatalf("expected cleared, got %v / %v", u.DisplayName, u.About)
+	}
+}
+
+// raceDetectingStore wraps a real Store and records whether two GetUserByID
+// calls were ever in flight at once, to prove UpdateProfile's read-merge-
+// write serializes per user rather than merely happening to avoid a race
+// under a particular timing.
+type raceDetectingStore struct {
+	Store
+	active  int32
+	overlap int32
+}
+
+func (r *raceDetectingStore) GetUserByID(ctx context.Context, id int64) (*db.User, error) {
+	if atomic.AddInt32(&r.active, 1) > 1 {
+		atomic.AddInt32(&r.overlap, 1)
+	}
+	time.Sleep(5 * time.Millisecond) // widen the window a real race would need
+	defer atomic.AddInt32(&r.active, -1)
+	return r.Store.GetUserByID(ctx, id)
+}
+
+func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
+	rs := &raceDetectingStore{Store: database}
+	svc := NewUserService(rs)
+	ctx := context.Background()
+
+	// Simulates PATCH /users/me (sets display_name) racing
+	// POST /users/me/avatar (sets about, standing in for the avatar column;
+	// both calls pass the unrelated field's current value the way the real
+	// handlers do). Without serialization, whichever call's read lands
+	// between the other's read and write would revert that other call's
+	// change when it writes its own stale merge.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		name := "Ada L."
+		if _, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &name}); err != nil {
+			t.Errorf("UpdateProfile (display_name): %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		about := "counts on it"
+		if _, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", About: &about}); err != nil {
+			t.Errorf("UpdateProfile (about): %v", err)
+		}
+	}()
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&rs.overlap); got != 0 {
+		t.Errorf("UpdateProfile's read-merge-write overlapped %d times, want 0 (must be serialized per user)", got)
+	}
+
+	u, err := database.GetUserByID(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.DisplayName == nil || *u.DisplayName != "Ada L." {
+		t.Errorf("display_name = %v, want %q — must not be reverted by a concurrent update", u.DisplayName, "Ada L.")
+	}
+	if u.About == nil || *u.About != "counts on it" {
+		t.Errorf("about = %v, want %q — must not be reverted by a concurrent update", u.About, "counts on it")
 	}
 }
 

@@ -3,8 +3,8 @@
 // Each server message type maps to one or more store actions.
 
 import type { WsClient } from "./ws";
-import { toConnectionStatus } from "./ws";
-import { authStore, setAuth, clearAuth } from "@stores/auth.store";
+import { toConnectionStatus, setActiveChannelProvider } from "./ws";
+import { authStore, setAuth, clearAuth, updateUser } from "@stores/auth.store";
 import { setTransientError, setConnectionStatus } from "@stores/ui.store";
 import {
   setChannels,
@@ -23,6 +23,7 @@ import {
   deleteMessage,
   bulkDeleteMessages,
   updateReaction,
+  rollbackReaction,
   confirmSend,
   markSendFailed,
   messagesStore,
@@ -50,10 +51,12 @@ import {
   dmStore,
   setDmChannels,
   addDmChannel,
-  removeDmChannel,
+  closeDmLocally,
   updateDmLastMessage,
   updateDmLastMessagePreview,
+  incrementDmMention,
   dmDisplayName,
+  updateDmParticipant,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
@@ -64,6 +67,7 @@ import { invalidateReactionUsers } from "@components/message-list/reaction-toolt
 import { notifyIncomingMessage } from "./notifications";
 import { highlightsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
+import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
@@ -137,9 +141,28 @@ export function wireDispatcher(
 
   // ── Auth ──────────────────────────────────────────────
 
+  // Let the transport declare the open channel in the auth frame itself, so a
+  // resuming server can restore the ChannelTopic subscription during the
+  // handshake rather than only after the channel_focus round trip below —
+  // closing the window in which channel broadcasts reach nobody on this
+  // socket. The round trip stays as the fallback for older servers.
+  setActiveChannelProvider(() => channelsStore.select((s) => s.activeChannelId));
+  unsubs.push(() => setActiveChannelProvider(null));
+
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
       setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
+
+      // The resume path can land with no ChannelTopic subscription: the hub
+      // only transfers a focused channel from an old connection entry, but
+      // readPump's unregister deletes that entry as soon as the server
+      // observes the socket close — which happens well before the client's
+      // first reconnect attempt. Re-asserting focus here (idempotent on the
+      // server) covers that gap on every connect, resume included.
+      const activeChannelId = channelsStore.select((s) => s.activeChannelId);
+      if (activeChannelId !== null) {
+        ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
+      }
     }),
   );
 
@@ -196,19 +219,51 @@ export function wireDispatcher(
         );
       }
 
-      // Auto-select the first text channel if none is active
+      // Auto-select the first text channel if none is active; clear it when
+      // the channel this session was viewing is gone from the fresh snapshot
+      // (deleted, or a DM closed elsewhere while this client was offline) so
+      // the activeChannelId subscriber actually fires and tears down the
+      // stale message list/composer instead of leaving them mounted against
+      // a channel the server no longer recognizes. Checked against the raw
+      // payload (not the synthesized channelsStore row) so a still-open DM
+      // that was never locally synthesized this session isn't wrongly
+      // cleared.
       const currentActive = channelsStore.select((s) => s.activeChannelId);
+      // Set only when the branch below clears a channel that was active
+      // before this ready — distinct from "no channel was active", which
+      // must NOT mark-read whatever the auto-select branch just picked.
+      let activeChannelCleared = false;
       if (currentActive === null && payload.channels.length > 0) {
         const firstText = payload.channels.find((ch) => ch.type === "text");
         if (firstText !== undefined) {
           setActiveChannel(firstText.id);
         }
+      } else if (currentActive !== null) {
+        const stillPresent =
+          payload.channels.some((ch) => ch.id === currentActive) ||
+          (payload.dm_channels ?? []).some((dm) => dm.channel_id === currentActive);
+        if (!stillPresent) {
+          setActiveChannel(null);
+          activeChannelCleared = true;
+        }
       }
 
-      // Populate DM channels if present in the ready payload
+      // Populate DM channels from the ready payload. The server always sends
+      // the field, so an empty array is an authoritative "no open DMs" (all
+      // closed/left on another device) and must clear ghosts from dmStore —
+      // skipping it would let a stale DM survive every reconnect.
       const dmPayloads = payload.dm_channels ?? [];
-      if (dmPayloads.length > 0) {
-        setDmChannels(dmPayloads.map(mapDmPayload));
+      setDmChannels(dmPayloads.map(mapDmPayload));
+
+      // The server's read_states go stale while a channel stays focused
+      // (channel_focus is sent once per mount, mark_read only from the context
+      // menu), so a full-ready resync restates non-zero unread/mention counts
+      // for the very channel the user is reading. Mark it read: this advances
+      // the server read state and clears the local badges, for server channels
+      // and DMs alike. Skipped on first connect (nothing was active yet) and
+      // when the block above just cleared a channel that's gone.
+      if (currentActive !== null && !activeChannelCleared) {
+        markChannelRead(currentActive);
       }
 
       // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
@@ -268,7 +323,21 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.DM_CHANNEL_CLOSE, (payload) => {
       log.info("DM channel closed", { channelId: payload.channel_id });
-      removeDmChannel(payload.channel_id);
+      // Delivered to a device that never ran the local close flow (closed
+      // from another signed-in device) — unlike the sidebar's closeOrLeaveDm,
+      // there is no "channel visited before this DM" to restore, so fall
+      // back to another open DM, else the first text channel.
+      closeDmLocally(payload.channel_id, () => {
+        const remaining = dmStore.getState().channels;
+        if (remaining.length > 0) {
+          setActiveChannel(remaining[0]!.channelId);
+          return;
+        }
+        const firstText = [...channelsStore.getState().channels.values()]
+          .filter((ch) => ch.type === "text")
+          .toSorted((a, b) => a.position - b.position)[0];
+        setActiveChannel(firstText?.id ?? null);
+      });
     }),
   );
 
@@ -296,15 +365,15 @@ export function wireDispatcher(
       // DM channel IDs are not in channelsStore (they use dmStore), so
       // incrementUnread is a no-op for DMs, but the own-message guard is
       // applied here for defence-in-depth.
+      const isMention = highlightsCurrentUser(payload.content, {
+        mentions: payload.mentions,
+        mentionsEveryone: payload.mentions_everyone,
+      });
+
       if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
         incrementUnread(payload.channel_id);
         // A mention is an unread too — the mention badge just outranks it.
-        if (
-          highlightsCurrentUser(payload.content, {
-            mentions: payload.mentions,
-            mentionsEveryone: payload.mentions_everyone,
-          })
-        ) {
+        if (isMention) {
           incrementMention(payload.channel_id);
         }
       }
@@ -323,6 +392,12 @@ export function wireDispatcher(
           );
         } else {
           updateDmLastMessage(payload.channel_id, payload.id, payload.content, payload.timestamp);
+          // The DM badge reads dmStore's mentionCount (mute-immune, rendered
+          // by DmSidebar) — incrementMention above no-ops for DM ids, which
+          // are absent from channelsStore. Same guards as the unread bump.
+          if (isMention) {
+            incrementDmMention(payload.channel_id);
+          }
         }
       }
 
@@ -385,6 +460,10 @@ export function wireDispatcher(
       // store treats "field absent" as "leave the text alone", which is what
       // an older server's presence event means.
       updatePresence(payload.user_id, payload.status, payload.custom_status);
+      // dmStore keeps its own frozen copy of a DM partner's status for the
+      // sidebar row (see buildDmConversations) — membersStore alone does not
+      // reach it.
+      updateDmParticipant(payload.user_id, { status: payload.status });
     }),
   );
 
@@ -414,6 +493,9 @@ export function wireDispatcher(
           .toSorted((a, b) => a.position - b.position);
         const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
         setActiveChannel(firstTextId);
+        // The redirect alone reads as the app spontaneously changing channels;
+        // say why (ux/channels-members-dms §1.2).
+        showToast("This channel was deleted", "info");
         log.info("Active channel deleted, redirected", { deletedId: payload.id });
       }
     }),
@@ -446,6 +528,16 @@ export function wireDispatcher(
     ws.on(S.MEMBER_UPDATE, (payload) => {
       log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
+
+      // Keep authStore in sync when the signed-in user's own role changed —
+      // every permission gate (canManageChannels, canViewAuditLog, ...) reads
+      // authStore.user.role, not membersStore, so without this a promotion or
+      // demotion of the current user would leave every affordance stale until
+      // the socket reconnects (mirrors the USER_UPDATE self-branch below).
+      const me = authStore.getState().user;
+      if (me && payload.user_id === me.id) {
+        updateUser({ role: payload.role });
+      }
     }),
   );
 
@@ -478,6 +570,17 @@ export function wireDispatcher(
         avatar: payload.avatar,
         displayName: payload.display_name,
         identityPublicKey: payload.identity_public_key,
+      });
+      // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
+      // username/avatar/displayName is otherwise never refreshed. DmUser's
+      // avatar/displayName are non-nullable ("" = unset), so null (cleared)
+      // maps to "". display_name absent means "leave the nickname alone" —
+      // an older or partial payload must not blank it, exactly as
+      // updateMemberProfile above.
+      updateDmParticipant(payload.user_id, {
+        username: payload.username,
+        avatar: payload.avatar ?? "",
+        ...(payload.display_name === undefined ? {} : { displayName: payload.display_name ?? "" }),
       });
 
       // Update auth store if the current user changed their own profile.
@@ -555,13 +658,26 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.VOICE_LEAVE, (payload) => {
       removeVoiceUser(payload);
-      // Notify E2EE state machine so key holder can rotate the room key.
-      void livekitSession().then(({ handleParticipantLeft }) =>
-        handleParticipantLeft(payload.user_id),
-      );
-      // Clear local voice state if the current user was removed (kick/disconnect)
       const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
+      const isSelf = payload.user_id === currentUserId;
+      // A server-initiated eviction (revocation sweep, channel delete) has no
+      // companion teardown message — this voice_leave IS the signal that
+      // drives our own LiveKit/E2EE teardown, or mic publish and key material
+      // stay live while the UI shows not-in-voice. Guard on channel match: a
+      // late-arriving voice_leave for a channel we already left (and rejoined
+      // elsewhere) must not kill a newer join. Read the store before
+      // leaveVoiceChannel() below clears currentChannelId.
+      const shouldTeardownSession =
+        isSelf && voiceStore.getState().currentChannelId === payload.channel_id;
+      // Notify E2EE state machine so key holder can rotate the room key, and
+      // (when applicable) tear down the media session — both through one lazy
+      // import so the two effects cannot land in different ticks.
+      void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
+        void handleParticipantLeft(payload.user_id);
+        if (shouldTeardownSession) void leaveVoice(false);
+      });
+      // Clear local voice state if the current user was removed (kick/disconnect)
+      if (isSelf) {
         leaveVoiceChannel();
       }
     }),
@@ -637,13 +753,38 @@ export function wireDispatcher(
 
   // Local transport failures (proxy not open, outbound channel full/closed):
   // fail the matching optimistic row exactly like a server error reply would.
-  // Fire-and-forget sends (typing, presence, voice) have no pendingSends entry
-  // and stay logged-only.
+  // An optimistic reaction toggle rolls back the same way. Fire-and-forget
+  // sends (typing, presence, voice) have no pending entry and stay logged-only.
+  // A connection that leaves "connected" can never deliver chat_send_ok for
+  // frames already handed to the transport: fail every pending optimistic
+  // send so its row offers retry instead of spinning forever (and the leaked
+  // pendingSends entries are cleared).
+  unsubs.push(
+    ws.onStateChange((state) => {
+      if (state !== "reconnecting" && state !== "disconnected") return;
+      // Snapshot the ids: markSendFailed deletes from pendingSends, so
+      // iterating the live Map's keys would mutate during iteration.
+      for (const id of Array.from(messagesStore.getState().pendingSends.keys())) {
+        markSendFailed(id, "OFFLINE");
+      }
+      // Same reasoning applies to optimistic reaction toggles: a reaction
+      // frame already handed to a dying socket can never deliver its
+      // chat_send_ok/error either, so roll back every pending toggle instead
+      // of leaving a permanently wrong pill and a stale pendingReactions
+      // entry that could later consume an unrelated self-echo.
+      for (const id of Array.from(messagesStore.getState().pendingReactions?.keys() ?? [])) {
+        rollbackReaction(id);
+      }
+    }),
+  );
+
   unsubs.push(
     ws.onSendFailure((id, code) => {
       if (messagesStore.getState().pendingSends.has(id)) {
         markSendFailed(id, code);
+        return;
       }
+      rollbackReaction(id);
     }),
   );
 
@@ -675,9 +816,18 @@ export function wireDispatcher(
             chId === undefined
               ? undefined
               : dmStore.getState().channels.find((c) => c.channelId === chId);
-          if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
+          // Block gating is a 1:1-only rule (server exempts group DMs from
+          // block checks entirely — a group FORBIDDEN means something else,
+          // e.g. stale membership). recipient is just participants[0] for a
+          // group, so flagging it there would gate an unrelated 1:1 DM.
+          if (dm !== undefined && !dm.isGroup) setUserBlockedByThem(dm.recipient.id, true);
         }
         markSendFailed(id, payload.code);
+        return;
+      }
+      // A failed optimistic reaction toggle: the pill reverting is the
+      // feedback the spec asks for (ux/messaging §5) — no toast on top.
+      if (id !== undefined && rollbackReaction(id)) {
         return;
       }
       // Voice capacity refusals. The server owns the limits (voice_max_users /
@@ -692,6 +842,10 @@ export function wireDispatcher(
       }
       if (payload.code === "VIDEO_LIMIT") {
         showToast(payload.message || "That voice channel has reached its video limit", "error");
+        // max_video has no SFU-level enforcement — the server only refuses the
+        // DB write. Without this rollback the already-published camera track
+        // keeps streaming to everyone while voice_state says camera=false.
+        void livekitSession().then(({ disableCamera }) => disableCamera());
         return;
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {

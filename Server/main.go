@@ -310,21 +310,29 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 				}
 
 				// Clean up orphaned attachments (uploaded but never linked to a message).
-				cutoff := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
-				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
-				if orphanErr != nil {
-					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
-					tickFailed = true
-				} else if len(orphanFiles) > 0 {
-					// Best-effort file cleanup.
-					if fileStorage != nil {
+				//
+				// Skipped entirely with no file storage configured: the delete is
+				// atomic (row goes the instant it's selected, by design — see
+				// db/attachment_queries.go), so with fileStorage nil the returned
+				// stored_as names — the only remaining handle on those blobs —
+				// would just be discarded and the files stranded on disk with no
+				// query left able to name them. Leaving the rows in place keeps
+				// them reclaimable once storage is available again.
+				if fileStorage != nil {
+					cutoff := time.Now().Add(-1 * time.Hour)
+					orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
+					if orphanErr != nil {
+						log.Warn("failed to delete orphaned attachments", "error", orphanErr)
+						tickFailed = true
+					} else if len(orphanFiles) > 0 {
+						// Best-effort file cleanup.
 						for _, filename := range orphanFiles {
 							if delErr := fileStorage.Delete(filename); delErr != nil {
 								log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
 							}
 						}
+						log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
 					}
-					log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
 				}
 
 				if tickFailed {

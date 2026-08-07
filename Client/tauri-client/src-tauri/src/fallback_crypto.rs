@@ -67,12 +67,9 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         options.mode(0o600);
     }
     match options.open(&path) {
-        Ok(mut file) => {
-            file.write_all(&key)
-                .and_then(|()| file.sync_all())
-                .map_err(|e| format!("failed to write credential fallback key: {e}"))?;
-            Ok(key)
-        }
+        Ok(mut file) => finish_new_key_file(&path, key, || {
+            file.write_all(&key).and_then(|()| file.sync_all())
+        }),
         // Lost the create race to another thread — use the winner's key.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let bytes = fs::read(&path)
@@ -84,6 +81,28 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         }
         Err(e) => Err(format!("failed to create credential fallback key: {e}")),
     }
+}
+
+/// Finish writing a just-created (empty) key file: run `write_and_sync` — the
+/// real write_all + sync_all in production, injected here so the failure
+/// path is testable without forcing a genuine disk-full/IO error — and
+/// delete the file again if it fails.
+///
+/// `create_new` above already created `path` with zero bytes in it. Left
+/// behind, a write/sync failure leaves a short file that every future
+/// `load_or_create_key` call reads back and rejects forever (see this
+/// function's doc comment: "never rewritten once it exists") — silently
+/// poisoning the fallback store on the first ENOSPC/IO hiccup.
+fn finish_new_key_file(
+    path: &Path,
+    key: [u8; KEY_LEN],
+    write_and_sync: impl FnOnce() -> std::io::Result<()>,
+) -> Result<[u8; KEY_LEN], String> {
+    if let Err(e) = write_and_sync() {
+        let _ = fs::remove_file(path);
+        return Err(format!("failed to write credential fallback key: {e}"));
+    }
+    Ok(key)
 }
 
 /// Seal `plaintext` under `key`, binding `aad` (the service + account name).
@@ -213,6 +232,34 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "key file must be owner-only");
         }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removes_the_partial_file_when_the_write_fails() {
+        // A crash / ENOSPC mid-write must not leave a short file behind:
+        // load_or_create_key's doc comment says the key file is "never
+        // rewritten once it exists", so a poisoned short file is permanent —
+        // every future load fails the length check forever.
+        let dir = std::env::temp_dir().join(format!(
+            "owncord-fallback-partial-write-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CREDENTIAL_FALLBACK_KEY_FILE);
+        // `create_new` in load_or_create_key already created this empty file
+        // before the write step (which is what's under test) runs.
+        fs::write(&path, b"").unwrap();
+
+        let err = finish_new_key_file(&path, [7u8; KEY_LEN], || {
+            Err(std::io::Error::other("disk full"))
+        })
+        .unwrap_err();
+
+        assert!(err.contains("failed to write"), "unexpected error: {err}");
+        assert!(!path.exists(), "a failed write must not leave a partial key file behind");
 
         let _ = fs::remove_dir_all(&dir);
     }

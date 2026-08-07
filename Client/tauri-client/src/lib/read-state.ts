@@ -24,6 +24,11 @@ let sender: MarkReadSender | null = null;
  */
 export function setMarkReadSender(next: MarkReadSender | null): void {
   sender = next;
+  // A re-registration means a new connection (MainPage mounts once per
+  // session), so anything `markAllRead` still had queued belongs to the
+  // previous server. Channel ids are per-server, so letting those fire would
+  // mark the *new* server's same-numbered channel read.
+  cancelPendingMarkAll();
 }
 
 /**
@@ -67,11 +72,51 @@ export function unreadChannelIds(): readonly number[] {
 }
 
 /**
+ * The server's `mark_read` handler shares a 5-per-second-per-user budget with
+ * `channel_focus` (Server/ws/handlers_presence.go) and silently drops frames
+ * over that budget — no error reaches the client. A burst of `mark_read`
+ * sends larger than the budget would still clear every local badge (see
+ * `markChannelRead`), so the excess channels' badges would resurrect on the
+ * next `ready` once the server re-asserts its own unread counts. Pacing the
+ * burst to below the budget, with headroom for a `channel_focus` that may
+ * have already spent a slot, keeps every send inside a window the server
+ * actually honours.
+ */
+const MARK_ALL_READ_BURST_SIZE = 4;
+const MARK_ALL_READ_BURST_INTERVAL_MS = 1100;
+
+/** Timers for the not-yet-sent tail of the current `markAllRead` burst. Held so
+ *  a second mark-all, or a new connection, can drop the stale ones instead of
+ *  letting them land against a channel list that has since been replaced. */
+let pendingMarkAll: Array<ReturnType<typeof setTimeout>> = [];
+
+function cancelPendingMarkAll(): void {
+  for (const t of pendingMarkAll) clearTimeout(t);
+  pendingMarkAll = [];
+}
+
+/**
  * Mark every unread channel and DM read. Returns how many were marked, so the
  * caller can stay silent when there was nothing to do.
+ *
+ * Sent in bursts of `MARK_ALL_READ_BURST_SIZE` spaced `MARK_ALL_READ_BURST_INTERVAL_MS`
+ * apart — see the budget note above. Each channel's local badge is cleared at
+ * the moment its own frame actually goes out, not up front, so a channel
+ * whose send hasn't fired yet still shows unread rather than lying about it.
  */
 export function markAllRead(): number {
+  // A second click supersedes the first: its own `unreadChannelIds()` already
+  // covers everything the earlier burst had not sent yet, so keeping the old
+  // timers would only duplicate sends and spend budget twice.
+  cancelPendingMarkAll();
   const ids = unreadChannelIds();
-  for (const id of ids) markChannelRead(id);
+  for (const [i, id] of ids.entries()) {
+    const delay = Math.floor(i / MARK_ALL_READ_BURST_SIZE) * MARK_ALL_READ_BURST_INTERVAL_MS;
+    if (delay === 0) {
+      markChannelRead(id);
+    } else {
+      pendingMarkAll.push(setTimeout(() => markChannelRead(id), delay));
+    }
+  }
   return ids.length;
 }

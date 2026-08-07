@@ -16,13 +16,13 @@ Production deployment guide for OwnCord server on Windows and Linux.
 **Windows:**
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 ```
 
 **Linux:**
 ```bash
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
 ```
 
 - `-s -w` strips debug info (smaller binary)
@@ -35,7 +35,7 @@ Alternatively, download a pre-built binary from GitHub Releases:
 
 ## Docker (Linux)
 
-The easiest way to run OwnCord on Linux. Includes the chat server and LiveKit voice/video as separate containers on a shared internal network.
+The easiest way to run OwnCord on Linux. Includes the chat server and LiveKit voice/video as separate containers on a shared internal network. The server image is built `FROM gcr.io/distroless/static-debian12` and runs as a non-root user (`65532`), so there is no shell inside the container.
 
 ### Prerequisites
 
@@ -95,6 +95,14 @@ docker compose up -d
 ```
 
 The named volume is preserved — no data loss.
+
+Pulling the image is the **only** upgrade path in Docker: the admin panel's
+in-place "Apply Update & Restart" is refused in container deployments (503
+`CONTAINER_DEPLOYMENT`), because the running binary is image content — a
+replacement written next to it would die with the container. The shipped
+image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the
+server binary into a container and genuinely want in-place self-update can
+set `OWNCORD_CONTAINER=0` to opt back in.
 
 ### LiveKit in Docker
 
@@ -242,11 +250,13 @@ Restoring replaces the live database file. A pre-restore safety backup is create
 ```json
 {
   "status": "ok",
-  "version": "1.0.0",
   "uptime": 86400,
   "online_users": 12
 }
 ```
+
+The server version is deliberately not exposed on this unauthenticated
+endpoint (anti-fingerprinting hardening).
 
 ### Metrics Endpoint
 
@@ -262,6 +272,7 @@ Restoring replaces the live database file. A pre-restore safety backup is create
   "num_gc": 150,
   "connected_users": 12,
   "voice_sessions": 3,
+  "broadcast_drops": 0,
   "livekit_healthy": true
 }
 ```

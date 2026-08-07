@@ -231,6 +231,10 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     );
 
     const roleSub = createElement("div", { class: "context-menu__submenu" });
+    // One guard across every option: `currentRole` only updates when the
+    // member_update echoes, so without it a double-click (or a second option
+    // clicked while the first PATCH is in flight) fires twice.
+    let roleChangeRunning = false;
     for (const role of options.availableRoles) {
       const cls =
         role === options.currentRole
@@ -240,9 +244,14 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         role,
         cls,
         () => {
-          if (role !== options.currentRole) {
-            void options.onChangeRole(role);
-          }
+          if (roleChangeRunning || role === options.currentRole) return;
+          roleChangeRunning = true;
+          roleOption.classList.add("context-menu__item--pending");
+          const done = (): void => {
+            roleChangeRunning = false;
+            roleOption.classList.remove("context-menu__item--pending");
+          };
+          options.onChangeRole(role).then(done, done);
         },
         ac.signal,
       );

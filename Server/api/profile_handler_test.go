@@ -455,3 +455,84 @@ func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
 		})
 	}
 }
+
+// ─── GET /api/v1/users/me/sessions with an API-token principal ────────────────
+
+func TestListSessions_APITokenPrincipal(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+
+	// One login session exists, but the caller authenticates with an API
+	// token (nil SessionKey). The sibling DELETE works for this principal;
+	// the list must too, with no session marked current.
+	_ = profileCreateToken(t, database, "apisessions", 4)
+	user, _ := database.GetUserByUsername(context.Background(), "apisessions")
+	if user == nil {
+		t.Fatal("user not found")
+	}
+	apiTok, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateAPIToken(context.Background(), user.ID, auth.HashToken(apiTok), "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+apiTok)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sessions list via API token: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Sessions []struct {
+			ID        int64 `json:"id"`
+			IsCurrent bool  `json:"is_current"`
+		} `json:"sessions"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
+	}
+	if resp.Sessions[0].IsCurrent {
+		t.Error("API-token principal must not mark any session as current")
+	}
+}
+
+// ─── Rate-limit bucket isolation ─────────────────────────────────────────────
+
+func TestRateLimit_ProfileUpdatesDoNotConsumePasswordBudget(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "bucketuser", 4)
+
+	// Five profile PATCHes (limit 10/min). If the password endpoint shared
+	// the same bare-IP bucket, its 5/min budget would now read as exhausted
+	// with zero password attempts made.
+	for i := range 5 {
+		rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+			"username": "bucketuser",
+		})
+		if rr.Code == http.StatusTooManyRequests {
+			t.Fatalf("profile PATCH %d unexpectedly rate limited", i)
+		}
+	}
+
+	raw, _ := json.Marshal(map[string]string{
+		"old_password": "wrong-on-purpose",
+		"new_password": "NewSecurePass1!",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/me/password", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusTooManyRequests {
+		t.Fatal("password change 429'd with zero password attempts made — unrelated endpoints share one rate-limit bucket")
+	}
+}
