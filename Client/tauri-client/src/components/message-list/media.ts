@@ -346,6 +346,13 @@ export function renderInlineImage(url: string): HTMLDivElement {
 // properly remove document-level listeners from the previous instance.
 let activeLightboxClose: (() => void) | null = null;
 
+/** Close the active lightbox, if any. Called on page teardown (logout, page
+ *  swap) so an open overlay doesn't survive onto the next page with live
+ *  document listeners and a revoked blob URL. */
+export function closeActiveLightbox(): void {
+  activeLightboxClose?.();
+}
+
 /** Open a full-screen lightbox overlay with zoom and pan. */
 export function openImageLightbox(src: string, alt: string): void {
   // Close any existing lightbox (including its document listeners)

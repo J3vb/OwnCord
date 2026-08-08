@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
@@ -49,7 +49,7 @@ vi.mock("@lib/livekitSession", () => ({
   },
 }));
 
-import { AudioElements } from "../../src/lib/audioElements";
+import { AudioElements, setAudioVolumeHost } from "../../src/lib/audioElements";
 
 function createMockTrack(kind: string, sid: string) {
   const audioEl = document.createElement("audio");
@@ -177,6 +177,45 @@ describe("AudioElements", () => {
   describe("getUserVolume", () => {
     it("returns default volume of 100", () => {
       expect(elements.getUserVolume(42)).toBe(100);
+    });
+  });
+
+  describe("per-user volume — host scoping (B3-6)", () => {
+    afterEach(() => {
+      // currentHost is module-level state that outlives a single test.
+      setAudioVolumeHost(null);
+    });
+
+    it("falls back to the legacy unscoped key when no host is set", () => {
+      elements.setUserVolume(42, 150);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 150);
+    });
+
+    it("scopes the saved-volume key to the current host", () => {
+      setAudioVolumeHost("a.example.com");
+      elements.setUserVolume(42, 150);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42:a.example.com", 150);
+    });
+
+    it("reads the volume back under the scoped key, not the unscoped one", () => {
+      setAudioVolumeHost("a.example.com");
+      elements.getUserVolume(42);
+      expect(mockLoadPref).toHaveBeenCalledWith("userVolume_42:a.example.com", 100);
+    });
+
+    it("does not leak a volume set on one host onto another", () => {
+      // Regression for B3-6: a mute (volume 0) set for user 7 on server A
+      // must not silence user 7 on server B.
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "userVolume_7:a.example.com") return 0;
+        return defaultVal;
+      });
+
+      setAudioVolumeHost("a.example.com");
+      expect(elements.getUserVolume(7)).toBe(0);
+
+      setAudioVolumeHost("b.example.com");
+      expect(elements.getUserVolume(7)).toBe(100);
     });
   });
 

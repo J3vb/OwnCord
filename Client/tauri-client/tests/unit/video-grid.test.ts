@@ -825,4 +825,45 @@ describe("VideoGrid", () => {
       expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
     });
   });
+
+  // -----------------------------------------------------------------------
+  // clearStreams (B1-8: stale remote tiles survive join -> leave -> join)
+  // -----------------------------------------------------------------------
+
+  describe("clearStreams", () => {
+    it("removes every tile", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.addStream(2, "Bob", fakeStream());
+      expect(grid.hasStreams()).toBe(true);
+
+      grid.clearStreams();
+
+      expect(grid.hasStreams()).toBe(false);
+      expect(container.querySelectorAll(".video-cell").length).toBe(0);
+    });
+
+    it("clears focus state along with the tiles", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.setFocusedTile(1);
+      expect(grid.getFocusedTileId()).toBe(1);
+
+      grid.clearStreams();
+
+      expect(grid.getFocusedTileId()).toBeNull();
+    });
+
+    it("cleans up track listeners for every cell", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+
+      grid.clearStreams();
+
+      expect(track.listeners["ended"]?.length ?? 0).toBe(0);
+    });
+
+    it("is a no-op on an empty grid", () => {
+      expect(() => grid.clearStreams()).not.toThrow();
+      expect(grid.hasStreams()).toBe(false);
+    });
+  });
 });

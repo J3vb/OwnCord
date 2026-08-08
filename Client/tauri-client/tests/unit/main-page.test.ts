@@ -44,6 +44,17 @@ vi.mock("@lib/notifications", () => ({
   stopRingChime: vi.fn(),
 }));
 
+const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
+  mockSetAudioVolumeHost: vi.fn(),
+}));
+
+// Real audioElements.ts pulls in livekit-client (unmocked elsewhere in this
+// file's graph) purely to hold the AudioElements class this page never
+// touches directly — mock out the one export MainPage actually calls.
+vi.mock("@lib/audioElements", () => ({
+  setAudioVolumeHost: mockSetAudioVolumeHost,
+}));
+
 vi.mock("@lib/autoIdle", () => ({
   startAutoIdle: vi.fn(() => ({ destroy: vi.fn() })),
 }));
@@ -119,6 +130,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       videoGrid: {
         addStream: vi.fn(),
         removeStream: vi.fn(),
+        clearStreams: vi.fn(),
         hasStreams: vi.fn(() => false),
         setFocusedTile: vi.fn(),
         getFocusedTileId: vi.fn(() => null),
@@ -149,6 +161,7 @@ import { dmStore } from "../../src/stores/dm.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
+import { openImageLightbox } from "../../src/components/message-list/media";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -458,5 +471,24 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
 
     expect(uiStore.getState().settingsOpen).toBe(false);
+  });
+
+  it("scopes per-user volume prefs to the connected host, like channel mutes and the NSFW gate (B3-6)", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    expect(mockSetAudioVolumeHost).toHaveBeenCalledWith("");
+  });
+
+  it("closes an open image lightbox on destroy so it doesn't survive onto the next page (B6-15)", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    openImageLightbox("https://example.com/pic.png", "pic");
+    expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
+
+    page.destroy?.();
+
+    expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });
 });

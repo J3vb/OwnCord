@@ -27,8 +27,11 @@ export interface TileConfig {
 export interface VideoGridComponent extends MountableComponent {
   addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
   removeStream(userId: number): void;
+  /** Remove every tile — used on a real voice leave so stale remote tiles
+   *  from the previous session don't survive into the next join. */
+  clearStreams(): void;
   hasStreams(): boolean;
-  setFocusedTile(tileId: number): void;
+  setFocusedTile(tileId: number | null): void;
   getFocusedTileId(): number | null;
 }
 
@@ -225,7 +228,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
-  function setFocusedTile(tileId: number): void {
+  function setFocusedTile(tileId: number | null): void {
     focusedTileId = tileId;
     rebuildFocusLayout();
   }
@@ -427,6 +430,15 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** Remove every tile (trackCleanup + srcObject=null via removeStream).
+   *  Deleting the current key mid-iteration is well-defined for Map — no
+   *  entries are skipped — so this needs no snapshot copy of the keys. */
+  function clearStreams(): void {
+    for (const userId of cells.keys()) {
+      removeStream(userId);
+    }
+  }
+
   function hasStreams(): boolean {
     return cells.size > 0;
   }
@@ -476,6 +488,7 @@ export function createVideoGrid(): VideoGridComponent {
     destroy,
     addStream,
     removeStream,
+    clearStreams,
     hasStreams,
     setFocusedTile,
     getFocusedTileId: getFocusedTileIdFn,

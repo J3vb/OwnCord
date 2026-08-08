@@ -78,6 +78,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!videoMode) return;
     videoMode = false;
     focusedTileId = null;
+    // Clear the grid's own focus state too — otherwise it stays pinned to
+    // whatever tile was focused and the next auto-open (B5-15) reopens
+    // straight into a stale focus layout.
+    videoGrid.setFocusedTile(null);
     localTileAdded = false;
     localScreenshareTileAdded = false;
     slots.messagesSlot.style.display = "";
@@ -105,6 +109,12 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       // localCamera/localScreenshare go false, and this early return skips
       // the reset below — showChat() here would strand userDismissedVideo
       // set and suppress auto-open for the next session.
+      //
+      // This is a real leave (not a reconnect — currentChannelId stays set
+      // during auto-reconnect), so clear any remote tiles left over from the
+      // ended session too (B1-8) — otherwise they persist as dead
+      // MediaStreams and keep hasStreams() true for the next join.
+      videoGrid.clearStreams();
       closeVideoGrid();
       return;
     }

@@ -37,6 +37,7 @@ import {
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { clearAttachmentCaches } from "@components/message-list/attachments";
+import { closeActiveLightbox } from "@components/message-list/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -44,6 +45,7 @@ import {
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setNsfwGateHost } from "@lib/nsfw-gate";
+import { setAudioVolumeHost } from "@lib/audioElements";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -102,6 +104,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
   setNsfwGateHost(apiConfig.host ?? null);
+  setAudioVolumeHost(apiConfig.host ?? null);
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
@@ -769,6 +772,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // clip viewed this session stays pinned (as a blob: URL or a cached
       // data: URI) past logout.
       clearAttachmentCaches();
+      // The lightbox is a module-level overlay appended straight to
+      // document.body — renderPage only clears #app, so a forced logout with
+      // it open would otherwise leave it floating over the login screen with
+      // live document listeners and a since-revoked blob URL (B6-15).
+      closeActiveLightbox();
       autoIdle?.destroy();
       autoIdle = null;
       channelCtrl?.destroyChannel();

@@ -17,9 +17,30 @@ import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");
 
+/**
+ * Server host the per-user volume prefs below belong to. Mirrors
+ * channel-mutes.ts's currentHost — the client is multi-server (one webview
+ * origin means one localStorage) and userId is only unique per server, so
+ * without a host component a volume set for user 7 on one server would
+ * silence user 7 on every other server too. `null` (the startup default)
+ * falls back to the original unscoped key so a pre-scoping install's saved
+ * volumes are not orphaned.
+ */
+let currentHost: string | null = null;
+
+/** Point per-user volume reads/writes at a specific server. Call on connect
+ *  and on server switch — mirroring channel-mutes.ts's setChannelMutesHost. */
+export function setAudioVolumeHost(host: string | null): void {
+  currentHost = host;
+}
+
+function userVolumeKey(userId: number): string {
+  return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
+}
+
 /** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's GainNode-backed setVolume(). */
 function getSavedUserVolume(userId: number): number {
-  return loadPref<number>(`userVolume_${userId}`, 100);
+  return loadPref<number>(userVolumeKey(userId), 100);
 }
 
 export class AudioElements {
@@ -185,7 +206,7 @@ export class AudioElements {
 
   setUserVolume(userId: number, volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
-    savePref(`userVolume_${userId}`, clamped);
+    savePref(userVolumeKey(userId), clamped);
     if (this.room !== null) {
       for (const participant of this.room.remoteParticipants.values()) {
         if (parseUserId(participant.identity) === userId) {
