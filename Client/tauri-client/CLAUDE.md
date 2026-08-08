@@ -18,8 +18,14 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   Native Web Storage shadows jsdom's `localStorage` and fails ~478 tests that
   have nothing to do with your change. That is a local toolchain artifact, not
   a regression — do not "fix" those failures. CI pins Node 20.
-- `src/lib/dispatcher.ts` is the single WS-event entry point: server events
-  reach the stores only through a `ws.on(...)` subscription registered there.
+- `src/lib/dispatcher.ts` is the single WS-event entry point **into the
+  stores**: server events reach domain stores only through a `ws.on(...)`
+  subscription registered there. Other modules do register their own
+  `ws.on(...)` handlers for page-local UI (`main.ts`, `MainPage.ts`,
+  `ChannelController.ts` — ringing, overlays, slow-mode timers); that is fine
+  as long as they only *read* store state. Writing a store from one of those
+  handlers is the violation, and `local/no-store-write-in-ws-on` now fails the
+  build on it.
 - Voice sessions are superseded, not cancelled. `LiveKitSession` re-entry
   points check whether a newer attempt owns the shared state before tearing
   anything down, so cleanup in an aborted path must be scoped to that attempt's

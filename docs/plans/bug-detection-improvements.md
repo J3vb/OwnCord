@@ -67,9 +67,13 @@ indistinguishable at a glance from a real security finding. Confirm with
 crasher. Committed seed corpus files live in the same directory — deleting the
 directory takes them with it. Remove the single offending file by name.
 
-**Semgrep is the one candidate for later promotion to public CI.** Its rules
-are deterministic and its failures are regressions of already-fixed bugs, not
-disclosures of novel ones. Promotion is out of scope here.
+**Superseded 2026-08-08: Tier 2 ships as ESLint rules, not semgrep.** Semgrep
+has no native Windows support (WSL or Docker only), so on this machine it would
+join `make` as tooling that cannot be run locally. ESLint flat config supports
+an inline plugin, so custom rules cost no new dependency — and `npx eslint
+src/` is already a blocking CI gate, which removes the promotion step entirely.
+Rules live in `Client/tauri-client/eslint-rules.js`, tested with `RuleTester`
+in `tests/unit/eslint-rules.test.ts`. See "Tier 2 — delivered" below.
 
 ## Tier 1 — Turn on what already exists
 
@@ -146,18 +150,36 @@ and `docs/audit-*.md`.
 `semgrep-rule-creator` skill, which is test-first — each rule ships with a
 positive fixture that must match and a negative fixture that must not.
 
-**Rules to write first:**
+### Tier 2 — delivered 2026-08-08
 
-| Class | Detector | Source |
-| --- | --- | --- |
-| `await` between reading a store snapshot and `registerNow` | semgrep | recurring reconnect-transfer hotspot |
-| global `leaveVoice()` inside a superseded-attempt path | semgrep | client `CLAUDE.md` invariant |
-| peer marked verified without an epoch/keypair staleness check | semgrep | client `CLAUDE.md` invariant |
-| seq allocated for a frame that can subsequently be dropped | Go runtime assertion under `-tags deadlock` | server `CLAUDE.md` invariant |
+Five rules, all scoped to the modules their invariant governs, all proven to
+fire by reintroducing the historical bug shape into real source and reverting:
 
-**Location:** rules in `.semgrep/owncord/*.yaml`, fixtures alongside as
-`.semgrep/owncord/<rule>.test.{ts,go}`. Run via `npx semgrep --config
-.semgrep/owncord`.
+| Rule | Encodes |
+| --- | --- |
+| `no-leave-voice-when-superseded` | A global `leaveVoice()` inside a branch that already confirmed supersession tears down the newer live session |
+| `e2ee-epoch-needs-keypair-check` | A non-key-holder never bumps the epoch, so an epoch-only staleness guard cannot see a restarted session |
+| `e2ee-verified-status-literal` | Keeps `"verified"` tied to a hand-written call site that earned it, never a computed status |
+| `no-identity-scope-fallback` | A `?? 0` placeholder scope mints a keypair under the wrong account |
+| `no-store-write-in-ws-on` | Page-local `ws.on` handlers may read stores, not write them |
+
+**Declined: `await`-then-stale-snapshot.** Not AST-expressible. Whether an
+await needs a guard — and whether the guard present is sufficient and correctly
+placed — is intent, not shape. `livekitSession.ts` alone expresses supersession
+guards in at least four different forms, and several awaits legitimately need
+no guard. Any rule here would be too narrow to catch real bugs or broad enough
+to flag most of the file's already-correct guard code. A rule that misfires on
+correct code gets disabled and trains people to ignore the linter.
+
+**Found while writing these:** the dispatcher invariant in the client
+`CLAUDE.md` was factually wrong. It claimed `ws.on(...)` appears only in
+`dispatcher.ts`; eight handlers across `main.ts`, `MainPage.ts` and
+`ChannelController.ts` say otherwise. The true invariant — dispatcher is the
+single path by which server events *write to stores* — is what the rule
+encodes, and the doc has been corrected to match.
+
+**Still open:** the server-side `ws` seq/FIFO invariant, which needs a Go
+runtime assertion rather than a lint rule.
 
 Not every fixed bug becomes a rule. A class earns one when it has recurred at
 least twice, or when it corresponds to an invariant already written down in a
