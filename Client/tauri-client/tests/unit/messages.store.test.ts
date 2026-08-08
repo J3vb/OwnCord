@@ -274,6 +274,71 @@ describe("messages store", () => {
       expect(msgs[1]!.status).toBe("pending");
       expect(msgs[2]!.status).toBe("failed");
     });
+
+    it("dedupes an optimistic row against its own real message after a lost ack + resync", () => {
+      // The chat_send_ok ack never arrives (dropped by the same disconnect
+      // that forces a resync), so the row is still "pending" when
+      // invalidateLoadedMessageWindows carries it through.
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      invalidateLoadedMessageWindows();
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]!.status).toBe("pending");
+
+      // The resync's history fetch reveals the server DID persist the send —
+      // id 500 is the real echo of the lost ack.
+      setMessages(1, [makeMessageResponse({ id: 500, content: "ok", user: TEST_USER })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(500);
+      expect(msgs[0]!.status).toBe("sent");
+    });
+
+    it("keeps two genuinely distinct same-author, same-text sends distinct across the same resync", () => {
+      setMessages(1, [], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      invalidateLoadedMessageWindows();
+      expect(getChannelMessages(1)).toHaveLength(2);
+
+      // Both sends actually landed server-side; the resync's fetch returns
+      // both real rows — neither optimistic row may collapse onto the other's.
+      setMessages(
+        1,
+        [
+          makeMessageResponse({ id: 501, content: "ok", user: TEST_USER }),
+          makeMessageResponse({ id: 500, content: "ok", user: TEST_USER }),
+        ],
+        false,
+      );
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.map((m) => m.id)).toEqual([500, 501]);
+      expect(msgs.every((m) => m.status === "sent")).toBe(true);
+    });
   });
 
   // 4. prependMessages prepends older messages

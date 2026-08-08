@@ -173,6 +173,35 @@ export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
 // -----------------------------------------------------------------------------
 
 /**
+ * Whether `optimistic` is an unreconciled local row for the same send that
+ * `candidate` (a fresh server-sourced "sent" row) represents — i.e. the
+ * server did persist the send but the local row never learned that, because
+ * its chat_send_ok ack was lost. Shared by addMessage's live-broadcast path
+ * and setMessages' resync merge so the two never grow divergent notions of
+ * "same message".
+ *
+ * Bounded to avoid collapsing two genuinely distinct sends that happen to
+ * share text: only rows still actually awaiting reconciliation qualify —
+ * "pending", or "failed" for a reason (OFFLINE) that means the send may
+ * still have gone through despite the local failure. A server-rejected send
+ * (SLOW_MODE/FORBIDDEN/...) is never broadcast or replayed, so no echo can
+ * legitimately arrive for it; matching those would silently eat a row the
+ * user still needs to retry. Beyond that, callers must consume each
+ * candidate at most once (findIndex + a seen-set) so N identical pending
+ * sends match N identical real messages one-to-one instead of collapsing
+ * onto a single row.
+ */
+function isUnreconciledEcho(optimistic: Message, candidate: Message): boolean {
+  return (
+    (optimistic.status === "pending" ||
+      (optimistic.status === "failed" && optimistic.errorCode === "OFFLINE")) &&
+    optimistic.correlationId !== null &&
+    optimistic.user.id === candidate.user.id &&
+    optimistic.content === candidate.content
+  );
+}
+
+/**
  * Append a new message from a chat_message WS event, reconciling with any
  * optimistic row it corresponds to.
  *
@@ -212,13 +241,7 @@ export function addMessage(payload: ChatMessagePayload): void {
     //    carries identical content, while a same-author message from another
     //    session of this account does not, and consuming the pending row for it
     //    would orphan the real send.
-    const pendingIdx = existing.findIndex(
-      (m) =>
-        (m.status === "pending" || (m.status === "failed" && m.errorCode === "OFFLINE")) &&
-        m.correlationId !== null &&
-        m.user.id === message.user.id &&
-        m.content === message.content,
-    );
+    const pendingIdx = existing.findIndex((m) => isUnreconciledEcho(m, message));
     if (pendingIdx !== -1) {
       const replaced = existing.map((m, i) => (i === pendingIdx ? message : m));
       const updated = new Map(prev.messagesByChannel);
@@ -382,9 +405,23 @@ export function setMessages(
     const previous = prev.messagesByChannel.get(channelId) ?? [];
     const snapshotIds = new Set(trimmed.map((m) => m.id));
     const maxSnapshotId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
-    const carried = previous.filter(
-      (m) => !snapshotIds.has(m.id) && (m.status !== "sent" || m.id > maxSnapshotId),
-    );
+    // A pending/OFFLINE-failed row whose chat_send_ok ack was lost to the same
+    // disconnect that forced this resync would otherwise survive forever
+    // (its id stays 0, so it can never collide with the real id above) while
+    // the fresh snapshot already carries its persisted echo — drop it rather
+    // than show both. Each snapshot row is consumed by at most one carried
+    // row so two genuinely distinct sends with identical text each keep a row.
+    const consumedEchoes = new Set<number>();
+    const carried = previous.filter((m) => {
+      if (snapshotIds.has(m.id)) return false;
+      if (m.status === "sent") return m.id > maxSnapshotId;
+      const echoIdx = trimmed.findIndex(
+        (s, i) => !consumedEchoes.has(i) && isUnreconciledEcho(m, s),
+      );
+      if (echoIdx === -1) return true;
+      consumedEchoes.add(echoIdx);
+      return false;
+    });
     let merged = carried.length > 0 ? [...trimmed, ...carried] : trimmed;
     const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
     if (mergeTrimmed) {

@@ -12,6 +12,26 @@
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Elements the app hides via inline `style.display = "none"` (the codebase's
+ * standard show/hide idiom — e.g. a group-name field revealed only once a
+ * second member is picked) still match FOCUSABLE_SELECTOR: the selector is
+ * structural, not a visibility check. A browser silently refuses to move
+ * focus onto a display:none element, so treating one as the dialog's "first"
+ * or "last" focusable leaves .focus() a no-op and the Tab trap comparing
+ * against an edge focus never actually reached — Tab then falls through to
+ * the browser's native order and can walk out of the dialog entirely.
+ */
+function isFocusable(el: HTMLElement): boolean {
+  return el.style.display !== "none" && el.style.visibility !== "hidden";
+}
+
+function queryFocusable(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    isFocusable,
+  );
+}
+
 export interface DialogSemanticsOptions {
   /** Accessible name for the dialog (aria-label). */
   readonly label?: string;
@@ -45,7 +65,7 @@ export function trapFocus(container: HTMLElement, signal: AbortSignal): void {
     "keydown",
     (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
-      const focusable = container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      const focusable = queryFocusable(container);
       if (focusable.length === 0) {
         // Nothing tabbable inside — keep focus on the container itself.
         e.preventDefault();
@@ -143,7 +163,7 @@ export function enableRovingNavigation(
  */
 export function focusDialog(container: HTMLElement): () => void {
   const previous = document.activeElement;
-  const firstFocusable = container.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+  const firstFocusable = queryFocusable(container)[0];
   (firstFocusable ?? container).focus();
   return () => {
     if (previous instanceof HTMLElement && previous.isConnected) {

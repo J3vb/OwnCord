@@ -136,6 +136,35 @@ describe("trapFocus", () => {
 
     expect(e.defaultPrevented).toBe(false);
   });
+
+  it("skips display:none controls when wrapping — a hidden control earlier in DOM order is not treated as the edge", () => {
+    // Mirrors the member-picker modal: fields hidden via inline style.display
+    // sit ahead of the only visible control in DOM order. Tabbing from that
+    // visible control must wrap to itself, not escape to whatever the
+    // browser's native tab order finds outside the dialog.
+    const ac = new AbortController();
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    const hiddenA = document.createElement("input");
+    hiddenA.style.display = "none";
+    const hiddenB = document.createElement("input");
+    hiddenB.style.display = "none";
+    const visible = document.createElement("button");
+    visible.textContent = "only visible control";
+    dialog.append(hiddenA, hiddenB, visible);
+    container.appendChild(dialog);
+    trapFocus(dialog, ac.signal);
+
+    visible.focus();
+    const forward = tab(visible);
+    expect(forward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(visible);
+
+    const backward = tab(visible, true);
+    expect(backward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(visible);
+    ac.abort();
+  });
 });
 
 describe("focusDialog", () => {
@@ -180,5 +209,24 @@ describe("focusDialog", () => {
     outside.remove();
     expect(() => restore()).not.toThrow();
     expect(document.activeElement).not.toBe(outside);
+  });
+
+  it("skips a display:none control that is earlier in DOM order than the first visible one", () => {
+    // A hidden field (e.g. a group-name input revealed only after a
+    // selection) sits first in DOM order. Browsers refuse to focus a
+    // display:none element, so calling .focus() on it silently fails and
+    // focus never lands in the dialog at all. The first *visible* focusable
+    // must be chosen instead.
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    const hidden = document.createElement("input");
+    hidden.style.display = "none";
+    const visible = document.createElement("button");
+    dialog.append(hidden, visible);
+    container.appendChild(dialog);
+
+    focusDialog(dialog);
+
+    expect(document.activeElement).toBe(visible);
   });
 });
