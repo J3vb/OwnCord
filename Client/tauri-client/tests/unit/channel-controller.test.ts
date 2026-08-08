@@ -29,6 +29,7 @@ const {
       content?: string;
       user?: { id: number; username: string };
       deleted?: boolean;
+      status?: string;
     }> => [],
   ),
   mockSetReplyTo: vi.fn(),
@@ -241,7 +242,13 @@ vi.mock("@stores/blocks.store", () => ({
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
-import { channelsStore, setChannels, setActiveChannel, setRoles } from "@stores/channels.store";
+import {
+  channelsStore,
+  setChannels,
+  setActiveChannel,
+  setRoles,
+  updateChannel,
+} from "@stores/channels.store";
 import { acknowledgeNsfw } from "@lib/nsfw-gate";
 
 // ---------------------------------------------------------------------------
@@ -905,10 +912,34 @@ describe("createChannelController", () => {
   describe("edit-last-message event", () => {
     it("finds the last non-deleted message by current user and starts edit", () => {
       mockGetChannelMessages.mockReturnValue([
-        { id: 1, content: "first", user: { id: 1, username: "me" }, deleted: false },
-        { id: 2, content: "other user", user: { id: 2, username: "them" }, deleted: false },
-        { id: 3, content: "my deleted", user: { id: 1, username: "me" }, deleted: true },
-        { id: 4, content: "my latest", user: { id: 1, username: "me" }, deleted: false },
+        {
+          id: 1,
+          content: "first",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 2,
+          content: "other user",
+          user: { id: 2, username: "them" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 3,
+          content: "my deleted",
+          user: { id: 1, username: "me" },
+          deleted: true,
+          status: "sent",
+        },
+        {
+          id: 4,
+          content: "my latest",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
       ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
@@ -922,8 +953,20 @@ describe("createChannelController", () => {
 
     it("skips deleted messages and finds earlier non-deleted message", () => {
       mockGetChannelMessages.mockReturnValue([
-        { id: 1, content: "earliest", user: { id: 1, username: "me" }, deleted: false },
-        { id: 2, content: "deleted", user: { id: 1, username: "me" }, deleted: true },
+        {
+          id: 1,
+          content: "earliest",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 2,
+          content: "deleted",
+          user: { id: 1, username: "me" },
+          deleted: true,
+          status: "sent",
+        },
       ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
@@ -937,7 +980,63 @@ describe("createChannelController", () => {
 
     it("does nothing when no own messages exist", () => {
       mockGetChannelMessages.mockReturnValue([
-        { id: 1, content: "other", user: { id: 2, username: "them" }, deleted: false },
+        {
+          id: 1,
+          content: "other",
+          user: { id: 2, username: "them" },
+          deleted: false,
+          status: "sent",
+        },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+
+    it("skips an unconfirmed/failed optimistic row (id 0) and edits the last actually-sent message", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 5,
+          content: "sent earlier",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 0,
+          content: "still sending",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "pending",
+        },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      // The visual Edit affordance only appears on status === "sent" rows
+      // (renderers.ts); the keyboard shortcut must honor the same gate rather
+      // than editing an optimistic row that has no real message id yet.
+      expect(mockStartEdit).toHaveBeenCalledWith(5, "sent earlier");
+    });
+
+    it("does nothing when every own message is still pending/failed", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 0,
+          content: "still sending",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "failed",
+        },
       ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
@@ -1164,6 +1263,36 @@ describe("createChannelController", () => {
 
       expect(opts.chatHeaderName!.textContent).toBe("random");
       expect(mockUpdateChatHeaderForDm).not.toHaveBeenCalled();
+    });
+
+    it("keeps the header name live when the channel is renamed mid-session (mirrors the topic subscription)", () => {
+      setChannels([
+        {
+          id: 42,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          nsfw: false,
+        },
+      ]);
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "general", "text");
+      expect(opts.chatHeaderName!.textContent).toBe("general");
+
+      updateChannel({ id: 42, name: "renamed" });
+      channelsStore.flush();
+
+      expect(opts.chatHeaderName!.textContent).toBe("renamed");
     });
   });
 
@@ -1397,6 +1526,16 @@ describe("createChannelController", () => {
       vi.clearAllMocks();
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
       expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+
+    it("destroyChannel closes any open reaction picker — it survives every other teardown path otherwise", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      ctrl.destroyChannel();
+
+      expect(opts.reactionCtrl.destroy).toHaveBeenCalled();
     });
   });
   // ─── NSFW age gate ────────────────────────────────────────────────────────

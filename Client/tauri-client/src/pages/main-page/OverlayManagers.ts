@@ -15,6 +15,7 @@ import type { PinnedMessage } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
+import { setMessagePinned } from "@stores/messages.store";
 
 const log = createLogger("overlays");
 
@@ -226,11 +227,14 @@ export function createPinnedPanelController(opts: {
 
   readonly getCurrentChannelId: () => number | null;
   /**
-   * Jump to a pinned message. Fire-and-forget: the jumper fetches the
-   * around-window when the message is not loaded and reports its own failures,
-   * so the panel simply closes and gets out of the way.
+   * Jump to a pinned message, in the channel the panel was opened for (the
+   * panel does not re-derive "current channel" live — a channel switch while
+   * it is open must not silently retarget the jump). Fire-and-forget: the
+   * jumper fetches the around-window when the message is not loaded and
+   * reports its own failures, so the panel simply closes and gets out of the
+   * way.
    */
-  readonly onJumpToMessage?: (messageId: number) => void;
+  readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): PinnedPanelController {
   let instance: MountableComponent | null = null;
   // Same guard as InviteManagerController.open: `instance` is only assigned
@@ -262,13 +266,17 @@ export function createPinnedPanelController(opts: {
         channelId,
         pinnedMessages: pins,
         onJumpToMessage: (msgId: number) => {
-          opts.onJumpToMessage?.(msgId);
+          opts.onJumpToMessage?.(channelId, msgId);
           close();
         },
         onUnpin: (msgId: number) => {
           void opts.api
             .unpinMessage(channelId, msgId)
             .then(() => {
+              // The server has no pin/unpin broadcast — this store write is
+              // the row's only local authority for `pinned`. Without it the
+              // row still says "Unpin" after this panel closes.
+              setMessagePinned(channelId, msgId, false);
               close();
             })
             .catch((err: unknown) => {

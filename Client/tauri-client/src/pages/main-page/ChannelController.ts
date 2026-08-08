@@ -123,6 +123,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
   function destroyChannel(): void {
     pendingDeleteManager.cleanup();
+    // The reaction picker is a body-mounted overlay keyed to a message in
+    // this channel — every other teardown path already routes through here,
+    // so this is the one choke point to close it before the channel it was
+    // opened against goes away. destroy() is idempotent (closePicker
+    // null-checks), so it is safe even when no picker is open.
+    reactionCtrl.destroy();
 
     for (const unsub of composerGatingUnsubs) unsub();
     composerGatingUnsubs = [];
@@ -498,7 +504,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Find the last message sent by the current user (array is chronological)
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i]!;
-          if (m.user.id === myId && !m.deleted) {
+          // Mirrors renderers.ts's gate on the visual Edit affordance: an
+          // optimistic row (pending/failed) carries id 0 until the server
+          // acks it, so editing it would send chat_edit for a message that
+          // does not exist yet.
+          if (m.user.id === myId && !m.deleted && m.status === "sent") {
             messageInput?.startEdit(m.id, m.content);
             break;
           }
@@ -574,6 +584,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       updateChatHeaderForDm(chatHeaderRefs, null);
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
+        // Keep the header name live across channel_update events (a rename),
+        // same as the topic subscription right below — otherwise it is set
+        // once from the mount-time snapshot and disagrees with the sidebar
+        // row (which does re-render off the live store) until the channel is
+        // remounted.
+        const nameEl = chatHeaderName;
+        composerGatingUnsubs.push(
+          channelsStore.subscribeSelector(
+            (s) => s.channels.get(channelId)?.name ?? channelName,
+            (name) => setText(nameEl, name),
+          ),
+        );
       }
       // Show the channel topic and keep it live across channel_update events.
       const topicEl = chatHeaderRefs.topicEl;

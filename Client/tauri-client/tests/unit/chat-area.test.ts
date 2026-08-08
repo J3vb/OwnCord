@@ -380,24 +380,17 @@ describe("createChatArea", () => {
 
   // --- Jump wiring: both overlays route into the one jumper ---
 
-  it("pinned onJumpToMessage jumps within the current channel", () => {
+  it("pinned onJumpToMessage forwards the channel the panel passes, not whatever is active now", () => {
+    // The panel captured its own channel (99) when it was opened, which can
+    // differ from whatever channel is active by the time the click lands
+    // (e.g. the user switched channels while the panel stayed open).
     const channelCtrl = { currentChannelId: 7, messageList: null } as any;
     createChatArea(makeOptions({ getChannelCtrl: () => channelCtrl }));
 
     const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    call.onJumpToMessage!(42);
+    call.onJumpToMessage!(99, 42);
 
-    // The pinned panel only ever lists the current channel's pins, so the
-    // channel id comes from the controller rather than the entry.
-    expect(mockJumpTo).toHaveBeenCalledWith(7, 42);
-  });
-
-  it("pinned onJumpToMessage is a no-op with no channel mounted", () => {
-    createChatArea(makeOptions({ getChannelCtrl: () => null }));
-
-    const call = vi.mocked(createPinnedPanelController).mock.calls[0]![0];
-    expect(() => call.onJumpToMessage!(42)).not.toThrow();
-    expect(mockJumpTo).not.toHaveBeenCalled();
+    expect(mockJumpTo).toHaveBeenCalledWith(99, 42);
   });
 
   it("search onJumpToMessage jumps to the result's own channel", () => {

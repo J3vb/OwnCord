@@ -165,6 +165,8 @@ import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
+import { createProfileManager } from "@lib/profiles";
 
 // ---------------------------------------------------------------------------
 // Helpers to access mock internals
@@ -1456,6 +1458,31 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("tracks the rename-group prompt so page teardown removes it (every other modal in this file does)", () => {
+      const dm = makeDm({ channelId: 100, isGroup: true, name: "Old Name" });
+      addDmChannel(dm);
+
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onRenameGroup(100);
+
+      // createPromptModal is the real (unmocked) factory — it mounts to
+      // document.body, outside `root`, so it survives every teardown path
+      // that only removes `root` (a 401/kick/shutdown logout while the
+      // prompt is open) unless SidebarArea tracks and destroys it itself,
+      // same as every sibling modal in this file.
+      expect(document.querySelector(".modal-prompt")).not.toBeNull();
+
+      cleanup(result);
+
+      expect(document.querySelector(".modal-prompt")).toBeNull();
+    });
+
     it("onCloseDm goes back to channels when last DM is closed", () => {
       addDmChannel(
         makeDm({
@@ -2004,6 +2031,48 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       expect(() => result.openQuickSwitch()).not.toThrow();
+
+      cleanup(result);
+    });
+
+    it("does not mount a second overlay from a double-click while profiles are still loading", async () => {
+      // `quickSwitchInstance` is only assigned after the loadProfiles()
+      // await — a synchronous second call in that window must not slip past
+      // the guard and mount a second, orphaned overlay (the same class of bug
+      // already fixed with an `opening` flag on the sibling overlay
+      // controllers in OverlayManagers.ts).
+      let resolveLoad!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        resolveLoad = resolve;
+      });
+      (createProfileManager as MockedFn).mockReturnValueOnce({
+        loadProfiles: vi.fn().mockReturnValue(pending),
+        getAll: vi.fn().mockReturnValue([]),
+        store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
+      });
+
+      // createQuickSwitchOverlay's mock call count is not reset between
+      // tests in this file (resetMocks() doesn't touch it), so compare
+      // against a baseline rather than an absolute count.
+      const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      result.openQuickSwitch();
+      result.openQuickSwitch();
+
+      resolveLoad();
+      // Await the exact promise the source code awaits: its resolution
+      // queues each caller's continuation in registration order, and each
+      // continuation runs to completion (no further await inside) before the
+      // next is dequeued — so once this settles, any second overlay a buggy
+      // double-open would have mounted already exists. vi.waitFor's polling
+      // cannot be trusted here: it can observe the count between the two
+      // continuations and pass before the second one ever runs.
+      await pending;
+
+      expect((createQuickSwitchOverlay as MockedFn).mock.calls.length).toBe(callsBefore + 1);
 
       cleanup(result);
     });

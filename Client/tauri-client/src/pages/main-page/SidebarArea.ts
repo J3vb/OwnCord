@@ -36,6 +36,7 @@ import {
 } from "./SidebarDmHelpers";
 import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/modalFactory";
 import { toggleChannelMute } from "@lib/channel-mutes";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
@@ -103,6 +104,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Quick-switch overlay instance
   let quickSwitchInstance: MountableComponent | null = null;
+  // Set for the duration of the profile-load round trip. `quickSwitchInstance`
+  // is only assigned after that await, so the synchronous
+  // `quickSwitchInstance !== null` guard alone lets a double-click during the
+  // load mount two overlays — the second assignment orphans the first, which
+  // is then unreachable by its own close affordances. Same pattern as
+  // InviteManagerController / PinnedPanelController in OverlayManagers.ts.
+  let openingQuickSwitch = false;
+
+  // Track the rename-group prompt so page teardown removes it — every other
+  // modal in this file assigns `activeModal` for the same reason.
+  let activePrompt: ModalInstance | null = null;
 
   // Re-render hook for the DM sidebar, set while DM mode is mounted. Mute state
   // lives in localStorage rather than a store, so toggling it has no subscriber
@@ -462,7 +474,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function renameGroup(channelId: number): void {
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     if (dm === undefined || !dm.isGroup) return;
-    createPromptModal({
+    const prompt = createPromptModal({
       title: "Rename Group",
       label: "Leave it empty to go back to listing the members.",
       initialValue: dm.name,
@@ -477,7 +489,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           getToast()?.show(msg, "error");
         });
       },
+      onClose: () => {
+        activePrompt = null;
+      },
     });
+    activePrompt = prompt;
   }
 
   function buildDmSidebar(): MountableComponent {
@@ -678,49 +694,54 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   function openQuickSwitch(): void {
-    if (quickSwitchInstance !== null) return;
+    if (quickSwitchInstance !== null || openingQuickSwitch) return;
+    openingQuickSwitch = true;
 
     const currentHost = api.getConfig().host ?? "";
 
     // Load profiles asynchronously, then show overlay
     void (async () => {
-      let profiles: readonly QuickSwitchProfile[];
-
       try {
-        if (profileManager === null) {
-          profileManager = createProfileManager(createTauriBackend());
+        let profiles: readonly QuickSwitchProfile[];
+
+        try {
+          if (profileManager === null) {
+            profileManager = createProfileManager(createTauriBackend());
+          }
+          await profileManager.loadProfiles();
+          profiles = profileManager.getAll().map((p) => ({
+            name: p.name,
+            host: p.host,
+          }));
+        } catch {
+          // If profiles fail to load (e.g., outside Tauri), show empty list
+          profiles = [];
         }
-        await profileManager.loadProfiles();
-        profiles = profileManager.getAll().map((p) => ({
-          name: p.name,
-          host: p.host,
-        }));
-      } catch {
-        // If profiles fail to load (e.g., outside Tauri), show empty list
-        profiles = [];
+
+        // Ensure we haven't been cleaned up while awaiting
+        if (sidebarWrapper.parentElement === null) return;
+
+        quickSwitchInstance = createQuickSwitchOverlay({
+          profiles,
+          currentHost,
+          onSwitch: (host, _name) => {
+            closeQuickSwitch();
+            // Store target for ConnectPage to auto-select after navigation
+            sessionStorage.setItem("owncord:quick-switch-target", host);
+            // Trigger normal logout flow (clears auth -> ws disconnect -> navigate to connect)
+            clearAuth();
+          },
+          onAddServer: () => {
+            closeQuickSwitch();
+            // Navigate to ConnectPage so the user can add a new server
+            clearAuth();
+          },
+          onClose: closeQuickSwitch,
+        });
+        quickSwitchInstance.mount(document.body);
+      } finally {
+        openingQuickSwitch = false;
       }
-
-      // Ensure we haven't been cleaned up while awaiting
-      if (sidebarWrapper.parentElement === null) return;
-
-      quickSwitchInstance = createQuickSwitchOverlay({
-        profiles,
-        currentHost,
-        onSwitch: (host, _name) => {
-          closeQuickSwitch();
-          // Store target for ConnectPage to auto-select after navigation
-          sessionStorage.setItem("owncord:quick-switch-target", host);
-          // Trigger normal logout flow (clears auth -> ws disconnect -> navigate to connect)
-          clearAuth();
-        },
-        onAddServer: () => {
-          closeQuickSwitch();
-          // Navigate to ConnectPage so the user can add a new server
-          clearAuth();
-        },
-        onClose: closeQuickSwitch,
-      });
-      quickSwitchInstance.mount(document.body);
     })();
   }
 
@@ -749,6 +770,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (activeModal !== null) {
       activeModal.destroy?.();
       activeModal = null;
+    }
+  });
+
+  unsubscribers.push(() => {
+    if (activePrompt !== null) {
+      activePrompt.destroy();
+      activePrompt = null;
     }
   });
 
