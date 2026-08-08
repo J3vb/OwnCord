@@ -240,6 +240,60 @@ export function resetIdentityKeyPairCache(): void {
   identityKeyPairCache.clear();
 }
 
+/**
+ * One-time migration for pre-B3-3 installs (see `identityKeyPairCache` above):
+ * before that fix, the identity keypair lived under the host-only keyring
+ * account (`identity:{host}`, passed here as plain `host`) instead of the
+ * scoped `identity:{host}:{uid}`. Without this, every existing install finds
+ * nothing at the new scoped account and mints a fresh identity keypair, and
+ * every peer who already pinned the old key sees a TOFU mismatch — a MITM
+ * warning firing for the whole alpha population at once, training users to
+ * click through the one warning meant to matter.
+ *
+ * Only called when the scoped account is empty, so a genuine first login (or
+ * a second account on a host whose legacy key the first already adopted)
+ * still gets its own fresh keypair — that distinctness is the point of B3-3.
+ * On a host that really did have two accounts sharing one key, whichever logs
+ * in first adopts it and the other mints fresh: the legacy account records no
+ * user id, so there is nothing to match on. That leaves the old shared-key
+ * behaviour in place for exactly one account instead of two, and it resolves
+ * itself once both have signed in once.
+ * The scoped save happens before the legacy delete, so a failed save can't
+ * leave the user with neither key; the legacy account just stays put for the
+ * next launch to retry.
+ *
+ * Delete this once the alpha population has rolled onto the scoped account.
+ */
+async function migrateLegacyIdentityKey(
+  host: string,
+  scope: string,
+): Promise<CryptoKeyPair | null> {
+  const legacyBlob = await loadIdentityKey(host);
+  if (!legacyBlob) {
+    return null;
+  }
+  let keyPair: CryptoKeyPair;
+  try {
+    keyPair = await importIdentityKeyPair(legacyBlob);
+  } catch (err) {
+    log.error("Legacy identity key is corrupt — generating fresh instead of migrating", {
+      host,
+      error: String(err),
+    });
+    return null;
+  }
+  if (await saveIdentityKey(scope, legacyBlob)) {
+    await deleteIdentityKey(host);
+  } else {
+    log.error(
+      "Failed to migrate legacy identity key to the scoped account — leaving the legacy " +
+        "key in place so the next launch can retry",
+      { host },
+    );
+  }
+  return keyPair;
+}
+
 async function loadOrGenerateIdentityKeyPair(host: string, userId: number): Promise<CryptoKeyPair> {
   const scope = identityScopeKey(host, userId);
   const stored = await loadIdentityKey(scope);
@@ -252,6 +306,11 @@ async function loadOrGenerateIdentityKeyPair(host: string, userId: number): Prom
         userId,
         error: String(err),
       });
+    }
+  } else {
+    const migrated = await migrateLegacyIdentityKey(host, scope);
+    if (migrated) {
+      return migrated;
     }
   }
   const keyPair = await generateIdentityKeyPair();
