@@ -523,18 +523,23 @@ export function invalidateLoadedMessageWindows(): void {
 }
 
 /**
- * Drop a channel's detached window so the next history fetch reloads the live
- * tail. Clears the loaded flag too — otherwise MessageController short-circuits
- * on "already loaded" and the stale window stays on screen.
+ * Drop a channel's loaded flag so the next history fetch reloads the live
+ * tail — otherwise MessageController short-circuits on "already loaded" and
+ * the stale window stays on screen.
+ *
+ * Deliberately does NOT clear detachedChannels itself: that flag is what
+ * keeps the "Jump to Present" pill visible and blocks addMessage from
+ * appending a live broadcast onto the stale around-window. setMessages
+ * clears it on success, once the tail has actually landed — if that refetch
+ * fails instead, the channel must stay detached so a live broadcast can't
+ * splice onto history with a silent gap.
  */
 export function reattachToPresent(channelId: number): void {
   messagesStore.setState((prev) => {
     if (!prev.detachedChannels.has(channelId)) return prev;
-    const updatedDetached = new Set(prev.detachedChannels);
-    updatedDetached.delete(channelId);
     const updatedLoaded = new Set(prev.loadedChannels);
     updatedLoaded.delete(channelId);
-    return { ...prev, detachedChannels: updatedDetached, loadedChannels: updatedLoaded };
+    return { ...prev, loadedChannels: updatedLoaded };
   });
 }
 

@@ -283,8 +283,13 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
 /// Cert-store key for a host. Strips a default `:443` so the ws proxy (which
 /// keys off `wss://host` with no explicit 443) and the http/livekit proxies
 /// (which see `host:443`) resolve the SAME pin. Non-default ports are kept.
+/// Case-folded (DNS names are case-insensitive): the host reaches this from
+/// several places (a profile-entered host verbatim, a `wss://` URL, a URL
+/// parsed on the TS side, which lowercases) — without folding case here, two
+/// callers with the same server in different case would pin/read different
+/// entries, opening a second, unpinned proxy tunnel.
 pub(crate) fn cert_store_key(host: &str) -> String {
-    host.strip_suffix(":443").unwrap_or(host).to_string()
+    host.strip_suffix(":443").unwrap_or(host).to_ascii_lowercase()
 }
 
 /// Extract the host (with any non-default port) from a `wss://` URL.
@@ -388,6 +393,20 @@ mod tests {
         assert_eq!(cert_store_key("example.com:443"), "example.com");
         assert_eq!(cert_store_key("example.com"), "example.com");
         assert_eq!(cert_store_key("example.com:8443"), "example.com:8443");
+    }
+
+    // DNS names are case-insensitive, but a raw host string (a profile-entered
+    // host, or one taken verbatim from a wss:// URL) is not normalized before
+    // reaching here. Two call sites can derive the SAME host in different
+    // case (e.g. login uses the host as typed, an attachment fetch resolves
+    // it through URL parsing, which lowercases) — without folding case here,
+    // they pin/read two different cert-store entries for the same server,
+    // opening a second, unpinned proxy tunnel.
+    #[test]
+    fn cert_store_key_folds_case() {
+        assert_eq!(cert_store_key("Example.COM"), "example.com");
+        assert_eq!(cert_store_key("MyServer.LAN:8443"), "myserver.lan:8443");
+        assert_eq!(cert_store_key("Example.COM:443"), "example.com");
     }
 
     #[test]

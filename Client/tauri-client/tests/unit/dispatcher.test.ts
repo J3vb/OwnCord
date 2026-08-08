@@ -2139,8 +2139,10 @@ describe("WS Dispatcher", () => {
     expect(error).toBe("Server error");
   });
 
-  it("wires error with unknown code does not set transient error", () => {
-    // Clear any previous errors
+  it("wires error with an unrecognized code to the generic fallback banner", () => {
+    // The final fallthrough is the one place every unmatched error code
+    // lands (e.g. a rejected fire-and-forget chat_edit) — it must not be
+    // silently dropped just because it isn't RATE_LIMITED/FORBIDDEN.
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock.dispatch("error", {
@@ -2148,7 +2150,19 @@ describe("WS Dispatcher", () => {
       message: "Something odd",
     });
 
-    expect(uiStore.getState().transientError).toBeNull();
+    expect(uiStore.getState().transientError).toBe("Something odd");
+  });
+
+  it("wires a BAD_REQUEST error with no pending correlation (e.g. a rejected chat_edit) to a transient error", () => {
+    // chat_edit is fire-and-forget: it never enters pendingSends, so a
+    // rejection's envelope id matches nothing above and used to fall through
+    // this handler silently, leaving the user's edited text destroyed with
+    // no error shown (only RATE_LIMITED/FORBIDDEN were bannered).
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+
+    mock.dispatch("error", { code: "BAD_REQUEST", message: "Message too long" }, "edit-id-1");
+
+    expect(uiStore.getState().transientError).toBe("Message too long");
   });
 
   it("wires an error carrying a pending send id to mark that row failed (not a toast)", () => {

@@ -18,6 +18,7 @@ import {
   incrementMention,
   clearUnread,
   getUnreadOnOpen,
+  resetChannelsStore,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
 
@@ -1002,6 +1003,40 @@ describe("channels store", () => {
       const after = channelsStore.getState().channels.get(1);
       expect(after).not.toBe(before);
       expect(before?.nsfw).toBe(false);
+    });
+  });
+
+  // v107-follow-up: channelsStore was never reset on logout, so setChannels'
+  // DM-row carry (line ~117) re-inserted the previous server's DM channels
+  // into the next server's map, and a stale unreadOnOpen snapshot leaked
+  // across accounts/servers too.
+  describe("resetChannelsStore", () => {
+    it("resets channels, activeChannelId, and roles to initial state", () => {
+      setChannels(readyChannels);
+      setRoles([{ id: 1, name: "admin", color: "#ff0000", permissions: 0 }]);
+      setActiveChannel(1);
+      expect(channelsStore.getState().channels.size).toBeGreaterThan(0);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      expect(channelsStore.getState().roles.length).toBeGreaterThan(0);
+
+      resetChannelsStore();
+
+      const state = channelsStore.getState();
+      expect(state.channels.size).toBe(0);
+      expect(state.activeChannelId).toBeNull();
+      expect(state.roles).toEqual([]);
+    });
+
+    it("clears the unreadOnOpen snapshot so a stale read position can't leak into the next server", () => {
+      setChannels(readyChannels);
+      // setActiveChannel(1) snapshots unreadOnOpen[1] = channel 1's pre-open
+      // unread count (3, from readyChannels).
+      setActiveChannel(1);
+      expect(getUnreadOnOpen(1)).toBe(3);
+
+      resetChannelsStore();
+
+      expect(getUnreadOnOpen(1)).toBe(0);
     });
   });
 });

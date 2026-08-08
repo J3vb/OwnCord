@@ -972,9 +972,12 @@ export function wireDispatcher(
           return;
         }
       }
-      if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
-        setTransientError(payload.message || "Server error");
-      }
+      // Every code that reaches here has no dedicated handler above (not a
+      // pending send/reaction/video rollback, not a capacity refusal) — this
+      // is the one place every remaining server error lands (a rejected
+      // fire-and-forget chat_edit, for one), so it must not be silently
+      // dropped just because it isn't RATE_LIMITED/FORBIDDEN.
+      setTransientError(payload.message || "Server error");
     }),
   );
 

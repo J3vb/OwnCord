@@ -194,16 +194,32 @@ describe("live messages while detached", () => {
 });
 
 describe("reattachToPresent", () => {
-  it("clears the detached flag and the loaded flag so the tail is refetched", () => {
+  it("clears the loaded flag so the tail is refetched, but keeps the detached flag until the tail actually lands", () => {
     setAroundMessages(1, ascendingWindow(10, 12), true, true);
     expect(isChannelLoaded(1)).toBe(true);
 
     reattachToPresent(1);
 
-    expect(isWindowDetached(1)).toBe(false);
     // Without clearing "loaded", MessageController short-circuits and the
     // stale window stays on screen forever.
     expect(isChannelLoaded(1)).toBe(false);
+    // The detached flag must survive until setMessages' tail fetch actually
+    // succeeds (see below) — clearing it eagerly here would let a live
+    // broadcast splice onto stale history if that refetch fails.
+    expect(isWindowDetached(1)).toBe(true);
+  });
+
+  it("keeps the detached flag set until the tail actually arrives, so a failed refetch does not let a live broadcast splice onto stale history", () => {
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    reattachToPresent(1);
+    // The refetch MessageController would normally issue next never landed
+    // (still in flight, or failed) — the window is still the stale
+    // around-window, so a live broadcast must not be appended onto it.
+    addMessage(broadcast(900));
+
+    expect(isWindowDetached(1)).toBe(true);
+    expect(ids(1)).toEqual([10, 11, 12]);
   });
 
   it("is a no-op for a channel that was never detached", () => {

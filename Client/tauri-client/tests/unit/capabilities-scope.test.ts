@@ -77,6 +77,16 @@ describe("Tauri default capability — HTTP scope", () => {
     }
   });
 
+  it("grants core:window:allow-request-user-attention (the Flash Taskbar notification setting needs it)", () => {
+    // core:window:default's implicit permission set is getters only — no
+    // request-user-attention — so without this explicit grant, every
+    // win.requestUserAttention() call is ACL-rejected and the default-on
+    // "Flash Taskbar" setting silently does nothing.
+    expect(find("core:window:allow-request-user-attention")).toBe(
+      "core:window:allow-request-user-attention",
+    );
+  });
+
   it("filesystem grants stay under $APPDATA/$APPLOG", () => {
     const fsPaths = permissions.flatMap((p) =>
       typeof p !== "string" && p.identifier.startsWith("fs:")

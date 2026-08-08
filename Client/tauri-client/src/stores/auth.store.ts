@@ -7,6 +7,7 @@ import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
 import { resetVoiceStore, voiceStore } from "@stores/voice.store";
 import { resetMessagesStore } from "@stores/messages.store";
+import { resetChannelsStore } from "@stores/channels.store";
 import { cleanupNotificationAudio } from "@lib/notifications";
 import { clearNsfwAcknowledgements } from "@lib/nsfw-gate";
 import { createLogger } from "@lib/logger";
@@ -68,7 +69,9 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
  *  id that also exists on the next-signed-into server (channel ids are only
  *  unique per-server) would short-circuit its refetch and render the
  *  previous session's messages, and same-account relogin would leave a
- *  permanent hole for messages posted while logged out. */
+ *  permanent hole for messages posted while logged out. Also clears
+ *  channelsStore: setChannels' DM-row carry otherwise re-inserts the
+ *  previous server's DM channel rows into the next server's channel map. */
 export function clearAuth(reason: LogoutReason = "user"): void {
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
   // lazily so it stays out of the startup path. Only import it when there is
@@ -87,6 +90,7 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   }
   resetVoiceStore();
   resetMessagesStore();
+  resetChannelsStore();
   // NSFW acknowledgements are per-viewer consent, not per-device: without this
   // the next account signed into the same server inherits the previous user's
   // acks and the age gate silently never appears for them. Host-scoping the

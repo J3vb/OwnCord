@@ -109,6 +109,47 @@ describe("cert mismatch blocking", () => {
     expect(reconnectCalls).toHaveLength(0);
   });
 
+  it("blocks reconnect when the profile host's case differs from the Rust proxy's lowercased event host", async () => {
+    // Regression: config.host is stored as the user typed it (e.g.
+    // "Example.COM:8443" from a profile), but tofu::cert_store_key
+    // case-folds to lowercase before the proxy emits the cert-tofu event.
+    // An un-normalized (case-sensitive) comparison here would miss the
+    // match and never latch this connection's reconnect loop.
+    client.connect({ host: "Example.COM:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Rust-normalized event host — lowercase.
+    emitTauriEvent("cert-tofu", {
+      host: "example.com:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls).toHaveLength(0);
+  });
+
   it("should unblock after acceptCertFingerprint", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
