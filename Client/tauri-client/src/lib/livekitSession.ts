@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
 import { E2EEManager } from "@lib/livekitE2EE";
-import { DeviceManager } from "@lib/deviceManager";
+import { DeviceManager, isMicPolicyGated } from "@lib/deviceManager";
 import {
   type VideoTrackDeps,
   type CameraTrackState,
@@ -439,6 +439,24 @@ export class LiveKitSession {
     this._deviceManager.setOnToast(this.onErrorCallback);
   }
 
+  /** True when an in-flight reconnect attempt for `channelId` has been
+   *  superseded and must stop touching shared state: the signal was
+   *  aborted, OR a newer connectAndSetup() already claimed `_state` (whether
+   *  by moving to "idle"/"connected" for a DIFFERENT channel, or — the
+   *  airtight case — by reaching "connected" for the SAME channel, since
+   *  connectAndSetup()'s entry-point leaveVoice(false) never runs while
+   *  `_room` reads null during "reconnecting" and so never aborts our
+   *  signal). State is always "reconnecting" during this loop's own
+   *  legitimate run (it only transitions to "connected" at the end of a
+   *  successful attempt), so the type check can never false-positive on a
+   *  still-current attempt. Checked at every checkpoint in the loop, in the
+   *  loop's own state-restore branch, and in the post-loop give-up path. */
+  private reconnectSuperseded(signal: AbortSignal, channelId: number): boolean {
+    return (
+      signal.aborted || this._state.type !== "reconnecting" || this._currentChannelId !== channelId
+    );
+  }
+
   /** Attempt to auto-reconnect after unexpected disconnect using stored token.
    *  The signal is aborted by leaveVoice() to cancel the loop when the user
    *  voluntarily leaves voice during the reconnect delay. */
@@ -457,7 +475,7 @@ export class LiveKitSession {
       // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
-      if (signal.aborted || this._currentChannelId !== channelId) {
+      if (this.reconnectSuperseded(signal, channelId)) {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
@@ -493,7 +511,7 @@ export class LiveKitSession {
         this._deviceManager.setRoom(newRoom);
         this._deviceManager.setAudioPipeline(this._audioPipeline);
 
-        if (signal.aborted || this._currentChannelId !== channelId) {
+        if (this.reconnectSuperseded(signal, channelId)) {
           log.info("Auto-reconnect aborted after room creation");
           await cleanupAbortedReconnect();
           return;
@@ -502,7 +520,7 @@ export class LiveKitSession {
         // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
 
-        if (signal.aborted || this._currentChannelId !== channelId) {
+        if (this.reconnectSuperseded(signal, channelId)) {
           log.info("Auto-reconnect aborted before room connect");
           await cleanupAbortedReconnect();
           return;
@@ -519,7 +537,7 @@ export class LiveKitSession {
         // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await newRoom.connect(resolvedUrl, token);
 
-        if (signal.aborted || this._currentChannelId !== channelId) {
+        if (this.reconnectSuperseded(signal, channelId)) {
           log.info("Auto-reconnect aborted after room connect");
           await cleanupAbortedReconnect();
           return;
@@ -612,11 +630,7 @@ export class LiveKitSession {
     // `_room` getter is null while "reconnecting", so its entry-point
     // leaveVoice(false) never runs), leaving both `signal.aborted` false and
     // `_currentChannelId` equal to ours once that join reaches "connected".
-    if (
-      signal.aborted ||
-      this._state.type !== "reconnecting" ||
-      this._currentChannelId !== channelId
-    ) {
+    if (this.reconnectSuperseded(signal, channelId)) {
       log.info("Auto-reconnect give-up skipped — superseded");
       return;
     }
@@ -798,7 +812,17 @@ export class LiveKitSession {
     // user muted themselves", and ptt.ts refuses to open the mic on a PTT
     // press while it is set — writing it here would close the mic for the
     // whole session instead of only until the first press.
-    const pttArmed = mode === "join" && isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0;
+    // On reconnect, don't recompute pttArmed from scratch — that always
+    // yields false (mode !== "join") and ignores whatever pttGated the store
+    // is still carrying from before the disconnect. If the user joined with
+    // PTT armed and never pressed the key before the connection dropped, the
+    // gate is still supposed to be closed; reading it back here (instead of
+    // silently reopening the mic) is what keeps that promise across a
+    // reconnect.
+    const pttArmed =
+      mode === "join"
+        ? isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0
+        : state.pttGated === true;
     if (mode === "join") {
       setPttGated(pttArmed);
     }
@@ -1298,15 +1322,16 @@ export class LiveKitSession {
       await room.localParticipant.setMicrophoneEnabled(true);
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
-      // Also honor a moderator's server-mute the same way: a listen-only join
-      // publishes no audio track, so the server-side mute has nothing to act
-      // on and persists silently — republishing here must not hand the whole
-      // channel a fresh, unmuted track. (The setMuted() guard does not cover
-      // this direct setMicrophoneEnabled call.)
-      const { localDeafened, localServerMuted } = voiceStore.getState();
-      if (localDeafened || localServerMuted) {
+      // Also honor a moderator's server-mute, a genuine self-mute, and an
+      // unpressed push-to-talk key the same way: a listen-only join publishes
+      // no audio track, so none of these have anything to act on and persist
+      // silently — republishing here must not hand the whole channel a
+      // fresh, unmuted track. Shares applyMicMuteState's own gate rather
+      // than re-deriving a narrower one (the setMuted() guard does not cover
+      // this direct setMicrophoneEnabled call).
+      if (isMicPolicyGated()) {
         await this.applyMicMuteState(true);
-        log.info("Microphone acquired but muted (user is deafened or server-muted)");
+        log.info("Microphone acquired but muted (mute/deafen/server-mute/PTT gate active)");
       } else {
         setLocalMuted(false);
         log.info("Microphone permission granted — exited listen-only mode");
@@ -1424,6 +1449,14 @@ export class LiveKitSession {
       await room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic fully unpublished (muted)");
     } else {
+      // A push-to-talk gate (or, defensively, a moderator's server-mute) is
+      // not this call's to lift — setMuted/setDeafened only guard their own
+      // flag before calling here, so this is the one place every re-enable
+      // path (present and future) shares the full policy check.
+      if (isMicPolicyGated()) {
+        log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute/PTT)");
+        return;
+      }
       // Re-enable mic — this re-publishes the track to the SFU
       await room.localParticipant.setMicrophoneEnabled(true);
       // Rebuild the audio pipeline on the fresh track
