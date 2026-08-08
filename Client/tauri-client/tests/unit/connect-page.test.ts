@@ -486,6 +486,44 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // B4_conn_ipc-6: a WS auth_error, cert-mismatch reject, or credential-save
+  // warning can set transientError AFTER this page is already mounted — a
+  // one-time getState() read at mount would silently drop it.
+  it("shows a transient error set after mount, not just one already pending at mount time", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    // No error yet at mount time.
+    expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
+
+    setTransientError("Your session expired — sign in again.");
+    uiStore.flush();
+
+    const errorBanner = container.querySelector(".error-banner")!;
+    expect(errorBanner.classList.contains("visible")).toBe(true);
+    expect(errorBanner.textContent).toBe("Your session expired — sign in again.");
+    expect(uiStore.getState().transientError).toBeNull();
+
+    page.destroy?.();
+  });
+
+  // B4_conn_ipc-15: a transient error set while this page was mounted (e.g. a
+  // background credential-save failure fired after a successful login moved
+  // on to MainPage) must not survive to resurface at the NEXT mount — which
+  // only happens after a later logout, where it would misleadingly read as a
+  // fresh login failure.
+  it("clears a transient error on destroy so it cannot resurface as a bogus login error later", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    // Set while mounted but not yet observed (no flush before destroy) —
+    // mirrors a background failure landing just as the page is torn down.
+    setTransientError("Could not save credentials — auto-login won't work");
+    page.destroy?.();
+
+    expect(uiStore.getState().transientError).toBeNull();
+  });
+
   // --- TOTP overlay interactions ---
 
   it("TOTP submit calls onTotpSubmit with 6-digit code", async () => {

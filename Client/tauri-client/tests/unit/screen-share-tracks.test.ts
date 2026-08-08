@@ -45,6 +45,7 @@ const {
   getRemoteVideoStream,
   stopManualCameraTrack,
   stopManualScreenTracks,
+  rollbackPendingVideo,
 } = await import("@lib/screenShare");
 
 type VideoTrackDeps = Parameters<typeof enableCamera>[1];
@@ -296,6 +297,33 @@ describe("enableCamera", () => {
 
     expect(old.stop).toHaveBeenCalled();
   });
+
+  it("discards the track and does not publish when disableCamera runs during device acquisition", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const track = fakeVideoTrack();
+    let resolveTrack!: (t: LocalVideoTrack) => void;
+    createLocalVideoTrack.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrack = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    // A concurrent disable runs to completion while createLocalVideoTrack is
+    // still awaiting the permission prompt / device handshake.
+    await disableCamera(state, deps);
+    resolveTrack(track);
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalled();
+    expect(state.manualCameraTrack).toBeNull();
+    // disableCamera already set this false — the superseded enable must not
+    // resurrect it.
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────
@@ -514,6 +542,55 @@ describe("enableScreenshare", () => {
 
     expect(deps.onError).not.toHaveBeenCalled();
   });
+
+  it("unpublishes a track that already published before a later one in the batch fails", async () => {
+    // All quality presets request audio alongside video — a second publish
+    // call (audio) can reject after the first (video) already succeeded.
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    rig.publishTrack.mockImplementation((track: unknown) =>
+      track === audio ? Promise.reject(new Error("publish failed")) : Promise.resolve(undefined),
+    );
+    const deps = fakeDeps(rig.room);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    await enableScreenshare(state, deps);
+
+    // track.stop() is programmatic and never fires the DOM "ended" event, so
+    // LiveKit's ended-driven auto-unpublish never runs — without an explicit
+    // unpublish the video track stays live in the room while nothing in this
+    // client can find its publication to clean it up later.
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+    expect(video.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
+    expect(state.manualScreenTracks).toEqual([]);
+  });
+
+  it("discards the tracks and does not publish when disableScreenshare runs during capture", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const video = fakeVideoTrack();
+    let resolveTracks!: (t: LocalTrack[]) => void;
+    createLocalScreenTracks.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTracks = resolve;
+      }),
+    );
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    const enabling = enableScreenshare(state, deps);
+    // A concurrent disable runs to completion while the OS picker is still up.
+    await disableScreenshare(state, deps);
+    resolveTracks([video]);
+    await enabling;
+
+    expect(rig.publishTrack).not.toHaveBeenCalled();
+    expect(video.stop).toHaveBeenCalled();
+    expect(state.manualScreenTracks).toEqual([]);
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
 });
 
 // ── disableScreenshare ─────────────────────────────────────────────────────
@@ -549,6 +626,58 @@ describe("disableScreenshare", () => {
     await disableScreenshare({ manualScreenTracks: [] }, fakeDeps(null));
 
     expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+});
+
+// ── rollbackPendingVideo ───────────────────────────────────────────────────
+//
+// dispatcher.ts's ERROR handler correlates a server refusal (FORBIDDEN,
+// RATE_LIMITED, INTERNAL, ...) of a voice_camera/voice_screenshare enable
+// with the already-published track via the envelope id ws.send() returns.
+
+describe("rollbackPendingVideo", () => {
+  it("registers a camera enable's envelope id and resolves it once", async () => {
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+    const deps = fakeDeps(rig.room);
+    deps.wsSend.mockReturnValue("req-camera-1");
+
+    await enableCamera({ manualCameraTrack: null }, deps);
+
+    expect(rollbackPendingVideo("req-camera-1")).toBe("camera");
+    // Single-use: a second refusal echoing the same id must not roll back
+    // whatever is live by then.
+    expect(rollbackPendingVideo("req-camera-1")).toBeUndefined();
+  });
+
+  it("registers a screenshare enable's envelope id", async () => {
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const deps = fakeDeps(rig.room);
+    deps.wsSend.mockReturnValue("req-screen-1");
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expect(rollbackPendingVideo("req-screen-1")).toBe("screen");
+  });
+
+  it("returns undefined for an id that was never registered", () => {
+    expect(rollbackPendingVideo("never-seen")).toBeUndefined();
+  });
+
+  it("supersedes the previous camera enable's id when a new one starts", async () => {
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+    const deps = fakeDeps(rig.room);
+    deps.wsSend.mockReturnValueOnce("req-1").mockReturnValueOnce("req-2");
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    await enableCamera(state, deps);
+    await enableCamera(state, deps);
+
+    // Only the latest in-flight camera enable can still be refused.
+    expect(rollbackPendingVideo("req-1")).toBeUndefined();
+    expect(rollbackPendingVideo("req-2")).toBe("camera");
   });
 });
 

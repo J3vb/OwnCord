@@ -24,6 +24,7 @@ import {
   setChannelLoading,
   setChannelLoadError,
   getHistoryLoadState,
+  invalidateLoadedMessageWindows,
 } from "../../src/stores/messages.store";
 import type {
   ChatMessagePayload,
@@ -272,6 +273,71 @@ describe("messages store", () => {
       expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
       expect(msgs[1]!.status).toBe("pending");
       expect(msgs[2]!.status).toBe("failed");
+    });
+
+    it("dedupes an optimistic row against its own real message after a lost ack + resync", () => {
+      // The chat_send_ok ack never arrives (dropped by the same disconnect
+      // that forces a resync), so the row is still "pending" when
+      // invalidateLoadedMessageWindows carries it through.
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      invalidateLoadedMessageWindows();
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]!.status).toBe("pending");
+
+      // The resync's history fetch reveals the server DID persist the send —
+      // id 500 is the real echo of the lost ack.
+      setMessages(1, [makeMessageResponse({ id: 500, content: "ok", user: TEST_USER })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(500);
+      expect(msgs[0]!.status).toBe("sent");
+    });
+
+    it("keeps two genuinely distinct same-author, same-text sends distinct across the same resync", () => {
+      setMessages(1, [], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "ok",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      invalidateLoadedMessageWindows();
+      expect(getChannelMessages(1)).toHaveLength(2);
+
+      // Both sends actually landed server-side; the resync's fetch returns
+      // both real rows — neither optimistic row may collapse onto the other's.
+      setMessages(
+        1,
+        [
+          makeMessageResponse({ id: 501, content: "ok", user: TEST_USER }),
+          makeMessageResponse({ id: 500, content: "ok", user: TEST_USER }),
+        ],
+        false,
+      );
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.map((m) => m.id)).toEqual([500, 501]);
+      expect(msgs.every((m) => m.status === "sent")).toBe(true);
     });
   });
 
@@ -1196,6 +1262,104 @@ describe("messages store", () => {
       expect(msgs).toHaveLength(1);
       expect(msgs[0]!.id).toBe(800);
       expect(msgs[0]!.status).toBe("sent");
+    });
+
+    it("reconciles an OFFLINE-failed row when its echo arrives — no duplicate, no dead Retry", () => {
+      // The dispatcher's offline sweep flips every pending send to
+      // failed/OFFLINE on the first reconnecting/disconnected transition —
+      // it cannot know whether the frame actually reached the server first.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "OFFLINE");
+
+      // It did reach the server after all — its broadcast (or a reconnect
+      // replay) arrives with the real id.
+      addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hi" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(900);
+      expect(msgs[0]!.status).toBe("sent");
+    });
+
+    it("does not reconcile a server-rejected (non-OFFLINE) failed row into an unrelated broadcast", () => {
+      // SLOW_MODE/FORBIDDEN etc. are never broadcast by the server, so no echo
+      // can legitimately arrive for them — widening the reconcile must stay
+      // scoped to OFFLINE, or a same-author/same-content coincidence would
+      // silently eat a row the user still needs to retry.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+
+      addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hi" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("failed");
+    });
+  });
+
+  describe("invalidateLoadedMessageWindows", () => {
+    it("drops sent rows and clears loaded/hasMore/detached for every loaded channel", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], true);
+      setMessages(2, [makeMessageResponse({ id: 20, channel_id: 2 })], false);
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(isChannelLoaded(2)).toBe(true);
+
+      invalidateLoadedMessageWindows();
+
+      expect(getChannelMessages(1)).toEqual([]);
+      expect(getChannelMessages(2)).toEqual([]);
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(isChannelLoaded(2)).toBe(false);
+      expect(hasMoreMessages(1)).toBe(false);
+      expect(isWindowDetached(1)).toBe(false);
+    });
+
+    it("carries pending and failed optimistic rows instead of destroying them", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "still sending",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "SLOW_MODE");
+
+      invalidateLoadedMessageWindows();
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.correlationId)).toEqual(["c1", "c2"]);
+      expect(msgs[0]!.status).toBe("pending");
+      expect(msgs[1]!.status).toBe("failed");
+    });
+
+    it("is a no-op when no channel is loaded", () => {
+      const before = messagesStore.getState();
+      invalidateLoadedMessageWindows();
+      expect(messagesStore.getState()).toBe(before);
     });
   });
 

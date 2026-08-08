@@ -115,6 +115,20 @@ describe("filterMentionSuggestions", () => {
     signInAs("owner", Permission.ADMINISTRATOR);
     expect(filterMentionSuggestions("every").map((s) => s.token)).toEqual(["everyone"]);
   });
+
+  // The composer's own token scanner and both parsers (client lib/mentions.ts,
+  // server mentions.go) only accept [\p{L}\p{N}_.-]{1,64} -- a username with a
+  // space or "@" truncates the token on insert, so picking it produces a dead
+  // token that resolves to no mention and notifies nobody.
+  it("skips members whose username cannot be expressed as a mention token", () => {
+    seedMembers(["alice", "John Smith", "weird@name"]);
+    expect(filterMentionSuggestions("").map((s) => s.token)).toEqual(["alice"]);
+  });
+
+  it("skips an inexpressible username even when the query would otherwise match it", () => {
+    seedMembers(["John Smith"]);
+    expect(filterMentionSuggestions("john")).toEqual([]);
+  });
 });
 
 describe("createMentionAutocomplete", () => {

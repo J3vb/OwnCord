@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { invokeMock, logMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -19,7 +19,33 @@ import {
   publishIdentityKey,
   ensureIdentityKeyPublished,
 } from "@lib/identity";
-import { generateIdentityKeyPair, exportPublicKey } from "@lib/e2eeCrypto";
+import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
+import { authStore } from "@stores/auth.store";
+
+/**
+ * Stateful keyring double for the legacy-migration tests: a Map keyed by the
+ * exact `host` string each command receives (the scoped account
+ * `chat.example:1` and the legacy account `chat.example` are just different
+ * keys in the same map), so save/delete on one account cannot be confused
+ * with another the way a host-agnostic mock would.
+ */
+function keyringDouble(seed: Record<string, string> = {}): Map<string, string> {
+  const store = new Map<string, string>(Object.entries(seed));
+  invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    const h = args?.host as string;
+    if (cmd === "load_identity_key") return Promise.resolve(store.get(h) ?? null);
+    if (cmd === "save_identity_key") {
+      store.set(h, args!.key as string);
+      return Promise.resolve(undefined);
+    }
+    if (cmd === "delete_identity_key") {
+      store.delete(h);
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(undefined);
+  });
+  return store;
+}
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -135,13 +161,15 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    const kp = await getOrCreateIdentityKeyPair("chat.example");
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.privateKey).toBeDefined();
     expect(kp.publicKey).toBeDefined();
 
     const saveCall = invokeMock.mock.calls.find((c) => c[0] === "save_identity_key");
     expect(saveCall).toBeDefined();
-    expect((saveCall![1] as { host: string }).host).toBe("chat.example");
+    // Scoped by host AND user id (B3-3) — not just host — so two accounts
+    // signed into the same host never share a keyring blob.
+    expect((saveCall![1] as { host: string }).host).toBe("chat.example:1");
   });
 
   it("reloads the persisted keypair on subsequent logins (no regenerate)", async () => {
@@ -155,7 +183,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       }
       return Promise.resolve(undefined);
     });
-    const first = await getOrCreateIdentityKeyPair("chat.example");
+    const first = await getOrCreateIdentityKeyPair("chat.example", 1);
     const firstPub = await exportPublicKey(first.publicKey);
 
     // Second login: keyring returns the saved blob → same public key, no save.
@@ -167,7 +195,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve(savedBlob);
       return Promise.resolve(undefined);
     });
-    const second = await getOrCreateIdentityKeyPair("chat.example");
+    const second = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(await exportPublicKey(second.publicKey)).toBe(firstPub);
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
   });
@@ -177,7 +205,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve("!!not-valid-jwk!!");
       return Promise.resolve(undefined);
     });
-    const kp = await getOrCreateIdentityKeyPair("chat.example");
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.publicKey).toBeDefined();
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(true);
   });
@@ -194,10 +222,10 @@ describe("getOrCreateIdentityKeyPair", () => {
     });
 
     const [publishPair, signingPair] = await Promise.all([
-      getOrCreateIdentityKeyPair("chat.example"),
-      getOrCreateIdentityKeyPair("chat.example"),
+      getOrCreateIdentityKeyPair("chat.example", 1),
+      getOrCreateIdentityKeyPair("chat.example", 1),
     ]);
-    const laterPair = await getOrCreateIdentityKeyPair("chat.example");
+    const laterPair = await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(signingPair).toBe(publishPair);
     expect(laterPair).toBe(publishPair);
@@ -210,9 +238,19 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve(null);
       return Promise.resolve(undefined);
     });
-    const a = await getOrCreateIdentityKeyPair("chat.example");
-    const b = await getOrCreateIdentityKeyPair("other.example");
+    const a = await getOrCreateIdentityKeyPair("chat.example", 1);
+    const b = await getOrCreateIdentityKeyPair("other.example", 1);
     expect(await exportPublicKey(b.publicKey)).not.toBe(await exportPublicKey(a.publicKey));
+  });
+
+  it("[B3-3] keeps the memo per user id, not just per host — two accounts on the same host never share an identity keypair", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const userA = await getOrCreateIdentityKeyPair("chat.example", 1);
+    const userB = await getOrCreateIdentityKeyPair("chat.example", 2);
+    expect(await exportPublicKey(userB.publicKey)).not.toBe(await exportPublicKey(userA.publicKey));
   });
 
   it("reports a credential store that accepts the write but drops the value", async () => {
@@ -221,10 +259,11 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined); // save_identity_key "succeeds"
     });
 
-    await getOrCreateIdentityKeyPair("chat.example");
+    await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(logMock.error).toHaveBeenCalledWith(expect.stringContaining("did not persist"), {
       host: "chat.example",
+      userId: 1,
     });
   });
 
@@ -234,7 +273,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    await expect(getOrCreateIdentityKeyPair("chat.example")).rejects.toThrow("keychain locked");
+    await expect(getOrCreateIdentityKeyPair("chat.example", 1)).rejects.toThrow("keychain locked");
     // Must not have minted and saved a brand-new identity over the top of an
     // unreadable (not necessarily absent) stored key.
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
@@ -251,7 +290,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    await getOrCreateIdentityKeyPair("chat.example");
+    await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(logMock.error).not.toHaveBeenCalled();
   });
@@ -284,6 +323,20 @@ describe("publishIdentityKey", () => {
 });
 
 describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
+  // Real authStore, not mocked — these tests exercise the normal ready-hook
+  // timing where auth state is already populated. The "not authenticated
+  // yet" guard is its own test below, which overrides `user` back to null.
+  beforeEach(() => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+    }));
+  });
+
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, user: null }));
+  });
+
   it("publishes username + identity key when the server copy is absent", async () => {
     // First-login keyring: nothing stored → a fresh keypair is generated.
     invokeMock.mockImplementation((cmd: string) => {
@@ -353,5 +406,112 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
     await expect(
       ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile),
     ).resolves.toBe(false);
+  });
+
+  it("does not mint or publish an identity key when no user is authenticated yet (never falls back to a placeholder scope)", async () => {
+    // Auth state not yet populated — e.g. this hook running before auth_ok
+    // has landed. Falling back to a placeholder `?? 0` scope would mint (or
+    // migrate-and-DELETE the real legacy key into) a bogus `host:0` keyring
+    // account; a later authenticated call then mints a SECOND, DIFFERENT
+    // keypair under `host:<realId>`, so the published key and the announce
+    // signing key permanently disagree — a false MITM warning for every peer.
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    expect(published).toBe(false);
+    expect(updateProfile).not.toHaveBeenCalled();
+    // No keyring interaction at all — nothing minted, migrated, or deleted.
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining("authenticated user id"),
+      expect.objectContaining({ host: "chat.example" }),
+    );
+  });
+
+  it("does not migrate (and delete) the legacy host-only key when no user is authenticated yet", async () => {
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    const legacy = await generateIdentityKeyPair();
+    const legacyBlob = await exportIdentityKeyPair(legacy.privateKey);
+    const store = keyringDouble({ "chat.example": legacyBlob });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    // The legacy key must be untouched: no adopt-then-delete into a bogus
+    // host:0 scope.
+    expect(store.get("chat.example")).toBe(legacyBlob);
+    expect(store.has("chat.example:0")).toBe(false);
+  });
+});
+
+describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
+  it("adopts a legacy host-only key: saves it under the scoped account and deletes the legacy one", async () => {
+    const legacy = await generateIdentityKeyPair();
+    const legacyBlob = await exportIdentityKeyPair(legacy.privateKey);
+    const legacyPub = await exportPublicKey(legacy.publicKey);
+    const store = keyringDouble({ "chat.example": legacyBlob });
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
+
+    expect(await exportPublicKey(kp.publicKey)).toBe(legacyPub);
+    expect(store.get("chat.example:1")).toBe(legacyBlob);
+    // Deleted so it can never be adopted a second time.
+    expect(store.has("chat.example")).toBe(false);
+  });
+
+  it("a second account on the same host gets its own keypair, not the already-adopted legacy one", async () => {
+    const legacy = await generateIdentityKeyPair();
+    const legacyBlob = await exportIdentityKeyPair(legacy.privateKey);
+    const legacyPub = await exportPublicKey(legacy.publicKey);
+    const store = keyringDouble({ "chat.example": legacyBlob });
+
+    const first = await getOrCreateIdentityKeyPair("chat.example", 1);
+    expect(await exportPublicKey(first.publicKey)).toBe(legacyPub);
+
+    const second = await getOrCreateIdentityKeyPair("chat.example", 2);
+    expect(await exportPublicKey(second.publicKey)).not.toBe(legacyPub);
+    expect(store.get("chat.example:2")).toBeDefined();
+    expect(store.get("chat.example:2")).not.toBe(legacyBlob);
+  });
+
+  it("falls back to fresh generation, without throwing, when the legacy blob is corrupt", async () => {
+    const store = keyringDouble({ "chat.example": "!!not-valid-jwk!!" });
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
+
+    expect(kp.publicKey).toBeDefined();
+    expect(store.get("chat.example:1")).toBeDefined();
+    expect(store.get("chat.example:1")).not.toBe("!!not-valid-jwk!!");
+  });
+
+  it("generates fresh, with no delete attempt, when there is no legacy key either (first login)", async () => {
+    keyringDouble();
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
+
+    expect(kp.publicKey).toBeDefined();
+    expect(invokeMock.mock.calls.some((c) => c[0] === "delete_identity_key")).toBe(false);
+  });
+
+  it("keeps the legacy key in place when the scoped save fails, so migration can retry next launch", async () => {
+    const legacy = await generateIdentityKeyPair();
+    const legacyBlob = await exportIdentityKeyPair(legacy.privateKey);
+    const store = keyringDouble({ "chat.example": legacyBlob });
+    const load = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "save_identity_key") return Promise.reject(new Error("keyring boom"));
+      return load(cmd, args);
+    });
+
+    await getOrCreateIdentityKeyPair("chat.example", 1);
+
+    expect(store.get("chat.example")).toBe(legacyBlob);
+    expect(store.has("chat.example:1")).toBe(false);
   });
 });

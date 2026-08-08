@@ -211,6 +211,7 @@ export function createConnectPage(
   > | null = null;
   let settingsOverlayLoading = false;
   let unsubSettingsOpen: (() => void) | null = null;
+  let unsubTransientError: (() => void) | null = null;
 
   // The settings overlay (whose tabs pull in the LiveKit stack) is created
   // lazily on first open so it stays out of the startup path. Once created it
@@ -254,6 +255,20 @@ export function createConnectPage(
     );
     if (uiStore.getState().settingsOpen) ensureSettingsOverlay();
 
+    // Surface a transient error for as long as this page is mounted — not
+    // just one already pending at mount time. A WS auth_error, a cert-
+    // mismatch reject, or a background credential-save warning can all set
+    // this while the connect page is already up; a one-time getState() read
+    // here would silently drop them.
+    unsubTransientError = uiStore.subscribeSelector(
+      (s) => s.transientError,
+      (msg) => {
+        if (msg) {
+          loginForm.showError(msg);
+          setTransientError(null);
+        }
+      },
+    );
     // Show any pending auth error (e.g. "already connected from another client")
     const pendingError = uiStore.getState().transientError;
     if (pendingError) {
@@ -270,8 +285,16 @@ export function createConnectPage(
     abortController.abort();
     unsubSettingsOpen?.();
     unsubSettingsOpen = null;
+    unsubTransientError?.();
+    unsubTransientError = null;
     settingsOverlay?.destroy?.();
     settingsOverlay = null;
+
+    // Any transient error set while this page was mounted (shown or not)
+    // must not resurface at the next mount — which only happens after a
+    // later logout, where it would misleadingly read as a fresh login
+    // failure rather than whatever set it during this session.
+    setTransientError(null);
 
     if (container && root) {
       container.removeChild(root);

@@ -84,9 +84,11 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     api,
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
-    onJumpToMessage: (msgId: number) => {
-      const channelId = getChannelCtrl()?.currentChannelId;
-      if (channelId == null) return;
+    // The panel forwards the channel it was opened for (captured at open
+    // time), not whatever is active now — the active channel can change
+    // while the panel is sitting open, and re-deriving it live here would
+    // silently jump in the wrong channel.
+    onJumpToMessage: (channelId: number, msgId: number) => {
       void jumper.jumpTo(channelId, msgId);
     },
   });

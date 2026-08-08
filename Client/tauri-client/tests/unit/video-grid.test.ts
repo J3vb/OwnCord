@@ -9,6 +9,7 @@ const mockSetScreenshareAudioVolume = vi.fn();
 const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
+const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
@@ -16,6 +17,7 @@ vi.mock("@lib/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
+  getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
 }));
 
 // ---------------------------------------------------------------------------
@@ -454,6 +456,32 @@ describe("VideoGrid", () => {
       expect(mockSetUserVolume).toHaveBeenCalledWith(77, 50);
     });
 
+    it("[B3-5] seeds the mic-tile slider from the persisted per-user volume, not a hardcoded 100%", () => {
+      mockGetUserVolume.mockReturnValueOnce(30);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: false });
+      grid.addStream(88, "erin", fakeStream(), config);
+
+      expect(mockGetUserVolume).toHaveBeenCalledWith(88);
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.value).toBe("30");
+      // Not muted at 30% — the mute button must reflect the real (unmuted) state.
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
+    });
+
+    it("[B3-5] starts a mic tile muted when the persisted per-user volume is 0", () => {
+      mockGetUserVolume.mockReturnValueOnce(0);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 89, isScreenshare: false });
+      grid.addStream(89, "frank", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.value).toBe("0");
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      const overlay = container.querySelector(".video-tile-overlay");
+      expect(overlay!.classList.contains("muted")).toBe(true);
+    });
+
     it("volume slider at 0 triggers mute icon swap and calls setUserVolume(0)", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
       grid.addStream(77, "dave", fakeStream(), config);
@@ -795,6 +823,47 @@ describe("VideoGrid", () => {
       expect(grid.getFocusedTileId()).toBe(1);
       const mainArea = container.querySelector(".video-focus-main");
       expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // clearStreams (B1-8: stale remote tiles survive join -> leave -> join)
+  // -----------------------------------------------------------------------
+
+  describe("clearStreams", () => {
+    it("removes every tile", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.addStream(2, "Bob", fakeStream());
+      expect(grid.hasStreams()).toBe(true);
+
+      grid.clearStreams();
+
+      expect(grid.hasStreams()).toBe(false);
+      expect(container.querySelectorAll(".video-cell").length).toBe(0);
+    });
+
+    it("clears focus state along with the tiles", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.setFocusedTile(1);
+      expect(grid.getFocusedTileId()).toBe(1);
+
+      grid.clearStreams();
+
+      expect(grid.getFocusedTileId()).toBeNull();
+    });
+
+    it("cleans up track listeners for every cell", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+
+      grid.clearStreams();
+
+      expect(track.listeners["ended"]?.length ?? 0).toBe(0);
+    });
+
+    it("is a no-op on an empty grid", () => {
+      expect(() => grid.clearStreams()).not.toThrow();
+      expect(grid.hasStreams()).toBe(false);
     });
   });
 });

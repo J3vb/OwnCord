@@ -128,6 +128,18 @@ export function setRoles(roles: readonly ReadyRole[]): void {
   channelsStore.setState((prev) => ({ ...prev, roles }));
 }
 
+/**
+ * Reset the entire store to its initial (empty) state — e.g. on logout.
+ * Also clears unreadOnOpen: without this, setChannels' DM-row carry (above)
+ * re-inserts the previous server's DM channel rows into the next server's
+ * channel map on the next login, and a stale read-position snapshot from the
+ * old server would otherwise leak into the new one.
+ */
+export function resetChannelsStore(): void {
+  unreadOnOpen.clear();
+  channelsStore.setState(() => INITIAL_STATE);
+}
+
 /** Look up a role ID by name (case-insensitive). Returns undefined if not found. */
 export function getRoleIdByName(name: string): number | undefined {
   const roles = channelsStore.getState().roles;

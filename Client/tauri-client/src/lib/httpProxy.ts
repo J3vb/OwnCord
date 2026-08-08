@@ -15,26 +15,28 @@ import { createLogger } from "./logger";
 
 const log = createLogger("http-proxy");
 
-/** host → resolved loopback origin (e.g. "http://127.0.0.1:49812"). */
-const origins = new Map<string, string>();
 /** host → in-flight start so concurrent callers don't race the tunnel. */
 const pending = new Map<string, Promise<string>>();
 
 /**
  * Ensure a tunnel exists for `host` and return its loopback origin
- * (no trailing slash). Idempotent and concurrency-safe per host.
+ * (no trailing slash). Concurrency-safe per host.
+ *
+ * Always invokes start_http_proxy — never caches the resolved origin here.
+ * Only the Rust side knows whether its listener is still alive: after 5
+ * consecutive accept errors run_proxy_loop deregisters itself so the next
+ * start_http_proxy rebinds a fresh port (http_proxy.rs). A JS-side cache
+ * would keep pointing every REST call at that dead tunnel until app restart.
+ * The Rust reuse branch dedups an unchanged host cheaply, so the repeat
+ * invoke is inexpensive — mirroring livekitSession.ts's ensureLiveKitProxy.
  */
 export async function ensureHttpProxy(host: string): Promise<string> {
-  const cached = origins.get(host);
-  if (cached) return cached;
-
   const inFlight = pending.get(host);
   if (inFlight) return inFlight;
 
   const start = (async () => {
     const port = await invoke<number>("start_http_proxy", { remoteHost: host });
     const origin = `http://127.0.0.1:${port}`;
-    origins.set(host, origin);
     log.debug("tunnel ready", { host, origin });
     return origin;
   })();
@@ -47,9 +49,8 @@ export async function ensureHttpProxy(host: string): Promise<string> {
   }
 }
 
-/** Stop the tunnel for `host` and drop its cached origin (best-effort). */
+/** Stop the tunnel for `host` (best-effort). */
 export async function stopHttpProxy(host: string): Promise<void> {
-  origins.delete(host);
   pending.delete(host);
   try {
     await invoke("stop_http_proxy", { remoteHost: host });

@@ -16,7 +16,8 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
-import { isSafeUrl } from "./message-list/attachments";
+import { isRenderableAvatar } from "@lib/avatar";
+import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -74,17 +75,26 @@ const STATUS_COLORS: Record<string, string> = {
   offline: "var(--text-micro)",
 };
 
-/** Fill one avatar circle: the picture if it is safe to load, else the letter. */
+/**
+ * Fill one avatar circle: the letter immediately, the picture swapped in once
+ * fetched. `<img src>` cannot carry the bearer token an authenticated
+ * `/api/v1/files/{id}` avatar needs, so the URL is always fetched through the
+ * same cert-pinned path attachments and custom emoji use rather than assigned
+ * directly.
+ */
 function paintAvatar(el: HTMLElement, avatar: string | null, label: string): void {
-  if (avatar !== null && isSafeUrl(avatar)) {
-    const img = createElement("img", { src: avatar, alt: label });
+  setText(el, label.charAt(0).toUpperCase());
+  if (!isRenderableAvatar(avatar)) return;
+  const resolved = resolveServerUrl(avatar);
+  void fetchImageAsDataUrl(resolved).then((dataUrl) => {
+    if (dataUrl === null || !el.isConnected) return;
+    const img = createElement("img", { src: dataUrl, alt: label });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
+    el.textContent = "";
     el.appendChild(img);
-    return;
-  }
-  setText(el, label.charAt(0).toUpperCase());
+  });
 }
 
 /**
@@ -317,6 +327,18 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
     );
 
     const items = sorted.map((convo) => renderDmItem(convo, options, ac.signal));
+
+    searchInput.addEventListener(
+      "input",
+      () => {
+        const q = searchInput.value.trim().toLowerCase();
+        items.forEach((el, i) => {
+          const match = q === "" || sorted[i]!.username.toLowerCase().includes(q);
+          el.style.display = match ? "" : "none";
+        });
+      },
+      { signal: ac.signal },
+    );
 
     appendChildren(root, header, sectionLabel, ...items);
     container.appendChild(root);

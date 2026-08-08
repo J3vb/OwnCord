@@ -90,6 +90,10 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       // App will relaunch — this code won't execute after relaunch()
     } catch (err) {
       log.error("Update install failed", { error: String(err) });
+      // The component may have been destroyed while the download was in
+      // flight (page swap / logout) -- the banner it wanted to repaint is
+      // already gone, so there is nothing left to do.
+      if (banner === null) return;
       while (banner.firstChild) banner.removeChild(banner.firstChild);
       const errorText = createElement(
         "span",

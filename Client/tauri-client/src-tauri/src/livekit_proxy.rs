@@ -31,7 +31,7 @@ use log::{debug, error, info, warn};
 use std::net::IpAddr;
 use std::sync::Arc;
 use rustls::pki_types::ServerName;
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -63,6 +63,21 @@ impl LiveKitProxyState {
                 pinned_fingerprint: String::new(),
                 shutdown_tx: None,
             }),
+        }
+    }
+
+    /// Clear the running-proxy state, but only if it still points at `port`.
+    /// Mirrors HttpProxyState::remove_if_port_matches; used by run_proxy_loop's
+    /// accept-error exit path so a dead listener doesn't keep being handed
+    /// back by start_livekit_proxy's reuse branch, and doesn't race a newer
+    /// proxy that may have already replaced it.
+    async fn clear_if_port_matches(&self, port: u16) {
+        let mut inner = self.inner.lock().await;
+        if inner.port == Some(port) {
+            inner.port = None;
+            inner.remote_host.clear();
+            inner.pinned_fingerprint.clear();
+            inner.shutdown_tx = None;
         }
     }
 }
@@ -224,7 +239,14 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let host = remote_host.clone();
-    let loop_handle = tokio::spawn(run_proxy_loop(listener, host, fingerprint.clone(), shutdown_rx));
+    let loop_handle = tokio::spawn(run_proxy_loop(
+        app.clone(),
+        listener,
+        host,
+        port,
+        fingerprint.clone(),
+        shutdown_rx,
+    ));
     // Watch the loop so a panic is logged instead of vanishing silently.
     tokio::spawn(async move {
         match loop_handle.await {
@@ -266,9 +288,11 @@ pub async fn stop_livekit_proxy(
 /// Maximum consecutive accept errors before the proxy loop exits.
 const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
 
-async fn run_proxy_loop(
+async fn run_proxy_loop<R: Runtime>(
+    app: tauri::AppHandle<R>,
     listener: TcpListener,
     remote_host: String,
+    port: u16,
     pinned_fingerprint: String,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
@@ -300,6 +324,20 @@ async fn run_proxy_loop(
                                 "[livekit_proxy] {} consecutive accept errors, stopping proxy loop",
                                 MAX_CONSECUTIVE_ACCEPT_ERRORS
                             );
+                            // Deregister the dead proxy BEFORE the break drops
+                            // `listener`, so a future start_livekit_proxy
+                            // rebinds a fresh port instead of handing back
+                            // this closed one forever (the reuse branch keys
+                            // only on host+pin, not liveness). Mirrors
+                            // http_proxy.rs's identical fix.
+                            if let Some(state) = app.try_state::<LiveKitProxyState>() {
+                                state.clear_if_port_matches(port).await;
+                            } else {
+                                warn!(
+                                    "[livekit_proxy] state unmanaged; cannot deregister dead proxy for {}",
+                                    remote_host
+                                );
+                            }
                             break;
                         }
                     }
@@ -676,5 +714,43 @@ mod tests {
             outcome.expect("bounded").is_err(),
             "a silent peer must produce an error, not a usable TLS stream"
         );
+    }
+
+    // ── LiveKitProxyState::clear_if_port_matches ────────────────────────────
+    //
+    // B4_conn_ipc-7: run_proxy_loop's accept-error exit path drops the
+    // listener without deregistering it, so ProxyInner.port stays set and
+    // start_livekit_proxy's reuse branch (unchanged host+pin) hands the dead
+    // port back forever. Mirrors http_proxy.rs's
+    // remove_if_port_matches_removes_only_matching_entry test.
+
+    #[tokio::test]
+    async fn clear_if_port_matches_clears_only_a_matching_entry() {
+        let state = LiveKitProxyState::new();
+        {
+            let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+            let mut inner = state.inner.lock().await;
+            inner.port = Some(4242);
+            inner.remote_host = "example.com:8443".to_string();
+            inner.pinned_fingerprint = "aa:bb".to_string();
+            inner.shutdown_tx = Some(tx);
+        }
+
+        // A stale loop reporting a port that no longer matches the live
+        // listener must leave the current entry alone.
+        state.clear_if_port_matches(9999).await;
+        assert_eq!(
+            state.inner.lock().await.port,
+            Some(4242),
+            "mismatched port must not clear a newer proxy's state"
+        );
+
+        // A loop reporting its own still-current port must clear it so the
+        // next start_livekit_proxy rebinds instead of reusing the dead listener.
+        state.clear_if_port_matches(4242).await;
+        let inner = state.inner.lock().await;
+        assert_eq!(inner.port, None, "matching port must deregister the dead proxy");
+        assert!(inner.remote_host.is_empty());
+        assert!(inner.pinned_fingerprint.is_empty());
     }
 }

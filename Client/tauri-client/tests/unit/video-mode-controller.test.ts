@@ -47,6 +47,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     destroy: vi.fn(),
     addStream: vi.fn(),
     removeStream: vi.fn(),
+    clearStreams: vi.fn(),
     hasStreams: vi.fn(() => false),
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
@@ -622,6 +623,82 @@ describe("createVideoModeController", () => {
       mockVoiceStoreGetState.mockReturnValue(inChannel);
       ctrl.checkVideoMode();
       expect(ctrl.isVideoMode()).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Stale remote tile / focus cleanup on close (B1-8, B5-15)
+  // -----------------------------------------------------------------------
+
+  describe("grid cleanup on close", () => {
+    it("clears videoGrid streams on a real leave (currentChannelId becomes null)", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      const inChannel = makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, users]]),
+      });
+      mockVoiceStoreGetState.mockReturnValue(inChannel);
+
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      expect(vg.clearStreams).not.toHaveBeenCalled();
+
+      // Leaving voice clears currentChannelId — remote tiles from the ended
+      // session must not survive into the next join.
+      mockVoiceStoreGetState.mockReturnValue({ ...inChannel, currentChannelId: null });
+      ctrl.checkVideoMode();
+
+      expect(vg.clearStreams).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not clear videoGrid streams while merely stopping local video mid-session", () => {
+      // Auto-reconnect keeps currentChannelId set, so a transient no-video
+      // state (all cameras off, still in the channel) must not wipe
+      // in-flight remote tiles.
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
+      );
+
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+
+      expect(vg.clearStreams).not.toHaveBeenCalled();
+    });
+
+    it("closeVideoGrid clears the videoGrid's own focus state, not just the controller's", () => {
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.showVideoGrid();
+      ctrl.setFocus(42);
+      expect(vg.setFocusedTile).toHaveBeenCalledWith(42);
+
+      ctrl.showChat();
+
+      // Without this, the grid reopens later still pinned in focus mode on
+      // tile 42 even though the controller's own focusedTileId was reset.
+      expect(vg.setFocusedTile).toHaveBeenCalledWith(null);
     });
   });
 });

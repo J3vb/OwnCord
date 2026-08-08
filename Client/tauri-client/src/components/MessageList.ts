@@ -158,7 +158,11 @@ function buildVirtualItems(
     // A message directly under the NEW line starts a fresh block: rendering it
     // as a grouped continuation of a message from before the line hides both
     // its author and the fact that the line is there.
-    const isGrouped = !isFirstUnread && prevMsg !== null && shouldGroup(prevMsg, msg);
+    const isGrouped =
+      !isFirstUnread &&
+      prevMsg !== null &&
+      isSameDay(prevMsg.timestamp, msg.timestamp) &&
+      shouldGroup(prevMsg, msg);
     items.push({ kind: "message", message: msg, isGrouped });
     lastTimestamp = msg.timestamp;
     prevMsg = msg;
@@ -710,14 +714,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   let loadingOlder = false;
-  let prevMessageCount = 0;
+  // The oldest loaded message's id, not the count: a live tail append also
+  // changes the count while a history fetch is still in flight, and
+  // resetting the latch on that lets the next scroll refire loadOlderMessages
+  // with the same unchanged cursor -- the same page then lands twice. Only a
+  // prepend moves messages[0]. Seeded from the current state (not left at a
+  // placeholder) so the first change observed after construction is compared
+  // against reality, not an arbitrary initial value.
+  let prevOldestId: number | null = getChannelMessages(options.channelId)[0]?.id ?? null;
 
   const unsubLoadingReset = messagesStore.subscribeSelector(
     (s) => s.messagesByChannel,
     () => {
       const msgs = getChannelMessages(options.channelId);
-      if (msgs.length !== prevMessageCount) {
-        prevMessageCount = msgs.length;
+      const oldestId = msgs.length > 0 ? msgs[0]!.id : null;
+      if (oldestId !== prevOldestId) {
+        prevOldestId = oldestId;
         loadingOlder = false;
       }
     },

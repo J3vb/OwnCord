@@ -60,11 +60,12 @@ describe("createUpdateNotifier download progress", () => {
     host.remove();
   });
 
-  async function mountWithAvailableUpdate(): Promise<void> {
+  async function mountWithAvailableUpdate(): Promise<ReturnType<typeof createUpdateNotifier>> {
     mockCheckForUpdate.mockResolvedValue({ available: true, version: "1.2.0", body: "" });
     const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
     notifier.mount(host);
     await vi.advanceTimersByTimeAsync(3000); // fire the delayed check + resolve
+    return notifier;
   }
 
   function bannerText(): string | null | undefined {
@@ -103,5 +104,35 @@ describe("createUpdateNotifier download progress", () => {
     await Promise.resolve();
 
     expect(bannerText()).toBe("Update failed. Please try again later.");
+  });
+
+  it("does not throw (unhandled rejection) when destroyed mid-download and the download later fails", async () => {
+    let rejectDownload: (err: Error) => void = () => {};
+    mockDownloadAndInstall.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectDownload = reject;
+        }),
+    );
+
+    const notifier = await mountWithAvailableUpdate();
+    (host.querySelector(".update-banner-install") as HTMLButtonElement).click();
+
+    // Page swap / logout tears the component down while the download is
+    // still in flight -- the banner element is now null.
+    notifier.destroy?.();
+
+    // Real timers so the unhandledRejection check (a macrotask under Node)
+    // can actually run before the assertion. No @types/node in this project
+    // (tsconfig has no "node" lib), so reach the global the same untyped way
+    // other suites reach a browser-only global jsdom doesn't type either
+    // (see audio-pipeline-vad-worklet.test.ts's globalThis casts).
+    vi.useRealTimers();
+    const unhandled = vi.fn();
+    (globalThis as any).process.once("unhandledRejection", unhandled);
+    rejectDownload(new Error("boom"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(unhandled).not.toHaveBeenCalled();
   });
 });

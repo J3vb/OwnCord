@@ -17,6 +17,7 @@ const {
   mockSearchOverlayMount,
   mockSearchOverlayDestroy,
   mockSetActiveChannel,
+  mockSetMessagePinned,
 } = vi.hoisted(() => ({
   mockLogError: vi.fn(),
   mockInviteManagerMount: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockSearchOverlayMount: vi.fn(),
   mockSearchOverlayDestroy: vi.fn(),
   mockSetActiveChannel: vi.fn(),
+  mockSetMessagePinned: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -70,6 +72,10 @@ vi.mock("@components/SearchOverlay", () => ({
 
 vi.mock("@stores/channels.store", () => ({
   setActiveChannel: mockSetActiveChannel,
+}));
+
+vi.mock("@stores/messages.store", () => ({
+  setMessagePinned: mockSetMessagePinned,
 }));
 
 vi.mock("@lib/toast", () => ({
@@ -339,11 +345,17 @@ describe("createPinnedPanelController", () => {
       expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
     });
 
+    // The store's `pinned` flag is the row's only local authority (there is
+    // no server pin/unpin broadcast) — without this the row still says
+    // "Unpin" after a panel unpin, and re-clicking it calls unpinMessage on
+    // an already-unpinned message.
+    expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 1, false);
+
     // No error toast should be shown
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 
-  it("onJumpToMessage calls provided scroll callback and closes panel", async () => {
+  it("onJumpToMessage forwards the panel's own channel id (captured at open time), not just the message id", async () => {
     const api = makeMockApi();
     const toast = makeMockToast();
     const mockScrollToMessage = vi.fn().mockReturnValue(true);
@@ -364,7 +376,10 @@ describe("createPinnedPanelController", () => {
 
     opts.onJumpToMessage(1);
 
-    expect(mockScrollToMessage).toHaveBeenCalledWith(1);
+    // A caller juggling several channels (ChatArea re-reads currentChannelId
+    // live at click time) needs the panel's own channel, not whatever
+    // channel happens to be active when the click lands.
+    expect(mockScrollToMessage).toHaveBeenCalledWith(42, 1);
     expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
   });
 
@@ -392,7 +407,7 @@ describe("createPinnedPanelController", () => {
     // The jumper fetches the around-window for an unloaded target and reports
     // its own failures, so the panel no longer second-guesses it with a
     // "not in loaded window" toast — it just gets out of the way.
-    expect(mockJump).toHaveBeenCalledWith(999);
+    expect(mockJump).toHaveBeenCalledWith(42, 999);
     expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
     expect(mockShowToast).not.toHaveBeenCalled();
   });

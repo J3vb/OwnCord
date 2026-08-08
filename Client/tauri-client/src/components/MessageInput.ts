@@ -418,10 +418,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       },
       message,
     );
+    // app.css only shows the preview bar via .visible -- without this an
+    // error with no attachments already queued renders into a display:none
+    // container and is never seen.
+    attachmentPreviewBar.classList.add("visible");
     attachmentPreviewBar.appendChild(errEl);
     const t = setTimeout(() => {
       activeTimers.delete(t);
       errEl.remove();
+      if (
+        attachmentPreviewBar !== null &&
+        pendingAttachments.length === 0 &&
+        attachmentPreviewBar.childElementCount === 0
+      ) {
+        attachmentPreviewBar.classList.remove("visible");
+      }
     }, 4000);
     activeTimers.add(t);
   }
@@ -522,6 +533,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
 
+    // Attachments queued during an edit are neither sent (the edit branch
+    // never reads pendingAttachments) nor cleared -- they'd silently ride
+    // along with the next ordinary message. Refuse at the single entry point.
+    if (state.editing !== null) {
+      showUploadError("Can't attach files while editing a message");
+      return;
+    }
+
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
       showUploadError(`File too large: ${file.name} exceeds 100 MB limit`);
@@ -615,7 +634,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setReplyTo(messageId: number, username: string): void {
-    if (state.editing !== null) hideEditBar();
+    // cancelEdit also clears the textarea -- without it the stale edit text
+    // survives into reply mode and Enter reposts it as a duplicate.
+    if (state.editing !== null) cancelEdit();
     state = { replyTo: { messageId, username }, editing: null };
     showReplyBar(username);
     textarea?.focus();

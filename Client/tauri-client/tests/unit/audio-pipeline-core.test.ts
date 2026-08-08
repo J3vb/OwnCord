@@ -555,6 +555,118 @@ describe("AudioPipeline", () => {
     });
   });
 
+  // --- B3-1: pipeline must source from (and restore to) the NS processor's
+  // output when one is attached, or the gain/VAD chain gets silently bypassed
+  // by the processor's own replaceTrack ---
+
+  describe("AudioPipeline sourcing when an NS processor is attached (B3-1)", () => {
+    afterEach(() => {
+      pipeline.teardownAudioPipeline();
+      vi.unstubAllGlobals();
+    });
+
+    function stubAudioContext(): { mockSender: any } {
+      const mockSender = { replaceTrack: vi.fn().mockResolvedValue(undefined) };
+      const mockAudioCtx = {
+        resume: vi.fn().mockResolvedValue(undefined),
+        createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
+        createAnalyser: vi.fn().mockReturnValue({
+          fftSize: 0,
+          smoothingTimeConstant: 0,
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          getFloatTimeDomainData: vi.fn(),
+        }),
+        createGain: vi.fn().mockReturnValue({
+          gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
+        createMediaStreamDestination: vi.fn().mockReturnValue({
+          stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "adjusted" }]) },
+          disconnect: vi.fn(),
+        }),
+        currentTime: 0,
+        close: vi.fn().mockResolvedValue(undefined),
+        state: "running",
+        audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
+      };
+      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation((tracks: unknown) => ({ tracks })),
+      );
+      return { mockSender };
+    }
+
+    it("setupAudioPipeline sources from the processor's processedTrack, not the raw mic track", () => {
+      const { mockSender } = stubAudioContext();
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              mediaStreamTrack: { id: "raw-track" },
+              sender: mockSender,
+              getProcessor: vi.fn().mockReturnValue({ processedTrack: { id: "processed-track" } }),
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+
+      expect(MediaStream).toHaveBeenCalledWith([{ id: "processed-track" }]);
+    });
+
+    it("teardownAudioPipeline restores the sender to the processor's processedTrack, not the raw mic track, when NS is still attached", () => {
+      const { mockSender } = stubAudioContext();
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              mediaStreamTrack: { id: "raw-track" },
+              sender: mockSender,
+              getProcessor: vi.fn().mockReturnValue({ processedTrack: { id: "processed-track" } }),
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+      mockSender.replaceTrack.mockClear();
+      pipeline.teardownAudioPipeline();
+
+      expect(mockSender.replaceTrack).toHaveBeenCalledWith({ id: "processed-track" });
+    });
+
+    it("applyNoiseSuppressor rebuilds the pipeline after attaching, so the sender ends on the gain/VAD chain instead of the processor's raw output winning", async () => {
+      const { mockSender } = stubAudioContext();
+      const setProcessor = vi.fn().mockResolvedValue(undefined);
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              mediaStreamTrack: { id: "raw-track" },
+              sender: mockSender,
+              getProcessor: vi.fn().mockReturnValue(undefined), // no processor yet
+              setProcessor,
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+
+      await pipeline.applyNoiseSuppressor();
+
+      expect(setProcessor).toHaveBeenCalled();
+      // The rebuilt pipeline's own replaceTrack (dest/adjusted track) must be
+      // the LAST sender.replaceTrack call, so it wins over setProcessor's own
+      // (unawaited, internal) replaceTrack to the raw processed track.
+      const calls = mockSender.replaceTrack.mock.calls;
+      expect(calls.at(-1)?.[0]).toEqual({ id: "adjusted" });
+    });
+  });
+
   describe("setupAudioPipeline AudioContext configuration", () => {
     let mockAudioCtx: any;
 

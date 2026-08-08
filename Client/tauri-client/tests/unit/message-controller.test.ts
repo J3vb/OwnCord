@@ -174,6 +174,19 @@ describe("createMessageController", () => {
       expect(mockSetChannelLoadError).not.toHaveBeenCalled();
       expect(showError).not.toHaveBeenCalled();
     });
+
+    it("discards a stale tail response if the channel was loaded by something else while the fetch was in flight (e.g. a same-channel jump's around-window)", async () => {
+      // Not loaded when the fetch starts (so it proceeds), but loaded by the
+      // time it resolves — simulating MessageJump's setAroundMessages winning
+      // the race and installing a window this response must not clobber.
+      mockIsChannelLoaded.mockReturnValueOnce(false).mockReturnValueOnce(true);
+      const api = makeApi();
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadMessages(42, makeAbort().signal);
+
+      expect(mockSetMessages).not.toHaveBeenCalled();
+    });
   });
 
   describe("loadOlderMessages", () => {
@@ -245,6 +258,33 @@ describe("createMessageController", () => {
       const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadOlderMessages(42, signal);
+
+      expect(mockPrependMessages).not.toHaveBeenCalled();
+    });
+
+    it("discards a stale older-page if the window was replaced while the fetch was in flight (e.g. a same-channel jump swapped in an around-window)", async () => {
+      // First read (before the fetch): oldest visible row is id 10. Second
+      // read (after the await resolves): the window has already been
+      // replaced — id 10 is no longer at the front — so splicing this page
+      // onto it would duplicate/misorder rows.
+      mockGetChannelMessages
+        .mockReturnValueOnce([
+          { id: 10, content: "oldest" },
+          { id: 20, content: "newest" },
+        ])
+        .mockReturnValueOnce([
+          { id: 77, content: "replaced" },
+          { id: 78, content: "replaced2" },
+        ]);
+      const api = makeApi({
+        getMessages: vi.fn().mockResolvedValue({
+          messages: [{ id: 5, content: "older" }],
+          has_more: true,
+        }),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadOlderMessages(42, makeAbort().signal);
 
       expect(mockPrependMessages).not.toHaveBeenCalled();
     });

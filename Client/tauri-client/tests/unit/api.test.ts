@@ -317,6 +317,34 @@ describe("API Client", () => {
       expect(headers["Authorization"]).toBeUndefined();
       expect(headers["Content-Type"]).toBe("application/json");
     });
+
+    // B4_conn_ipc-2: a host switch must not carry the previous host's bearer
+    // token forward — otherwise a login/register request to a new server
+    // rides a still-live session token for the old one.
+    it("setConfig drops the previous token when switching to a different host without a new token", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({}));
+      // `api` (beforeEach) already holds token "test-token" for "localhost:8443".
+      api.setConfig({ host: "evil.example.com:8443" });
+      await api.getMe();
+      const headers = fetchCallOpts().headers as Record<string, string>;
+      expect(headers["Authorization"]).toBeUndefined();
+    });
+
+    it("setConfig keeps the token when the host is unchanged", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({}));
+      api.setConfig({ host: "localhost:8443" });
+      await api.getMe();
+      const headers = fetchCallOpts().headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer test-token");
+    });
+
+    it("setConfig keeps a token provided alongside a host change", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({}));
+      api.setConfig({ host: "new.example.com:8443", token: "fresh-token" });
+      await api.getMe();
+      const headers = fetchCallOpts().headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer fresh-token");
+    });
   });
 
   describe("user endpoints", () => {

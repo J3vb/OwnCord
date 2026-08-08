@@ -211,7 +211,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         log.error("setConfig rejected invalid host", { host: newConfig.host });
         throw new Error("Invalid host format");
       }
-      config = { ...config, ...newConfig };
+      // Switching to a different host without an accompanying new token must
+      // not carry the previous host's bearer token forward — otherwise the
+      // login/register request to the new host rides a still-live session
+      // token for the old one. Callers that only rotate the token (post-auth)
+      // never pass `host`, so this never touches a same-host token refresh.
+      if (
+        newConfig.host !== undefined &&
+        newConfig.host !== config.host &&
+        newConfig.token === undefined
+      ) {
+        config = { ...config, ...newConfig, token: undefined };
+      } else {
+        config = { ...config, ...newConfig };
+      }
     },
 
     /** Get current config (for debugging). Token is redacted. */

@@ -710,8 +710,17 @@
   color: var(--red);
 }
 
-/* Status picker popup */
+/* Status picker: the root is the inline anchor (trigger dot lives here and
+   must always be visible); the popup chrome + its display:none/open toggle
+   belong on the dropdown child, which is what StatusPicker.ts actually
+   toggles (status-picker-dropdown--open). This block used to be a verbatim
+   holdover from the pre-component popup and hid the whole picker. */
 .status-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.status-picker-dropdown {
   position: absolute;
   bottom: 60px;
   left: 8px;
@@ -724,10 +733,24 @@
   display: none;
   min-width: 160px;
 }
-.status-picker.open {
+.status-picker-dropdown--open {
   display: block;
 }
-.status-option {
+/* Trigger dot: only inline style is `background` (StatusPicker.ts), so the
+   size has to live here or the dot collapses to 0x0 and becomes both
+   invisible and unclickable. */
+.status-picker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-circle);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.status-picker-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.status-picker-option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -736,18 +759,29 @@
   cursor: pointer;
   font-size: 13px;
   color: var(--text-normal);
-  background: transparent;
-  width: 100%;
-  text-align: left;
   transition: background 0.1s ease;
 }
-.status-option:hover {
+.status-picker-option:hover {
   background: var(--bg-hover);
 }
-.status-option .so-dot {
+/* Rows are tabindex="0" menuitems, not buttons, so they need their own
+   focus ring instead of relying on native button focus styling. */
+.status-picker-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.status-picker-option-dot {
   width: 10px;
   height: 10px;
   border-radius: var(--radius-circle);
+  flex-shrink: 0;
+}
+.status-picker-option-label {
+  flex: 1;
+}
+.status-picker-option-check {
+  display: flex;
+  color: var(--accent);
   flex-shrink: 0;
 }
 

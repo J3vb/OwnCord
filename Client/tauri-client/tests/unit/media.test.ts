@@ -70,6 +70,7 @@ import {
   renderInlineImage,
   renderYouTubeEmbed,
   openImageLightbox,
+  closeActiveLightbox,
   extractUrls,
   renderUrlEmbeds,
   clearMediaCaches,
@@ -1181,6 +1182,25 @@ describe("media.ts", () => {
         new MouseEvent("mousemove", { clientX: 100, clientY: 100, bubbles: true }),
       );
       document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  });
+
+  // =========================================================================
+  // closeActiveLightbox (B6-15: lightbox survives logout/page swap)
+  // =========================================================================
+
+  describe("closeActiveLightbox", () => {
+    it("closes the active lightbox and removes it from the DOM", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
+
+      closeActiveLightbox();
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+    });
+
+    it("is a no-op when no lightbox is open", () => {
+      expect(() => closeActiveLightbox()).not.toThrow();
     });
   });
 

@@ -13,7 +13,8 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
-import { isSafeUrl } from "./message-list/attachments";
+import { isRenderableAvatar } from "@lib/avatar";
+import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,22 +147,31 @@ export function createDmProfileSidebar(
     wrapper.style.position = "relative";
     wrapper.style.flexShrink = "0";
 
-    if (user.avatar !== null && user.avatar.length > 0 && isSafeUrl(user.avatar)) {
-      wrapper.style.background = "transparent";
-      const img = createElement("img", {
-        src: user.avatar,
-        alt: user.username,
-        class: "dps-avatar-img",
+    // The letter draws immediately; the picture (if any) is fetched through
+    // the same cert-pinned, bearer-token path attachments use and swapped in
+    // once the bytes arrive. `<img src>` cannot carry the auth header an
+    // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
+    wrapper.style.background = "var(--accent, #5865f2)";
+    const initial = user.username.charAt(0).toUpperCase() || "?";
+    const letter = createElement("span", {}, initial);
+    wrapper.appendChild(letter);
+
+    if (isRenderableAvatar(user.avatar)) {
+      const resolved = resolveServerUrl(user.avatar);
+      void fetchImageAsDataUrl(resolved).then((dataUrl) => {
+        if (dataUrl === null || !wrapper.isConnected) return;
+        const img = createElement("img", {
+          src: dataUrl,
+          alt: user.username,
+          class: "dps-avatar-img",
+        });
+        img.style.width = "80px";
+        img.style.height = "80px";
+        img.style.borderRadius = "50%";
+        letter.remove();
+        wrapper.style.background = "transparent";
+        wrapper.insertBefore(img, wrapper.firstChild);
       });
-      img.style.width = "80px";
-      img.style.height = "80px";
-      img.style.borderRadius = "50%";
-      wrapper.appendChild(img);
-    } else {
-      wrapper.style.background = "var(--accent, #5865f2)";
-      const initial = user.username.charAt(0).toUpperCase() || "?";
-      const text = createElement("span", {}, initial);
-      wrapper.appendChild(text);
     }
 
     // Status dot overlay

@@ -146,11 +146,59 @@ export interface VideoTrackDeps {
 }
 
 // ---------------------------------------------------------------------------
+// Shared race guard for the enable/disable pairs below
+// ---------------------------------------------------------------------------
+
+/** A camera/screenshare disable() bumps this so a concurrent enable() that
+ *  captured an earlier value before its async device-acquisition gap
+ *  (getUserMedia / getDisplayMedia — a seconds-long window on the first
+ *  permission prompt) can tell it was superseded once that gap resolves, and
+ *  discard the track it just created instead of publishing over a stop. The
+ *  camera and screenshare races are the same shape, so both state types
+ *  carry this and share the two helpers below rather than each hand-rolling
+ *  a counter. */
+interface GenerationGuarded {
+  generation?: number;
+}
+
+function bumpGeneration(state: GenerationGuarded): void {
+  state.generation = (state.generation ?? 0) + 1;
+}
+
+// ---------------------------------------------------------------------------
+// Server-refusal rollback correlation
+// ---------------------------------------------------------------------------
+
+/** Correlates an in-flight camera/screenshare *enable* request's envelope id
+ *  with its kind, so dispatcher.ts's ERROR handler can roll back the
+ *  already-published track on a server refusal (FORBIDDEN, RATE_LIMITED,
+ *  INTERNAL, ...) it could not have pre-blocked. A new enable of the same
+ *  kind supersedes the previous entry — only the latest in-flight request
+ *  for that kind can still be refused. */
+const pendingVideoEnables = new Map<string, "camera" | "screen">();
+
+function registerPendingVideoEnable(id: string, kind: "camera" | "screen"): void {
+  for (const [existingId, existingKind] of pendingVideoEnables) {
+    if (existingKind === kind) pendingVideoEnables.delete(existingId);
+  }
+  pendingVideoEnables.set(id, kind);
+}
+
+/** Consume a pending video-enable correlation on a server refusal. Returns
+ *  the kind that must be rolled back, or undefined when `id` doesn't match
+ *  an in-flight enable (unrelated error, or already resolved). */
+export function rollbackPendingVideo(id: string): "camera" | "screen" | undefined {
+  const kind = pendingVideoEnables.get(id);
+  if (kind !== undefined) pendingVideoEnables.delete(id);
+  return kind;
+}
+
+// ---------------------------------------------------------------------------
 // Camera track state
 // ---------------------------------------------------------------------------
 
 /** Mutable state for the manually published camera track. */
-export interface CameraTrackState {
+export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | null;
 }
 
@@ -176,6 +224,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   }
   setLocalCamera(true);
   const quality = getStreamQuality();
+  const generation = state.generation ?? 0;
   try {
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
     stopManualCameraTrack(state, room);
@@ -183,6 +232,13 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       ...CAMERA_PRESETS[quality],
       ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
     });
+    if ((state.generation ?? 0) !== generation) {
+      // A disableCamera ran to completion while getUserMedia was pending —
+      // it already reset localCamera and sent voice_camera(false).
+      // Publishing now would resurrect a track the user just turned off.
+      videoTrack.stop();
+      return;
+    }
     state.manualCameraTrack = videoTrack;
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
@@ -192,7 +248,8 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
         maxFramerate: quality === "low" ? 15 : 30,
       },
     });
-    ws.send({ type: "voice_camera", payload: { enabled: true } });
+    const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
+    registerPendingVideoEnable(sendId, "camera");
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
   } catch (err) {
@@ -214,6 +271,9 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
 }
 
 export async function disableCamera(state: CameraTrackState, deps: VideoTrackDeps): Promise<void> {
+  // Bump first: a concurrent enableCamera that is still awaiting device
+  // acquisition captured the pre-bump value and will detect it changed.
+  bumpGeneration(state);
   const room = deps.getRoom();
   try {
     stopManualCameraTrack(state, room);
@@ -233,7 +293,7 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 // ---------------------------------------------------------------------------
 
 /** Mutable state for the manually published screenshare tracks. */
-export interface ScreenTrackState {
+export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
 }
 
@@ -267,9 +327,17 @@ export async function enableScreenshare(
   const fps = getScreenShareFps();
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
+  const generation = state.generation ?? 0;
   try {
     stopManualScreenTracks(state, room);
     const screenTracks = await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
+    if ((state.generation ?? 0) !== generation) {
+      // A disableScreenshare ran to completion while the OS picker was still
+      // up — it already reset localScreenshare and sent voice_screenshare
+      // (false). Publishing now would resurrect a share the user just ended.
+      for (const t of screenTracks) t.stop();
+      return;
+    }
     state.manualScreenTracks = screenTracks;
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
@@ -299,15 +367,19 @@ export async function enableScreenshare(
         { once: true },
       );
     }
-    ws.send({ type: "voice_screenshare", payload: { enabled: true } });
+    const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
+    registerPendingVideoEnable(sendId, "screen");
     deps.reapplyAudioPipeline();
     log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
   } catch (err) {
-    // BUG-100: Stop created tracks to release screen capture if publish failed.
-    for (const t of state.manualScreenTracks) {
-      t.stop();
-    }
-    state.manualScreenTracks = [];
+    // BUG-100 (+ partial-publish-failure hardening): release every created
+    // track, not just stop() it — a track already published before a later
+    // one in the batch fails (all quality presets request audio alongside
+    // video) needs unpublishing too, or it stays orphaned in the room:
+    // track.stop() is programmatic and never fires the DOM "ended" event, so
+    // LiveKit's ended-driven auto-unpublish never runs. stopManualScreenTracks
+    // does both and no-ops when nothing was created.
+    stopManualScreenTracks(state, room);
     setLocalScreenshare(false);
     log.error("Failed to enable screenshare", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -322,6 +394,9 @@ export async function disableScreenshare(
   state: ScreenTrackState,
   deps: VideoTrackDeps,
 ): Promise<void> {
+  // Bump first: a concurrent enableScreenshare still awaiting the OS picker
+  // captured the pre-bump value and will detect it changed.
+  bumpGeneration(state);
   const room = deps.getRoom();
   try {
     stopManualScreenTracks(state, room);

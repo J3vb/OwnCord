@@ -82,7 +82,12 @@ export function createMessageController(opts: MessageControllerOptions): Message
     setChannelLoading(channelId);
     try {
       const resp = await api.getMessages(channelId, { limit: PAGE_SIZE }, signal);
-      if (!signal.aborted) {
+      // Re-check "loaded" after the await: a same-channel jump can install an
+      // around-window (setAroundMessages) while this mount-time tail fetch is
+      // still in flight — nothing aborts this fetch's signal in that case.
+      // Both landing marks the channel loaded, so a tail response that lost
+      // the race is discarded instead of clobbering the jump's window.
+      if (!signal.aborted && !isChannelLoaded(channelId)) {
         log.info("Messages loaded", {
           channelId,
           count: resp.messages.length,
@@ -120,7 +125,16 @@ export function createMessageController(opts: MessageControllerOptions): Message
         signal,
       );
       if (!signal.aborted) {
-        prependMessages(channelId, resp.messages, resp.has_more);
+        // The window can be replaced wholesale while this fetch is in flight
+        // (e.g. a same-channel jump swaps in an around-window via
+        // setAroundMessages) — nothing aborts this fetch's controller in that
+        // case. Splicing this now-stale page onto a window it was never
+        // fetched for would duplicate/misorder rows, so bail if the row this
+        // page continues from is no longer the window's oldest.
+        const current = getChannelMessages(channelId);
+        if (current.length > 0 && current[0]!.id === oldest.id) {
+          prependMessages(channelId, resp.messages, resp.has_more);
+        }
       }
     } catch (err) {
       if (!signal.aborted) {

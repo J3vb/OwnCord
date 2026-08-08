@@ -123,6 +123,24 @@ describe("channel mutes — host scoping", () => {
     muteChannel(9);
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([9]);
   });
+
+  it("migrates a pre-scoping legacy mute through to the scoped key without leaking to a different host", () => {
+    // A mute saved before host-scoping existed lives at the bare
+    // `mutedChannels` key. It must still apply once a host is set, and the
+    // migration must write under THAT host's scoped key specifically — not
+    // clobber a different host's own explicit mute list, even an empty one.
+    localStorage.setItem(KEY, JSON.stringify([7]));
+    localStorage.setItem(`${STORAGE_PREFIX}mutedChannels:b.example.com`, JSON.stringify([]));
+
+    setChannelMutesHost("a.example.com");
+    expect(isChannelMuted(7)).toBe(true);
+    expect(
+      JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}mutedChannels:a.example.com`)!),
+    ).toEqual([7]);
+
+    setChannelMutesHost("b.example.com");
+    expect(isChannelMuted(7)).toBe(false);
+  });
 });
 
 describe("channel mutes — notification gating", () => {

@@ -37,6 +37,7 @@ import {
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { clearAttachmentCaches } from "@components/message-list/attachments";
+import { closeActiveLightbox } from "@components/message-list/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
@@ -44,6 +45,7 @@ import {
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setNsfwGateHost } from "@lib/nsfw-gate";
+import { setAudioVolumeHost } from "@lib/audioElements";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -102,6 +104,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
   setNsfwGateHost(apiConfig.host ?? null);
+  setAudioVolumeHost(apiConfig.host ?? null);
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
@@ -232,7 +235,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     if (active === null || active.type !== "dm") return;
 
     const dmChannel = dmStore.getState().channels.find((c) => c.channelId === active.id);
-    if (dmChannel === undefined) return;
+    // A group has no single "recipient" — dm.store.ts documents .recipient as
+    // just the first of .participants for a group, with group-correct code
+    // expected to read .participants instead. A 1:1 profile panel built from
+    // it would present one arbitrary member's identity as the conversation.
+    if (dmChannel === undefined || dmChannel.isGroup) return;
 
     const recipient = dmChannel.recipient;
     const status =
@@ -271,6 +278,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function startCall(): void {
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
+    // onVoiceJoin silently refuses to join when the socket is down
+    // (VoiceCallbacks.ts's socketLive() guard) — without this check the ring
+    // and "Calling…" toast fire anyway, promising a call nobody can hear.
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast("Not connected", "error");
+      return;
+    }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
     ws.send({ type: "call_ring", payload: { channel_id: active.id } });
     showToast("Calling…", "info");
@@ -526,7 +540,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => ringCtrl?.accept(),
+      onAccept: () => {
+        // ringCtrl.accept() unconditionally consumes the ring
+        // (stopRinging) before onVoiceJoin ever runs, and onVoiceJoin itself
+        // silently refuses to join while the socket is down (VoiceCallbacks
+        // .ts's socketLive() guard) — so accepting while reconnecting would
+        // otherwise discard the ring for good with no join and no retry.
+        // Guarded here, the banner's only caller of accept(), so the ring
+        // survives for the user to accept again once reconnected.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          showToast("Can't answer while reconnecting", "error");
+          return;
+        }
+        ringCtrl?.accept();
+      },
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);
@@ -680,7 +707,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const active = getActiveChannel();
           if (active !== null) {
-            if (active.type === "text") {
+            // Voice is the only channel type that should keep the grid up;
+            // text, dm and announcement all mount a chat surface and must
+            // dismiss it, not just "text" (a dm/announcement switch used to
+            // leave the grid covering an unrelated channel's chat).
+            if (active.type !== "voice") {
               videoModeCtrl?.showChat();
             }
             // Close DM profile sidebar when switching channels
@@ -723,6 +754,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function destroy(): void {
     log.info("MainPage destroying");
     try {
+      // closeSettings() is otherwise only ever called from the overlay's own
+      // onClose — a non-user-initiated unmount (401, ban, server shutdown)
+      // left `settingsOpen` stale, and the next page to mount an (initially
+      // hidden) SettingsOverlay off that flag — ConnectPage, after logout —
+      // would show it over the login screen.
+      closeSettings();
       teardownToast();
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
@@ -735,6 +772,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // clip viewed this session stays pinned (as a blob: URL or a cached
       // data: URI) past logout.
       clearAttachmentCaches();
+      // The lightbox is a module-level overlay appended straight to
+      // document.body — renderPage only clears #app, so a forced logout with
+      // it open would otherwise leave it floating over the login screen with
+      // live document listeners and a since-revoked blob URL (B6-15).
+      closeActiveLightbox();
       autoIdle?.destroy();
       autoIdle = null;
       channelCtrl?.destroyChannel();

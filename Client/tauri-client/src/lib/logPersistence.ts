@@ -107,6 +107,12 @@ async function rotateOldFiles(): Promise<void> {
 /** Handle a log entry by serializing it and buffering for disk write. */
 function onLogEntry(entry: LogEntry): void {
   if (!initialized) return;
+  // Break the self-sustaining loop: a persistently failing flush logs
+  // through this module's own logger (flush failed / rotation failed),
+  // which would otherwise re-enter here and re-arm scheduleFlush every 2s
+  // forever. The entry still reaches console/the in-memory ring buffer —
+  // it just never gets queued for its own persistence.
+  if (entry.component === "logPersistence") return;
   buffer.push(JSON.stringify(entry));
   scheduleFlush();
 }

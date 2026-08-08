@@ -9,6 +9,7 @@ const mockVoiceState = vi.hoisted(() => ({
   localServerDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  pttGated: false,
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -206,6 +207,7 @@ import {
 import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 import type { ReadyMember } from "../../src/lib/types";
 import {
   isVoiceConnected,
@@ -309,6 +311,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localServerDeafened = false;
     mockVoiceState.localCamera = false;
     mockVoiceState.localScreenshare = false;
+    mockVoiceState.pttGated = false;
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -1638,6 +1641,24 @@ describe("LiveKitSession", () => {
         mockVoiceState.localServerDeafened = false;
       }
     });
+
+    // B1_voice_mic-6: restoreLocalVoiceState records a join-time PTT gate in
+    // pttGated (never localMuted, by design) and unpublishes the mic without
+    // touching localMuted — so undeafening before the first PTT press must
+    // not republish a mic that is still supposed to be gated.
+    it("undeafening while push-to-talk still gates the mic keeps it muted", async () => {
+      mockVoiceState.pttGated = true;
+
+      try {
+        session.setDeafened(false);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(setLocalDeafened).toHaveBeenCalledWith(false);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+      } finally {
+        mockVoiceState.pttGated = false;
+      }
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -1747,6 +1768,29 @@ describe("LiveKitSession", () => {
         mockVoiceState.localServerMuted = false;
       }
     });
+
+    // B1_voice_mic-5: a listen-only user who self-muted before losing mic
+    // access must not come back live just because they regained the device.
+    it("keeps the mic muted when the user self-muted before going listen-only", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+      vi.clearAllMocks();
+      mockVoiceState.localMuted = true;
+
+      try {
+        await session.retryMicPermission();
+
+        expect(setListenOnly).toHaveBeenCalledWith(false);
+        // applyMicMuteState(true) re-disables the mic it just enabled — the
+        // user's own mute must survive regaining mic access.
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+        expect(setLocalMuted).not.toHaveBeenCalledWith(false);
+      } finally {
+        mockVoiceState.localMuted = false;
+      }
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -1805,6 +1849,43 @@ describe("LiveKitSession", () => {
         expect.stringContaining("Microphone permission denied"),
       );
       expect(errorCb).not.toHaveBeenCalledWith(expect.stringContaining("Microphone unavailable"));
+    });
+
+    // B1_voice_mic-4: mode "reconnect" must read the PTT gate the store is
+    // still carrying from before the disconnect instead of recomputing
+    // pttArmed from scratch (which is always false for mode !== "join") —
+    // otherwise a reconnect during the "joined with PTT armed, key never
+    // pressed yet" window republishes a hot mic.
+    it("mode reconnect keeps the mic gated when pttGated survived from before the disconnect", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      mockVoiceState.pttGated = true;
+
+      // Mirrors the real caller (handleDisconnected via setReconnectAc),
+      // which always sets "reconnecting" before starting this loop.
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "token",
+        lastUrl: "/lk",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const ac = new AbortController();
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/lk",
+        7,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
     });
 
     it("mode join with generic mic error calls error callback", async () => {
@@ -2643,6 +2724,53 @@ describe("LiveKitSession", () => {
       expect(leaveVoiceChannel).toHaveBeenCalled();
     });
 
+    // B1_voice_mic-3: the in-loop supersession checks (unlike the post-loop
+    // give-up check) did not test `_state.type`, so a same-channel rejoin
+    // that lands DURING the retry delay — before the loop's own in-flight
+    // check runs — was not caught until the give-up path at the very end.
+    // This exercises the very first in-loop checkpoint, right after the
+    // delay, which the give-up-only tests above never reach.
+    it("aborts before creating a room when a same-channel rejoin lands during the retry delay (zombie reconnect)", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const ac = new AbortController();
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      // A fresh, same-channel join completes DURING the retry delay, before
+      // the loop's first in-flight guard has a chance to run.
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 5,
+        latestToken: "fresh-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+      };
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      // The zombie loop must never touch the live session: no second
+      // connect(), and the live room/state must survive untouched.
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.latestToken).toBe("fresh-token");
+    });
+
     it("cleans up reconnect room when signal aborts after connect resolves (BUG-070)", async () => {
       (session as any)._state = {
         type: "reconnecting",
@@ -2772,6 +2900,22 @@ describe("LiveKitSession", () => {
       (getIdentityPin as any).mockResolvedValue({ status: "unpinned" });
       (storeIdentityPin as any).mockResolvedValue(true);
       (verifyEphemeralKeySignature as any).mockResolvedValue(true);
+      // Joining voice requires an authenticated session, and the identity
+      // keypair is scoped by host AND user id — with no user the announce is
+      // deliberately sent unsigned rather than scoped under a placeholder id.
+      // Kept below PEER_ID so key-holder election (lowest id wins) is unchanged.
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "me", role: "member" } as never,
+        isAuthenticated: true,
+      }));
+    });
+
+    afterEach(() => {
+      // Do not leak the authenticated user into the rest of the file — an
+      // earlier bug in this suite was one test leaving a role set for every
+      // test after it.
+      authStore.setState((prev) => ({ ...prev, user: null, isAuthenticated: false }));
     });
 
     it("signs the ephemeral announce sent on join", async () => {

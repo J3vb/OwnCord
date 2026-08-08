@@ -176,8 +176,16 @@ export class E2EEManager {
       return false;
     }
 
-    // Use server-authoritative is_key_holder from voice_token payload.
-    this._isKeyHolder = isKeyHolder;
+    // Use server-authoritative is_key_holder from voice_token payload — OR'd
+    // with whatever this._isKeyHolder already is. The server value was
+    // captured when we started joining and cannot see a handleParticipantLeft
+    // promotion that landed during the awaits above: the generation check
+    // just above proves no clearState() ran since myGeneration was captured,
+    // so the only other writer of this field for THIS generation is that
+    // promotion — unconditionally overwriting it with the stale server value
+    // strands the newly-elected holder waiting for an offer nobody (least of
+    // all itself) will ever send, timing out and ejecting it from voice.
+    this._isKeyHolder = isKeyHolder || this._isKeyHolder;
 
     if (this._isKeyHolder) {
       // Generate the room key BEFORE draining queued announces, so the
@@ -343,13 +351,28 @@ export class E2EEManager {
 
   /** Load (once per session) this client's long-term identity keypair from the
    *  OS keyring so we can sign ephemeral announces. Returns null when there is
-   *  no server host (identity is host-scoped) — the announce then goes out
-   *  unsigned and peers treat us as a legacy/unverified client. */
+   *  no server host (identity is host-scoped) OR no authenticated user id yet
+   *  (identity is host+user scoped, B3-3) — the announce then goes out
+   *  unsigned and peers treat us as a legacy/unverified client. A missing user
+   *  id must never fall back to a placeholder scope like `?? 0`:
+   *  `getOrCreateIdentityKeyPair` would mint (or migrate-and-DELETE the real
+   *  legacy key into) a bogus `host:0` keyring account, and a later
+   *  authenticated call would then mint a second, different keypair under
+   *  `host:<realId>` — so the published key and the announce signing key
+   *  permanently disagree and every peer's verifyPeerAnnounce reports a false
+   *  MITM "mismatch" (see identity.ts's `identityKeyPairCache` doc). */
   private async ensureIdentityKeyPair(): Promise<CryptoKeyPair | null> {
     if (this._identityKeyPair) return this._identityKeyPair;
     const host = this.deps.getServerHost();
     if (host === null) return null;
-    this._identityKeyPair = await getOrCreateIdentityKeyPair(host);
+    const myUserId = authStore.getState().user?.id;
+    if (myUserId === undefined) {
+      log.warn(
+        "E2EE: no authenticated user id yet — announcing unsigned instead of scoping under a placeholder id",
+      );
+      return null;
+    }
+    this._identityKeyPair = await getOrCreateIdentityKeyPair(host, myUserId);
     return this._identityKeyPair;
   }
 
@@ -397,7 +420,8 @@ export class E2EEManager {
   private async verifyPeerAnnounce(
     userId: number,
     publicKeyBase64: string,
-    signatureBase64?: string,
+    signatureBase64: string | undefined,
+    myGeneration: number,
   ): Promise<boolean> {
     const publishedIdentity =
       membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
@@ -416,7 +440,11 @@ export class E2EEManager {
     // the server delivered. Reject the announce and surface the distinct
     // "unknown" state; the peer stays blocked for E2EE until the store recovers.
     if (lookup.status === "unavailable") {
-      setPeerVerification({ userId, status: "unknown", safetyNumber: null });
+      this.setPeerVerificationIfCurrent(myGeneration, {
+        userId,
+        status: "unknown",
+        safetyNumber: null,
+      });
       log.error("E2EE: identity pin store unreadable — rejecting announce (fail closed)", {
         userId,
       });
@@ -428,7 +456,11 @@ export class E2EEManager {
     // Pinned peer whose delivered key is absent or differs from the pin —
     // possible server MITM. Block until the user re-pins.
     if (pin !== null && publishedIdentity !== pin) {
-      setPeerVerification({ userId, status: "mismatch", safetyNumber: null });
+      this.setPeerVerificationIfCurrent(myGeneration, {
+        userId,
+        status: "mismatch",
+        safetyNumber: null,
+      });
       log.error("E2EE: pinned peer identity key missing/changed — blocking (identity-tofu)", {
         userId,
       });
@@ -439,7 +471,11 @@ export class E2EEManager {
     // but mark unverified (pin-pending). This is the only case the compatibility
     // posture keeps open.
     if (!publishedIdentity) {
-      setPeerVerification({ userId, status: "unverified", safetyNumber: null });
+      this.setPeerVerificationIfCurrent(myGeneration, {
+        userId,
+        status: "unverified",
+        safetyNumber: null,
+      });
       log.warn("E2EE: peer has no identity key — accepting as unverified (legacy)", { userId });
       return true;
     }
@@ -454,7 +490,11 @@ export class E2EEManager {
       : false;
     if (!ok) {
       // Fail closed: peer has an identity key but no valid signature (MITM).
-      setPeerVerification({ userId, status: "mismatch", safetyNumber: null });
+      this.setPeerVerificationIfCurrent(myGeneration, {
+        userId,
+        status: "mismatch",
+        safetyNumber: null,
+      });
       log.error("E2EE: peer announce signature invalid — rejecting (MITM?)", { userId });
       return false;
     }
@@ -479,12 +519,30 @@ export class E2EEManager {
       }
     }
     if (pinWriteFailed) {
-      setPeerVerification({ userId, status: "unverified", safetyNumber: null });
+      this.setPeerVerificationIfCurrent(myGeneration, {
+        userId,
+        status: "unverified",
+        safetyNumber: null,
+      });
       return true; // still accept the announce — the write failure alone shouldn't block the call
     }
     const safetyNumber = await computeKeyFingerprint(identityKey);
-    setPeerVerification({ userId, status: "verified", safetyNumber });
+    this.setPeerVerificationIfCurrent(myGeneration, { userId, status: "verified", safetyNumber });
     return true;
+  }
+
+  /** setPeerVerification, but a no-op if a clearState() teardown happened
+   *  since myGeneration was captured. verifyPeerAnnounce awaits a Tauri IPC
+   *  (identity pin lookup) internally and writes verification state on every
+   *  branch, so a Disconnect mid-await must not let the resumed continuation
+   *  resurrect voice-store state for a session that no longer exists
+   *  (finding B3-7). */
+  private setPeerVerificationIfCurrent(
+    myGeneration: number,
+    verification: Parameters<typeof setPeerVerification>[0],
+  ): void {
+    if (this._sessionGeneration !== myGeneration) return;
+    setPeerVerification(verification);
   }
 
   /**
@@ -566,13 +624,25 @@ export class E2EEManager {
       log.info("E2EE: queued announce (keypair not ready)", { userId });
       return;
     }
+    // Captured before verifyPeerAnnounce's awaits (a Tauri IPC pin lookup) so
+    // a clearState() that lands during them — e.g. Disconnect mid-verify —
+    // can be detected before this continuation writes into a session a newer
+    // (or no) attempt now owns (finding B3-7).
+    const myGeneration = this._sessionGeneration;
     try {
       // ── F3 TOFU verification gate ──────────────────────────────────────
       // Resolve the peer's identity key and verify the announce signature
       // BEFORE storing the ECDH key or wrapping the room key. A malicious
       // server that swaps user_id↔ephemeral-key or forges keys fails here.
-      if (!(await this.verifyPeerAnnounce(userId, publicKeyBase64, signatureBase64))) {
+      if (
+        !(await this.verifyPeerAnnounce(userId, publicKeyBase64, signatureBase64, myGeneration))
+      ) {
         return; // rejected/blocked — do not store or wrap
+      }
+
+      if (this._sessionGeneration !== myGeneration) {
+        log.info("E2EE: discarding stale announce (session torn down during verify)", { userId });
+        return;
       }
 
       // Deduplicate: if the key is identical, skip the import but still

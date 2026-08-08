@@ -60,6 +60,10 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
   const substring: MentionSuggestion[] = [];
 
   for (const member of membersStore.getState().members.values()) {
+    // Skip usernames the mention grammar cannot express (a space, an "@",
+    // etc. truncate the token on insert) -- picking one would insert a dead
+    // token that resolves to no mention and notifies nobody.
+    if (!/^[\p{L}\p{N}_.-]{1,64}$/u.test(member.username)) continue;
     const lower = member.username.toLowerCase();
     if (q !== "" && !lower.includes(q)) continue;
     const entry: MentionSuggestion = {

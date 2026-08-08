@@ -8,6 +8,7 @@ import { notificationAllowed } from "./channel-mutes";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
@@ -19,11 +20,21 @@ function isWindowFocused(): boolean {
   return document.hasFocus();
 }
 
-/** Get the channel name for a given channel ID. */
-function getChannelName(channelId: number): string {
-  const channels = channelsStore.getState().channels;
-  const channel = channels.get(channelId);
-  return channel?.name ?? `Channel ${channelId}`;
+/**
+ * The name to show for a given channel/DM id, and whether it is a DM (a DM
+ * gets no "#" prefix -- it is not a channel).
+ *
+ * DM ids are absent from channelsStore until the conversation is opened
+ * (dispatcher.ts), so they must be checked first or the fallback below always
+ * wins and a DM notification reads "Channel <id>". dmDisplayName is the one
+ * place every DM-labelling surface (sidebar, header, quick switcher, and
+ * this) agrees on what a conversation is called.
+ */
+function resolveNotificationChannel(channelId: number): { name: string; isDm: boolean } {
+  const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+  if (dm !== undefined) return { name: dmDisplayName(dm), isDm: true };
+  const channel = channelsStore.getState().channels.get(channelId);
+  return { name: channel?.name ?? `Channel ${channelId}`, isDm: false };
 }
 
 /**
@@ -73,7 +84,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
 
-  const channelName = getChannelName(payload.channel_id);
+  const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
+  const channelLabel = isDm ? channelName : `#${channelName}`;
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function sanitizeNotif(s: string, maxLen: number): string {
@@ -84,8 +96,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const title = sanitizeNotif(
     mentioned
-      ? `${payload.user.username} mentioned you in #${channelName}`
-      : `${payload.user.username} in #${channelName}`,
+      ? `${payload.user.username} mentioned you in ${channelLabel}`
+      : `${payload.user.username} in ${channelLabel}`,
     80,
   );
   const body = sanitizeNotif(payload.content, 100);

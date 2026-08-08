@@ -1,4 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+
+// Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
+// reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
+// distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
+vi.mock("@components/message-list/attachments", () => ({
+  fetchImageAsDataUrl,
+  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
+  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
+}));
+
 import { createDmSidebar } from "../../src/components/DmSidebar";
 import type { DmConversation } from "../../src/components/DmSidebar";
 
@@ -18,6 +30,7 @@ describe("DmSidebar", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    fetchImageAsDataUrl.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -37,6 +50,37 @@ describe("DmSidebar", () => {
     const searchInput = container.querySelector(".dm-search");
     expect(searchInput).not.toBeNull();
     expect((searchInput as HTMLInputElement).placeholder).toBe("Find a conversation");
+
+    sidebar.destroy?.();
+  });
+
+  it("filters the conversation list as the search box is typed into", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, username: "Alice" }),
+        makeConvo({ channelId: 2, username: "Bob" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+    searchInput.value = "ali";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const visibleNames = [...container.querySelectorAll(".dm-item")]
+      .filter((el) => (el as HTMLElement).style.display !== "none")
+      .map((el) => el.querySelector(".dm-name")?.textContent);
+    expect(visibleNames).toEqual(["Alice"]);
+
+    // Clearing the query shows every conversation again.
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const allVisible = [...container.querySelectorAll(".dm-item")].every(
+      (el) => (el as HTMLElement).style.display !== "none",
+    );
+    expect(allVisible).toBe(true);
 
     sidebar.destroy?.();
   });
@@ -175,7 +219,12 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("shows avatar image when avatar URL is provided", () => {
+  it("shows avatar image when avatar URL is provided", async () => {
+    // <img src> cannot carry the bearer token an authenticated file route
+    // needs, so the picture is fetched through the same cert-pinned path
+    // attachments use and swapped in once the bytes arrive -- never assigned
+    // as a raw src.
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ avatar: "http://example.com/img.png" })],
       onSelectConversation: vi.fn(),
@@ -183,9 +232,36 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const img = container.querySelector(".dm-avatar img") as HTMLImageElement;
-    expect(img).not.toBeNull();
-    expect(img.src).toBe("http://example.com/img.png");
+    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("http://example.com/img.png");
+    await vi.waitFor(() => {
+      const img = container.querySelector(".dm-avatar img") as HTMLImageElement;
+      expect(img).not.toBeNull();
+      expect(img.src).toBe("data:image/png;base64,AAA");
+    });
+
+    sidebar.destroy?.();
+  });
+
+  it("fetches a server-relative avatar through the authenticated path instead of leaving a raw <img src> that 404s", async () => {
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,BBB");
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ username: "Bob", avatar: "/api/v1/files/42" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    // The letter fallback draws immediately, not skipped in favor of a
+    // broken <img>.
+    const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
+    expect(avatar.textContent).toBe("B");
+
+    await vi.waitFor(() => {
+      expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
+      const img = avatar.querySelector("img");
+      expect(img).not.toBeNull();
+      expect(img?.getAttribute("src")).toBe("data:image/png;base64,BBB");
+    });
 
     sidebar.destroy?.();
   });

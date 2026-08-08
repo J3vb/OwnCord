@@ -15,6 +15,18 @@ function resetStore(): void {
   // Role list drives member-list grouping/colors — reset so tests that seed
   // roles don't leak into the ones asserting the fallback groups.
   setRoles([]);
+  // The moderation-menu gate now reads the live authStore role (see "re-reads
+  // the current user's role live..." below), so a user left behind by an
+  // earlier test — the "admin"/"owner" role names in particular fall back to
+  // isLegacyAdminRole's full-access grant when that name isn't in the
+  // per-test role list — would otherwise leak into unrelated gate tests.
+  authStore.setState(() => ({
+    token: null,
+    user: null,
+    serverName: null,
+    motd: null,
+    isAuthenticated: false,
+  }));
 }
 
 function makeMember(overrides: Partial<Member> & { id: number; username: string }): Member {
@@ -433,6 +445,42 @@ describe("MemberList", () => {
     // No context menu should appear for yourself
     const contextMenu = document.body.querySelector(".admin-context-menu, .context-menu");
     expect(contextMenu).toBeNull();
+  });
+
+  // The role NAME passed via opts.currentUserRole is a snapshot taken once at
+  // mount (SidebarMemberSection.ts). dispatcher.ts keeps authStore.user.role
+  // current on every self MEMBER_UPDATE specifically so permission gates can
+  // read it live -- this is the one gate that opted out by threading the
+  // stale prop instead.
+  it("re-reads the current user's role live from authStore instead of the mount-time opts.currentUserRole snapshot", () => {
+    setRoles([{ id: 8, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 999, username: "Self", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    setTestMembers(testMembers);
+    const opts: MemberListOptions = { ...defaultOpts(), currentUserRole: "member" };
+    memberList.destroy?.();
+    memberList = createMemberList(opts);
+    memberList.mount(container);
+
+    // Mid-session promotion after mount -- opts.currentUserRole was only
+    // ever read once, but authStore now says admin.
+    authStore.setState((prev) => ({ ...prev, user: { ...prev.user!, role: "admin" } }));
+
+    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const menu = document.body.querySelector(".context-menu");
+    expect(menu).not.toBeNull();
+    const labels = Array.from(menu!.children)
+      .filter((el) => el.classList.contains("context-menu__item"))
+      .map((el) => el.firstChild?.textContent ?? "");
+    expect(labels).toEqual(expect.arrayContaining(["Change Role", "Force Logout", "Ban"]));
+
+    document.body.querySelector(".context-menu")?.remove();
   });
 
   it("displays member names with role-colored text", () => {

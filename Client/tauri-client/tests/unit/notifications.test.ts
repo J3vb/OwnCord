@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { notifyIncomingMessage, cleanupNotificationAudio } from "../../src/lib/notifications";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
+import { dmStore } from "../../src/stores/dm.store";
+import type { DmChannel } from "../../src/stores/dm.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
@@ -135,6 +137,11 @@ describe("notifyIncomingMessage", () => {
       activeChannelId: 1,
       roles: [],
     }));
+
+    // DM ids are absent from channelsStore until the conversation is opened
+    // (see dispatcher.ts) -- reset so a DM seeded by one test cannot leak
+    // into another that expects the plain channelsStore fallback.
+    dmStore.setState(() => ({ channels: [] }));
 
     // Ensure document.hasFocus returns false (simulating unfocused window)
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -665,6 +672,49 @@ describe("notifyIncomingMessage", () => {
         expect(sendNotification).toHaveBeenCalledWith({
           title: "Alice in #general",
           body: "Hey there!",
+        });
+      });
+    });
+
+    // DM channel ids are never in channelsStore until the conversation is
+    // opened, so a DM notification used to fall back to "Channel <id>" --
+    // dm.store.ts names dmDisplayName as the one place every DM-labelling
+    // surface (sidebar, header, quick switcher, notification title) must
+    // agree, so the title routes through it too, with no "#" (a DM is not a
+    // channel).
+    it("titles a DM notification from dmDisplayName, not the channelsStore fallback", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      const dm: DmChannel = {
+        channelId: 55,
+        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+        participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+        name: "",
+        isGroup: false,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      };
+      dmStore.setState(() => ({ channels: [dm] }));
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      const payload = makePayload({
+        user: { id: 2, username: "bob", avatar: null },
+        channel_id: 55,
+        content: "hey",
+      });
+      notifyIncomingMessage(payload);
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledWith({
+          title: "bob in bob",
+          body: "hey",
         });
       });
     });

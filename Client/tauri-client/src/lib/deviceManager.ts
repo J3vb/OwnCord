@@ -5,6 +5,7 @@
 // Monitors navigator.mediaDevices.ondevicechange for hot-swap (unplug/plug).
 
 import { Room } from "livekit-client";
+import { voiceStore } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
@@ -13,6 +14,25 @@ const log = createLogger("deviceManager");
 
 /** Debounce interval for device change events (ms). */
 const DEVICE_CHANGE_DEBOUNCE_MS = 500;
+
+/** True when a mute/deafen/server-mute/push-to-talk gate means the mic must
+ *  stay off regardless of a caller's own request to (re-)enable it.
+ *  livekit-client's setMicrophoneEnabled(true) is a bare track.unmute() when
+ *  a muted-but-published track survives a toggle (only ScreenShare actually
+ *  unpublishes) — no LocalTrackPublished/TrackUnmuted event fires for
+ *  anything downstream to catch and correct, so every re-enable path has to
+ *  check this itself instead of relying on one. Exported so LiveKitSession's
+ *  own re-enable paths (setDeafened's unmute branch, retryMicPermission)
+ *  share the same gate instead of each re-deriving it. */
+export function isMicPolicyGated(): boolean {
+  const s = voiceStore.getState();
+  return (
+    s.localMuted === true ||
+    s.localDeafened === true ||
+    s.localServerMuted === true ||
+    s.pttGated === true
+  );
+}
 
 export class DeviceManager {
   private room: Room | null = null;
@@ -41,6 +61,21 @@ export class DeviceManager {
 
   setOnToast(cb: ((message: string) => void) | null): void {
     this.onToast = cb;
+  }
+
+  /** Toggle the mic off/on to force a fresh capture after a device change,
+   *  skipping the re-enable when a mute/deafen/server-mute/PTT gate is
+   *  active. Shared by handleDeviceChange's device-removed fallback and
+   *  switchInputDevice('') — both drive the exact same false/true cycle, and
+   *  both were unconditionally republishing a gated mic before this guard. */
+  private async cycleMicForDeviceSwitch(room: Room): Promise<void> {
+    await room.localParticipant.setMicrophoneEnabled(false);
+    if (this.room !== room) return;
+    if (isMicPolicyGated()) {
+      log.debug("Skipping mic re-enable after device switch — muted/deafened/gated");
+      return;
+    }
+    await room.localParticipant.setMicrophoneEnabled(true);
   }
 
   // --- Device change detection (hot-swap) ---
@@ -92,9 +127,7 @@ export class DeviceManager {
         savePref("audioInputDevice", "");
         // Switch to default device
         try {
-          await room.localParticipant.setMicrophoneEnabled(false);
-          if (this.room !== room) return;
-          await room.localParticipant.setMicrophoneEnabled(true);
+          await this.cycleMicForDeviceSwitch(room);
           if (this.room !== room) return;
           try {
             this.audioPipeline?.setupAudioPipeline();
@@ -134,9 +167,7 @@ export class DeviceManager {
       if (deviceId) {
         await room.switchActiveDevice("audioinput", deviceId);
       } else {
-        await room.localParticipant.setMicrophoneEnabled(false);
-        if (this.room !== room) return;
-        await room.localParticipant.setMicrophoneEnabled(true);
+        await this.cycleMicForDeviceSwitch(room);
       }
       if (this.room !== room) return;
       // Rebuild audio pipeline (source track changed after device switch)

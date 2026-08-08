@@ -15,6 +15,8 @@ import {
 } from "../../src/stores/voice.store";
 import { leaveVoice } from "@lib/livekitSession";
 import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stores/messages.store";
+import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import type { ReadyChannel } from "../../src/lib/types";
 import { acknowledgeNsfw, isNsfwAcknowledged } from "../../src/lib/nsfw-gate";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 
@@ -415,6 +417,61 @@ describe("auth store", () => {
       // unloaded so the caller refetches instead of rendering stale content.
       expect(isChannelLoaded(1)).toBe(false);
       expect(getChannelMessages(1)).toHaveLength(0);
+    });
+  });
+
+  // Regression: clearAuth() must also drop channelsStore, or setChannels'
+  // DM-row carry (a DM channel row is deliberately preserved across a normal
+  // `ready` rebuild, since ready never restates DM rows) re-inserts the
+  // PREVIOUS server's DM channel ids into the NEXT server's channel map on
+  // the next login — a stale phantom channel signed into an unrelated server.
+  describe("clearAuth channels cleanup", () => {
+    const readyChannels: ReadyChannel[] = [
+      { id: 1, name: "general", type: "text", category: "Text", position: 0, unread_count: 3 },
+    ];
+
+    it("clears channels, activeChannelId, and roles on logout", () => {
+      setChannels(readyChannels);
+      expect(channelsStore.getState().channels.size).toBe(1);
+
+      clearAuth();
+
+      expect(channelsStore.getState().channels.size).toBe(0);
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+    });
+
+    it("does not carry the previous server's DM channel row into the next session", () => {
+      setChannels(readyChannels);
+      // Synthesize a DM row the way addDmToChannelsStore does — setChannels'
+      // carry loop (channels.store.ts) re-inserts any "dm"-typed row across
+      // every future setChannels call unless the store is reset first.
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(999, {
+          id: 999,
+          name: "alice",
+          type: "dm",
+          category: null,
+          topic: "",
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: next };
+      });
+      expect(channelsStore.getState().channels.has(999)).toBe(true);
+
+      clearAuth();
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      setChannels([]); // the next server's `ready` — no DMs of its own yet
+
+      expect(channelsStore.getState().channels.has(999)).toBe(false);
     });
   });
 });

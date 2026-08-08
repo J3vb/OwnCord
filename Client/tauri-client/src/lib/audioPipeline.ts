@@ -79,6 +79,10 @@ export class AudioPipeline {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
     await micPub.track.setProcessor(processor as any);
     log.info("RNNoise processor attached to mic track");
+    // Rebuild so the gain/VAD chain sources from the processor's output and
+    // its own sender.replaceTrack runs last, winning over setProcessor's
+    // internal replaceTrack to the raw processed track (B3-1).
+    this.setupAudioPipeline();
   }
 
   /** Remove RNNoise processor from the local mic track. Safe to call if none attached. */
@@ -89,6 +93,9 @@ export class AudioPipeline {
     if (micPub.track.getProcessor() === undefined) return;
     await micPub.track.stopProcessor();
     log.info("RNNoise processor removed from mic track");
+    // Rebuild so the sender ends back on the gain/VAD chain over the raw mic,
+    // not whatever track stopProcessor's own internals left wired (B3-1).
+    this.setupAudioPipeline();
   }
 
   // --- Pipeline setup/teardown ---
@@ -101,7 +108,15 @@ export class AudioPipeline {
     if (micPub?.track === undefined) return;
 
     try {
-      const mediaTrack = micPub.track.mediaStreamTrack;
+      // Source from the NS processor's output when one is attached, not the
+      // raw mic track — livekit-client's LocalTrack.setProcessor() does its
+      // own (internal, unawaited) sender.replaceTrack(processedTrack) once
+      // the worklet loads, and that call lands AFTER this one (it awaits
+      // addModule+fetch first). Sourcing from mediaStreamTrack unconditionally
+      // meant that call always won, silently rewiring the sender straight to
+      // the raw mic and bypassing this pipeline's gain/VAD entirely (B3-1).
+      const mediaTrack =
+        micPub.track.getProcessor()?.processedTrack ?? micPub.track.mediaStreamTrack;
       const ctx = new AudioContext({ sampleRate: 48000 });
       void ctx.resume(); // Ensure not suspended (WebView2 autoplay policy)
 
@@ -168,7 +183,11 @@ export class AudioPipeline {
     if (this.room !== null) {
       const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (micPub?.track?.sender !== undefined) {
-        const originalTrack = micPub.track.mediaStreamTrack;
+        // Restore to the NS processor's output when one is still attached, not
+        // the raw mic — otherwise tearing down just the gain/VAD wrapper (e.g.
+        // muting) would also silently bypass an active noise suppressor (B3-1).
+        const originalTrack =
+          micPub.track.getProcessor()?.processedTrack ?? micPub.track.mediaStreamTrack;
         void micPub.track.sender
           .replaceTrack(originalTrack)
           .then(() => {

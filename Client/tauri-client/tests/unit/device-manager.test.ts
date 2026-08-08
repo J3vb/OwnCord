@@ -29,7 +29,53 @@ vi.mock("livekit-client", () => ({
   }),
 }));
 
-import { DeviceManager } from "../../src/lib/deviceManager";
+const mockVoiceState = vi.hoisted(() => ({
+  localMuted: false,
+  localDeafened: false,
+  localServerMuted: false,
+  pttGated: false,
+}));
+
+vi.mock("@stores/voice.store", () => ({
+  voiceStore: {
+    getState: () => mockVoiceState,
+  },
+}));
+
+import { DeviceManager, isMicPolicyGated } from "../../src/lib/deviceManager";
+
+describe("isMicPolicyGated", () => {
+  beforeEach(() => {
+    mockVoiceState.localMuted = false;
+    mockVoiceState.localDeafened = false;
+    mockVoiceState.localServerMuted = false;
+    mockVoiceState.pttGated = false;
+  });
+
+  it("is false when nothing gates the mic", () => {
+    expect(isMicPolicyGated()).toBe(false);
+  });
+
+  it("is true when localMuted", () => {
+    mockVoiceState.localMuted = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+
+  it("is true when localDeafened", () => {
+    mockVoiceState.localDeafened = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+
+  it("is true when localServerMuted", () => {
+    mockVoiceState.localServerMuted = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+
+  it("is true when pttGated", () => {
+    mockVoiceState.pttGated = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+});
 
 describe("DeviceManager", () => {
   let dm: DeviceManager;
@@ -38,6 +84,10 @@ describe("DeviceManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mockVoiceState.localMuted = false;
+    mockVoiceState.localDeafened = false;
+    mockVoiceState.localServerMuted = false;
+    mockVoiceState.pttGated = false;
     dm = new DeviceManager();
     mockRoom = {
       localParticipant: {
@@ -186,6 +236,26 @@ describe("DeviceManager", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
+    // B1_voice_mic-2: switchInputDevice('') must not silently undo a mute,
+    // deafen, server-mute, or PTT gate — livekit's setMicrophoneEnabled(true)
+    // is a bare unmute when the muted-but-published track survives the
+    // toggle, so nothing downstream ever observes the re-publish.
+    it("does not re-enable the mic on default-device switch while the user is muted", async () => {
+      mockVoiceState.localMuted = true;
+      dm.setRoom(mockRoom);
+      await dm.switchInputDevice("");
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    });
+
+    it("does not re-enable the mic on default-device switch while push-to-talk is gating it", async () => {
+      mockVoiceState.pttGated = true;
+      dm.setRoom(mockRoom);
+      await dm.switchInputDevice("");
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    });
+
     it("calls setupAudioPipeline on the pipeline after switch", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
@@ -329,6 +399,29 @@ describe("DeviceManager", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
       expect(onToast).toHaveBeenCalledWith("Audio device disconnected — switched to default");
+    });
+
+    // B1_voice_mic-1: the device-removed fallback must not silently undo a
+    // mute the user (or a moderator, or push-to-talk) applied.
+    it("does not re-enable the mic on device-removed fallback while the user is muted", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "saved-device-id";
+        if (key === "audioOutputDevice") return "";
+        return defaultVal;
+      });
+      mockGetLocalDevices.mockImplementation((kind: string) => {
+        if (kind === "audioinput") return Promise.resolve([{ deviceId: "other-device" }]);
+        return Promise.resolve([]);
+      });
+      mockVoiceState.localMuted = true;
+
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
     });
 
     it("does nothing if saved input device still exists", async () => {

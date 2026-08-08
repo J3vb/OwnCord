@@ -118,12 +118,13 @@ function uuid(): string {
 }
 
 /** Normalize a host for comparison against the Rust proxies' cert-tofu event
- *  host, mirroring `tofu::cert_store_key`'s trailing-":443" strip
- *  (src-tauri/src/tofu.rs). Profile/config hosts are stored verbatim (e.g.
- *  "example.com:443"), but the proxies always emit the normalized form, so an
- *  un-normalized comparison here would silently miss the match. */
-function normalizeHostForCertCompare(host: string): string {
-  return host.replace(/:443$/, "");
+ *  host, mirroring `tofu::cert_store_key`'s trailing-":443" strip and
+ *  lowercasing (src-tauri/src/tofu.rs). Profile/config hosts are stored
+ *  verbatim (e.g. "Example.COM:443"), but the proxies always emit the
+ *  normalized (stripped, lowercased) form, so an un-normalized comparison
+ *  here would silently miss the match. */
+export function normalizeHostForCertCompare(host: string): string {
+  return host.replace(/:443$/, "").toLowerCase();
 }
 
 export function createWsClient() {

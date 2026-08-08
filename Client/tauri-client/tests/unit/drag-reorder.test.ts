@@ -357,6 +357,20 @@ describe("reorder index arithmetic", () => {
     expect(channelsStore.select((s) => s.channels.get(2)?.position)).toBe(0);
   });
 
+  it("reassigns the group's own position slots, not a 0-based range, for a category with a non-zero global offset", () => {
+    // This category's channels sit at global positions 5, 7, 9 (interleaved
+    // with another category's channels at 0/1/2/etc in the server's single
+    // global position space). A within-category drag must preserve that
+    // range -- renumbering to 0..n-1 would stomp the other category's slots.
+    signIn("owner");
+    const rig = buildRig([makeCh(1, 5), makeCh(2, 7), makeCh(3, 9)]);
+
+    drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
+
+    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    expect(positionsOf(reorders)).toEqual({ 3: 5, 1: 7, 2: 9 });
+  });
+
   it("does not fire when dropped on itself", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);

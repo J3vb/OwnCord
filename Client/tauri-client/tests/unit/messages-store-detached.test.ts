@@ -23,6 +23,8 @@ import {
   hasMoreMessages,
   isWindowDetached,
   hasMessageLoaded,
+  addOptimisticMessage,
+  markSendFailed,
 } from "../../src/stores/messages.store";
 import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
 
@@ -128,6 +130,36 @@ describe("setAroundMessages", () => {
     expect(isWindowDetached(2)).toBe(false);
     expect(ids(2)).toEqual([500]);
   });
+
+  it("carries pending and failed optimistic rows instead of wiping them", () => {
+    // Unlike setMessages, setAroundMessages replaces the window wholesale —
+    // without a carry, a jump elsewhere destroys the user's still-unsent
+    // message and orphans its Retry draft.
+    addOptimisticMessage({
+      correlationId: "c1",
+      channelId: 1,
+      user: USER,
+      content: "still sending",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    addOptimisticMessage({
+      correlationId: "c2",
+      channelId: 1,
+      user: USER,
+      content: "refused",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:01Z",
+    });
+    markSendFailed("c2", "SLOW_MODE");
+
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    const msgs = getChannelMessages(1);
+    expect(msgs.map((m) => m.correlationId)).toEqual([null, null, null, "c1", "c2"]);
+    expect(msgs[3]!.status).toBe("pending");
+    expect(msgs[4]!.status).toBe("failed");
+  });
 });
 
 describe("live messages while detached", () => {
@@ -162,16 +194,32 @@ describe("live messages while detached", () => {
 });
 
 describe("reattachToPresent", () => {
-  it("clears the detached flag and the loaded flag so the tail is refetched", () => {
+  it("clears the loaded flag so the tail is refetched, but keeps the detached flag until the tail actually lands", () => {
     setAroundMessages(1, ascendingWindow(10, 12), true, true);
     expect(isChannelLoaded(1)).toBe(true);
 
     reattachToPresent(1);
 
-    expect(isWindowDetached(1)).toBe(false);
     // Without clearing "loaded", MessageController short-circuits and the
     // stale window stays on screen forever.
     expect(isChannelLoaded(1)).toBe(false);
+    // The detached flag must survive until setMessages' tail fetch actually
+    // succeeds (see below) — clearing it eagerly here would let a live
+    // broadcast splice onto stale history if that refetch fails.
+    expect(isWindowDetached(1)).toBe(true);
+  });
+
+  it("keeps the detached flag set until the tail actually arrives, so a failed refetch does not let a live broadcast splice onto stale history", () => {
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    reattachToPresent(1);
+    // The refetch MessageController would normally issue next never landed
+    // (still in flight, or failed) — the window is still the stale
+    // around-window, so a live broadcast must not be appended onto it.
+    addMessage(broadcast(900));
+
+    expect(isWindowDetached(1)).toBe(true);
+    expect(ids(1)).toEqual([10, 11, 12]);
   });
 
   it("is a no-op for a channel that was never detached", () => {

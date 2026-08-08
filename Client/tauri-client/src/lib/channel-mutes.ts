@@ -18,7 +18,7 @@
  * and `notificationSounds` live in localStorage next to it.
  */
 
-import { loadPref, savePref } from "./preferences";
+import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
 
 /** localStorage key (under the shared settings prefix). */
 const MUTED_KEY = "mutedChannels";
@@ -28,9 +28,11 @@ const MUTED_KEY = "mutedChannels";
  * profiles keyed by host, all sharing one Tauri webview origin and therefore
  * one localStorage), and channel ids are per-server SQLite autoincrement
  * integers — without a host component in the key, muting channel 7 on one
- * server silently mutes channel 7 on every other server too. `null` (the
- * startup default, before any host is known) falls back to the original
- * unscoped key so a pre-scoping install's mutes are not orphaned.
+ * server silently mutes channel 7 on every other server too. `setChannelMutesHost`
+ * is always called with a real host before any mute is read (see MainPage.ts),
+ * so the `null` startup default is not what protects a pre-scoping install's
+ * saved mutes — `readMuted` does that below by reading through to the
+ * original unscoped key on a miss at the scoped one.
  */
 let currentHost: string | null = null;
 
@@ -60,9 +62,7 @@ export function setChannelMutesHost(host: string | null): void {
   invalidateMuteCache();
 }
 
-function readMuted(): ReadonlySet<number> {
-  if (cache !== null) return cache;
-  const raw = loadPref<unknown[]>(mutedKey(), []);
+function parseMutedIds(raw: unknown): Set<number> {
   const ids = new Set<number>();
   if (Array.isArray(raw)) {
     for (const v of raw) {
@@ -71,8 +71,38 @@ function readMuted(): ReadonlySet<number> {
       if (typeof v === "number" && Number.isInteger(v) && v > 0) ids.add(v);
     }
   }
-  cache = ids;
   return ids;
+}
+
+/** Whether a raw localStorage entry exists at all under `key` (prefixed) —
+ *  as opposed to `loadPref`'s fallback, which can't distinguish "absent" from
+ *  "present but happens to equal the fallback". An empty saved mute list is
+ *  real data (the user unmuted everything) and must not be treated as a miss. */
+function keyExists(key: string): boolean {
+  return localStorage.getItem(STORAGE_PREFIX + key) !== null;
+}
+
+function readMuted(): ReadonlySet<number> {
+  if (cache !== null) return cache;
+
+  const scopedKey = mutedKey();
+  if (currentHost === null || keyExists(scopedKey)) {
+    cache = parseMutedIds(loadPref<unknown[]>(scopedKey, []));
+    return cache;
+  }
+
+  // Miss at the scoped key: read through to the pre-scoping legacy key once
+  // and persist the result under the scoped key so the read-through isn't
+  // repeated. A different host with its OWN explicit (even empty) mute list
+  // is not touched by this — it never reaches this branch.
+  if (keyExists(MUTED_KEY)) {
+    const legacy = parseMutedIds(loadPref<unknown[]>(MUTED_KEY, []));
+    writeMuted(legacy);
+    return legacy;
+  }
+
+  cache = new Set();
+  return cache;
 }
 
 function writeMuted(ids: ReadonlySet<number>): void {

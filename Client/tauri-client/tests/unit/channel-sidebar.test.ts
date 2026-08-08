@@ -630,6 +630,34 @@ describe("ChannelSidebar", () => {
     expect(onWatchStream).toHaveBeenCalledWith(30 + 1_000_000);
   });
 
+  it("clicking a peer's stream row also joins the channel when not already in it", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+
+    const voiceUserItem = container.querySelector(".voice-user-item") as HTMLElement;
+    expect(voiceUserItem).not.toBeNull();
+    voiceUserItem.click();
+
+    // Watching a peer's stream needs a live LiveKit room -- without joining
+    // first, showVideoGrid has no cells to focus and the user is stranded on
+    // an empty grid. currentChannelId defaults to null (not channel 3 here).
+    expect(onVoiceJoin).toHaveBeenCalledWith(3);
+  });
+
   // ── Empty state ──
 
   it("shows empty state when no channels exist", () => {
