@@ -15,6 +15,7 @@ import {
   setMessages,
   markSendFailed,
   isChannelLoaded,
+  getHistoryLoadState,
 } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
@@ -1357,6 +1358,90 @@ describe("WS Dispatcher", () => {
 
       const msgs = getChannelMessages(1);
       expect(msgs.some((m) => m.correlationId === "c1" && m.status === "failed")).toBe(true);
+    });
+
+    // Guard added by commit 34c89fb: invalidate only runs when there IS a
+    // resolvable active channel to refetch. Without it, a resync landing with
+    // no active channel (e.g. logged in but nothing selected yet) would drop
+    // every loaded window with nothing able to reload it — the same "stuck
+    // empty" bug as the no-getMessages case above, just keyed on activeId
+    // instead of api.getMessages. Pins the guard's other half and that no
+    // downstream step in the ready handler assumes the invalidation ran.
+    it("does not throw and leaves history untouched when no channel is active on resync", () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      const getMessages = vi.fn().mockResolvedValue({ messages: [], has_more: false });
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      // Channel 1 is loaded but never made active — an empty `channels` list
+      // on both readies means nothing ever auto-selects it.
+      setMessages(1, [storedMessage(10)], false);
+
+      expect(() => {
+        mock.dispatch("ready", {
+          channels: [],
+          members: [],
+          voice_states: [],
+          roles: [],
+          dm_channels: [],
+        });
+        mock.dispatch("ready", {
+          channels: [],
+          members: [],
+          voice_states: [],
+          roles: [],
+          dm_channels: [],
+        });
+      }).not.toThrow();
+
+      expect(getMessages).not.toHaveBeenCalled();
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getChannelMessages(1)).toHaveLength(1);
+    });
+
+    // NEW residual gap the guard move opens: invalidate and the refetch now
+    // always fire together, but invalidate is synchronous while the refetch
+    // is async — so a rejection lands *after* the active channel's window is
+    // already dropped. The .catch only logs; without also marking the
+    // channel load-errored, the mounted MessageList falls back to its empty
+    // "no messages yet" welcome state (virtualItems.length === 0 and
+    // historyLoadState is still idle) instead of the inline error+Retry
+    // state — silently misrepresenting a failed reload as a genuinely empty
+    // channel, which is exactly the kind of silent history hole B2-1 exists
+    // to prevent.
+    it("marks the active channel load-errored when the resync refetch rejects", async () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      const getMessages = vi.fn().mockRejectedValue(new Error("network down"));
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+      ];
+
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getHistoryLoadState(1)).toBe("error");
     });
   });
 

@@ -38,12 +38,20 @@ const FIRST_USE: CertTofuPayload = {
   status: "first_use",
 };
 
+// Deliberately NOT the host the session below authenticates against — used to
+// prove a rotated cert on some other saved profile leaves the live session
+// alone.
 const MISMATCH: CertTofuPayload = {
   host: "myserver.example:8443",
   fingerprint: "99:88:77:66:55:44:33:22",
   storedFingerprint: "AA:BB:CC:DD:EE:FF:00:11",
   status: "mismatch",
 };
+
+// The host helpers.ts's submitLogin authenticates against, so main.ts records
+// it as the live session's host. Only a mismatch for THIS host may tear the
+// session down.
+const MISMATCH_LIVE_HOST: CertTofuPayload = { ...MISMATCH, host: "localhost:8443" };
 
 test.describe("Cert TOFU — first use", () => {
   test.beforeEach(async ({ page }) => {
@@ -114,12 +122,29 @@ test.describe("Cert TOFU — mismatch", () => {
   });
 
   test("disconnect on mismatch returns to the connect page", async ({ page }) => {
-    await emitCertTofu(page, MISMATCH);
+    await emitCertTofu(page, MISMATCH_LIVE_HOST);
     await expect(page.locator("h3", { hasText: "Certificate Warning" })).toBeVisible();
 
     await page.locator(".modal-footer button", { hasText: "Disconnect" }).click();
 
     await expect(page.locator("h3", { hasText: "Certificate Warning" })).toBeHidden();
     await expect(page.locator(".connect-page")).toBeVisible();
+  });
+
+  // The client is multi-server: a cert rotating on some other saved profile
+  // must not disconnect and log out the session the user is actually in. The
+  // modal is still shown (main.ts notifies unconditionally so the connect
+  // page's own ceremony sees every event) — only the teardown is scoped.
+  test("disconnect on a mismatch for another host leaves the live session alone", async ({
+    page,
+  }) => {
+    await emitCertTofu(page, MISMATCH);
+    await expect(page.locator("h3", { hasText: "Certificate Warning" })).toBeVisible();
+
+    await page.locator(".modal-footer button", { hasText: "Disconnect" }).click();
+
+    await expect(page.locator("h3", { hasText: "Certificate Warning" })).toBeHidden();
+    await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+    await expect(page.locator(".connect-page")).toBeHidden();
   });
 });

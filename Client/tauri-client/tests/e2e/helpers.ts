@@ -439,6 +439,14 @@ export function buildTauriMockScript(opts: {
   /** Make get_identity_pin REJECT — models a transient keyring failure, the
    *  DC-08 fail-closed path. */
   identityPinError?: boolean;
+  /** Seeds the `get_settings` payload — pass `{"owncord:profiles": {schemaVersion, profiles}}`
+   *  to give the connect page saved server profiles (e.g. one with
+   *  autoConnect) instead of the default empty store. */
+  storedSettings?: Record<string, unknown>;
+  /** Seeds `load_credential`. Default null = nothing stored. `delete_credential`
+   *  stays a no-op, so a test can assert behaviour that must hold even when the
+   *  credential is still readable. */
+  storedCredential?: { username: string; token: string } | null;
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
 
@@ -652,10 +660,11 @@ export function buildTauriMockScript(opts: {
         if (cmd === "stop_livekit_proxy") return;
 
         // ---- Credentials ----
-        if (cmd === "save_credential" || cmd === "delete_credential" || cmd === "load_credential") return null;
+        if (cmd === "save_credential" || cmd === "delete_credential") return null;
+        if (cmd === "load_credential") return ${JSON.stringify(opts.storedCredential ?? null)};
 
         // ---- Settings ----
-        if (cmd === "get_settings") return {};
+        if (cmd === "get_settings") return ${JSON.stringify(opts.storedSettings ?? {})};
         if (cmd === "save_settings") return;
 
         // ---- Certs ----
@@ -727,6 +736,45 @@ export async function mockTauriFullSession(page: Page): Promise<void> {
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
       simulateWsFlow: true,
+    }),
+  );
+}
+
+/**
+ * Full session where the connect page ALSO has a saved auto-connect profile
+ * for the same host, and `load_credential` still returns a usable credential.
+ * `delete_credential` remains a no-op, so a logout test built on this asserts
+ * the client refuses to auto-login on its own account rather than relying on
+ * the credential delete having already won a race.
+ */
+export async function mockTauriFullSessionWithAutoConnect(page: Page): Promise<void> {
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+      ],
+      simulateWsFlow: true,
+      storedCredential: { username: "testuser", token: "stored-token" },
+      storedSettings: {
+        "owncord:profiles": {
+          schemaVersion: 1,
+          profiles: [
+            {
+              id: "p1",
+              name: "Local",
+              host: "localhost:8443",
+              username: "testuser",
+              autoConnect: true,
+              rememberPassword: true,
+              color: "#5865f2",
+              lastConnected: null,
+            },
+          ],
+        },
+      },
     }),
   );
 }

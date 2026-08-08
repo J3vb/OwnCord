@@ -619,6 +619,19 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         return; // Skip auto-login when switching servers
       }
 
+      // A logout that deleted this host's credential is on its way out as a
+      // fire-and-forget delete_credential. Auto-login below would read the
+      // same account back concurrently, and the credential commands run off
+      // the IPC thread now (`#[tauri::command(async)]`), so a read that wins
+      // that race signs the user straight back into the server they just left.
+      // Suppressing the attempt removes the race instead of relying on the
+      // delete being dispatched early enough to win it — and an auto-login
+      // immediately after an explicit logout is wrong regardless of timing.
+      if (sessionStorage.getItem("owncord:skip-auto-login") !== null) {
+        sessionStorage.removeItem("owncord:skip-auto-login");
+        return;
+      }
+
       // Auto-login: if a profile has autoConnect enabled, try to reconnect
       // using the stored token (password is no longer returned from the
       // credential store over IPC for security).
@@ -706,6 +719,11 @@ authStore.subscribeSelector(
       const host = api.getConfig().host;
       if (host && authStore.getState().logoutReason !== "server_shutdown") {
         void deleteCredential(host);
+        // Same condition on purpose: whenever the credential is being removed,
+        // the connect page must not turn around and auto-login with it. A
+        // server_shutdown keeps the credential precisely so auto-login still
+        // works on restart, so it deliberately does not set this.
+        sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
       router.navigate("connect");
     }
@@ -735,7 +753,7 @@ void initWindowState();
 // form — it can't complete a join by itself.
 function handleInviteDeepLink(code: string, host?: string): void {
   pendingInviteLink = { code, host };
-  if (authStore.getState().isAuthenticated) {
+  if (router.getCurrentPage() === "main") {
     // Let the logout path do the teardown instead of navigating behind a
     // live session: clearAuth() fires while the router is still on "main",
     // so the authStore subscriber above runs its full teardown (voice leave,
@@ -743,6 +761,29 @@ function handleInviteDeepLink(code: string, host?: string): void {
     // itself — whose render branch consumes pendingInviteLink below.
     clearAuth();
     return;
+  }
+  if (lastConnectHost !== "") {
+    // wirePostAuth already ran — a login/auto-login/register is connecting,
+    // or reached auth_ok (isAuthenticated flipped true) but the connected
+    // overlay's ready countdown hasn't called router.navigate("main") yet, so
+    // the branch above never triggered. The authStore subscriber only tears
+    // down once the router IS "main", so it won't fire for this window
+    // either: left alone, the overlay's timer fires router.navigate("main")
+    // regardless, mounting MainPage on top of whatever this handler does to
+    // authStore below. Tear the in-flight session down directly, the same
+    // way onAutoLoginCancel does, before applying the invite below.
+    sessionCleanup?.();
+    sessionCleanup = null;
+    dispatcherCleanup?.();
+    dispatcherCleanup = null;
+    connectedOverlay?.destroy();
+    connectedOverlay = null;
+    ws.disconnect();
+    lastConnectHost = "";
+    lastConnectToken = "";
+    if (authStore.getState().isAuthenticated) {
+      clearAuth();
+    }
   }
   router.navigate("connect");
   // If the connect page was already mounted, navigate() may not re-render it —

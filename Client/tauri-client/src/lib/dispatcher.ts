@@ -29,6 +29,7 @@ import {
   messagesStore,
   setMessages,
   invalidateLoadedMessageWindows,
+  setChannelLoadError,
 } from "@stores/messages.store";
 import {
   setMembers,
@@ -310,9 +311,18 @@ export function wireDispatcher(
           invalidateLoadedMessageWindows();
           getMessages(activeAfterReady, { limit: 50 })
             .then((resp) => setMessages(activeAfterReady, resp.messages, resp.has_more))
-            .catch((err) =>
-              log.warn("Failed to reload message history after resync", { error: String(err) }),
-            );
+            .catch((err) => {
+              log.warn("Failed to reload message history after resync", { error: String(err) });
+              // The invalidate above already dropped this channel's window,
+              // so a silent catch would leave a mounted MessageList showing
+              // its "no messages yet" welcome state — indistinguishable from
+              // a genuinely empty channel. Route through the same
+              // historyLoadState the normal load path uses so the region
+              // shows the inline error + Retry instead (MessageController's
+              // loadMessages, wired to the Retry button, re-fetches because
+              // invalidate also cleared "loaded").
+              setChannelLoadError(activeAfterReady);
+            });
         }
       }
       hasReceivedReadyBefore = true;
