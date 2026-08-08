@@ -1,5 +1,6 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
+import localRules from "./eslint-rules.js";
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -32,10 +33,7 @@ export default tseslint.config(
       // Empty functions are used for no-op callbacks
       "@typescript-eslint/no-empty-function": "off",
       // Project uses void for fire-and-forget promises intentionally
-      "@typescript-eslint/no-misused-promises": [
-        "error",
-        { checksVoidReturn: false },
-      ],
+      "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
       // Allow require() in config files
       "@typescript-eslint/no-require-imports": "off",
       // Unbound methods used in singleton export pattern (bind at export)
@@ -67,14 +65,43 @@ export default tseslint.config(
       "consistent-return": "off",
     },
   },
+  // --- Local rules: three CLAUDE.md invariants enforced as lint rules ---
+  // See eslint-rules.js for each rule's rationale and the historical bug
+  // shape it catches. Each is scoped to only the module(s) its invariant
+  // governs.
   {
-    ignores: [
-      "dist/",
-      "src-tauri/",
-      "node_modules/",
-      "public/",
-      "*.js",
-      "*.cjs",
-    ],
+    files: ["src/lib/livekitSession.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/no-leave-voice-when-superseded": "error",
+    },
+  },
+  {
+    files: ["src/lib/livekitE2EE.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/e2ee-epoch-needs-keypair-check": "error",
+      "local/e2ee-verified-status-literal": "error",
+      "local/no-identity-scope-fallback": "error",
+    },
+  },
+  {
+    files: ["src/lib/identity.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/no-identity-scope-fallback": "error",
+    },
+  },
+  {
+    // dispatcher.ts IS the allowed entry point, so it is exempt from its own rule.
+    files: ["src/**/*.ts"],
+    ignores: ["src/lib/dispatcher.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/no-store-write-in-ws-on": "error",
+    },
+  },
+  {
+    ignores: ["dist/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
   },
 );
