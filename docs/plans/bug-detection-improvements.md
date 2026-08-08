@@ -53,6 +53,20 @@ Local-only also means zero new workflow files and zero CI minutes.
 `testdata/fuzz/` corpus entry and the fix are committed together, as one
 regression test. This is the same shape as the existing test-first rule.
 
+**Always replay a crasher before believing it.** Go runs fuzz targets in
+separate worker processes. When a worker dies without reporting, the
+coordinator cannot tell "crashed on this input" from "was killed externally",
+so it saves the in-flight input to `testdata/fuzz/` as a suspected crasher.
+Interrupting a fuzz run therefore manufactures a fake reproducer that is
+indistinguishable at a glance from a real security finding. Confirm with
+`go test ./<pkg> -run='<FuzzTarget>'` — a real crasher fails there. Observed
+2026-08-08: a 1666-byte malformed JPEG appeared under
+`api/testdata/fuzz/FuzzImageDimensions/` purely because the run was killed.
+
+**Never `rm -r` a `testdata/fuzz/<Target>/` directory** to clear a false
+crasher. Committed seed corpus files live in the same directory — deleting the
+directory takes them with it. Remove the single offending file by name.
+
 **Semgrep is the one candidate for later promotion to public CI.** Its rules
 are deterministic and its failures are regressions of already-fixed bugs, not
 disclosures of novel ones. Promotion is out of scope here.
