@@ -38,6 +38,7 @@ import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
 
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -66,7 +67,10 @@ document.addEventListener("contextmenu", (e) => {
 // F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
 // ghost voice state (user appears in channel with no LiveKit connection).
 document.addEventListener("keydown", (e) => {
-  if (e.key === "F5" || (e.ctrlKey && e.key === "r")) {
+  // KeyboardEvent.key carries the shifted/CapsLock-cased character, so
+  // Ctrl+Shift+R (and Ctrl+R with CapsLock on) would fall through this guard
+  // as "R" without the lowercase compare.
+  if (e.key === "F5" || (e.ctrlKey && e.key.toLowerCase() === "r")) {
     e.preventDefault();
     return;
   }
@@ -114,7 +118,12 @@ const router = createRouter("connect");
 // accepted; the bearer token never rides an unpinned TLS connection.
 const api = createApiClient({ host: "" }, () => {
   log.warn("Session expired (401), clearing auth");
-  setTransientError("Your session expired — sign in again.");
+  // A 401 on a request made before any session existed (e.g. a failed login
+  // attempt) is not a session "expiring" — the login form's own catch block
+  // already surfaces that failure. Only warn about a session that was live.
+  if (authStore.getState().isAuthenticated) {
+    setTransientError("Your session expired — sign in again.");
+  }
   clearAuth();
 });
 const ws = createWsClient();
@@ -145,6 +154,14 @@ let pendingInviteLink: { code: string; host?: string } | null = null;
 // Shared guard so the first-use and mismatch cert modals never stack.
 let certModalActive = false;
 
+/** Normalize a host for comparison against a cert-tofu event's host, mirroring
+ *  `tofu::cert_store_key`'s trailing-":443" strip (src-tauri/src/tofu.rs).
+ *  Duplicated from ws.ts's private normalizer of the same name — ws.ts does
+ *  not export it, and this batch's owned-files list does not include ws.ts. */
+function normalizeHostForCertCompare(host: string): string {
+  return host.replace(/:443$/, "");
+}
+
 // First-use certificate confirmation (F4/F8). The Rust proxy REJECTS the first
 // connection to a server until the user confirms its fingerprint, so no
 // credential is ever sent to an unconfirmed host. This fires during the connect
@@ -163,9 +180,16 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
           // Refresh server health so the now-trusted host becomes reachable,
-          // and resume a pending connect if one was in flight.
+          // and resume a pending connect if one was in flight — but only when
+          // it was pending for THIS host. Accepting a first-use cert for one
+          // profile must not force-reconnect (or churn) a session already
+          // live for a different host.
           rerunConnectHealth?.();
-          if (lastConnectHost && lastConnectToken) {
+          if (
+            lastConnectHost &&
+            lastConnectToken &&
+            evt.host === normalizeHostForCertCompare(lastConnectHost)
+          ) {
             ws.connect({ host: lastConnectHost, token: lastConnectToken });
           }
         } catch (err) {
@@ -194,7 +218,11 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
       void (async () => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
-          if (lastConnectHost && lastConnectToken) {
+          if (
+            lastConnectHost &&
+            lastConnectToken &&
+            evt.host === normalizeHostForCertCompare(lastConnectHost)
+          ) {
             reconnectAfterCertAccept(ws, router, lastConnectHost, lastConnectToken);
           }
         } catch (err) {
@@ -205,9 +233,14 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
     onReject: () => {
       modal.destroy?.();
       certModalActive = false;
-      ws.disconnect();
-      clearAuth();
-      router.navigate("connect");
+      // Only tear down the live session when the mismatch is FOR that
+      // session's host — a rotated cert on an unrelated saved profile must
+      // not disconnect and log out an unrelated authenticated session.
+      if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
+        ws.disconnect();
+        clearAuth();
+        router.navigate("connect");
+      }
     },
   });
   modal.mount(document.body);
@@ -216,6 +249,19 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
 // Register the global cert-tofu listener now so first-use / mismatch prompts
 // are received during the connect page's health checks, before any WS connect.
 void ws.startCertListener();
+
+// Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
+// the same presence_update wire message the in-app StatusPicker sends
+// (UserBar.ts/MainPage.ts's applyPresence) — the Rust side only emitted
+// "status-change" with nothing in the webview listening for it. ws.send is a
+// safe no-op (logged) when there is no live session, so no auth guard is
+// needed here.
+void listen<string>("status-change", (e) => {
+  const status = e.payload;
+  if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
+    ws.send({ type: "presence_update", payload: { status } });
+  }
+});
 
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
@@ -402,6 +448,17 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       return [{ name: "Local Server", host: "localhost:8443" }];
     }
 
+    // Persist a profile mutation, surfacing a failure instead of letting it
+    // silently revert on next launch: profiles.ts awaits invoke("save_settings"),
+    // which rejects when the store write fails (read-only file, disk full),
+    // and `void`-ing that rejection at each call site (as this used to) left
+    // the in-memory store as the only record of the change.
+    function persistProfiles(): void {
+      void profileManager.saveProfiles().catch(() => {
+        setTransientError("Could not save server profiles");
+      });
+    }
+
     // Auto-save a profile for a host after successful login (if not already saved)
     function ensureProfileExists(host: string, username: string, rememberPassword: boolean): void {
       const existing = profileManager.getAll().find((p) => p.host === host);
@@ -420,7 +477,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         });
         profileManager.setLastConnected(created.id);
       }
-      void profileManager.saveProfiles();
+      persistProfiles();
     }
 
     const connectPage = createConnectPage(
@@ -483,23 +540,37 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             rememberPassword: false,
             color: "#5865F2",
           });
-          void profileManager.saveProfiles();
+          persistProfiles();
           connectPage.refreshProfiles(getProfileList());
           // Check health for the new profile
           runHealthChecks(connectPage, getProfileList());
         },
         onDeleteProfile(profileId) {
           profileManager.removeProfile(profileId);
-          void profileManager.saveProfiles();
+          persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },
         onToggleAutoLogin(profileId, enabled) {
           profileManager.setAutoLogin(enabled ? profileId : null);
-          void profileManager.saveProfiles();
+          persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },
         onAutoLoginCancel() {
           autoLoginCancelled = true;
+          // Every read of this flag below runs before the overlay carrying
+          // this Cancel button is ever painted, so by the time a click
+          // reaches here the session is already in flight (wirePostAuth has
+          // called ws.connect and registered listeners). Tear it down the
+          // same way the logout path does.
+          sessionCleanup?.();
+          sessionCleanup = null;
+          dispatcherCleanup?.();
+          dispatcherCleanup = null;
+          connectedOverlay?.destroy();
+          connectedOverlay = null;
+          ws.disconnect();
+          lastConnectHost = "";
+          lastConnectToken = "";
         },
       },
       getProfileList(),
@@ -672,6 +743,15 @@ void initWindowState();
 // form — it can't complete a join by itself.
 function handleInviteDeepLink(code: string, host?: string): void {
   pendingInviteLink = { code, host };
+  if (authStore.getState().isAuthenticated) {
+    // Let the logout path do the teardown instead of navigating behind a
+    // live session: clearAuth() fires while the router is still on "main",
+    // so the authStore subscriber above runs its full teardown (voice leave,
+    // dispatcher/session cleanup, ws.disconnect) and navigates to "connect"
+    // itself — whose render branch consumes pendingInviteLink below.
+    clearAuth();
+    return;
+  }
   router.navigate("connect");
   // If the connect page was already mounted, navigate() may not re-render it —
   // apply directly. Otherwise the connect render branch consumes the pending link.

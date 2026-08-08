@@ -335,8 +335,13 @@ pub async fn ws_send(
 /// Disconnect the proxy WebSocket.
 #[tauri::command]
 pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), String> {
-    let mut tx_lock = state.tx.lock().await;
-    *tx_lock = None; // dropping the sender closes the channel → write task ends
+    // begin_connection() both clears the sender slot (dropping it closes the
+    // channel so the write task ends) AND bumps the generation counter, so a
+    // handshake still pending from before this disconnect fails install_sender
+    // instead of installing itself afterward — reusing the same invalidation
+    // path a superseding connect() already has. The returned generation is
+    // unused: nothing will ever install under it.
+    state.begin_connection().await;
     Ok(())
 }
 
@@ -589,4 +594,30 @@ mod tests {
         assert_eq!(got, None, "rx.recv() must yield None so the write task exits");
     }
 
+    // B4_conn_ipc-9: ws_disconnect must invalidate an in-flight ws_connect
+    // attempt, not just null the sender slot. A handshake can pend for up to
+    // CONNECT_TIMEOUT (10s) past a disconnect (JS calls connect fire-and-
+    // forget — logout during "connecting" is a real interleaving), and
+    // install_sender checks generation alone, so a manual `*tx_lock = None`
+    // leaves a "cancelled" connection free to install itself afterward and
+    // spawn its worker tasks against a socket JS believes closed.
+    #[tokio::test]
+    async fn disconnect_invalidates_an_in_flight_connect_attempt() {
+        let state = WsState::new();
+        // A's handshake is in flight: generation claimed, sender not yet
+        // installed (mirrors the pending window before install_sender runs).
+        let gen_a = state.begin_connection().await;
+
+        // ws_disconnect fires while A is still mid-handshake — this is
+        // ws_disconnect's real body (state.begin_connection().await).
+        state.begin_connection().await;
+
+        // A's handshake finally completes and tries to install its sender.
+        // It must be rejected: JS already believes the connection is closed.
+        let (tx_a, _rx_a) = mpsc::channel::<String>(4);
+        assert!(
+            !state.install_sender(gen_a, tx_a).await,
+            "a handshake pending during disconnect must not be able to install after it"
+        );
+    }
 }

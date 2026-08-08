@@ -68,7 +68,7 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
 /// On macOS it is stored in the system Keychain. The write is read back before
 /// this returns — see [`crate::secret_store`] for what happens when it does not
 /// come back.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_credential(
     app: AppHandle,
     host: String,
@@ -96,7 +96,7 @@ pub fn save_credential(
 /// Load a credential from the system credential store.
 ///
 /// Returns `None` when no credential exists for the given host.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_credential(app: AppHandle, host: String) -> Result<Option<CredentialData>, String> {
     require_non_empty(&host, "host")?;
 
@@ -142,7 +142,7 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 /// Delete a credential from the system credential store.
 ///
 /// Deleting a non-existent credential is not treated as an error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
     require_non_empty(&host, "host")?;
     secret_store::delete(&app, &login_account(&host))
@@ -165,7 +165,7 @@ pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
 /// file (DPAPI on Windows, sealed per-install key elsewhere); if that is also
 /// unavailable this returns an error rather than reporting a success that would
 /// leave peers rejecting the user's voice announce after a restart.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<(), String> {
     require_non_empty(&host, "host")?;
     require_non_empty(&key, "key")?;
@@ -178,7 +178,7 @@ pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<()
 /// Load the identity private key for `host`.
 ///
 /// Returns `None` when no identity key exists for the given host.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_identity_key(app: AppHandle, host: String) -> Result<Option<String>, String> {
     require_non_empty(&host, "host")?;
     secret_store::get(&app, &identity_account(&host))
@@ -188,7 +188,7 @@ pub fn load_identity_key(app: AppHandle, host: String) -> Result<Option<String>,
 /// Delete the identity private key for `host`.
 ///
 /// Deleting a non-existent key is not treated as an error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_identity_key(app: AppHandle, host: String) -> Result<(), String> {
     require_non_empty(&host, "host")?;
     secret_store::delete(&app, &identity_account(&host))
@@ -217,7 +217,7 @@ pub struct CredentialStoreProbe {
 /// announce: it distinguishes "the credential store is fine" from "writes are
 /// accepted and dropped" without touching any real credential. The probe
 /// account is removed again whatever the outcome.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
     // Underscores are not legal in DNS hostnames, so this cannot collide with a
     // real `{host}` or `identity:{host}` account.

@@ -343,6 +343,23 @@ describe("log persistence", () => {
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
     });
 
+    // B4_conn_ipc-12: a persistently failing flush logs through this
+    // module's own logger (createLogger("logPersistence")). In production
+    // that log re-enters onLogEntry via the real logger's listener pipeline
+    // (mocked apart here — see the vi.mock("@lib/logger") above), so
+    // onLogEntry must refuse to buffer/reschedule its own entries or a
+    // failing write re-arms the 2s flush timer forever.
+    it("does not buffer or re-arm the flush timer for its own log entries", async () => {
+      const { getListener } = captureListener();
+      const { initLogPersistence } = await freshImport();
+      await initLogPersistence();
+
+      getListener()!(makeEntry({ component: "logPersistence", message: "flush failed" }));
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
+    });
+
     it("does not flush when buffer is empty", async () => {
       captureListener();
       const { initLogPersistence, flushLogs } = await freshImport();
