@@ -710,8 +710,17 @@
   color: var(--red);
 }
 
-/* Status picker popup */
+/* Status picker: the root is the inline anchor (trigger dot lives here and
+   must always be visible); the popup chrome + its display:none/open toggle
+   belong on the dropdown child, which is what StatusPicker.ts actually
+   toggles (status-picker-dropdown--open). This block used to be a verbatim
+   holdover from the pre-component popup and hid the whole picker. */
 .status-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.status-picker-dropdown {
   position: absolute;
   bottom: 60px;
   left: 8px;
@@ -724,31 +733,8 @@
   display: none;
   min-width: 160px;
 }
-.status-picker.open {
+.status-picker-dropdown--open {
   display: block;
-}
-.status-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-normal);
-  background: transparent;
-  width: 100%;
-  text-align: left;
-  transition: background 0.1s ease;
-}
-.status-option:hover {
-  background: var(--bg-hover);
-}
-.status-option .so-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-circle);
-  flex-shrink: 0;
 }
 
 /* ── Chat Area ── */

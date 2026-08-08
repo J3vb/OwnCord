@@ -143,17 +143,23 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
         ...withoutDrag.slice(insertIdx),
       ];
 
-      // Build reorder data and update store immediately
+      // Build reorder data and update store immediately. Reassign the
+      // group's own existing position slots, not a 0..n-1 range: the
+      // server's position space is global, so a category can sit at
+      // non-contiguous positions (interleaved with other categories), and
+      // renumbering from 0 would stomp another category's slots.
+      const slots = drag.channels.map((c) => c.position).sort((a, b) => a - b);
       const reorders: ChannelReorderData[] = [];
       for (let i = 0; i < reorderedIds.length; i++) {
         const id = reorderedIds[i];
-        if (id === undefined) {
+        const newPosition = slots[i];
+        if (id === undefined || newPosition === undefined) {
           continue;
         }
         const ch = drag.channels.find((c) => c.id === id);
-        if (ch !== undefined && ch.position !== i) {
-          reorders.push({ channelId: id, newPosition: i });
-          updateChannelPosition(id, i);
+        if (ch !== undefined && ch.position !== newPosition) {
+          reorders.push({ channelId: id, newPosition });
+          updateChannelPosition(id, newPosition);
         }
       }
 

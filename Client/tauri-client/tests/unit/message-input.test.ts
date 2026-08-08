@@ -505,6 +505,57 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("upload error makes the (initially hidden) preview bar visible", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    // Nothing queued yet, so the preview bar starts without the "visible"
+    // class -- app.css only shows it via .visible.
+    const previewBar = container.querySelector(".attachment-preview-bar");
+    expect(previewBar!.classList.contains("visible")).toBe(false);
+
+    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
+    Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [bigFile], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+    expect(previewBar!.classList.contains("visible")).toBe(true);
+
+    comp.destroy?.();
+  });
+
+  it("preview bar loses 'visible' again once the error auto-dismisses with nothing else queued", async () => {
+    vi.useFakeTimers();
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
+    Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [bigFile], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.advanceTimersByTimeAsync(10);
+    const previewBar = container.querySelector(".attachment-preview-bar");
+    expect(previewBar!.classList.contains("visible")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
+    expect(previewBar!.classList.contains("visible")).toBe(false);
+
+    vi.useRealTimers();
+    comp.destroy?.();
+  });
+
   it("rejects unsupported file types", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
     const opts = makeOptions({ onUploadFile });
@@ -672,6 +723,33 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("refuses to attach a file while editing a message", async () => {
+    const onUploadFile = vi.fn(async () => ({
+      id: "srv-1",
+      url: "http://x.png",
+      filename: "x.png",
+    }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.startEdit(77, "old content");
+
+    const file = new File(["data"], "photo.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Must not upload, and must not silently ride along with the next
+    // ordinary send once the edit is cancelled.
+    expect(onUploadFile).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+
+    comp.destroy?.();
+  });
+
   // ── setReplyTo clears edit mode ──
 
   it("setReplyTo hides edit bar if editing", () => {
@@ -690,6 +768,24 @@ describe("MessageInput", () => {
     expect(editBar.classList.contains("visible")).toBe(false);
     const replyBar = bars[0] as HTMLDivElement;
     expect(replyBar.classList.contains("visible")).toBe(true);
+
+    comp.destroy?.();
+  });
+
+  it("setReplyTo while editing clears the stale edit text from the textarea", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.startEdit(88, "old message body");
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("old message body");
+
+    comp.setReplyTo(55, "replying");
+
+    // The edit text must not survive into reply mode -- otherwise Enter
+    // reposts it verbatim as a duplicate reply.
+    expect(textarea.value).toBe("");
 
     comp.destroy?.();
   });

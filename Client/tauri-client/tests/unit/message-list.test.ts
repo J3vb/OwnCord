@@ -273,6 +273,35 @@ describe("MessageList", () => {
     expect(dividers.length).toBe(2);
   });
 
+  it("day divider breaks grouping even for the same author posting across midnight", () => {
+    // isSameDay compares local calendar days, so the boundary is built with
+    // the local-time Date constructor (not UTC ISO literals) to stay
+    // independent of the machine/CI runner's timezone.
+    const beforeMidnight = new Date(2024, 0, 15, 23, 58, 0).toISOString();
+    const afterMidnight = new Date(2024, 0, 16, 0, 1, 0).toISOString();
+    const messages = [
+      makeMessage({
+        id: 1,
+        user: { id: 1, username: "Alice", avatar: null },
+        timestamp: beforeMidnight,
+      }),
+      makeMessage({
+        id: 2,
+        user: { id: 1, username: "Alice", avatar: null },
+        timestamp: afterMidnight,
+      }),
+    ];
+    setMessages(1, messages);
+    msgList.mount(container);
+
+    // 2 dividers: the leading one before the first message, plus one for the
+    // day change (matches "renders day dividers between messages on
+    // different days" above -- the assertion here is on grouping, not count).
+    expect(container.querySelectorAll(".msg-day-divider").length).toBe(2);
+    const row2 = container.querySelector("[data-testid='message-2']")!;
+    expect(row2.classList.contains("grouped")).toBe(false);
+  });
+
   it("renders DM channel empty state differently from text channels", () => {
     msgList.destroy?.();
     const dmOptions: MessageListOptions = {
@@ -397,6 +426,42 @@ describe("MessageList", () => {
     // loadingOlder must now be false — scrolling to top again re-triggers it.
     root.dispatchEvent(new Event("scroll"));
     expect(onScrollTop).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-trigger onScrollTop from a live tail append while a history fetch is in flight", async () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    messagesStore.flush();
+
+    let resolveLoad: () => void = () => {};
+    const onScrollTop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    msgList = createMessageList({ ...options, onScrollTop });
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+
+    // A live message arrives at the tail while the older-page fetch is still
+    // in flight. messages[0] (the oldest loaded message) is unchanged, so the
+    // latch must stay set -- otherwise the next scroll refires the fetch with
+    // the same unchanged cursor and the same page lands twice.
+    setMessages(1, [
+      ...(messagesStore.getState().messagesByChannel.get(1) ?? []),
+      makeMessage({ id: 2 }),
+    ]);
+    messagesStore.flush();
+
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+
+    resolveLoad();
+    await Promise.resolve();
   });
 
   it("scrollToMessage returns false before mount", () => {

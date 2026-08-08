@@ -1,4 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+
+// Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
+// reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
+// distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
+vi.mock("@components/message-list/attachments", () => ({
+  fetchImageAsDataUrl,
+  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
+  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
+}));
+
 import { createDmProfileSidebar } from "../../src/components/DmProfileSidebar";
 import type { DmProfileData, DmProfileSidebarOptions } from "../../src/components/DmProfileSidebar";
 
@@ -24,6 +36,7 @@ describe("DmProfileSidebar", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    fetchImageAsDataUrl.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -123,14 +136,39 @@ describe("DmProfileSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("shows avatar image when avatar URL is provided", () => {
+  it("shows avatar image when avatar URL is provided", async () => {
+    // <img src> cannot carry the bearer token an authenticated file route
+    // needs, so the picture is fetched and swapped in, never assigned raw.
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
     const user = makeUser({ avatar: "https://example.com/avatar.png" });
     const sidebar = createDmProfileSidebar(makeOptions({ user }));
     sidebar.mount(container);
 
-    const img = container.querySelector(".dps-avatar-img") as HTMLImageElement;
-    expect(img).not.toBeNull();
-    expect(img.src).toBe("https://example.com/avatar.png");
+    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://example.com/avatar.png");
+    await vi.waitFor(() => {
+      const img = container.querySelector(".dps-avatar-img") as HTMLImageElement;
+      expect(img).not.toBeNull();
+      expect(img.src).toBe("data:image/png;base64,AAA");
+    });
+
+    sidebar.destroy?.();
+  });
+
+  it("fetches a server-relative avatar through the authenticated path and draws the letter until it arrives", async () => {
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,BBB");
+    const user = makeUser({ username: "Bob", avatar: "/api/v1/files/42" });
+    const sidebar = createDmProfileSidebar(makeOptions({ user }));
+    sidebar.mount(container);
+
+    const avatarEl = container.querySelector('[data-testid="dps-avatar"]') as HTMLDivElement;
+    expect(avatarEl.textContent).toContain("B");
+    expect(avatarEl.querySelector("img")).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
+      const img = avatarEl.querySelector(".dps-avatar-img");
+      expect(img).not.toBeNull();
+    });
 
     sidebar.destroy?.();
   });

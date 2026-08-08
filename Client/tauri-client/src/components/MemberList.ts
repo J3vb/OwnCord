@@ -272,7 +272,11 @@ function createMemberItem(
 
       // Moderation actions are permission-gated per item (a role name told us
       // nothing about what its bits allow); block/unblock is open to everyone.
-      const gates = moderationGates(opts.currentUserRole);
+      // The role name is read live from authStore, not the opts snapshot
+      // taken once at mount -- dispatcher.ts keeps authStore.user.role
+      // current on every self MEMBER_UPDATE precisely so gates like this one
+      // see a promotion/demotion without waiting for the sidebar to rebuild.
+      const gates = moderationGates(authStore.getState().user?.role ?? opts.currentUserRole);
       const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
       closeActiveMenu();

@@ -505,6 +505,11 @@ function renderVoiceChannelItem(
             // Don't trigger if the right-click menu is open
             if (e.button !== 0) return;
             e.stopPropagation();
+            // Watching a stream needs a live LiveKit room -- join first, same
+            // as the hover/focus preview's placeholder click below.
+            if (voiceStore.getState().currentChannelId !== channel.id) {
+              onVoiceJoin(channel.id);
+            }
             const tileId = user.screenshare
               ? user.userId + SCREENSHARE_TILE_ID_OFFSET
               : user.userId;

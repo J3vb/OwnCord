@@ -100,6 +100,21 @@ describe("channel context menu — mute", () => {
   });
 });
 
+describe("channel context menu — teardown", () => {
+  // The menu is appended to document.body, not under the sidebar's own root,
+  // so the sidebar's own AbortController tearing down must also remove it --
+  // otherwise it survives as an undismissable orphan (e.g. onto the connect
+  // page after logout).
+  it("removes the open menu from document.body when the owning signal aborts", () => {
+    openMenu(channel());
+    expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+
+    ac.abort();
+
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+  });
+});
+
 describe("NotificationsTab — muted channel list", () => {
   it("says nothing is muted when nothing is", () => {
     const tab = buildNotificationsTab(ac.signal);
