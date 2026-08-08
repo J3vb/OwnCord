@@ -186,6 +186,24 @@ describe("dismissal", () => {
     expect(menuEl()).toBeNull();
   });
 
+  it("[B3-4] ties the parent-signal abort bridge to the menu's own dismiss signal, so it does not outlive a dismissed menu", () => {
+    // Without a { signal } option, this bridge listener (and the closure
+    // retaining a detached .user-vol-menu subtree) survives every future
+    // right-click for the parent's entire lifetime — the outside-click and
+    // replace-on-reopen dismiss paths remove the menu but cannot remove this
+    // listener, since it is registered directly on the caller's long-lived
+    // signal. Mirrors context-menu.ts's `{ signal: menuAc.signal }` pattern.
+    const parentAc = new AbortController();
+    const addSpy = vi.spyOn(parentAc.signal, "addEventListener");
+
+    showUserVolumeMenu(7, "alice", 0, 0, parentAc.signal);
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [eventName, , options] = addSpy.mock.calls[0]!;
+    expect(eventName).toBe("abort");
+    expect(options).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
   it("does not re-attach the dismiss listener when aborted before the timer fires", () => {
     const ac = new AbortController();
     showUserVolumeMenu(7, "alice", 0, 0, ac.signal);

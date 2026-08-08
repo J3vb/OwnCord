@@ -3,9 +3,11 @@
  * layer (F3). Mirrors credentials.ts: dynamically imports Tauri `invoke` and
  * no-ops in non-Tauri environments (tests, browser).
  *
- * Two backing stores, both keyed by connection host:
- *   - OS keyring  (save/load/delete_identity_key, account `identity:{host}`):
- *     the client's own long-term identity PRIVATE key (base64 JWK blob).
+ * Two backing stores:
+ *   - OS keyring  (save/load/delete_identity_key, account `identity:{host}:{uid}`):
+ *     the client's own long-term identity PRIVATE key (base64 JWK blob),
+ *     scoped by host AND user id (see `identityKeyPairCache` below — two
+ *     accounts must never share one identity keypair).
  *   - identity_pins.json (store/get_identity_pin, key `{host}:{userId}`):
  *     peers' pinned identity PUBLIC keys (base64), for TOFU verification.
  */
@@ -17,6 +19,7 @@ import {
   generateIdentityKeyPair,
   importIdentityKeyPair,
 } from "./e2eeCrypto";
+import { authStore } from "@stores/auth.store";
 
 const log = createLogger("identity");
 
@@ -173,7 +176,17 @@ export async function getIdentityPin(host: string, userId: string): Promise<Iden
 // ── High-level lifecycle ───────────────────────────────────────────────────
 
 /**
- * One identity keypair per host, shared by every caller in this process.
+ * One identity keypair per host+user, shared by every caller in this process.
+ *
+ * Scoped by BOTH host and user id (B3-3), not host alone: two different
+ * accounts signed into the same host — including two people sharing one OS
+ * profile/keyring, or one client used to log into several accounts on the
+ * same server without a restart — must never share a voice-E2EE identity
+ * keypair. Sharing one would make their announces verify against each
+ * other's TOFU pin, silently defeating the identity model's distinctness
+ * guarantee. (Pre-existing installs mint a fresh per-account keypair the
+ * first time they run this scoping — a one-time re-verify for their peers,
+ * traded for closing the cross-account sharing hole.)
  *
  * The keypair has two independent consumers: the ready hook publishes its
  * public half (`ensureIdentityKeyPublished`) and the voice session signs
@@ -191,45 +204,59 @@ export async function getIdentityPin(host: string, userId: string): Promise<Iden
  */
 const identityKeyPairCache = new Map<string, Promise<CryptoKeyPair>>();
 
+/** Composite keyring/memo key scoping the identity keypair by host AND user
+ *  id. The keyring commands only take a single opaque `host` string, so the
+ *  scope is folded into that one field rather than requiring a Rust-side
+ *  change. */
+function identityScopeKey(host: string, userId: number): string {
+  return `${host}:${userId}`;
+}
+
 /**
- * Load this host's identity keypair from the keyring, generating and saving a
- * fresh one on first login (or when the stored blob is corrupt). In non-Tauri
- * environments the keypair is in-memory only (not persisted).
+ * Load this host+user's identity keypair from the keyring, generating and
+ * saving a fresh one on first login (or when the stored blob is corrupt). In
+ * non-Tauri environments the keypair is in-memory only (not persisted).
  *
  * Stable for the lifetime of the process: repeat callers get the same keypair
  * even when the keyring is unavailable (see `identityKeyPairCache`).
  */
-export function getOrCreateIdentityKeyPair(host: string): Promise<CryptoKeyPair> {
-  let pending = identityKeyPairCache.get(host);
+export function getOrCreateIdentityKeyPair(host: string, userId: number): Promise<CryptoKeyPair> {
+  const scope = identityScopeKey(host, userId);
+  let pending = identityKeyPairCache.get(scope);
   if (pending === undefined) {
-    // A rejected load must not be cached, or the host is poisoned for the
+    // A rejected load must not be cached, or the scope is poisoned for the
     // rest of the session; drop it so the next caller can retry.
-    pending = loadOrGenerateIdentityKeyPair(host).catch((err: unknown) => {
-      identityKeyPairCache.delete(host);
+    pending = loadOrGenerateIdentityKeyPair(host, userId).catch((err: unknown) => {
+      identityKeyPairCache.delete(scope);
       throw err;
     });
-    identityKeyPairCache.set(host, pending);
+    identityKeyPairCache.set(scope, pending);
   }
   return pending;
 }
 
-/** Test-only: drop the per-host keypair memo so each case starts clean. */
+/** Test-only: drop the per-host+user keypair memo so each case starts clean. */
 export function resetIdentityKeyPairCache(): void {
   identityKeyPairCache.clear();
 }
 
-async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPair> {
-  const stored = await loadIdentityKey(host);
+async function loadOrGenerateIdentityKeyPair(host: string, userId: number): Promise<CryptoKeyPair> {
+  const scope = identityScopeKey(host, userId);
+  const stored = await loadIdentityKey(scope);
   if (stored) {
     try {
       return await importIdentityKeyPair(stored);
     } catch (err) {
-      log.error("Stored identity key is corrupt — regenerating", { host, error: String(err) });
+      log.error("Stored identity key is corrupt — regenerating", {
+        host,
+        userId,
+        error: String(err),
+      });
     }
   }
   const keyPair = await generateIdentityKeyPair();
   const blob = await exportIdentityKeyPair(keyPair.privateKey);
-  if (await saveIdentityKey(host, blob)) {
+  if (await saveIdentityKey(scope, blob)) {
     // Outer half of a two-layer check. `save_identity_key` already reads its own
     // write back and falls through to the DPAPI file if the OS credential store
     // does not return it (see src-tauri/src/secret_store.rs and
@@ -243,7 +270,7 @@ async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPai
     // nothing left to abort.
     let persisted: boolean;
     try {
-      persisted = (await loadIdentityKey(host)) === blob;
+      persisted = (await loadIdentityKey(scope)) === blob;
     } catch {
       persisted = false;
     }
@@ -251,7 +278,7 @@ async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPai
       log.error(
         "Identity key did not persist — the credential store accepted the write but did not return it. " +
           "This session works, but peers will see a new identity (and prompt to re-verify) every restart.",
-        { host },
+        { host, userId },
       );
     }
   }
@@ -281,11 +308,17 @@ export async function publishIdentityKey(
 
 /**
  * Login/ready hook: ensure the server holds this client's identity public key.
- * Loads (or generates) the host keypair and publishes it via the REST profile
- * update when the server's stored copy is absent or stale — idempotent, so it
- * runs at most once per key. The server's PATCH /users/me requires a username,
- * so `username` is sent alongside the key. Fire-and-forget: errors are logged
- * and swallowed (returns false) so the connect/voice flow is never blocked.
+ * Loads (or generates) the host+user keypair and publishes it via the REST
+ * profile update when the server's stored copy is absent or stale —
+ * idempotent, so it runs at most once per key. The server's PATCH /users/me
+ * requires a username, so `username` is sent alongside the key. Fire-and-forget:
+ * errors are logged and swallowed (returns false) so the connect/voice flow is
+ * never blocked.
+ *
+ * The user id is read from `authStore` rather than taken as a parameter: this
+ * is called from the ready hook, by which point auth state is populated, and
+ * keeping the signature unchanged avoids threading the id through every call
+ * site just to scope the keyring lookup (B3-3).
  */
 export async function ensureIdentityKeyPublished(
   host: string,
@@ -294,7 +327,8 @@ export async function ensureIdentityKeyPublished(
   updateProfile: (data: { username: string; identity_public_key: string }) => Promise<unknown>,
 ): Promise<boolean> {
   try {
-    const keyPair = await getOrCreateIdentityKeyPair(host);
+    const userId = authStore.getState().user?.id ?? 0;
+    const keyPair = await getOrCreateIdentityKeyPair(host, userId);
     return await publishIdentityKey(
       (data) => updateProfile({ username, ...data }),
       serverCopy,

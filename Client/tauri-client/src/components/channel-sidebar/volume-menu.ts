@@ -128,11 +128,19 @@ export function showUserVolumeMenu(
     );
   }, 0);
 
-  // Also clean up if the parent component is destroyed
-  signal.addEventListener("abort", () => {
-    menu.remove();
-    dismissAc.abort();
-  });
+  // Also clean up if the parent component is destroyed. Tied to dismissAc's
+  // own signal (mirrors context-menu.ts's menuAc pattern) so this bridge
+  // listener is torn down with the menu itself — otherwise it never runs
+  // (the parent signal is long-lived) and every right-click permanently
+  // accumulates one closure retaining a detached .user-vol-menu subtree.
+  signal.addEventListener(
+    "abort",
+    () => {
+      menu.remove();
+      dismissAc.abort();
+    },
+    { signal: dismissAc.signal },
+  );
 }
 
 /** Builds the moderation rows. close() runs after any action so the menu does

@@ -135,13 +135,15 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    const kp = await getOrCreateIdentityKeyPair("chat.example");
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.privateKey).toBeDefined();
     expect(kp.publicKey).toBeDefined();
 
     const saveCall = invokeMock.mock.calls.find((c) => c[0] === "save_identity_key");
     expect(saveCall).toBeDefined();
-    expect((saveCall![1] as { host: string }).host).toBe("chat.example");
+    // Scoped by host AND user id (B3-3) — not just host — so two accounts
+    // signed into the same host never share a keyring blob.
+    expect((saveCall![1] as { host: string }).host).toBe("chat.example:1");
   });
 
   it("reloads the persisted keypair on subsequent logins (no regenerate)", async () => {
@@ -155,7 +157,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       }
       return Promise.resolve(undefined);
     });
-    const first = await getOrCreateIdentityKeyPair("chat.example");
+    const first = await getOrCreateIdentityKeyPair("chat.example", 1);
     const firstPub = await exportPublicKey(first.publicKey);
 
     // Second login: keyring returns the saved blob → same public key, no save.
@@ -167,7 +169,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve(savedBlob);
       return Promise.resolve(undefined);
     });
-    const second = await getOrCreateIdentityKeyPair("chat.example");
+    const second = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(await exportPublicKey(second.publicKey)).toBe(firstPub);
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
   });
@@ -177,7 +179,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve("!!not-valid-jwk!!");
       return Promise.resolve(undefined);
     });
-    const kp = await getOrCreateIdentityKeyPair("chat.example");
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.publicKey).toBeDefined();
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(true);
   });
@@ -194,10 +196,10 @@ describe("getOrCreateIdentityKeyPair", () => {
     });
 
     const [publishPair, signingPair] = await Promise.all([
-      getOrCreateIdentityKeyPair("chat.example"),
-      getOrCreateIdentityKeyPair("chat.example"),
+      getOrCreateIdentityKeyPair("chat.example", 1),
+      getOrCreateIdentityKeyPair("chat.example", 1),
     ]);
-    const laterPair = await getOrCreateIdentityKeyPair("chat.example");
+    const laterPair = await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(signingPair).toBe(publishPair);
     expect(laterPair).toBe(publishPair);
@@ -210,9 +212,19 @@ describe("getOrCreateIdentityKeyPair", () => {
       if (cmd === "load_identity_key") return Promise.resolve(null);
       return Promise.resolve(undefined);
     });
-    const a = await getOrCreateIdentityKeyPair("chat.example");
-    const b = await getOrCreateIdentityKeyPair("other.example");
+    const a = await getOrCreateIdentityKeyPair("chat.example", 1);
+    const b = await getOrCreateIdentityKeyPair("other.example", 1);
     expect(await exportPublicKey(b.publicKey)).not.toBe(await exportPublicKey(a.publicKey));
+  });
+
+  it("[B3-3] keeps the memo per user id, not just per host — two accounts on the same host never share an identity keypair", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const userA = await getOrCreateIdentityKeyPair("chat.example", 1);
+    const userB = await getOrCreateIdentityKeyPair("chat.example", 2);
+    expect(await exportPublicKey(userB.publicKey)).not.toBe(await exportPublicKey(userA.publicKey));
   });
 
   it("reports a credential store that accepts the write but drops the value", async () => {
@@ -221,10 +233,11 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined); // save_identity_key "succeeds"
     });
 
-    await getOrCreateIdentityKeyPair("chat.example");
+    await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(logMock.error).toHaveBeenCalledWith(expect.stringContaining("did not persist"), {
       host: "chat.example",
+      userId: 1,
     });
   });
 
@@ -234,7 +247,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    await expect(getOrCreateIdentityKeyPair("chat.example")).rejects.toThrow("keychain locked");
+    await expect(getOrCreateIdentityKeyPair("chat.example", 1)).rejects.toThrow("keychain locked");
     // Must not have minted and saved a brand-new identity over the top of an
     // unreadable (not necessarily absent) stored key.
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
@@ -251,7 +264,7 @@ describe("getOrCreateIdentityKeyPair", () => {
       return Promise.resolve(undefined);
     });
 
-    await getOrCreateIdentityKeyPair("chat.example");
+    await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(logMock.error).not.toHaveBeenCalled();
   });

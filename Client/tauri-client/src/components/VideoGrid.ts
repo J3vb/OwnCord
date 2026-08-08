@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
+  getUserVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
   setUserVolume,
@@ -306,13 +307,18 @@ export function createVideoGrid(): VideoGridComponent {
 
     // Add audio control overlay for remote tiles
     if (config !== undefined && !config.isSelf) {
-      // Screenshare audio state survives tile rebuilds — initialize from it.
-      // Screenshare sliders are 0-100 (HTMLAudioElement.volume caps at 1.0);
-      // mic sliders keep 0-200 (LiveKit setVolume supports boost up to 2.0).
-      let muted = config.isScreenshare ? getScreenshareAudioMuted(config.audioUserId) : false;
-      let currentVolume = config.isScreenshare
+      // Mic and screenshare audio state both survive tile rebuilds —
+      // initialize from the same persisted values the sidebar volume menu
+      // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
+      // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
+      // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+      const savedVolume = config.isScreenshare
         ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
-        : 100;
+        : getUserVolume(config.audioUserId);
+      let currentVolume = savedVolume;
+      let muted = config.isScreenshare
+        ? getScreenshareAudioMuted(config.audioUserId)
+        : savedVolume === 0;
 
       const overlay = createElement("div", { class: "video-tile-overlay" });
 

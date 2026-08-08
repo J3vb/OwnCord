@@ -9,6 +9,7 @@ const mockSetScreenshareAudioVolume = vi.fn();
 const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
+const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
@@ -16,6 +17,7 @@ vi.mock("@lib/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
+  getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
 }));
 
 // ---------------------------------------------------------------------------
@@ -452,6 +454,32 @@ describe("VideoGrid", () => {
       slider.value = "50";
       slider.dispatchEvent(new Event("input"));
       expect(mockSetUserVolume).toHaveBeenCalledWith(77, 50);
+    });
+
+    it("[B3-5] seeds the mic-tile slider from the persisted per-user volume, not a hardcoded 100%", () => {
+      mockGetUserVolume.mockReturnValueOnce(30);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: false });
+      grid.addStream(88, "erin", fakeStream(), config);
+
+      expect(mockGetUserVolume).toHaveBeenCalledWith(88);
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.value).toBe("30");
+      // Not muted at 30% — the mute button must reflect the real (unmuted) state.
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
+    });
+
+    it("[B3-5] starts a mic tile muted when the persisted per-user volume is 0", () => {
+      mockGetUserVolume.mockReturnValueOnce(0);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 89, isScreenshare: false });
+      grid.addStream(89, "frank", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.value).toBe("0");
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      const overlay = container.querySelector(".video-tile-overlay");
+      expect(overlay!.classList.contains("muted")).toBe(true);
     });
 
     it("volume slider at 0 triggers mute icon swap and calls setUserVolume(0)", () => {

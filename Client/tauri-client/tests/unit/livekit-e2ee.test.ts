@@ -87,7 +87,7 @@ import {
   generateECDHKeyPair,
   importPublicKey,
 } from "@lib/e2eeCrypto";
-import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/identity";
+import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 
 const PEER_ID = 42;
 
@@ -764,5 +764,77 @@ describe("E2EEManager", () => {
     // Neither peer should receive an offer wrapped under the abandoned
     // keypair — the loop must abort as soon as it notices the swap.
     expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+  });
+
+  // ── Batch B3 findings ───────────────────────────────────────────────────
+
+  it("[B3-2] preserves a key-holder promotion that lands during setupKeyExchange's pre-publish awaits, instead of clobbering it with the stale server value", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // After the real holder (PEER_ID) leaves, we (uid 1) are the only
+    // remaining participant — client-side election promotes us.
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+
+    // Stall the identity-key load inside buildAnnouncePayload so a
+    // participant-left promotion can land BEFORE setupKeyExchange assigns
+    // this._isKeyHolder from the (now-stale) server value.
+    let releaseIdentity!: () => void;
+    const stalledIdentity = new Promise<typeof mockIdentityKeyPair>((resolve) => {
+      releaseIdentity = () => resolve(mockIdentityKeyPair);
+    });
+    vi.mocked(getOrCreateIdentityKeyPair).mockReturnValueOnce(stalledIdentity);
+
+    // Server said we are NOT the key holder when we started joining...
+    const setupPromise = mgr.setupKeyExchange(false, 1);
+    await vi.waitFor(() => expect(getOrCreateIdentityKeyPair).toHaveBeenCalled());
+
+    // ...but the real holder leaves before we finish setting up, and since we
+    // are the only participant left, client-side election promotes us.
+    await mgr.handleParticipantLeft(PEER_ID);
+
+    releaseIdentity();
+    // On the buggy path this falls through to the non-holder wait-for-offer
+    // branch and burns the full 10s + 5s timeout before resolving false —
+    // fast-forward past it so the test does not block on a real 15s wait.
+    vi.useFakeTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(20_000);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The promotion must win: we end up as key holder (generated + applied a
+    // room key and announced) instead of waiting for an offer that only WE
+    // could have sent — the exact interleaving that times out and gets the
+    // joiner ejected from voice.
+    await expect(setupPromise).resolves.toBe(true);
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+  });
+
+  it("[B3-7] does not resurrect peer key/verification state into a torn-down session when clearState() runs during verifyPeerAnnounce's pin lookup", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair
+
+    let releasePin!: (v: { status: "unpinned" }) => void;
+    const stalledPin = new Promise<{ status: "unpinned" }>((resolve) => {
+      releasePin = resolve;
+    });
+    vi.mocked(getIdentityPin).mockReturnValueOnce(stalledPin);
+
+    const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalled());
+
+    // Disconnect mid-verify.
+    mgr.clearState();
+    vi.mocked(setPeerVerification).mockClear();
+
+    releasePin({ status: "unpinned" });
+    await announcePromise;
+
+    // The torn-down session's peer map and verification state must not be
+    // resurrected by a continuation that resumes after teardown.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    expect(setPeerVerification).not.toHaveBeenCalled();
   });
 });
