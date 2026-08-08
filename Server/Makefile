@@ -2,6 +2,8 @@
 #
 # test               Run the test suite the way CI does (race + timeout).
 # test-deadlock      Run the deadlock-detection pass CI also runs.
+# fuzz               Actually fuzz. CI (and plain `go test`) only replays the
+#                    committed seed corpus; this generates new inputs.
 # cover              Per-package coverage (what CI uploads) + a function summary.
 # cover-all          Cross-package coverage — the honest number. See below.
 # sqlc-generate      Regenerate type-safe Go from sqlc.yaml (db/dbgen).
@@ -14,7 +16,7 @@
 
 SQLC_VERSION := $(shell cat sqlc.version)
 
-.PHONY: test test-deadlock cover cover-all sqlc-install sqlc-generate sqlc-verify \
+.PHONY: test test-deadlock fuzz cover cover-all sqlc-install sqlc-generate sqlc-verify \
         protocol-generate protocol-verify otel-up otel-down
 
 test:
@@ -22,6 +24,29 @@ test:
 
 test-deadlock:
 	go test -tags deadlock -count=1 ./...
+
+# Every Fuzz* target, one at a time. `go test ./...` (and therefore CI) runs a
+# Fuzz function against its committed seed corpus only — one pass per seed,
+# zero generated inputs — so the harnesses find nothing new until this runs.
+# Go fuzzes exactly one target per package per invocation, hence the loop.
+#
+# Deliberately local-only: a crasher is written to testdata/fuzz/<Target>/<hash>
+# and that file IS a working reproducer. This repo is public, so a crasher stays
+# uncommitted until its fix exists, then corpus entry and fix land together as
+# one regression test.
+#
+# No make on Windows? The same loop, straight into Git Bash:
+#   for pkg in $(go list ./...); do for fn in $(go test -list='^Fuzz' $pkg \
+#     2>/dev/null | grep '^Fuzz'); do go test $pkg -run='^$' -fuzz="^$fn$" \
+#     -fuzztime=30s || break 2; done; done
+FUZZTIME ?= 30s
+fuzz:
+	@for pkg in $$(go list ./...); do \
+	  for fn in $$(go test -list='^Fuzz' $$pkg 2>/dev/null | grep '^Fuzz'); do \
+	    echo "── $$pkg $$fn"; \
+	    go test $$pkg -run='^$$' -fuzz="^$$fn$$" -fuzztime=$(FUZZTIME) || exit 1; \
+	  done; \
+	done
 
 # Matches the CI invocation. Note that `go test ./... -coverprofile` instruments
 # each package only for itself, so a package whose code is mostly exercised
