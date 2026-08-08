@@ -8,6 +8,9 @@ import {
   addOptimisticMessage,
   addOptimisticReaction,
   getChannelMessages,
+  setMessages,
+  markSendFailed,
+  isChannelLoaded,
 } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
@@ -29,7 +32,7 @@ import {
 } from "../../src/components/message-list/reaction-tooltip";
 import { setMarkReadSender } from "../../src/lib/read-state";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
-import type { ServerMessage } from "../../src/lib/types";
+import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 
 // Mock notifications and livekitSession to avoid side effects
 vi.mock("@lib/notifications", () => ({
@@ -47,6 +50,13 @@ vi.mock("@lib/livekitSession", () => ({
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
+  disableScreenshare: vi.fn(async () => {}),
+}));
+// screenShare.ts's rollback correlation is exercised at the unit level in
+// screen-share-tracks.test.ts; here only the dispatcher's own reaction to it
+// is under test, so the lookup itself is mocked and controlled per test.
+vi.mock("@lib/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
@@ -62,12 +72,16 @@ vi.mock("@lib/identity", () => ({
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
+import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../src/lib/notifications";
+
 import {
   setMuted as mockSetMuted,
   setDeafened as mockSetDeafened,
   leaveVoice as mockLeaveVoice,
   disableCamera as mockDisableCamera,
+  disableScreenshare as mockDisableScreenshare,
 } from "@lib/livekitSession";
+import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -313,6 +327,94 @@ describe("WS Dispatcher", () => {
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
+  });
+
+  describe("chat_message notifications during a reconnect replay burst", () => {
+    // ws.ts clears isReplaying() as soon as auth_ok is processed — before the
+    // replay burst of chat_message frames the server sends right after it
+    // even arrives — so it cannot gate notifications the way it gates the
+    // unread counter above. A second auth_ok in this dispatcher's lifetime is
+    // always a reconnect handshake; its timestamp is the gate instead.
+    beforeEach(() => {
+      vi.mocked(mockNotifyIncomingMessage).mockClear();
+    });
+
+    it("does not notify for a replay frame timestamped before the reconnect handshake", () => {
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      // Second auth_ok in the same dispatcher lifetime = a reconnect.
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      mock.dispatch("chat_message", {
+        id: 1,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "missed while offline",
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(handshakeAt - 5000).toISOString(),
+      });
+
+      expect(mockNotifyIncomingMessage).not.toHaveBeenCalled();
+    });
+
+    it("still notifies for a genuinely live message after reconnecting", () => {
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      mock.dispatch("chat_message", {
+        id: 2,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "live now",
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(handshakeAt + 1000).toISOString(),
+      });
+
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "live now" }),
+      );
+    });
+
+    it("does not gate messages on the session's very first connect (no prior handshake)", () => {
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      // Old timestamp, but there was no earlier auth_ok — not a reconnect.
+      mock.dispatch("chat_message", {
+        id: 3,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "first connect",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2020-01-01T00:00:00Z",
+      });
+
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("mention counts", () => {
@@ -906,6 +1008,253 @@ describe("WS Dispatcher", () => {
       // Auto-select ran, but a first connect is not a resync — the payload's
       // counts are fresh and the user was not yet reading anything.
       expect(sender).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ready reconciles the DM channelsStore mirror", () => {
+    function seedDmMirrorRow(unreadCount: number, mentionCount: number): void {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(50, {
+          id: 50,
+          name: "bob",
+          type: "dm" as const,
+          category: null,
+          position: 0,
+          unreadCount,
+          mentionCount,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: ch };
+      });
+    }
+
+    // The mirror row is only ever created by addDmToChannelsStore (on open),
+    // and setChannels' carry loop deliberately preserves dm-typed rows across
+    // every ready rebuild — so a DM closed elsewhere while offline keeps a
+    // phantom row here forever unless something prunes it.
+    it("removes a dm-typed mirror row absent from the fresh dm_channels payload", () => {
+      seedDmMirrorRow(3, 1);
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      expect(channelsStore.getState().channels.has(50)).toBe(false);
+    });
+
+    // incrementUnread/incrementMention bump the mirror in parallel with
+    // dmStore once it exists, but only dmStore is restated by `ready` — so a
+    // DM read on another device keeps a stale count here that survives every
+    // reconnect until this reconciles it too.
+    it("restates a surviving dm-typed mirror row's unread/mention counts from the payload", () => {
+      seedDmMirrorRow(9, 4);
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+            mention_count: 0,
+          },
+        ],
+      });
+
+      const ch = channelsStore.getState().channels.get(50);
+      expect(ch?.unreadCount).toBe(0);
+      expect(ch?.mentionCount).toBe(0);
+    });
+
+    it("leaves a non-dm channel row's counts alone", () => {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(1, {
+          id: 1,
+          name: "general",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 5,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        // Active channel is some other id — channel 1 must be neither
+        // auto-selected (activeChannelId isn't null) nor mark-read'd (it
+        // isn't the active one), both of which legitimately zero a badge on
+        // their own and would otherwise be confused for this reconciliation
+        // reaching into a channel type it must not touch.
+        return { ...prev, channels: ch, activeChannelId: 2 };
+      });
+
+      mock.dispatch("ready", {
+        channels: [
+          {
+            id: 1,
+            name: "general",
+            type: "text",
+            category: null,
+            position: 0,
+            unread_count: 5,
+            mention_count: 0,
+          },
+        ],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(5);
+    });
+  });
+
+  describe("ready invalidates loaded message windows on a full-ready resync", () => {
+    function storedMessage(id: number, channelId = 1): MessageResponse {
+      return {
+        id,
+        channel_id: channelId,
+        user: { id: 1, username: "alex", avatar: null },
+        content: `msg ${id}`,
+        reply_to: null,
+        attachments: [],
+        reactions: [],
+        pinned: false,
+        edited_at: null,
+        deleted: false,
+        timestamp: "2026-03-15T09:00:00Z",
+      };
+    }
+
+    it("leaves history alone on the session's very first ready", () => {
+      setMessages(1, [storedMessage(10)], false);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getChannelMessages(1)).toHaveLength(1);
+    });
+
+    // The full-ready tier (this is the only tier that ever sends `ready`
+    // again after the first) never replays chat_message frames, so every
+    // channel loaded before the drop keeps a permanent hole unless its
+    // window is invalidated and the one on screen is refetched.
+    it("invalidates every loaded channel and refetches the active one on a second ready", async () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      const getMessages = vi.fn().mockResolvedValue({
+        messages: [storedMessage(900)],
+        has_more: false,
+      });
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+      setMessages(2, [storedMessage(20, 2)], false);
+      // Channel 1 must stay present in every ready payload — otherwise the
+      // "channel this session was viewing is gone" branch clears
+      // activeChannelId first, which would make the refetch target null for
+      // reasons unrelated to what this test is pinning.
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+      ];
+
+      // First ready in this dispatcher's lifetime: initial connect.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+      expect(getMessages).not.toHaveBeenCalled();
+
+      // Second ready: a full-ready resync.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // The inactive channel is invalidated but not eagerly refetched.
+      expect(isChannelLoaded(2)).toBe(false);
+      expect(getChannelMessages(2)).toEqual([]);
+
+      // The active channel is refetched from the server.
+      expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([900]);
+      expect(isChannelLoaded(1)).toBe(true);
+    });
+
+    it("carries a failed optimistic row through the resync invalidation", () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      const getMessages = vi.fn().mockResolvedValue({ messages: [], has_more: false });
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "unsent",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.some((m) => m.correlationId === "c1" && m.status === "failed")).toBe(true);
     });
   });
 
@@ -2415,6 +2764,59 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().activeChannelId).toBe(60);
     });
 
+    // The channelsStore mirror row for a DM is only ever synthesized by
+    // addDmToChannelsStore (on open, via selectDmConversation) — a DM present
+    // in dmStore from `ready` but never opened this session has none. Without
+    // synthesizing it here, activating channel 60 lands on an id
+    // ChannelController can't resolve and blanks the chat area permanently.
+    it("synthesizes the channelsStore mirror row when falling back to a DM never opened this session", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+          {
+            channelId: 60,
+            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+            participants: [{ id: 11, username: "carl", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 2,
+            mentionCount: 1,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      // Channel 60 has no channelsStore row yet — the bug this test locks.
+      expect(channelsStore.getState().channels.has(60)).toBe(false);
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      const ch = channelsStore.getState().channels.get(60);
+      // Without the fix, ch is undefined here — activation succeeded but the
+      // row it needs to resolve a name/type from never got synthesized.
+      expect(ch).toBeDefined();
+      expect(ch?.type).toBe("dm");
+      expect(ch?.name).toBe("carl");
+      // setActiveChannel legitimately zeroes a badge on open (existing,
+      // correct behavior) — this only confirms that ran against a row that
+      // now actually exists, not that synthesis skipped the counts.
+      expect(ch?.unreadCount).toBe(0);
+    });
+
     it("falls back to the first text channel when the closed DM was active and no DMs remain", () => {
       dmStore.setState(() => ({
         channels: [
@@ -2707,6 +3109,82 @@ describe("WS Dispatcher", () => {
       uiStore.setState((prev) => ({ ...prev, transientError: null }));
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
       expect(uiStore.getState().transientError).toBeNull();
+    });
+
+    // The sidebar/widget optimistically writes currentChannelId (voiceStatus
+    // "joining") before the server answers. A first-time join has no prior
+    // channel to leave, so no voice_leave ever arrives to clean that up —
+    // without a rollback here, currentChannelId is stuck pointing at a
+    // channel with no LiveKit session, and the sidebar's recovery click tears
+    // down whatever *is* live instead.
+    it("rolls back the optimistic join on a first-time CHANNEL_FULL", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    // A channel-*switch* refusal is different: the server leaves the old
+    // channel first, whose self voice_leave already reset voiceStatus to
+    // idle by the time this error lands — so the guard above is a no-op and
+    // must not blow away a genuinely connected session.
+    it("does not touch an already-established voice session on CHANNEL_FULL", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "connected" }));
+
+      mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
+
+      expect(voiceStore.getState().currentChannelId).toBe(5);
+      expect(voiceStore.getState().voiceStatus).toBe("connected");
+    });
+  });
+
+  // A server refusal of voice_camera/voice_screenshare (FORBIDDEN,
+  // RATE_LIMITED, INTERNAL, ...) other than VIDEO_LIMIT is otherwise
+  // unhandled — the already-published track keeps streaming to every peer
+  // while the store says it's off. Correlated by envelope id, exactly like
+  // pendingSends/pendingReactions above, so an unrelated refusal on some
+  // other action never touches video state.
+  describe("voice video-enable refusal rollback", () => {
+    beforeEach(() => {
+      vi.mocked(mockRollbackPendingVideo).mockReset().mockReturnValue(undefined);
+      vi.mocked(mockDisableCamera).mockClear();
+      vi.mocked(mockDisableScreenshare).mockClear();
+      uiStore.setState((prev) => ({ ...prev, transientError: null }));
+    });
+
+    it("rolls back the camera publish on a correlated refusal", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "no permission" }, "vid-1");
+      await vi.runAllTimersAsync();
+
+      expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
+      expect(mockDisableCamera).toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
+      expect(uiStore.getState().transientError).toBe("no permission");
+    });
+
+    it("rolls back the screenshare publish on a correlated refusal", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
+
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "" }, "vid-2");
+      await vi.runAllTimersAsync();
+
+      expect(mockDisableScreenshare).toHaveBeenCalled();
+      expect(mockDisableCamera).not.toHaveBeenCalled();
+      expect(uiStore.getState().transientError).toBe("Server error");
+    });
+
+    it("leaves an uncorrelated refusal as a plain transient error — no rollback", () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "unrelated-id");
+
+      expect(mockDisableCamera).not.toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
+      expect(uiStore.getState().transientError).toBe("nope");
     });
   });
 });

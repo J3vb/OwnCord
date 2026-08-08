@@ -27,6 +27,8 @@ import {
   confirmSend,
   markSendFailed,
   messagesStore,
+  setMessages,
+  invalidateLoadedMessageWindows,
 } from "@stores/messages.store";
 import {
   setMembers,
@@ -71,6 +73,12 @@ import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
+import { rollbackPendingVideo } from "@lib/screenShare";
+// SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
+// place the DM->channelsStore mirror row is synthesized (selectDmConversation
+// on open); the dm_channel_close fallback below needs the same synthesis for
+// a DM it is activating that was never opened this session.
+import { addDmToChannelsStore } from "@pages/main-page/SidebarDmHelpers";
 
 const log = createLogger("dispatcher");
 
@@ -130,14 +138,28 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
  * Returns a cleanup function that removes all listeners.
  *
  * `api` is optional so tests can wire the dispatcher without a client; when
- * present it is used to refresh DM block state (GET /blocks) on ready.
+ * present it is used to refresh DM block state (GET /blocks) on ready, and to
+ * refetch the active channel's history after a full-ready resync.
  */
 export function wireDispatcher(
   ws: WsClient,
   api?: Pick<ApiClient, "listBlocks"> &
-    Partial<Pick<ApiClient, "updateProfile" | "getConfig" | "listEmoji">>,
+    Partial<Pick<ApiClient, "updateProfile" | "getConfig" | "listEmoji" | "getMessages">>,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
+
+  // A second (or later) auth_ok/ready in this call's lifetime is always a
+  // reconnect: wireDispatcher is called once per login (main.ts's
+  // wirePostAuth), and every automatic reconnect fires its events through
+  // these same long-lived listeners. Closure-scoped so a fresh login (a new
+  // wireDispatcher call) always starts clean.
+  let hasAuthenticatedBefore = false;
+  let hasReceivedReadyBefore = false;
+  // Set from the second-or-later auth_ok — the reconnect handshake time. A
+  // chat_message replay frame the transport delivers after it is timestamped
+  // *before* it (see the CHAT_MESSAGE handler below); a genuinely live
+  // message is timestamped after.
+  let lastReconnectHandshakeAt: number | null = null;
 
   // ── Auth ──────────────────────────────────────────────
 
@@ -151,6 +173,10 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
+      if (hasAuthenticatedBefore) {
+        lastReconnectHandshakeAt = Date.now();
+      }
+      hasAuthenticatedBefore = true;
       setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
 
       // The resume path can land with no ChannelTopic subscription: the hub
@@ -248,12 +274,64 @@ export function wireDispatcher(
         }
       }
 
+      // A second (or later) `ready` in this dispatcher's lifetime only ever
+      // arrives from a full-ready resync (Server/ws/serve.go: a fresh connect
+      // and a full resync are the only paths that send `ready` at all — a
+      // successful seq-based replay reconnect does not), and that tier never
+      // replays missed chat_message frames. Every channel this session had
+      // already loaded would otherwise keep a permanent, silent hole in its
+      // history — invalidate them and refetch the one actually on screen.
+      if (hasReceivedReadyBefore) {
+        invalidateLoadedMessageWindows();
+        const activeAfterReady = channelsStore.select((s) => s.activeChannelId);
+        const getMessages = api?.getMessages;
+        if (activeAfterReady !== null && getMessages !== undefined) {
+          getMessages(activeAfterReady, { limit: 50 })
+            .then((resp) => setMessages(activeAfterReady, resp.messages, resp.has_more))
+            .catch((err) =>
+              log.warn("Failed to reload message history after resync", { error: String(err) }),
+            );
+        }
+      }
+      hasReceivedReadyBefore = true;
+
       // Populate DM channels from the ready payload. The server always sends
       // the field, so an empty array is an authoritative "no open DMs" (all
       // closed/left on another device) and must clear ghosts from dmStore —
       // skipping it would let a stale DM survive every reconnect.
       const dmPayloads = payload.dm_channels ?? [];
       setDmChannels(dmPayloads.map(mapDmPayload));
+
+      // The channels-store mirror row for a DM (synthesized on open by
+      // addDmToChannelsStore) is deliberately carried across setChannels'
+      // rebuild above, because the ready payload never includes DM rows at
+      // all — but that means a DM closed elsewhere while this client was
+      // offline keeps a phantom row here (closeDmLocally fixes this exact
+      // shape for the live dm_channel_close path; this is its ready-time
+      // equivalent), and a DM read elsewhere keeps a stale unread/mention
+      // count (incrementUnread/incrementMention bump the mirror in parallel
+      // with dmStore once it exists, but only dmStore is restated above).
+      // Reconcile every dm-typed row against the just-restated payload.
+      channelsStore.setState((prev) => {
+        const dmById = new Map(dmPayloads.map((d) => [d.channel_id, d]));
+        const nextChannels = new Map(prev.channels);
+        let changed = false;
+        for (const [id, ch] of prev.channels) {
+          if (ch.type !== "dm") continue;
+          const dm = dmById.get(id);
+          if (dm === undefined) {
+            nextChannels.delete(id);
+            changed = true;
+            continue;
+          }
+          const mentionCount = dm.mention_count ?? 0;
+          if (ch.unreadCount !== dm.unread_count || ch.mentionCount !== mentionCount) {
+            nextChannels.set(id, { ...ch, unreadCount: dm.unread_count, mentionCount });
+            changed = true;
+          }
+        }
+        return changed ? { ...prev, channels: nextChannels } : prev;
+      });
 
       // The server's read_states go stale while a channel stays focused
       // (channel_focus is sent once per mount, mark_read only from the context
@@ -330,6 +408,13 @@ export function wireDispatcher(
       closeDmLocally(payload.channel_id, () => {
         const remaining = dmStore.getState().channels;
         if (remaining.length > 0) {
+          // Synthesize the channelsStore mirror row before activating: it is
+          // only ever created by addDmToChannelsStore (on open, via
+          // selectDmConversation), so a DM present in dmStore from `ready`
+          // but never opened this session has none — without this,
+          // activating it lands on an id ChannelController can't resolve and
+          // blanks the chat area with no way to recover.
+          addDmToChannelsStore(remaining[0]!);
           setActiveChannel(remaining[0]!.channelId);
           return;
         }
@@ -401,8 +486,18 @@ export function wireDispatcher(
         }
       }
 
-      // Fire desktop notification, taskbar flash, and sound
-      notifyIncomingMessage(payload);
+      // Fire desktop notification, taskbar flash, and sound — but not for a
+      // reconnect's replayed burst. ws.isReplaying() cannot gate this the way
+      // it gates the unread counter above: ws.ts clears it as soon as auth_ok
+      // is processed, before the replay burst itself even arrives. A replay
+      // frame's timestamp instead predates the reconnect handshake that
+      // preceded it, unlike a genuinely new live message.
+      const isReplayFrame =
+        lastReconnectHandshakeAt !== null &&
+        Date.parse(payload.timestamp) < lastReconnectHandshakeAt;
+      if (!isReplayFrame) {
+        notifyIncomingMessage(payload);
+      }
     }),
   );
 
@@ -838,6 +933,18 @@ export function wireDispatcher(
       // with an explanation buried in the log.
       if (payload.code === "CHANNEL_FULL") {
         showToast(payload.message || "That voice channel is full", "error");
+        // The sidebar/widget optimistically writes currentChannelId before
+        // the server answers (VoiceCallbacks.onVoiceJoin). A first-time join
+        // refusal earns no voice_leave (there was no previous channel to
+        // leave), so nothing else clears that optimistic state — the sidebar
+        // is left keyed on a channel with no LiveKit session. A channel
+        // *switch* refusal doesn't need this: the server always leaves the
+        // old channel first, whose self voice_leave already reset
+        // voiceStatus to idle before this error arrives, so the guard is a
+        // no-op there.
+        if (voiceStore.getState().voiceStatus === "joining") {
+          leaveVoiceChannel();
+        }
         return;
       }
       if (payload.code === "VIDEO_LIMIT") {
@@ -847,6 +954,23 @@ export function wireDispatcher(
         // keeps streaming to everyone while voice_state says camera=false.
         void livekitSession().then(({ disableCamera }) => disableCamera());
         return;
+      }
+      // A server refusal of a voice_camera/voice_screenshare enable other
+      // than VIDEO_LIMIT (FORBIDDEN, RATE_LIMITED, INTERNAL, ...): roll back
+      // the already-published track, or it keeps streaming to every peer
+      // while the store says it's off. Correlated by envelope id — exactly
+      // like pendingSends/pendingReactions above — so an unrelated
+      // FORBIDDEN/RATE_LIMITED on some other action never touches video
+      // state.
+      if (id !== undefined) {
+        const kind = rollbackPendingVideo(id);
+        if (kind !== undefined) {
+          setTransientError(payload.message || "Server error");
+          void livekitSession().then(({ disableCamera, disableScreenshare }) =>
+            kind === "camera" ? disableCamera() : disableScreenshare(),
+          );
+          return;
+        }
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
         setTransientError(payload.message || "Server error");

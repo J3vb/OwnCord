@@ -23,6 +23,8 @@ import {
   hasMoreMessages,
   isWindowDetached,
   hasMessageLoaded,
+  addOptimisticMessage,
+  markSendFailed,
 } from "../../src/stores/messages.store";
 import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
 
@@ -127,6 +129,36 @@ describe("setAroundMessages", () => {
 
     expect(isWindowDetached(2)).toBe(false);
     expect(ids(2)).toEqual([500]);
+  });
+
+  it("carries pending and failed optimistic rows instead of wiping them", () => {
+    // Unlike setMessages, setAroundMessages replaces the window wholesale —
+    // without a carry, a jump elsewhere destroys the user's still-unsent
+    // message and orphans its Retry draft.
+    addOptimisticMessage({
+      correlationId: "c1",
+      channelId: 1,
+      user: USER,
+      content: "still sending",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    addOptimisticMessage({
+      correlationId: "c2",
+      channelId: 1,
+      user: USER,
+      content: "refused",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:01Z",
+    });
+    markSendFailed("c2", "SLOW_MODE");
+
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    const msgs = getChannelMessages(1);
+    expect(msgs.map((m) => m.correlationId)).toEqual([null, null, null, "c1", "c2"]);
+    expect(msgs[3]!.status).toBe("pending");
+    expect(msgs[4]!.status).toBe("failed");
   });
 });
 

@@ -181,8 +181,10 @@ export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
  *   1. If a row with the same real id exists, replace it in place — this turns
  *      an optimistic "sent" row into the full server message (attachments,
  *      sanitized content, server timestamp) and is idempotent against replay.
- *   2. Otherwise, defensively reconcile the oldest still-pending row from the
- *      same author (covers a broadcast that raced ahead of its ack).
+ *   2. Otherwise, defensively reconcile the oldest still-pending (or
+ *      OFFLINE-failed) row from the same author (covers a broadcast that
+ *      raced ahead of its ack, or one the offline sweep gave up on before
+ *      learning the server had already stored it).
  *   3. Otherwise, append as a new message.
  */
 export function addMessage(payload: ChatMessagePayload): void {
@@ -200,14 +202,19 @@ export function addMessage(payload: ChatMessagePayload): void {
       return { ...prev, messagesByChannel: updated };
     }
 
-    // 2. Defensive: reconcile the oldest pending optimistic row from this author
-    //    (a broadcast that arrived before its chat_send_ok ack). Content must
-    //    match too — our own echo always carries identical content, while a
-    //    same-author message from another session of this account does not,
-    //    and consuming the pending row for it would orphan the real send.
+    // 2. Defensive: reconcile the oldest pending (or transport-failed) optimistic
+    //    row from this author (a broadcast that arrived before its chat_send_ok
+    //    ack, or arrived after the dispatcher's offline sweep gave up on a send
+    //    that had actually gone through). Scoped to OFFLINE — a server-rejected
+    //    send (SLOW_MODE/FORBIDDEN/...) is never broadcast, so no echo can ever
+    //    arrive for it, and eating that row here would silently drop the retry
+    //    the user still needs. Content must match too — our own echo always
+    //    carries identical content, while a same-author message from another
+    //    session of this account does not, and consuming the pending row for it
+    //    would orphan the real send.
     const pendingIdx = existing.findIndex(
       (m) =>
-        m.status === "pending" &&
+        (m.status === "pending" || (m.status === "failed" && m.errorCode === "OFFLINE")) &&
         m.correlationId !== null &&
         m.user.id === message.user.id &&
         m.content === message.content,
@@ -422,6 +429,11 @@ export function setMessages(
  * `hasMoreAfter` marks the window as detached from the live tail: the list
  * offers "Jump to Present" and live broadcasts stop being appended until
  * reattachToPresent (or a fresh setMessages) lands.
+ *
+ * Carries unreconciled (pending/failed) rows across the replacement exactly
+ * like setMessages does — they are the only copy of the user's composed
+ * text, and a jump elsewhere must not silently destroy an in-flight send or
+ * orphan its Retry draft.
  */
 export function setAroundMessages(
   channelId: number,
@@ -439,8 +451,10 @@ export function setAroundMessages(
       ? converted.slice(0, MAX_MESSAGES_PER_CHANNEL)
       : converted;
   messagesStore.setState((prev) => {
+    const previous = prev.messagesByChannel.get(channelId) ?? [];
+    const carried = previous.filter((m) => m.status !== "sent");
     const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, trimmed);
+    updatedMessages.set(channelId, carried.length > 0 ? [...trimmed, ...carried] : trimmed);
 
     const updatedLoaded = new Set(prev.loadedChannels);
     updatedLoaded.add(channelId);
@@ -467,6 +481,43 @@ export function setAroundMessages(
       hasMore: updatedHasMore,
       historyLoadState: updatedLoadState,
       detachedChannels: updatedDetached,
+    };
+  });
+}
+
+/**
+ * Invalidate every channel's loaded window after a full-ready resync (see
+ * dispatcher.ts's `ready` handler). That tier never replays missed
+ * chat_message frames — only a fresh connect and a full resync send `ready`
+ * at all, and a successful seq-based replay reconnect doesn't — so a channel
+ * loaded before the drop would otherwise keep a permanent hole in its
+ * history for the rest of the session.
+ *
+ * Carries pending/failed optimistic rows exactly like setMessages' merge —
+ * they are the only copy of an unsent message — but drops "sent" rows so the
+ * next fetch rebuilds a contiguous window instead of leaving stale rows
+ * above a gap the fetch has no way to detect.
+ */
+export function invalidateLoadedMessageWindows(): void {
+  messagesStore.setState((prev) => {
+    if (prev.loadedChannels.size === 0) return prev;
+    const updatedMessages = new Map(prev.messagesByChannel);
+    for (const channelId of prev.loadedChannels) {
+      const existing = updatedMessages.get(channelId);
+      if (existing === undefined) continue;
+      const carried = existing.filter((m) => m.status !== "sent");
+      if (carried.length > 0) {
+        updatedMessages.set(channelId, carried);
+      } else {
+        updatedMessages.delete(channelId);
+      }
+    }
+    return {
+      ...prev,
+      messagesByChannel: updatedMessages,
+      loadedChannels: new Set(),
+      hasMore: new Map(),
+      detachedChannels: new Set(),
     };
   });
 }
