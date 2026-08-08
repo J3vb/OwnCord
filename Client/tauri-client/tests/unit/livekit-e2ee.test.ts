@@ -88,6 +88,7 @@ import {
   importPublicKey,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
+import { authStore } from "@stores/auth.store";
 
 const PEER_ID = 42;
 
@@ -836,5 +837,27 @@ describe("E2EEManager", () => {
     // resurrected by a continuation that resumes after teardown.
     expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
     expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
+  it("[identity-scope guard] does not mint an identity keypair when no user is authenticated yet — announce goes out unsigned instead of under a placeholder host:0 scope", async () => {
+    // If this ever ran before auth state landed, falling back to `?? 0`
+    // would mint (or migrate-and-DELETE the real legacy key into) a bogus
+    // `host:0` keyring scope; the ready hook's later, authenticated call
+    // then mints a SECOND, DIFFERENT keypair under `host:<realId>` — so the
+    // published key and the announce signing key permanently disagree and
+    // every peer's verifyPeerAnnounce reports a false MITM "mismatch".
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    vi.mocked(authStore.getState).mockReturnValueOnce({ user: null } as never);
+
+    const ok = await mgr.setupKeyExchange(true, 1);
+
+    expect(ok).toBe(true);
+    expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
+    const announces = sendsOfType(ws, "voice_e2ee_announce");
+    expect(announces).toHaveLength(1);
+    // Same contract as "no server host": degrade to an unsigned announce
+    // rather than sign/scope under a placeholder id.
+    expect((announces[0] as any).payload.signature).toBeUndefined();
   });
 });

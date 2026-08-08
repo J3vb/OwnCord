@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+// Vite's `?raw` suffix inlines the file's source text as a string (see
+// src/vite-env.d.ts's `vite/client` types) — used below for a structural
+// bundle-hygiene assertion, without pulling in node:fs.
+import dispatcherSource from "../../src/lib/dispatcher.ts?raw";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../src/stores/channels.store";
@@ -414,6 +418,66 @@ describe("WS Dispatcher", () => {
       });
 
       expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+    });
+
+    // BUG: the anchor (lastReconnectHandshakeAt) is stamped from the CLIENT's
+    // Date.now(), but payload.timestamp is the SERVER's created_at — a raw
+    // comparison mixes clock domains. A self-hosted server routinely runs
+    // without NTP; if its clock lags the client's, every genuinely live
+    // message for the drift window after every reconnect looks like it
+    // predates the handshake and gets silently treated as a replay (no
+    // notification, no taskbar flash) — and with persistent skew this never
+    // recovers.
+    it("does not misclassify a live post-reconnect message as a replay when the server clock lags (observed skew)", () => {
+      const driftMs = 30_000; // server clock reads 30s behind the client's
+      const t0 = Date.now();
+
+      // First connect. A live message here establishes the observed skew
+      // before any reconnect exists to misclassify.
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      mock.dispatch("chat_message", {
+        id: 1,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "before reconnect",
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(t0 - driftMs).toISOString(),
+      });
+      vi.mocked(mockNotifyIncomingMessage).mockClear();
+
+      // Reconnect 1s later (client clock).
+      vi.setSystemTime(t0 + 1000);
+      const handshakeAt = Date.now();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      // A genuinely live message arrives 1s after the handshake (client
+      // clock). Its server timestamp — still 30s behind — reads 29s
+      // *before* the handshake in the client's own clock, which a
+      // client-clock-only comparison misclassifies as a replay.
+      vi.setSystemTime(handshakeAt + 1000);
+      mock.dispatch("chat_message", {
+        id: 2,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "live after reconnect, server clock still lagging",
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(Date.now() - driftMs).toISOString(),
+      });
+
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "live after reconnect, server clock still lagging" }),
+      );
     });
   });
 
@@ -1218,6 +1282,44 @@ describe("WS Dispatcher", () => {
       await Promise.resolve();
       expect(getChannelMessages(1).map((m) => m.id)).toEqual([900]);
       expect(isChannelLoaded(1)).toBe(true);
+    });
+
+    // BUG: invalidateLoadedMessageWindows() ran unconditionally, but the
+    // refetch below it only runs when there's a resolvable active channel
+    // AND api.getMessages exists (api is a Partial<...>, so it may be
+    // absent). When it can't refetch, every loaded window is dropped with
+    // nothing left to reload it — the mounted MessageList is stuck showing
+    // only carried-through pending rows until the user navigates away and
+    // back. The default wireDispatcher(mock.ws) from the outer beforeEach
+    // has no `api` at all, so there is no getMessages to refetch with here.
+    it("keeps loaded history across a resync when there is no getMessages to refetch it", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+      ];
+
+      // First ready: initial connect.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // Second ready: a full-ready resync, with nothing able to refetch it.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getChannelMessages(1)).toHaveLength(1);
     });
 
     it("carries a failed optimistic row through the resync invalidation", () => {
@@ -3200,6 +3302,20 @@ describe("WS Dispatcher", () => {
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
       expect(uiStore.getState().transientError).toBe("nope");
     });
+  });
+});
+
+describe("bundle hygiene", () => {
+  // screenShare.ts has VALUE imports from livekit-client (~1.3 MB) at module
+  // scope. dispatcher.ts is imported statically from main.ts, so a top-level
+  // `import ... from "@lib/screenShare"` here drags the whole library into
+  // the startup bundle — every other voice call site in this file already
+  // loads its module lazily (see the livekitSession() helper), and
+  // screenShare.ts's one export used here (rollbackPendingVideo) must follow
+  // the same idiom instead of a static import.
+  it("does not statically import screenShare — dynamic import only", () => {
+    const staticImport = /^\s*import\s[^;]*from\s+["']@lib\/screenShare["']/m;
+    expect(staticImport.test(dispatcherSource)).toBe(false);
   });
 });
 

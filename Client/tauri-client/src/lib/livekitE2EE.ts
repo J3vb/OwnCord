@@ -351,13 +351,27 @@ export class E2EEManager {
 
   /** Load (once per session) this client's long-term identity keypair from the
    *  OS keyring so we can sign ephemeral announces. Returns null when there is
-   *  no server host (identity is host-scoped) — the announce then goes out
-   *  unsigned and peers treat us as a legacy/unverified client. */
+   *  no server host (identity is host-scoped) OR no authenticated user id yet
+   *  (identity is host+user scoped, B3-3) — the announce then goes out
+   *  unsigned and peers treat us as a legacy/unverified client. A missing user
+   *  id must never fall back to a placeholder scope like `?? 0`:
+   *  `getOrCreateIdentityKeyPair` would mint (or migrate-and-DELETE the real
+   *  legacy key into) a bogus `host:0` keyring account, and a later
+   *  authenticated call would then mint a second, different keypair under
+   *  `host:<realId>` — so the published key and the announce signing key
+   *  permanently disagree and every peer's verifyPeerAnnounce reports a false
+   *  MITM "mismatch" (see identity.ts's `identityKeyPairCache` doc). */
   private async ensureIdentityKeyPair(): Promise<CryptoKeyPair | null> {
     if (this._identityKeyPair) return this._identityKeyPair;
     const host = this.deps.getServerHost();
     if (host === null) return null;
-    const myUserId = authStore.getState().user?.id ?? 0;
+    const myUserId = authStore.getState().user?.id;
+    if (myUserId === undefined) {
+      log.warn(
+        "E2EE: no authenticated user id yet — announcing unsigned instead of scoping under a placeholder id",
+      );
+      return null;
+    }
     this._identityKeyPair = await getOrCreateIdentityKeyPair(host, myUserId);
     return this._identityKeyPair;
   }

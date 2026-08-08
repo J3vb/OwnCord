@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { invokeMock, logMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -20,6 +20,7 @@ import {
   ensureIdentityKeyPublished,
 } from "@lib/identity";
 import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
+import { authStore } from "@stores/auth.store";
 
 /**
  * Stateful keyring double for the legacy-migration tests: a Map keyed by the
@@ -322,6 +323,20 @@ describe("publishIdentityKey", () => {
 });
 
 describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
+  // Real authStore, not mocked — these tests exercise the normal ready-hook
+  // timing where auth state is already populated. The "not authenticated
+  // yet" guard is its own test below, which overrides `user` back to null.
+  beforeEach(() => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+    }));
+  });
+
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, user: null }));
+  });
+
   it("publishes username + identity key when the server copy is absent", async () => {
     // First-login keyring: nothing stored → a fresh keypair is generated.
     invokeMock.mockImplementation((cmd: string) => {
@@ -391,6 +406,47 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
     await expect(
       ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile),
     ).resolves.toBe(false);
+  });
+
+  it("does not mint or publish an identity key when no user is authenticated yet (never falls back to a placeholder scope)", async () => {
+    // Auth state not yet populated — e.g. this hook running before auth_ok
+    // has landed. Falling back to a placeholder `?? 0` scope would mint (or
+    // migrate-and-DELETE the real legacy key into) a bogus `host:0` keyring
+    // account; a later authenticated call then mints a SECOND, DIFFERENT
+    // keypair under `host:<realId>`, so the published key and the announce
+    // signing key permanently disagree — a false MITM warning for every peer.
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    expect(published).toBe(false);
+    expect(updateProfile).not.toHaveBeenCalled();
+    // No keyring interaction at all — nothing minted, migrated, or deleted.
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining("authenticated user id"),
+      expect.objectContaining({ host: "chat.example" }),
+    );
+  });
+
+  it("does not migrate (and delete) the legacy host-only key when no user is authenticated yet", async () => {
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    const legacy = await generateIdentityKeyPair();
+    const legacyBlob = await exportIdentityKeyPair(legacy.privateKey);
+    const store = keyringDouble({ "chat.example": legacyBlob });
+    const updateProfile = vi.fn().mockResolvedValue({});
+
+    await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
+
+    // The legacy key must be untouched: no adopt-then-delete into a bogus
+    // host:0 scope.
+    expect(store.get("chat.example")).toBe(legacyBlob);
+    expect(store.has("chat.example:0")).toBe(false);
   });
 });
 

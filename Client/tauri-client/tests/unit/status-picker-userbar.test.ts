@@ -1,3 +1,8 @@
+// Read from disk rather than `import ... ?raw`: vitest stubs CSS modules
+// (its `css: false` default), which wins over the `?raw` suffix and yields an
+// empty string. A .ts source can use `?raw`; a stylesheet cannot.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
@@ -184,5 +189,37 @@ describe("StatusPicker wired to UserBar", () => {
     // the control stays disabled instead (no-silent-failure principle).
     const wrap = container.querySelector("[data-testid='status-picker-wrap']") as HTMLElement;
     expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(true);
+  });
+
+  // jsdom never applies app.css, so a computed-style assertion here would
+  // pass whether or not the rules exist. Instead this pins the CSS *source*
+  // to the classes StatusPicker.ts actually emits, so a future edit that
+  // renames/deletes one side without the other goes red immediately (this
+  // is exactly how the trigger dot went invisible: the rules were deleted
+  // but the component still emitted the old names).
+  it("every class StatusPicker.ts emits has a rule in app.css, and both dots have an explicit size", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+
+    const ruleBody = (selector: string): string => {
+      const match = new RegExp(`\\.${selector}\\s*\\{([^}]*)\\}`).exec(css);
+      expect(match, `expected a \`.${selector} { ... }\` rule in app.css`).not.toBeNull();
+      return match![1]!;
+    };
+
+    ruleBody("status-picker-option");
+    ruleBody("status-picker-option-label");
+    ruleBody("status-picker-option-check");
+
+    // The dot and option-dot are bare elements whose only inline style is
+    // `background` (StatusPicker.ts) -- without an explicit size in CSS
+    // they collapse to 0x0 and are invisible/unclickable.
+    for (const dotSelector of ["status-picker-dot", "status-picker-option-dot"]) {
+      const body = ruleBody(dotSelector);
+      expect(body, `${dotSelector} needs an explicit width`).toMatch(/width\s*:/);
+      expect(body, `${dotSelector} needs an explicit height`).toMatch(/height\s*:/);
+      expect(body, `${dotSelector} needs a border-radius to render as a dot`).toMatch(
+        /border-radius\s*:/,
+      );
+    }
   });
 });

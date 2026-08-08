@@ -217,6 +217,25 @@ describe("AudioElements", () => {
       setAudioVolumeHost("b.example.com");
       expect(elements.getUserVolume(7)).toBe(100);
     });
+
+    it("migrates a pre-scoping legacy volume through to the scoped key without leaking to a different host", () => {
+      // A save made before host-scoping existed lives at the bare
+      // `userVolume_7` key. It must still apply once a host is set, and the
+      // migration must write under THAT host's scoped key specifically —
+      // not clobber a different host's own explicit choice.
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "userVolume_7") return 30;
+        if (key === "userVolume_7:b.example.com") return 80;
+        return defaultVal;
+      });
+
+      setAudioVolumeHost("a.example.com");
+      expect(elements.getUserVolume(7)).toBe(30);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 30);
+
+      setAudioVolumeHost("b.example.com");
+      expect(elements.getUserVolume(7)).toBe(80);
+    });
   });
 
   describe("setOutputVolume", () => {

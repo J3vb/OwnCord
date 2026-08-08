@@ -34,20 +34,30 @@ let pttErrorUnsubscribe: (() => void) | null = null;
  *  by clearing the latch on any observed unmute, not just PTT's. */
 let pttOwnsMute = false;
 
-/** Clear the PTT gate and, if nothing else independently wants the mic
- *  closed, re-open it. Used whenever the poller can no longer produce a
- *  future press/release edge to lift a mute the last release applied —
+/** Clear the PTT gate and, if the mute in effect is the one PTT's own last
+ *  release applied (not one the user asked for) and nothing else
+ *  independently wants the mic closed, re-open it. Used whenever the poller
+ *  can no longer produce a future press/release edge to lift that mute —
  *  clearing the key binding (stopPtt) or the polling thread dying
- *  (ptt-error) — so the mic is never stranded gated with no recovery path. */
-function ungateMic(): void {
+ *  (ptt-error) — so a PTT-applied mute is never stranded gated with no
+ *  recovery path.
+ *
+ *  `mutedByPtt` must be the caller's `pttOwnsMute` latch read BEFORE it
+ *  resets the latch to false: both call sites zero it ahead of calling this
+ *  (a mute must not outlive its PTT binding), so by the time this body runs
+ *  the module-level flag itself is already false and can't be consulted
+ *  here — the pre-reset value has to be threaded through instead. */
+function ungateMic(mutedByPtt: boolean): void {
   if (voiceStore.getState().pttGated !== true) return;
   setPttGated(false);
   const { localMuted, localDeafened } = voiceStore.getState();
-  if (!localMuted && !localDeafened) {
-    void import("./livekitSession")
-      .then(({ setMuted }) => setMuted(false))
-      .catch((e) => log.warn("Failed to re-open mic after clearing PTT gate", e));
-  }
+  if (localDeafened) return;
+  // A mute the user asked for is never PTT's to lift (v006) — only lift it
+  // when it's the one PTT's own release applied.
+  if (localMuted && !mutedByPtt) return;
+  void import("./livekitSession")
+    .then(({ setMuted }) => setMuted(false))
+    .catch((e) => log.warn("Failed to re-open mic after clearing PTT gate", e));
 }
 
 // Well-known virtual key code names for display
@@ -160,8 +170,10 @@ export async function initPtt(): Promise<void> {
     pttErrorUnsubscribe = await listen<string>("ptt-error", (event) => {
       log.warn("PTT polling thread stopped unexpectedly", { error: event.payload });
       setPttPollingLive(false);
+      // Capture before resetting — see ungateMic's doc comment.
+      const mutedByPtt = pttOwnsMute;
       pttOwnsMute = false;
-      ungateMic();
+      ungateMic(mutedByPtt);
     });
 
     // Listen for press/release events
@@ -229,6 +241,8 @@ export async function stopPtt(): Promise<void> {
     pttStoreUnsubscribe = null;
     pttErrorUnsubscribe?.();
     pttErrorUnsubscribe = null;
+    // Capture before resetting — see ungateMic's doc comment.
+    const mutedByPtt = pttOwnsMute;
     pttOwnsMute = false;
     // No further ptt-state events once the loop is torn down; clear the flag
     // before the await so a concurrent join cannot observe a stale `true`.
@@ -236,7 +250,7 @@ export async function stopPtt(): Promise<void> {
     // With the key idle there is no press/release edge left to lift a mute
     // PTT's last release applied — rearm now, or it stays stranded for the
     // rest of the voice session (see ungateMic's doc comment).
-    ungateMic();
+    ungateMic(mutedByPtt);
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("ptt_stop");
     listening = false;

@@ -9,7 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
-import { createWsClient } from "@lib/ws";
+import { createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
@@ -153,14 +153,6 @@ let pendingInviteLink: { code: string; host?: string } | null = null;
 
 // Shared guard so the first-use and mismatch cert modals never stack.
 let certModalActive = false;
-
-/** Normalize a host for comparison against a cert-tofu event's host, mirroring
- *  `tofu::cert_store_key`'s trailing-":443" strip (src-tauri/src/tofu.rs).
- *  Duplicated from ws.ts's private normalizer of the same name — ws.ts does
- *  not export it, and this batch's owned-files list does not include ws.ts. */
-function normalizeHostForCertCompare(host: string): string {
-  return host.replace(/:443$/, "");
-}
 
 // First-use certificate confirmation (F4/F8). The Rust proxy REJECTS the first
 // connection to a server until the user confirms its fingerprint, so no

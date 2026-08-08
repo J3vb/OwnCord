@@ -207,6 +207,7 @@ import {
 import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 import type { ReadyMember } from "../../src/lib/types";
 import {
   isVoiceConnected,
@@ -2899,6 +2900,22 @@ describe("LiveKitSession", () => {
       (getIdentityPin as any).mockResolvedValue({ status: "unpinned" });
       (storeIdentityPin as any).mockResolvedValue(true);
       (verifyEphemeralKeySignature as any).mockResolvedValue(true);
+      // Joining voice requires an authenticated session, and the identity
+      // keypair is scoped by host AND user id — with no user the announce is
+      // deliberately sent unsigned rather than scoped under a placeholder id.
+      // Kept below PEER_ID so key-holder election (lowest id wins) is unchanged.
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "me", role: "member" } as never,
+        isAuthenticated: true,
+      }));
+    });
+
+    afterEach(() => {
+      // Do not leak the authenticated user into the rest of the file — an
+      // earlier bug in this suite was one test leaving a role set for every
+      // test after it.
+      authStore.setState((prev) => ({ ...prev, user: null, isAuthenticated: false }));
     });
 
     it("signs the ephemeral announce sent on join", async () => {

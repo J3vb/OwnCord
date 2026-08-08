@@ -123,7 +123,7 @@ function uuid(): string {
  *  verbatim (e.g. "Example.COM:443"), but the proxies always emit the
  *  normalized (stripped, lowercased) form, so an un-normalized comparison
  *  here would silently miss the match. */
-function normalizeHostForCertCompare(host: string): string {
+export function normalizeHostForCertCompare(host: string): string {
   return host.replace(/:443$/, "").toLowerCase();
 }
 

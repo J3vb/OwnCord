@@ -73,7 +73,6 @@ import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
-import { rollbackPendingVideo } from "@lib/screenShare";
 // SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
 // place the DM->channelsStore mirror row is synthesized (selectDmConversation
 // on open); the dm_channel_close fallback below needs the same synthesis for
@@ -155,11 +154,28 @@ export function wireDispatcher(
   // wireDispatcher call) always starts clean.
   let hasAuthenticatedBefore = false;
   let hasReceivedReadyBefore = false;
-  // Set from the second-or-later auth_ok — the reconnect handshake time. A
-  // chat_message replay frame the transport delivers after it is timestamped
-  // *before* it (see the CHAT_MESSAGE handler below); a genuinely live
-  // message is timestamped after.
+  // Set from the second-or-later auth_ok — the reconnect handshake time, in
+  // THIS CLIENT's clock. A chat_message replay frame the transport delivers
+  // after it is timestamped *before* it; a genuinely live message is
+  // timestamped after. But payload.timestamp is the SERVER's created_at, in
+  // the SERVER's clock — comparing it to this anchor directly mixes clock
+  // domains, so the comparison below shifts the anchor into server time
+  // using serverClockSkewMs first (see its declaration below).
   let lastReconnectHandshakeAt: number | null = null;
+  // Running estimate of (this client's clock) minus (the server's clock),
+  // sampled from the most recently accepted live chat_message (Date.now() at
+  // receipt minus that frame's own server timestamp). A self-hosted server
+  // routinely runs without NTP or with a skewed TZ/clock, and comparing its
+  // timestamps against lastReconnectHandshakeAt without this correction means
+  // a lagging server clock makes every genuinely live message look like a
+  // replay for the whole drift window after every reconnect — and with
+  // persistent skew that never recovers. Network latency between the
+  // server's send and this receipt biases the estimate positive, which nudges
+  // the boundary computed below slightly EARLY relative to the server's true
+  // clock; that is the safe direction — a missed replay suppression is at
+  // worst a duplicate notification, while a false replay classification
+  // silently drops one.
+  let serverClockSkewMs = 0;
 
   // ── Auth ──────────────────────────────────────────────
 
@@ -282,10 +298,16 @@ export function wireDispatcher(
       // already loaded would otherwise keep a permanent, silent hole in its
       // history — invalidate them and refetch the one actually on screen.
       if (hasReceivedReadyBefore) {
-        invalidateLoadedMessageWindows();
         const activeAfterReady = channelsStore.select((s) => s.activeChannelId);
         const getMessages = api?.getMessages;
+        // Only invalidate when the refetch below can actually happen — api is
+        // a Partial<...>, so getMessages may be absent, and there may be no
+        // resolvable active channel to refetch. Dropping every loaded window
+        // with nothing able to reload it would leave a mounted MessageList
+        // showing only carried-through pending rows until the user navigates
+        // away and back.
         if (activeAfterReady !== null && getMessages !== undefined) {
+          invalidateLoadedMessageWindows();
           getMessages(activeAfterReady, { limit: 50 })
             .then((resp) => setMessages(activeAfterReady, resp.messages, resp.has_more))
             .catch((err) =>
@@ -491,12 +513,17 @@ export function wireDispatcher(
       // it gates the unread counter above: ws.ts clears it as soon as auth_ok
       // is processed, before the replay burst itself even arrives. A replay
       // frame's timestamp instead predates the reconnect handshake that
-      // preceded it, unlike a genuinely new live message.
+      // preceded it, unlike a genuinely new live message — compared in
+      // server-clock terms (see serverClockSkewMs above) so a lagging or
+      // skewed server clock cannot make a live message look like a replay.
       const isReplayFrame =
         lastReconnectHandshakeAt !== null &&
-        Date.parse(payload.timestamp) < lastReconnectHandshakeAt;
+        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
       if (!isReplayFrame) {
         notifyIncomingMessage(payload);
+        // Refresh the skew estimate from this accepted-as-live frame so it
+        // stays current for the next reconnect.
+        serverClockSkewMs = Date.now() - Date.parse(payload.timestamp);
       }
     }),
   );
@@ -955,29 +982,33 @@ export function wireDispatcher(
         void livekitSession().then(({ disableCamera }) => disableCamera());
         return;
       }
+      // Every remaining code has no dedicated handler above (not a pending
+      // send/reaction rollback, not a capacity refusal) — this is the one
+      // place every remaining server error lands (a rejected fire-and-forget
+      // chat_edit, for one), so it must not be silently dropped just because
+      // it isn't RATE_LIMITED/FORBIDDEN. Set synchronously, independent of
+      // the video-rollback lookup below: both paths produce this exact same
+      // message, so there is nothing left to gate on that lookup resolving.
+      setTransientError(payload.message || "Server error");
+
       // A server refusal of a voice_camera/voice_screenshare enable other
       // than VIDEO_LIMIT (FORBIDDEN, RATE_LIMITED, INTERNAL, ...): roll back
       // the already-published track, or it keeps streaming to every peer
       // while the store says it's off. Correlated by envelope id — exactly
       // like pendingSends/pendingReactions above — so an unrelated
       // FORBIDDEN/RATE_LIMITED on some other action never touches video
-      // state.
+      // state. screenShare.ts pulls in livekit-client at module scope, so —
+      // like livekitSession() above — it's loaded lazily here too, at its
+      // one call site in this file.
       if (id !== undefined) {
-        const kind = rollbackPendingVideo(id);
-        if (kind !== undefined) {
-          setTransientError(payload.message || "Server error");
+        void import("@lib/screenShare").then(({ rollbackPendingVideo }) => {
+          const kind = rollbackPendingVideo(id);
+          if (kind === undefined) return;
           void livekitSession().then(({ disableCamera, disableScreenshare }) =>
             kind === "camera" ? disableCamera() : disableScreenshare(),
           );
-          return;
-        }
+        });
       }
-      // Every code that reaches here has no dedicated handler above (not a
-      // pending send/reaction/video rollback, not a capacity refusal) — this
-      // is the one place every remaining server error lands (a rejected
-      // fire-and-forget chat_edit, for one), so it must not be silently
-      // dropped just because it isn't RATE_LIMITED/FORBIDDEN.
-      setTransientError(payload.message || "Server error");
     }),
   );
 

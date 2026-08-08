@@ -471,6 +471,32 @@ describe("parseStoredFingerprint", () => {
   });
 });
 
+describe("normalizeHostForCertCompare", () => {
+  // Import the pure function directly — it must be exported for main.ts to
+  // share it (see below) instead of keeping its own duplicate.
+  let normalizeHostForCertCompare: typeof import("../../src/lib/ws").normalizeHostForCertCompare;
+
+  beforeEach(async () => {
+    const mod = await import("../../src/lib/ws");
+    normalizeHostForCertCompare = mod.normalizeHostForCertCompare;
+  });
+
+  it("lowercases so a mixed-case saved host matches the Rust proxy's lowercased event host", () => {
+    // This is exactly the guard main.ts's onCertMismatch/onCertFirstUse
+    // handlers evaluate as `evt.host === normalizeHostForCertCompare(lastConnectHost)`
+    // before resuming a connect (accept) or tearing down the live session
+    // (reject). lastConnectHost is stored verbatim from the profile (e.g.
+    // typed as "Example.COM:443"); evt.host arrives from tofu::cert_store_key
+    // (src-tauri/src/tofu.rs), which always lowercases. Without lowercasing
+    // here too, that guard silently fails for any uppercase host — worst
+    // case, onReject's session teardown never fires and the user stays
+    // connected to a server whose changed certificate they just rejected.
+    const evtHost = "example.com";
+    const lastConnectHost = "Example.COM:443";
+    expect(evtHost === normalizeHostForCertCompare(lastConnectHost)).toBe(true);
+  });
+});
+
 describe("cert-tofu non-mismatch statuses", () => {
   let client: ReturnType<typeof createWsClient>;
 

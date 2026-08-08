@@ -378,6 +378,16 @@ export async function publishIdentityKey(
  * is called from the ready hook, by which point auth state is populated, and
  * keeping the signature unchanged avoids threading the id through every call
  * site just to scope the keyring lookup (B3-3).
+ *
+ * If auth state is NOT yet populated (no user id), this returns false
+ * without touching the keyring at all — it must never substitute a
+ * placeholder scope like `?? 0`. `getOrCreateIdentityKeyPair` is host+user
+ * scoped, and minting (or migrating) a keypair under a bogus `host:0`
+ * would adopt-and-DELETE the real legacy key into that wrong account (see
+ * `identityKeyPairCache` / `migrateLegacyIdentityKey` above); the next,
+ * correctly-authenticated call then mints a second, different keypair under
+ * `host:<realId>`, so the published key and the announce signing key
+ * permanently disagree — a false MITM warning for every peer.
  */
 export async function ensureIdentityKeyPublished(
   host: string,
@@ -386,7 +396,11 @@ export async function ensureIdentityKeyPublished(
   updateProfile: (data: { username: string; identity_public_key: string }) => Promise<unknown>,
 ): Promise<boolean> {
   try {
-    const userId = authStore.getState().user?.id ?? 0;
+    const userId = authStore.getState().user?.id;
+    if (userId === undefined) {
+      log.warn("No authenticated user id yet — not publishing identity key", { host });
+      return false;
+    }
     const keyPair = await getOrCreateIdentityKeyPair(host, userId);
     return await publishIdentityKey(
       (data) => updateProfile({ username, ...data }),

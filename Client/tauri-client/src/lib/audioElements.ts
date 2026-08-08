@@ -22,9 +22,11 @@ const log = createLogger("audioElements");
  * channel-mutes.ts's currentHost — the client is multi-server (one webview
  * origin means one localStorage) and userId is only unique per server, so
  * without a host component a volume set for user 7 on one server would
- * silence user 7 on every other server too. `null` (the startup default)
- * falls back to the original unscoped key so a pre-scoping install's saved
- * volumes are not orphaned.
+ * silence user 7 on every other server too. `setAudioVolumeHost` is always
+ * called with a real host before any volume is read (see MainPage.ts), so
+ * the `null` startup default is not what protects a pre-scoping install's
+ * saved volumes — `getSavedUserVolume` does that below by reading through to
+ * the original unscoped key on a miss at the scoped one.
  */
 let currentHost: string | null = null;
 
@@ -38,9 +40,26 @@ function userVolumeKey(userId: number): string {
   return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
 }
 
-/** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's GainNode-backed setVolume(). */
+// setUserVolume always clamps to 0-200, so -1 is safe as a "nothing saved" sentinel.
+const VOLUME_NOT_SET = -1;
+
+/** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's
+ *  GainNode-backed setVolume(). On a miss at the host-scoped key, reads
+ *  through to the pre-scoping unscoped key once and persists the result
+ *  under the scoped key so the read-through isn't repeated. */
 function getSavedUserVolume(userId: number): number {
-  return loadPref<number>(userVolumeKey(userId), 100);
+  const scopedKey = userVolumeKey(userId);
+  if (currentHost === null) return loadPref<number>(scopedKey, 100);
+
+  const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);
+  if (scoped !== VOLUME_NOT_SET) return scoped;
+
+  const legacy = loadPref<number>(`userVolume_${userId}`, VOLUME_NOT_SET);
+  if (legacy !== VOLUME_NOT_SET) {
+    savePref(scopedKey, legacy);
+    return legacy;
+  }
+  return loadPref<number>(scopedKey, 100);
 }
 
 export class AudioElements {
