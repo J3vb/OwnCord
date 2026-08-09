@@ -277,4 +277,71 @@ for (const { cluster, results } of fixed) {
   log(`prove ${cluster.file}: committed ${p.sha} (${ids.join(', ')})`)
 }
 
-return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate: null }
+// ---------- phase 4: gate ----------
+const GATE_RESULT = {
+  type: 'object',
+  required: ['passed', 'stacks', 'output'],
+  properties: {
+    passed: { type: 'boolean' },
+    stacks: { type: 'array', items: { type: 'string' } },
+    output: { type: 'string', description: 'the failing command and its output, or a short ok summary' },
+  },
+}
+
+function stacksFor(files) {
+  const s = new Set()
+  for (const f of files) {
+    if (f.startsWith('Server/')) s.add('server')
+    else if (f.startsWith('Client/tauri-client/src-tauri/')) s.add('rust')
+    else if (f.startsWith('Client/')) s.add('client')
+  }
+  return [...s]
+}
+
+const GATE_COMMANDS = {
+  client:
+    `From Client/tauri-client:\n` +
+    `  NODE_OPTIONS=--no-experimental-webstorage npm test\n` +
+    `  npm run typecheck\n` +
+    `  npm run lint\n` +
+    `  npm run format:check`,
+  server:
+    `From Server:\n` +
+    `  go build ./... && go build -tags otel ./... && go build -tags wazero ./... && go build -tags otel,wazero ./...\n` +
+    `  go vet ./...\n` +
+    `  go test -race ./...\n` +
+    `  go test -tags deadlock -count=1 ./ws/\n` +
+    `  golangci-lint run`,
+  rust:
+    `From Client/tauri-client/src-tauri:\n` +
+    `  cargo test\n` +
+    `  cargo clippy --all-targets -- -D warnings`,
+}
+
+let gate = null
+if (commits.length) {
+  phase('Gate')
+  const stacks = stacksFor(commits.map((c) => c.file))
+  gate = await agent(
+    `Run the OwnCord CI gates locally for the stacks touched by this fix run, on branch ${BRANCH}.\n\n` +
+      `This runs ONCE for the whole run - a full gate per fix would take longer than the fixing did.\n\n` +
+      `Touched stacks: ${stacks.join(', ')}\n\n` +
+      stacks.map((s) => GATE_COMMANDS[s]).join('\n\n') +
+      `\n\nRun every command for every touched stack. Report passed=false if ANY of them fails, and put ` +
+      `the failing command plus the relevant output in "output". Do NOT fix anything, do NOT amend or ` +
+      `revert any commit, and do NOT push. Reporting the failure accurately is the whole job.\n\n` +
+      `Known false alarm: a windows -race failure inside ws whose stack mentions runtime.scanstack or ` +
+      `runtime.(*unwinder).next is a Go 1.26.5 runtime GC fault, not a real failure - rerun that package ` +
+      `once before reporting it.`,
+    { label: 'gate', phase: 'Gate', model: 'sonnet', effort: 'medium', schema: GATE_RESULT },
+  )
+  // A malformed/missing report (dead agent, or a schema the caller didn't honor) is treated as a
+  // failed gate, same as the null-check pattern in phases 2 and 3 - never crash on shape here.
+  if (!gate || typeof gate.passed !== 'boolean' || !Array.isArray(gate.stacks))
+    gate = { passed: false, stacks, output: (gate && gate.output) || 'gate agent failed to report' }
+  log(`gate: ${gate.passed ? 'PASS' : 'FAIL'} (${gate.stacks.join(', ')})`)
+} else {
+  log('gate: nothing committed - skipped')
+}
+
+return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate }

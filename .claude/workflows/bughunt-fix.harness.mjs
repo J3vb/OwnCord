@@ -375,6 +375,82 @@ scenarios.f9b_declined_survives_a_failed_prove = async () => {
   assert.equal(byId['OC-0002'].rationale, declinedRationale)
 }
 
+// F10: the gate runs once, and only for the stacks the commits actually touched.
+scenarios.f10_gate_targets_touched_stacks = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  let gatePrompt = ''
+  const { result, calls } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })) }
+      }
+      if (String(opts.label).startsWith('prove:'))
+        return {
+          committed: true,
+          sha: 'aaa1111',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nFAIL t.ts (reverted)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts (fixed)',
+          note: '',
+        }
+      gatePrompt = prompt
+      return { passed: true, stacks: ['client', 'server'], output: 'ok' }
+    },
+  })
+  const gateCalls = calls.filter((c) => c.opts.label === 'gate')
+  assert.equal(gateCalls.length, 1, 'ci-check runs once, not per fix')
+  assert.equal(gateCalls[0].opts.model, 'sonnet')
+  assert.equal(gateCalls[0].opts.effort, 'medium')
+  assert.match(gatePrompt, /no-experimental-webstorage/, 'client gate command must be spelled out')
+  assert.match(gatePrompt, /go build -tags otel/, 'server gate must cover the tagged build variants')
+  assert.equal(result.gate.passed, true)
+}
+
+// F11: nothing committed means nothing to gate - skip it rather than burn 15 minutes.
+scenarios.f11_no_commits_skips_gate = async () => {
+  const findings = [rec('OC-0001')]
+  const { result, calls } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }] }
+      throw new Error(`no agent expected for label ${opts.label}`)
+    },
+  })
+  assert.ok(!calls.some((c) => c.opts.label === 'gate'))
+  assert.equal(result.gate, null)
+}
+
+// F12: a red gate does not rewrite history - commits stand, the failure is reported.
+scenarios.f12_failing_gate_keeps_commits = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      if (String(opts.label).startsWith('prove:'))
+        return {
+          committed: true,
+          sha: 'bbb2222',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nFAIL t.ts (reverted)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts (fixed)',
+          note: '',
+        }
+      return { passed: false, stacks: ['client'], output: 'tsc: 3 errors' }
+    },
+  })
+  assert.equal(result.commits.length, 1, 'a failing gate must not revert commits')
+  assert.equal(result.results[0].outcome, 'fixed')
+  assert.equal(result.gate.passed, false)
+  assert.match(result.gate.output, /tsc: 3 errors/)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
