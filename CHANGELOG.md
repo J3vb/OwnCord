@@ -9,8 +9,9 @@ behavioural changes operators must know about.
 
 - **feat(client):** the login form has an **Auto connect** checkbox under
   Remember password. Ticking it makes that server connect automatically on
-  launch — the same setting as the ⚡ button on a server card, so the two
-  stay in sync, and as before only one server can be auto-connect at a time.
+  launch — the same setting as the auto-login button on a server card, so
+  the two stay in sync, and as before only one server can be auto-connect
+  at a time.
   Ticking it also forces Remember password on and locks it: auto-connect
   replays the stored token, which is only written when the password is
   remembered, so the two cannot be set independently without producing a
@@ -18,6 +19,114 @@ behavioural changes operators must know about.
 - **fix(client):** Remember password works again. The password was saved to
   the OS keyring but never returned to the client over IPC, so the login
   form could not prefill it — the box appeared to work and did nothing.
+- **fix:** three bug-hunt sweeps closed **233 verified defects** since
+  `v1.2.0-alpha.1` — 26 in #1328, 107 in #1331, 100 in #1332 — each fixed
+  test-first, with the failing assertion watched red against the unpatched
+  code before the patch landed. The behavioural consequences worth knowing
+  about are listed in the nine entries below.
+- **server:** WS hub reconnect and replay hardening (#1328, #1331).
+  Cold-tier replay used to truncate silently instead of forcing a full
+  ready, and a retention-pruned event log was accepted outright as a
+  complete resume — the highest-impact fix in #1331, since any client whose
+  reconnect gap crossed the 24h retention default was permanently desynced.
+  Resume also silently dropped the focused channel's topic subscription,
+  stopping message delivery until the user manually switched channels; it
+  is now restored during the handshake. `visibilityChangeSeq` can now only
+  move forward across its three writers — it previously could regress and
+  skip a required resync.
+- **server:** voice/E2EE key-holder election and audience gating (#1328,
+  #1331) — three key-holder desync bugs (no client demotion path, peer keys
+  cleared on reconnect, missing re-election on the webhook and
+  fresh-reconnect paths), plus re-election wired into the sweep and
+  channel-cleanup paths. Voice events were READ-filtered while membership
+  is CONNECT-only, so participants in that gap silently missed
+  `voice_leave`, stalling key-holder election and forward-secrecy rotation.
+  Deleting a channel now evicts its voice participants first — the cleanup
+  function existed but had zero production callers, so the FK cascade used
+  to strand them silently. Moderator mute/deafen now survives a
+  voice-channel switch; joins to non-voice channels are rejected; archived
+  channels are read-only and unjoinable.
+- **security(server):** roles/permissions (#1328, #1331) — `UpdateRole`
+  allowed position collisions that `CreateRole` already rejected, so tied
+  positions could read as equal rank in every hierarchy comparison; it now
+  matches `CreateRole`'s validation. `can_send` is now recomputed per client
+  on every role/override change, so a permission change takes effect for
+  connected clients immediately rather than waiting on a reconnect.
+- **server:** attachments and admin data-safety (#1331) — migration **030**
+  unlinks attachments on message delete instead of cascading, so a cascaded
+  channel/DM delete no longer strands uploaded files on disk with no
+  reclamation path. The 15-minute orphan-attachment sweep was deleting every
+  avatar in the instance (avatars are, by design, attachments with no
+  message link) on its first tick past the grace period, permanently 404ing
+  every profile picture; a second bug in the same sweep collapsed the
+  one-hour grace period to effectively zero, from a TEXT-comparison mismatch
+  between an RFC3339 cutoff and SQLite's own timestamp format. A failed
+  backup restore used to truncate the live database to zero bytes with no
+  rollback, while the server kept answering requests against the now-closed
+  DB and falsely claimed a restart was underway — it now restores the
+  pre-restore safety copy on failure and requests the restart honestly.
+  Also fixed: personal data is cleared on account deletion, banned users are
+  excluded from owner lookup, the silent 1000-member roster cap is gone, and
+  a sender's own read state now advances on send. Migration applies
+  automatically on first start; no operator action needed.
+- **protocol:** a new READ-gated `active_channel_id` auth field (#1331)
+  restores the focused-channel subscription during the reconnect handshake
+  itself, closing the window before the post-`auth_ok` `channel_focus` round
+  trip lands. `protocol.md` also corrects the presence table, which had
+  incorrectly documented all presence events as sequenced. Older
+  clients/servers are unaffected — it is a new, ignorable field.
+- **security(client):** identity/TOFU and transport (#1332) — an in-flight
+  change to scope the identity keypair by host *and* user id would have
+  re-minted a fresh key on every existing install, firing the TOFU "verify
+  out-of-band" re-pin warning at the entire alpha population simultaneously,
+  exactly the pattern that teaches users to click through the one warning
+  meant to matter. The legacy host-only key is now adopted into the scoped
+  name instead, saving before deleting so a partial failure cannot strand a
+  user with neither key. Switching hosts carried the previous server's
+  bearer token forward into the next login request; `api.setConfig` now
+  drops it when the host changes without a replacement. A hand-copied,
+  un-lowercased host normalizer in `main.ts` meant an uppercase hostname's
+  cert-mismatch *reject* path skipped `disconnect()`/`clearAuth()`, leaving
+  a user who refused a changed certificate still connected to that server —
+  the single lowercased implementation in `ws.ts` is now shared everywhere.
+- **fix(client):** voice mic/camera reliability (#1331, #1332) — six
+  separate paths could republish the microphone without checking the user's
+  mute state (the audio-device fallback, selecting "Default" input,
+  un-deafening, `retryMicPermission`, a stale PTT ownership latch, and
+  auto-reconnect's `restoreLocalVoiceState`), each producing a hot mic while
+  every remote UI still showed the user muted; all now route through
+  `isMicPolicyGated()`. Camera and screenshare kept publishing to the SFU
+  after the user turned them off during the OS device picker. Enhanced Noise
+  Suppression silently disabled the input-volume slider and VAD gate because
+  `livekit-client`'s own `replaceTrack` call landed after ours. A key-holder
+  promotion arriving mid voice-setup was clobbered, ejecting the joiner
+  after a timeout only it could have resolved.
+- **fix(client):** messaging and store reliability (#1328, #1331, #1332) —
+  sequenced DMs could jump the FIFO ahead of `sendHigh`, permanently losing
+  an event dropped before flush. A full-ready resync left every loaded
+  channel with a permanent hole in its history, because that tier never
+  replays `chat_message` frames; loaded windows are now invalidated and the
+  active channel refetched. The WS error handler only bannered
+  `RATE_LIMITED` and `FORBIDDEN`, so every other server error code — for
+  example a rejected `chat_edit` — was dropped in silence while the
+  optimistic "Message edited" toast still fired. A message whose
+  `chat_send_ok` was lost to the same disconnect that forced a resync could
+  render twice; the optimistic row's id-based dedup now shares the
+  content-based match predicate `addMessage` already used. Replay detection
+  compared the server's `created_at` against the client's own clock, so a
+  self-hosted server without NTP made every live message after a reconnect
+  look like a replay and silently killed its notification; both sides now
+  use an estimated server-time skew.
+- **fix(client):** UI defects (#1331, #1332) — the quick-switcher could
+  mount a second overlay, orphaning a body-mounted backdrop that blocked all
+  input until reload. The status-picker stylesheet targeted a root element
+  the component never toggles; a same-branch repair then left the status dot
+  itself 0×0 and unclickable, now fixed together with a test pinning the
+  stylesheet to the classes the component actually emits. The attachment
+  remove button and the failed-send Retry/Discard buttons did nothing;
+  drag-reorder's phantom-drag latch and permission gate are fixed; keyboard
+  Tab could escape every modal because hidden (`display: none`) controls
+  were still counted as focusable.
 - **fix(client):** the user profile popup is styled correctly again
   (`a308f81`).
 - **fix(client):** Vite no longer watches `src-tauri/`, so a running dev
