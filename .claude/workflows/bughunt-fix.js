@@ -47,10 +47,13 @@ for (const f of ALL) {
 
 // Group by file. One agent per file is what removes merge conflicts (clusters are disjoint)
 // and what makes a root-cause fix possible - the agent sees every defect in the file at once.
+// Normalize the grouping key (backslashes -> forward slashes) so a path reported with the
+// "wrong" separator does not silently split one real file into two clusters.
 const byFile = new Map()
 for (const f of selected) {
-  if (!byFile.has(f.file)) byFile.set(f.file, [])
-  byFile.get(f.file).push(f)
+  const key = String(f.file).replace(/\\/g, '/')
+  if (!byFile.has(key)) byFile.set(key, [])
+  byFile.get(key).push(f)
 }
 const clusters = [...byFile.entries()].map(([file, findings]) => ({
   file,
@@ -68,7 +71,7 @@ const publicClusters = clusters.map((c) => ({ file: c.file, ids: c.ids }))
 // ---------- schemas ----------
 const FIX_RESULTS = {
   type: 'object',
-  required: ['results'],
+  required: ['results', 'touchedPaths'],
   properties: {
     results: {
       type: 'array',
@@ -82,6 +85,14 @@ const FIX_RESULTS = {
           rationale: { type: 'string', description: 'required for declined and blocked; empty for fixed' },
         },
       },
+    },
+    touchedPaths: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'every non-test SOURCE file this agent modified while working this cluster, repo-relative, forward ' +
+        'slashes - including cluster.file itself if it was touched, and any shared file outside the cluster ' +
+        'the root-cause fix required. Test files belong in testPath (per finding), not here.',
     },
   },
 }
@@ -104,20 +115,24 @@ function fixPrompt(cluster) {
     `  3. Fix the ROOT CAUSE. Grep every caller of the function you are about to change. One guard in a ` +
     `shared function beats a guard in every caller, and patching only the path a finding names leaves its ` +
     `siblings broken.\n` +
-    `  4. Because several findings share this file, look for one change that closes more than one of them ` +
+    `  4. You may edit a shared file outside your own cluster (${cluster.file}) when that is where the ` +
+    `root cause lives. If you do, you MUST list every SOURCE file you modified - including this cluster's ` +
+    `own file - in touchedPaths, repo-relative with forward slashes. Test files belong in testPath, not ` +
+    `touchedPaths.\n` +
+    `  5. Because several findings share this file, look for one change that closes more than one of them ` +
     `before writing separate patches.\n` +
-    `  5. DO NOT run any git command. No add, no commit, no stash, no checkout. Other agents are working ` +
+    `  6. DO NOT run any git command. No add, no commit, no stash, no checkout. Other agents are working ` +
     `in this same working tree and git operations collide on the index lock. Leave your changes in the ` +
     `working tree; a later serial phase commits them.\n` +
-    `  6. If a finding is wrong, or the correct fix is a deliberate product decision you should not make ` +
+    `  7. If a finding is wrong, or the correct fix is a deliberate product decision you should not make ` +
     `alone, return outcome "declined" with a rationale. Do not invent a fix you do not believe in.\n` +
-    `  7. If you cannot fix it for a mechanical reason (missing fixture, unclear repro), return "blocked" ` +
+    `  8. If you cannot fix it for a mechanical reason (missing fixture, unclear repro), return "blocked" ` +
     `with a rationale.\n\n` +
     `Client tests run from Client/tauri-client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
     `  go test ./<pkg>/ -run <TestName>\n\n` +
-    `Return one result per finding id, all ${cluster.ids.length} of them.\n\n` +
+    `Return one result per finding id, all ${cluster.ids.length} of them, plus touchedPaths.\n\n` +
     `--- FINDINGS IN ${cluster.file} ---\n${JSON.stringify(cluster.findings, null, 2)}`
   )
 }
@@ -130,7 +145,11 @@ const fixOutcomes = await parallel(
       model: 'sonnet',
       effort: 'xhigh',
       schema: FIX_RESULTS,
-    }).then((r) => ({ cluster, results: (r && r.results) || [] })),
+    }).then((r) => ({
+      cluster,
+      results: (r && r.results) || [],
+      touchedPaths: r && Array.isArray(r.touchedPaths) ? r.touchedPaths.filter((p) => typeof p === 'string' && p) : [],
+    })),
   ),
 )
 
@@ -144,6 +163,8 @@ for (let i = 0; i < clusters.length; i++) {
     fixed.push({
       cluster,
       results: cluster.ids.map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent failed or returned nothing' })),
+      touchedPaths: [],
+      union: [cluster.file],
     })
     continue
   }
@@ -160,7 +181,37 @@ for (let i = 0; i < clusters.length; i++) {
     .filter((id) => !reported.has(id))
     .map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent returned no result for this finding' }))
   if (missing.length) log(`fix ${cluster.file}: ${missing.length} finding(s) unreported by the agent - blocked`)
-  fixed.push({ cluster, results: [...ownResults, ...missing] })
+  fixed.push({
+    cluster,
+    results: [...ownResults, ...missing],
+    touchedPaths: outcome.touchedPaths,
+    union: [...new Set([cluster.file, ...outcome.touchedPaths])],
+  })
+}
+
+// ---------- phase 2.5: cross-cluster overlap guard ----------
+// Rule 4 above lets an agent fix a shared root cause outside its own file - the per-file
+// disjointness the whole design leans on (no merge conflicts, a clean revert per cluster) no
+// longer holds automatically once that happens. If two clusters' agents both touched the same
+// path, Phase 3 cannot safely revert/stage per-cluster: one cluster's revert could silently
+// undo the other's real fix (a misattributed VACUOUS TEST) or a real change could never get
+// staged at all. Block both clusters rather than guess which one "owns" the shared file.
+for (let i = 0; i < fixed.length; i++) {
+  for (let j = i + 1; j < fixed.length; j++) {
+    const a = fixed[i]
+    const b = fixed[j]
+    const shared = a.union.filter((p) => b.union.includes(p))
+    if (!shared.length) continue
+    log(`blocked: ${a.cluster.file} and ${b.cluster.file} both touch ${shared.join(', ')} - both clusters blocked`)
+    for (const [entry, other] of [[a, b], [b, a]]) {
+      for (const r of entry.results) {
+        if (r.outcome === 'fixed') {
+          r.outcome = 'blocked'
+          r.rationale = `cross-cluster edit: shares ${shared.join(', ')} with ${other.cluster.file} - needs a human`
+        }
+      }
+    }
+  }
 }
 
 const allResults = fixed.flatMap((f) => f.results)
@@ -182,14 +233,14 @@ const PROVE_RESULT = {
     redOutput: {
       type: 'string',
       description:
-        'the ACTUAL output of the test run performed with the source reverted (step 3), including the ' +
+        'the ACTUAL output of the test run performed with the source reverted (step 4), including the ' +
         'command that was run. This run must FAIL. Paste the real captured output verbatim - not a ' +
         'summary, not a paraphrase.',
     },
     greenOutput: {
       type: 'string',
       description:
-        'the ACTUAL output of the test run performed after the fix was restored (step 5), including the ' +
+        'the ACTUAL output of the test run performed after the fix was restored (step 6), including the ' +
         'command that was run. This run must PASS. Paste the real captured output verbatim - not a ' +
         'summary, not a paraphrase.',
     },
@@ -197,36 +248,43 @@ const PROVE_RESULT = {
   },
 }
 
-function provePrompt(cluster, fixedIds, testPaths) {
+function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
   return (
     `You are proving and committing ONE cluster of fixes in the OwnCord repo ` +
     `(D:/Local-Lab/Repos/OwnCord), on branch ${BRANCH}.\n\n` +
-    `Source file: ${cluster.file}\n` +
+    `Source file(s): ${sourcePaths.join(', ')}\n` +
     `Findings fixed here: ${fixedIds.join(', ')}\n` +
     `Test files written: ${testPaths.join(', ') || '(none reported)'}\n\n` +
     `You are running SERIALLY. No other agent is touching git right now, so you may use git freely.\n\n` +
     `Do exactly this, in order:\n` +
-    `  1. Copy the current (fixed) contents of the SOURCE file to a scratch location outside the repo.\n` +
-    `  2. Run: git checkout HEAD -- ${cluster.file}\n` +
-    `     Revert ONLY the source file. Do NOT revert or delete the test files - a brand-new test file is ` +
-    `untracked and this leaves it alone, and a new case in an existing test file is a modification to a ` +
-    `path you did not name, so it survives too. Either way the new assertions are present while the fix ` +
-    `is gone.\n` +
-    `  3. Run the tests listed above. They MUST fail. Set redObserved accordingly. Capture the ACTUAL ` +
+    `  1. Run: git rev-parse --abbrev-ref HEAD\n` +
+    `     It MUST print exactly "${BRANCH}". If it does not, DO NOT touch git any further: set ` +
+    `committed=false, explain in note which branch you actually found, and STOP. Committing to the wrong ` +
+    `branch (e.g. main, because the operator forgot to create/checkout ${BRANCH} first) is not recoverable ` +
+    `by this agent.\n` +
+    `  2. Copy the current (fixed) contents of ALL source file(s) listed above to a scratch location ` +
+    `outside the repo.\n` +
+    `  3. Run: git checkout HEAD -- ${sourcePaths.join(' ')}\n` +
+    `     Revert every source path listed above, and nothing else. Do NOT revert or delete the test ` +
+    `files - a brand-new test file is untracked and this leaves it alone, and a new case in an existing ` +
+    `test file is a modification to a path you did not name, so it survives too. Either way the new ` +
+    `assertions are present while the fix is gone.\n` +
+    `  4. Run the tests listed above. They MUST fail. Set redObserved accordingly. Capture the ACTUAL ` +
     `output of this run, including the command you ran, and return it verbatim in redOutput - not a ` +
     `summary, not a paraphrase.\n` +
     `     If they PASS, the tests do not pin the bug - they are vacuous. Restore the fixed source from ` +
     `scratch, set committed=false, explain in note, and STOP. Do not commit. Do not try to repair the ` +
     `test yourself.\n` +
-    `  4. Restore the fixed source file from your scratch copy.\n` +
-    `  5. Run the tests again. They MUST pass. Set greenObserved accordingly. Capture the ACTUAL output ` +
+    `  5. Restore the fixed source file(s) from your scratch copy.\n` +
+    `  6. Run the tests again. They MUST pass. Set greenObserved accordingly. Capture the ACTUAL output ` +
     `of this run, including the command you ran, and return it verbatim in greenOutput - not a summary, ` +
     `not a paraphrase. If they do not pass, set committed=false, explain in note, and STOP.\n` +
-    `  6. Stage the source file AND the test files, then commit with subject:\n` +
+    `  7. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files, ` +
+    `then commit with subject:\n` +
     `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
     `Co-Authored-By trailer.\n` +
-    `  7. Return the short sha.\n\n` +
+    `  8. Return the short sha.\n\n` +
     `Client tests run from Client/tauri-client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
@@ -236,7 +294,7 @@ function provePrompt(cluster, fixedIds, testPaths) {
 
 const commits = []
 // Serial on purpose: parallel git commands collide on .git/index.lock.
-for (const { cluster, results } of fixed) {
+for (const { cluster, results, union } of fixed) {
   const fixedHere = results.filter((r) => r.outcome === 'fixed')
   if (!fixedHere.length) {
     log(`prove ${cluster.file}: no fixes to prove - skipped`)
@@ -247,7 +305,7 @@ for (const { cluster, results } of fixed) {
   // A dead/thrown prove agent must not take down the sibling clusters still waiting in this
   // serial loop - same "one blocked cluster does not poison the rest" rule Phase 2 gets from
   // parallel()'s catch. Fold it into a null result so the ok/why logic below handles it uniformly.
-  const p = await agent(provePrompt(cluster, ids, testPaths), {
+  const p = await agent(provePrompt(cluster, ids, testPaths, union), {
     label: `prove:${cluster.file}`,
     phase: 'Prove',
     model: 'sonnet',

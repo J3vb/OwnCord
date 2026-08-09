@@ -82,6 +82,24 @@ scenarios.f1_clusters_by_file = async () => {
   assert.deepEqual(byFile['Server/ws/hub_sweep.go'], ['OC-0003'])
 }
 
+// F1b: a backslash/case-only variant of the same path must not split into a second cluster -
+// the same disjointness invariant the cross-cluster guard protects, at the grouping step.
+scenarios.f1b_clustering_normalizes_backslashes = async () => {
+  const findings = [
+    rec('OC-0001', { file: 'Server/ws/hub_sweep.go' }),
+    rec('OC-0002', { file: 'Server\\ws\\hub_sweep.go' }),
+  ]
+  const { result } = await run({
+    args: { findings },
+    agentStub: () => {
+      throw new Error('no agent should run in phase 1 with the later phases unimplemented')
+    },
+  })
+  assert.equal(result.clusters.length, 1, 'a backslash variant of the same path must merge into one cluster')
+  assert.deepEqual(result.clusters[0].ids.sort(), ['OC-0001', 'OC-0002'])
+  assert.equal(result.clusters[0].file, 'Server/ws/hub_sweep.go')
+}
+
 // F2: only / maxSeverity / non-open status all exclude, and every exclusion is logged by id.
 scenarios.f2_exclusions_are_announced = async () => {
   const findings = [
@@ -120,7 +138,7 @@ scenarios.f3_one_xhigh_agent_per_cluster = async () => {
     agentStub: (prompt, opts) => {
       if (!String(opts.label).startsWith('fix:')) throw new Error(`unexpected label ${opts.label}`)
       const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
-      return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.test.ts`, rationale: '' })) }
+      return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.test.ts`, rationale: '' })), touchedPaths: [] }
     },
   })
   const fixCalls = calls.filter((c) => String(c.opts.label).startsWith('fix:'))
@@ -137,10 +155,11 @@ scenarios.f3_one_xhigh_agent_per_cluster = async () => {
   assert.match(e2eeCall.prompt, /write a test that fails/i, 'rule 1: test-first')
   assert.match(e2eeCall.prompt, /weakening an assertion/i, 'rule 2: never weaken an assertion')
   assert.match(e2eeCall.prompt, /grep every caller/i, 'rule 3: root cause, grep callers')
-  assert.match(e2eeCall.prompt, /one change that closes more than one/i, 'rule 4: one change closing several findings')
-  assert.match(e2eeCall.prompt, /do not run any git command/i, 'rule 5: no git')
-  assert.match(e2eeCall.prompt, /do not invent a fix/i, 'rule 6: declined with a rationale')
-  assert.match(e2eeCall.prompt, /mechanical reason/i, 'rule 7: blocked with a rationale')
+  assert.match(e2eeCall.prompt, /touchedPaths/i, 'rule 4: shared-file edits must be listed in touchedPaths')
+  assert.match(e2eeCall.prompt, /one change that closes more than one/i, 'rule 5: one change closing several findings')
+  assert.match(e2eeCall.prompt, /do not run any git command/i, 'rule 6: no git')
+  assert.match(e2eeCall.prompt, /do not invent a fix/i, 'rule 7: declined with a rationale')
+  assert.match(e2eeCall.prompt, /mechanical reason/i, 'rule 8: blocked with a rationale')
   assert.equal(result.results.length, 3)
 }
 
@@ -161,7 +180,7 @@ scenarios.f4_dead_agent_does_not_poison_siblings = async () => {
           greenOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (fixed)',
           note: '',
         }
-      return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
     },
   })
   const byId = Object.fromEntries(result.results.map((r) => [r.id, r.outcome]))
@@ -178,6 +197,7 @@ scenarios.f5_decline_propagates = async () => {
     args: { findings },
     agentStub: () => ({
       results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'intended behaviour, locked by test X' }],
+      touchedPaths: [],
     }),
   })
   assert.equal(result.results[0].outcome, 'declined')
@@ -195,6 +215,7 @@ scenarios.f5b_foreign_id_is_dropped_and_announced = async () => {
         { id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' },
         { id: 'OC-9999', outcome: 'fixed', testPath: 't2.ts', rationale: '' },
       ],
+      touchedPaths: [],
     }),
   })
   assert.deepEqual(result.results.map((r) => r.id), ['OC-0001'])
@@ -211,7 +232,7 @@ scenarios.f6_prove_is_serial = async () => {
     agentStub: async (prompt, opts) => {
       if (String(opts.label).startsWith('fix:')) {
         const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
-        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.ts`, rationale: '' })) }
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.ts`, rationale: '' })), touchedPaths: [] }
       }
       inFlight++
       maxInFlight = Math.max(maxInFlight, inFlight)
@@ -246,7 +267,7 @@ scenarios.f7_vacuous_test_is_not_committed = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
       return {
         committed: false,
         sha: '',
@@ -270,7 +291,7 @@ scenarios.f7b_restored_fix_must_be_green = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
       return {
         committed: false,
         sha: '',
@@ -294,7 +315,7 @@ scenarios.f8_declined_cluster_skips_prove = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }], touchedPaths: [] }
       throw new Error('prove must not run for a cluster with no fixes')
     },
   })
@@ -311,7 +332,7 @@ scenarios.f9_blocked_cluster_does_not_block_siblings = async () => {
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:')) {
         const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
-        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })) }
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })), touchedPaths: [] }
       }
       if (opts.label.includes('livekitE2EE'))
         return {
@@ -355,6 +376,7 @@ scenarios.f9b_declined_survives_a_failed_prove = async () => {
             { id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' },
             { id: 'OC-0002', outcome: 'declined', testPath: '', rationale: declinedRationale },
           ],
+          touchedPaths: [],
         }
       }
       return {
@@ -384,7 +406,7 @@ scenarios.f10_gate_targets_touched_stacks = async () => {
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:')) {
         const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
-        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })) }
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })), touchedPaths: [] }
       }
       if (String(opts.label).startsWith('prove:'))
         return {
@@ -416,7 +438,7 @@ scenarios.f11_no_commits_skips_gate = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }], touchedPaths: [] }
       throw new Error(`no agent expected for label ${opts.label}`)
     },
   })
@@ -431,7 +453,7 @@ scenarios.f12_failing_gate_keeps_commits = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
       if (String(opts.label).startsWith('prove:'))
         return {
           committed: true,
@@ -460,7 +482,7 @@ scenarios.f12b_malformed_gate_response_is_a_failed_gate = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
       if (String(opts.label).startsWith('prove:'))
         return {
           committed: true,
@@ -495,7 +517,7 @@ scenarios.f12c_thrown_gate_agent_does_not_lose_commits = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
-        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }], touchedPaths: [] }
       if (String(opts.label).startsWith('prove:'))
         return {
           committed: true,
@@ -513,6 +535,115 @@ scenarios.f12c_thrown_gate_agent_does_not_lose_commits = async () => {
   assert.equal(result.commits[0].sha, 'ddd4444')
   assert.equal(result.gate.passed, false)
   assert.equal(result.results[0].outcome, 'fixed', 'a gate failure must not demote an already-committed result')
+}
+
+// F13: two clusters whose touchedPaths intersect (a shared root-cause file edited by both
+// agents) must both be blocked before Phase 3 - neither may reach prove/commit, and the log
+// must name both cluster files and the shared path.
+scenarios.f13_intersecting_touched_paths_blocks_both_clusters = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  const { result, logs, calls } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (!String(opts.label).startsWith('fix:')) throw new Error(`only fix agents should run, got ${opts.label}`)
+      if (opts.label.includes('livekitE2EE'))
+        return {
+          results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' }],
+          touchedPaths: ['Server/ws/shared_helper.go'],
+        }
+      return {
+        results: [{ id: 'OC-0003', outcome: 'fixed', testPath: 'Server/ws/hub_sweep_test.go', rationale: '' }],
+        touchedPaths: ['Server/ws/shared_helper.go'],
+      }
+    },
+  })
+  const byId = Object.fromEntries(result.results.map((r) => [r.id, r]))
+  assert.equal(byId['OC-0001'].outcome, 'blocked')
+  assert.equal(byId['OC-0003'].outcome, 'blocked')
+  assert.match(byId['OC-0001'].rationale, /Server\/ws\/shared_helper\.go/)
+  assert.match(byId['OC-0003'].rationale, /Server\/ws\/shared_helper\.go/)
+  assert.equal(result.commits.length, 0, 'neither cluster may commit once blocked by the overlap guard')
+  const joined = logs.join('\n')
+  assert.match(joined, /livekitE2EE\.ts/, 'log must name the first cluster file')
+  assert.match(joined, /hub_sweep\.go/, 'log must name the second cluster file')
+  assert.match(joined, /shared_helper\.go/, 'log must name the shared path')
+  assert.ok(!calls.some((c) => String(c.opts.label).startsWith('prove:')), 'blocked clusters must never reach prove')
+}
+
+// F14: two clusters with disjoint touchedPaths are unaffected by the guard and both commit.
+scenarios.f14_disjoint_touched_paths_both_commit = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        if (opts.label.includes('livekitE2EE'))
+          return {
+            results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' }],
+            touchedPaths: ['Client/tauri-client/src/lib/otherHelper.ts'],
+          }
+        return {
+          results: [{ id: 'OC-0003', outcome: 'fixed', testPath: 'Server/ws/hub_sweep_test.go', rationale: '' }],
+          touchedPaths: ['Server/ws/other_helper.go'],
+        }
+      }
+      return {
+        committed: true,
+        sha: opts.label.includes('livekitE2EE') ? 'e2ee1111' : 'sweep222',
+        redObserved: true,
+        greenObserved: true,
+        redOutput: 'FAIL (reverted)',
+        greenOutput: 'PASS (fixed)',
+        note: '',
+      }
+    },
+  })
+  assert.equal(result.commits.length, 2, 'disjoint touchedPaths must not trip the overlap guard')
+  const byId = Object.fromEntries(result.results.map((r) => [r.id, r.outcome]))
+  assert.equal(byId['OC-0001'], 'fixed')
+  assert.equal(byId['OC-0003'], 'fixed')
+}
+
+// F15: the prove prompt for a cluster whose agent reported extra touchedPaths names every one
+// of those paths in both the revert (checkout) instruction and the staging (add) instruction -
+// not just cluster.file.
+scenarios.f15_prove_prompt_names_every_touched_path = async () => {
+  const findings = [rec('OC-0001')]
+  let provePromptText = ''
+  const { result } = await run({
+    args: { findings, branch: 'fix/test-touched' },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return {
+          results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' }],
+          touchedPaths: ['Client/tauri-client/src/lib/sharedCrypto.ts'],
+        }
+      if (String(opts.label).startsWith('prove:')) {
+        provePromptText = prompt
+        return {
+          committed: true,
+          sha: 'aaa9999',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: 'FAIL (reverted)',
+          greenOutput: 'PASS (fixed)',
+          note: '',
+        }
+      }
+      return { passed: true, stacks: ['client'], output: 'ok' }
+    },
+  })
+  assert.equal(result.commits.length, 1)
+  const checkoutLine = provePromptText.split('\n').find((l) => l.includes('git checkout HEAD --'))
+  assert.ok(checkoutLine, 'prove prompt must contain the checkout instruction')
+  assert.match(checkoutLine, /livekitE2EE\.ts/, 'checkout instruction must name the cluster file')
+  assert.match(checkoutLine, /sharedCrypto\.ts/, 'checkout instruction must also name the extra touched path')
+  const addLine = provePromptText.split('\n').find((l) => l.includes('git add'))
+  assert.ok(addLine, 'prove prompt must contain the staging instruction')
+  assert.match(addLine, /livekitE2EE\.ts/, 'add instruction must name the cluster file')
+  assert.match(addLine, /sharedCrypto\.ts/, 'add instruction must also name the extra touched path')
+  assert.match(provePromptText, /rev-parse --abbrev-ref HEAD/, 'prove prompt must guard the current branch')
+  assert.match(provePromptText, /fix\/test-touched/, 'branch guard must name the expected branch')
 }
 
 // ---------- runner ----------

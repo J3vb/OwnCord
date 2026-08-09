@@ -41,7 +41,11 @@ silently degrading that lens instead of failing loudly. Check your lens
 objects before passing them.
 
 When it returns, append each entry of `result.confirmed` to the ledger with
-`status: "open"`, an id from `nextId`, and today's date. Bump `nextId`. Then:
+`status: "open"`, an id from `nextId`, and today's date. Bump `nextId`. The
+incoming record carries a prose `fix` field (bughunt's suggested remedy) —
+rename it to `suggestedFix` when appending, so the ledger's `fix` field starts
+as `null` and is free for `bughunt-fix` to fill in with `{commit, test,
+revertProof}` once something is actually fixed. Then:
 
 ```bash
 node .superpowers/render-ledger.mjs
@@ -72,11 +76,16 @@ is current and does not create one.
 
 When it returns, for each entry in `result.results`:
 
-- `fixed` → status `fixed`, `fix: {commit, test, revertProof: "pass"}` using the
-  matching `result.commits` entry
+- `fixed` → status `fixed`, `fix: {commit, test, revertProof: "self-reported"}`
+  using the matching `result.commits` entry — the prove agent's own report, not
+  yet independently checked (see step 4)
 - `declined` → status `declined`, copy the rationale
-- `blocked` → leave `open`, record the rationale; these failed their revert-proof
-  or their agent died, and want a human
+- `blocked` → status `blocked` (not `open`), record the rationale; these failed
+  their revert-proof, tripped the cross-cluster overlap guard, or their agent
+  died, and want a human. Do NOT leave them `open` — `bughunt-fix` only picks up
+  `open` findings, so `open` would silently re-enter one of these into the next
+  fix run, exactly the retry loop the design deliberately excludes ("one human
+  look beats three agent attempts").
 
 Check `result.gate`. A failed gate leaves the commits in place on the branch —
 fix it yourself, do not re-run the workflow over it.
@@ -100,7 +109,17 @@ Any `FAIL ... VACUOUS TEST` means the fix was committed behind a test that
 proves nothing. Revert that commit and set its findings back to `open`; do not
 talk yourself into keeping it because the code change looks right.
 
-Re-render, then review the branch and open the PR by hand. The workflow never
+For every commit `verify-fixes.mjs` reports `PASS`, upgrade that commit's
+findings' `fix.revertProof` from `"self-reported"` to `"pass"` — this
+independent run is the only check in the pipeline no agent can fabricate, and
+it is what earns the upgrade. A `FAIL` commit needs no further edit here — it
+was already reverted and its findings set back to `open` above.
+
+Re-render. Before you review the branch and open the PR, inspect the working
+tree: a blocked or declined cluster can leave its edits and any new failing
+test it wrote sitting uncommitted. Discard what you don't want — a reflexive
+`git add -A` would commit tests that describe unfixed defects into a public
+repo. Then review the branch and open the PR by hand. The workflow never
 pushes and never opens a PR.
 
 ## Testing the workflows themselves
