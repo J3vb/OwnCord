@@ -460,6 +460,31 @@ scenarios.s11_drifted_verdict = async () => {
   assert.equal(result.converged, true)
 }
 
+// S-known: a finding already in the ledger is suppressed - never verified, never re-confirmed,
+// and its text appears in the finder prompt so the model does not spend effort re-deriving it.
+scenarios.s_known_ledger_suppresses = async () => {
+  const known = [
+    { file: 'Server/ws/hub.go', line: 140, title: 'distinct bug alpha1 omega1', status: 'declined' },
+  ]
+  const { result, calls } = await run({
+    args: { known, maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const huntPrompts = calls.filter((c) => /:hunt:/.test(c.opts.label || '')).map((c) => c.prompt)
+  assert.ok(huntPrompts.length > 0, 'expected at least one finder call')
+  assert.match(huntPrompts[0], /KNOWN FINDINGS/, 'ledger entries must reach the finder prompt')
+  assert.match(huntPrompts[0], /\[declined\] distinct bug alpha1 omega1/)
+  assert.ok(
+    !calls.some((c) => /:verify:/.test(c.opts.label || '')),
+    'a ledger-known candidate must not reach verification',
+  )
+  assert.equal(result.confirmed.length, 0)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {

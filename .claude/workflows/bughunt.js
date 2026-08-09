@@ -403,7 +403,16 @@ const churnFiles = String(recon[0] || '')
 log('Recon complete - starting converging rounds')
 
 // ---------- round loop ----------
-const seen = []
+// Cross-run memory: the calling session passes the findings ledger in as args.known.
+// Seeding `seen` is all it takes - finderPrompt() already interpolates seenBlock(seen),
+// and each round already dedupes fresh candidates against it, so one assignment buys both
+// prompt-level suppression ("do not re-derive this") and mechanical dedupe.
+const seen = (ARGS.known || []).map((k) => ({
+  file: k.file,
+  line: k.line,
+  title: k.title,
+  status: k.status || 'known',
+}))
 const confirmedAll = []
 const unverified = []
 const roundStats = []
