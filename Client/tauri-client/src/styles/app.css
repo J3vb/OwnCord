@@ -657,14 +657,14 @@
   color: white;
   cursor: pointer;
 }
-.user-bar .status-dot {
+/* The status picker's own trigger dot now lives here instead of a separate
+   static dot — same corner, but it's the real thing: colored per status and
+   clickable to open the picker. Sizing/border override lives with the rest
+   of the status-picker rules below. */
+.user-bar .ub-status-picker-wrap {
   position: absolute;
   bottom: -1px;
   right: -1px;
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-circle);
-  border: 3px solid rgba(17, 18, 20, 0.6);
 }
 .user-bar .ub-info {
   flex: 1;
@@ -749,6 +749,13 @@
 .status-picker-dot:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* In the user bar the dot sits on the avatar corner, not inline next to
+   text — bigger, with a ring so it reads against any avatar picture. */
+.user-bar .status-picker-dot {
+  width: 12px;
+  height: 12px;
+  border: 3px solid rgba(17, 18, 20, 0.6);
 }
 .status-picker-option {
   display: flex;

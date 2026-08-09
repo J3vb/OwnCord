@@ -36,6 +36,13 @@ test.describe("User Bar", () => {
     await expect(status).toHaveText("Online");
   });
 
+  test("status picker dot sits on the avatar", async ({ page }) => {
+    const dot = page.locator(
+      "[data-testid='user-bar'] .ub-avatar [data-testid='status-picker-wrap'] .status-picker-dot",
+    );
+    await expect(dot).toBeVisible();
+  });
+
   test("user bar has settings button with correct label", async ({ page }) => {
     const controls = page.locator("[data-testid='user-bar'] .ub-controls");
     await expect(controls).toBeVisible();

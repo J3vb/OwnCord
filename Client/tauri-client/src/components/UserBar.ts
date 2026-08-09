@@ -120,19 +120,15 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     });
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);
-    const statusDot = createElement("div", {
-      class: "status-dot",
-      style:
-        "background: var(--green); width: 10px; height: 10px; border-radius: 50%; position: absolute; bottom: 0; right: 0;",
-    });
-    avatarEl.appendChild(statusDot);
 
     const info = createElement("div", { class: "ub-info" });
     nameEl = createElement("span", { class: "ub-name", "data-testid": "user-bar-name" });
     statusEl = createElement("span", { class: "ub-status" });
     appendChildren(info, nameEl, statusEl);
 
-    // Status picker — anchored below username, opens upward
+    // Status picker — the dot itself lives in the avatar's corner (same spot
+    // the old plain status indicator occupied) so it doubles as the status
+    // display and its click target; the dropdown still opens upward from there.
     const statusPickerWrap = createElement("div", {
       class: "ub-status-picker-wrap",
       "data-testid": "status-picker-wrap",
@@ -203,7 +199,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       () => updatePickerDisabled(),
     );
 
-    info.appendChild(statusPickerWrap);
+    avatarEl.appendChild(statusPickerWrap);
 
     const buttons = createElement("div", { class: "ub-controls" });
 
