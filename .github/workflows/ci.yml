@@ -96,11 +96,18 @@ jobs:
           path: Server/coverage.out
           retention-days: 7
 
+      # verify: false — the action's default `config verify` pass fetches
+      # golangci-lint.run's JSONSchema over HTTPS before linting anything, so a
+      # timeout on that host fails a required job having run zero linters (it
+      # took main red on d352696). `golangci-lint run` rejects a bad config on
+      # its own; the schema pass only bought a prettier error message, priced
+      # at a third-party site inside the gate.
       - name: Lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.11.3
           working-directory: Server/
+          verify: false
 
   client-check:
     name: Client Static Checks
