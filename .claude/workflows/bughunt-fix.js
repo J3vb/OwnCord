@@ -147,13 +147,20 @@ for (let i = 0; i < clusters.length; i++) {
     })
     continue
   }
+  // A hallucinated id, or one copy-pasted from a different cluster, must not merge in silently.
+  const ownIds = new Set(cluster.ids)
+  const ownResults = outcome.results.filter((r) => ownIds.has(r.id))
+  const foreignResults = outcome.results.filter((r) => !ownIds.has(r.id))
+  if (foreignResults.length) {
+    log(`fix ${cluster.file}: dropped ${foreignResults.length} result(s) for id(s) not in this cluster - ${foreignResults.map((r) => r.id).join(', ')}`)
+  }
   // An agent that skipped a finding entirely leaves it blocked rather than silently dropped.
-  const reported = new Set(outcome.results.map((r) => r.id))
+  const reported = new Set(ownResults.map((r) => r.id))
   const missing = cluster.ids
     .filter((id) => !reported.has(id))
     .map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent returned no result for this finding' }))
   if (missing.length) log(`fix ${cluster.file}: ${missing.length} finding(s) unreported by the agent - blocked`)
-  fixed.push({ cluster, results: [...outcome.results, ...missing] })
+  fixed.push({ cluster, results: [...ownResults, ...missing] })
 }
 
 const allResults = fixed.flatMap((f) => f.results)

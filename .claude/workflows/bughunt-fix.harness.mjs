@@ -134,7 +134,13 @@ scenarios.f3_one_xhigh_agent_per_cluster = async () => {
   assert.match(e2eeCall.prompt, /OC-0001/)
   assert.match(e2eeCall.prompt, /OC-0002/)
   assert.ok(!e2eeCall.prompt.includes('OC-0003'), 'a cluster prompt must not leak another file\'s findings')
-  assert.match(e2eeCall.prompt, /do not run any git command/i)
+  assert.match(e2eeCall.prompt, /write a test that fails/i, 'rule 1: test-first')
+  assert.match(e2eeCall.prompt, /weakening an assertion/i, 'rule 2: never weaken an assertion')
+  assert.match(e2eeCall.prompt, /grep every caller/i, 'rule 3: root cause, grep callers')
+  assert.match(e2eeCall.prompt, /one change that closes more than one/i, 'rule 4: one change closing several findings')
+  assert.match(e2eeCall.prompt, /do not run any git command/i, 'rule 5: no git')
+  assert.match(e2eeCall.prompt, /do not invent a fix/i, 'rule 6: declined with a rationale')
+  assert.match(e2eeCall.prompt, /mechanical reason/i, 'rule 7: blocked with a rationale')
   assert.equal(result.results.length, 3)
 }
 
@@ -166,6 +172,23 @@ scenarios.f5_decline_propagates = async () => {
   })
   assert.equal(result.results[0].outcome, 'declined')
   assert.equal(result.results[0].rationale, 'intended behaviour, locked by test X')
+}
+
+// F5b: a foreign id (hallucinated, or copy-pasted from a different cluster) is dropped, not merged,
+// and its id is announced in the logs rather than disappearing silently.
+scenarios.f5b_foreign_id_is_dropped_and_announced = async () => {
+  const findings = [rec('OC-0001')]
+  const { result, logs } = await run({
+    args: { findings },
+    agentStub: () => ({
+      results: [
+        { id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' },
+        { id: 'OC-9999', outcome: 'fixed', testPath: 't2.ts', rationale: '' },
+      ],
+    }),
+  })
+  assert.deepEqual(result.results.map((r) => r.id), ['OC-0001'])
+  assert.match(logs.join('\n'), /OC-9999/, 'the dropped foreign id must be announced in the logs')
 }
 
 // ---------- runner ----------
