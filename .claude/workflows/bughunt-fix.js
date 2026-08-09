@@ -148,14 +148,12 @@ for (let i = 0; i < clusters.length; i++) {
     continue
   }
   // An agent that skipped a finding entirely leaves it blocked rather than silently dropped.
-  // Dedupe by id too: if an agent reports the same id twice, the later report wins rather than
-  // both landing in the ledger.
-  const byId = new Map(outcome.results.map((r) => [r.id, r]))
+  const reported = new Set(outcome.results.map((r) => r.id))
   const missing = cluster.ids
-    .filter((id) => !byId.has(id))
+    .filter((id) => !reported.has(id))
     .map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent returned no result for this finding' }))
   if (missing.length) log(`fix ${cluster.file}: ${missing.length} finding(s) unreported by the agent - blocked`)
-  fixed.push({ cluster, results: [...byId.values(), ...missing] })
+  fixed.push({ cluster, results: [...outcome.results, ...missing] })
 }
 
 const allResults = fixed.flatMap((f) => f.results)

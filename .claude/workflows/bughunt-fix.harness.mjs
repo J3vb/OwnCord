@@ -119,7 +119,7 @@ scenarios.f3_one_xhigh_agent_per_cluster = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (!String(opts.label).startsWith('fix:')) throw new Error(`unexpected label ${opts.label}`)
-      const ids = [...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0])
+      const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
       return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.test.ts`, rationale: '' })) }
     },
   })
