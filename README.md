@@ -138,11 +138,11 @@ Two main components:
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.2" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.2" .
 
 # Client
 cd Client/tauri-client

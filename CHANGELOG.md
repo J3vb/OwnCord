@@ -5,8 +5,19 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
-## Unreleased
+## v1.2.0-alpha.2
 
+- **feat(client):** the login form has an **Auto connect** checkbox under
+  Remember password. Ticking it makes that server connect automatically on
+  launch — the same setting as the ⚡ button on a server card, so the two
+  stay in sync, and as before only one server can be auto-connect at a time.
+  Ticking it also forces Remember password on and locks it: auto-connect
+  replays the stored token, which is only written when the password is
+  remembered, so the two cannot be set independently without producing a
+  setting that silently does nothing.
+- **fix(client):** Remember password works again. The password was saved to
+  the OS keyring but never returned to the client over IPC, so the login
+  form could not prefill it — the box appeared to work and did nothing.
 - **fix(client):** the user profile popup is styled correctly again
   (`a308f81`).
 - **fix(client):** Vite no longer watches `src-tauri/`, so a running dev
