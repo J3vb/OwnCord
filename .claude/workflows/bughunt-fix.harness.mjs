@@ -451,6 +451,70 @@ scenarios.f12_failing_gate_keeps_commits = async () => {
   assert.match(result.gate.output, /tsc: 3 errors/)
 }
 
+// F12b: a truthy but wrongly-shaped gate response (no boolean `passed`, no `stacks` array) must
+// still be treated as a failed gate - falling back to the computed stack list, but keeping the
+// agent's own `output` string rather than overwriting it with the generic default message.
+scenarios.f12b_malformed_gate_response_is_a_failed_gate = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      if (String(opts.label).startsWith('prove:'))
+        return {
+          committed: true,
+          sha: 'ccc3333',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nFAIL t.ts (reverted)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts (fixed)',
+          note: '',
+        }
+      // wrongly shaped: no boolean `passed`, no `stacks` array - just a stray `output` string.
+      return { ok: true, output: 'ran partway: lint crashed before finishing' }
+    },
+  })
+  assert.equal(result.commits.length, 1, 'a malformed gate response must not lose an already-made commit')
+  assert.equal(result.gate.passed, false)
+  assert.ok(Array.isArray(result.gate.stacks), 'stacks must fall back to the computed list, not stay undefined')
+  assert.deepEqual(result.gate.stacks, ['client'])
+  assert.equal(
+    result.gate.output,
+    'ran partway: lint crashed before finishing',
+    "the agent's own output must be preserved, not replaced by the default message",
+  )
+}
+
+// F12c: the gate agent call itself throws. The .catch(() => null) guard must keep the rejection
+// from escaping the workflow - same as Phase 3's prove agent - so commits already made survive
+// and the gate is reported as failed rather than the run crashing before its final return.
+scenarios.f12c_thrown_gate_agent_does_not_lose_commits = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      if (String(opts.label).startsWith('prove:'))
+        return {
+          committed: true,
+          sha: 'ddd4444',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nFAIL t.ts (reverted)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts (fixed)',
+          note: '',
+        }
+      throw new Error('gate agent died')
+    },
+  })
+  assert.equal(result.commits.length, 1, 'a thrown gate agent must not lose an already-made commit')
+  assert.equal(result.commits[0].sha, 'ddd4444')
+  assert.equal(result.gate.passed, false)
+  assert.equal(result.results[0].outcome, 'fixed', 'a gate failure must not demote an already-committed result')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {

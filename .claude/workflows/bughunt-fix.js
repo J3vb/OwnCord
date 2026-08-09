@@ -311,7 +311,12 @@ const GATE_COMMANDS = {
     `  go vet ./...\n` +
     `  go test -race ./...\n` +
     `  go test -tags deadlock -count=1 ./ws/\n` +
-    `  golangci-lint run`,
+    `  golangci-lint run\n` +
+    `  make sqlc-verify protocol-verify   # generated output must not be stale. If make is not on PATH, ` +
+    `run the equivalent commands directly instead: ` +
+    `"sqlc generate && git diff --exit-code db/dbgen" and ` +
+    `"go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/tauri-client/src/lib/protocolTypes.ts" ` +
+    `- a non-empty diff in either means generated code is stale and the gate fails`,
   rust:
     `From Client/tauri-client/src-tauri:\n` +
     `  cargo test\n` +
@@ -334,7 +339,7 @@ if (commits.length) {
       `runtime.(*unwinder).next is a Go 1.26.5 runtime GC fault, not a real failure - rerun that package ` +
       `once before reporting it.`,
     { label: 'gate', phase: 'Gate', model: 'sonnet', effort: 'medium', schema: GATE_RESULT },
-  )
+  ).catch(() => null)
   // A malformed/missing report (dead agent, or a schema the caller didn't honor) is treated as a
   // failed gate, same as the null-check pattern in phases 2 and 3 - never crash on shape here.
   if (!gate || typeof gate.passed !== 'boolean' || !Array.isArray(gate.stacks))
