@@ -9,9 +9,9 @@ use crate::secret_store::{self, Backend};
 pub struct CredentialData {
     pub username: String,
     pub token: String,
-    // Password is stored in the credential blob for re-authentication but
-    // is never serialized back to the frontend over IPC to limit exposure.
-    #[serde(skip)]
+    // Password is stored in the credential blob for re-authentication and is
+    // serialized back to the frontend over IPC so the login form can prefill
+    // it when the user ticked "Remember password".
     pub password: Option<String>,
 }
 
@@ -398,15 +398,15 @@ mod tests {
     }
 
     #[test]
-    fn credential_data_skips_password_in_json() {
+    fn credential_data_serializes_password_for_prefill() {
         let data = CredentialData {
             username: "alice".into(),
             token: "tok".into(),
             password: Some("pw".into()),
         };
         let json = serde_json::to_string(&data).unwrap();
-        assert!(!json.contains("password"));
-        assert!(!json.contains("pw"));
+        assert!(json.contains("password"));
+        assert!(json.contains("pw"));
     }
 
     /// B4-3 follow-up: all 7 commands moved to `#[tauri::command(async)]`,
