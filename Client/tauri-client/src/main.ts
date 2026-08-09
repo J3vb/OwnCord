@@ -452,7 +452,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     }
 
     // Auto-save a profile for a host after successful login (if not already saved)
-    function ensureProfileExists(host: string, username: string, rememberPassword: boolean): void {
+    function ensureProfileExists(
+      host: string,
+      username: string,
+      rememberPassword: boolean,
+      autoConnect: boolean,
+    ): void {
       const existing = profileManager.getAll().find((p) => p.host === host);
       if (existing) {
         // Update username, rememberPassword preference, and lastConnected
@@ -468,6 +473,18 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           color: "#5865F2",
         });
         profileManager.setLastConnected(created.id);
+      }
+
+      // Re-find: the profile may have just been created above.
+      const profile = profileManager.getAll().find((p) => p.host === host);
+      if (profile) {
+        if (autoConnect) {
+          profileManager.setAutoLogin(profile.id);
+        } else if (profile.autoConnect) {
+          // Only clear when this profile is the current holder — setAutoLogin(null)
+          // clears auto-login on every profile, not just this one.
+          profileManager.setAutoLogin(null);
+        }
       }
       persistProfiles();
     }
@@ -487,7 +504,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           if (result.token) {
             const remember = connectPage.getRememberPassword();
             const savedPassword = remember ? password : undefined;
-            ensureProfileExists(host, username, remember);
+            ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
             wirePostAuth(host, result.token, username, savedPassword, remember);
           }
         },
@@ -496,7 +513,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           const result = await api.register(username, password, inviteCode);
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
-          ensureProfileExists(host, username, remember);
+          ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
           wirePostAuth(host, result.token, username, savedPassword, remember);
         },
         async onTotpSubmit(code) {
@@ -509,7 +526,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             if (result.token) {
               const remember = connectPage.getRememberPassword();
               const savedPassword = remember ? connectPage.getPassword() : undefined;
-              ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
+              ensureProfileExists(
+                pendingTotpHost,
+                pendingTotpUsername,
+                remember,
+                connectPage.getAutoConnect(),
+              );
               wirePostAuth(
                 pendingTotpHost,
                 result.token,
@@ -615,7 +637,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       if (quickSwitchTarget !== null) {
         sessionStorage.removeItem("owncord:quick-switch-target");
         const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
-        connectPage.selectServer(quickSwitchTarget, targetProfile?.username ?? undefined);
+        connectPage.selectServer(
+          quickSwitchTarget,
+          targetProfile?.username ?? undefined,
+          targetProfile?.autoConnect === true,
+        );
         return; // Skip auto-login when switching servers
       }
 
@@ -640,7 +666,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         try {
           const cred = await loadCredential(autoProfile.host);
           if (cred?.username && cred?.token && !autoLoginCancelled) {
-            connectPage.selectServer(autoProfile.host, cred.username);
+            // Pass autoConnect so the checkbox still reads correctly if the
+            // user cancels and lands back on the form.
+            connectPage.selectServer(autoProfile.host, cred.username, autoProfile.autoConnect);
             connectPage.showAutoConnecting(autoProfile.name);
 
             if (autoLoginCancelled) return;
@@ -656,7 +684,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             // remember (save_credential only carries the password key
             // `if let Some(...)`, so a None wipes it — see credentials.rs).
             api.setConfig({ host: autoProfile.host });
-            ensureProfileExists(autoProfile.host, cred.username, autoProfile.rememberPassword);
+            ensureProfileExists(
+              autoProfile.host,
+              cred.username,
+              autoProfile.rememberPassword,
+              autoProfile.autoConnect,
+            );
             wirePostAuth(autoProfile.host, cred.token, cred.username, undefined, false);
             return;
           }

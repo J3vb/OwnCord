@@ -53,6 +53,10 @@ export interface LoginFormApi {
   showError(message: string): void;
   resetToIdle(): void;
   getRememberPassword(): boolean;
+  /** Whether the auto-connect checkbox is ticked. */
+  getAutoConnect(): boolean;
+  /** Set the auto-connect checkbox (also forces remember-password on). */
+  setAutoConnect(enabled: boolean): void;
   getPassword(): string;
   /** Set the host input value (called when ServerPanel clicks a server). */
   setHost(host: string): void;
@@ -93,6 +97,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let totpInput: HTMLInputElement;
   let totpSubmitBtn: HTMLButtonElement;
   let rememberPasswordCheckbox: HTMLInputElement;
+  let autoConnectCheckbox: HTMLInputElement;
   let autoConnectServerName: HTMLSpanElement;
 
   // ---------------------------------------------------------------------------
@@ -220,6 +225,30 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
     appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
 
+    // Auto connect checkbox
+    const autoConnectGroup = createElement("div", { class: "form-group remember-password-group" });
+    autoConnectCheckbox = createElement("input", { type: "checkbox", id: "auto-connect" });
+    const autoConnectLabel = createElement(
+      "label",
+      {
+        for: "auto-connect",
+        class: "remember-password-label",
+      },
+      "Auto connect",
+    );
+    appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
+
+    autoConnectCheckbox.addEventListener(
+      "change",
+      () => {
+        // Auto-connect replays the saved token, which only exists when the
+        // password is remembered — so the pairing is enforced, not suggested.
+        if (autoConnectCheckbox.checked) rememberPasswordCheckbox.checked = true;
+        rememberPasswordCheckbox.disabled = autoConnectCheckbox.checked;
+      },
+      { signal },
+    );
+
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", "Invite Code", "text", "");
     inviteGroup.classList.add("form-group--hidden");
@@ -247,6 +276,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       usernameGroup,
       passwordGroup,
       rememberGroup,
+      autoConnectGroup,
       inviteGroup,
       submitBtn,
       formSwitch,
@@ -678,6 +708,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     getRememberPassword(): boolean {
       return rememberPasswordCheckbox?.checked ?? false;
+    },
+
+    getAutoConnect(): boolean {
+      return autoConnectCheckbox?.checked ?? false;
+    },
+
+    setAutoConnect(enabled: boolean): void {
+      autoConnectCheckbox.checked = enabled;
+      if (enabled) rememberPasswordCheckbox.checked = true;
+      rememberPasswordCheckbox.disabled = enabled;
     },
 
     getPassword(): string {

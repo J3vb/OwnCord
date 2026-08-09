@@ -47,7 +47,7 @@ function getIconInitials(name: string): string {
 export interface ServerPanelOptions {
   readonly signal: AbortSignal;
   /** Called immediately when the user clicks a server profile. */
-  readonly onServerClick: (host: string, username?: string) => void;
+  readonly onServerClick: (host: string, username?: string, autoConnect?: boolean) => void;
   /** Called after async credential lookup succeeds (may set password). */
   readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
@@ -206,13 +206,13 @@ export function createServerPanel(
         "click",
         () => {
           // Immediately fill host + username from profile
-          onServerClick(profile.host, fullProfile.username);
+          onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
           // Auto-fill credentials from credential store (async)
           const requestedHost = profile.host;
           void (async () => {
             const cred = await loadCredential(requestedHost);
             if (cred) {
-              onCredentialLoaded(requestedHost, cred.username, undefined);
+              onCredentialLoaded(requestedHost, cred.username, cred.password);
             }
           })();
         },
