@@ -108,6 +108,66 @@ scenarios.f2_exclusions_are_announced = async () => {
   }
 }
 
+// F3: one sonnet/xhigh agent per cluster, and the prompt carries every finding in that file.
+scenarios.f3_one_xhigh_agent_per_cluster = async () => {
+  const findings = [
+    rec('OC-0001'),
+    rec('OC-0002', { line: 800 }),
+    rec('OC-0003', { file: 'Server/ws/hub_sweep.go' }),
+  ]
+  const { result, calls } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (!String(opts.label).startsWith('fix:')) throw new Error(`unexpected label ${opts.label}`)
+      const ids = [...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0])
+      return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.test.ts`, rationale: '' })) }
+    },
+  })
+  const fixCalls = calls.filter((c) => String(c.opts.label).startsWith('fix:'))
+  assert.equal(fixCalls.length, 2, 'one agent per file cluster')
+  for (const c of fixCalls) {
+    assert.equal(c.opts.model, 'sonnet')
+    assert.equal(c.opts.effort, 'xhigh')
+    assert.equal(c.opts.phase, 'Fix')
+  }
+  const e2eeCall = fixCalls.find((c) => c.opts.label.includes('livekitE2EE'))
+  assert.match(e2eeCall.prompt, /OC-0001/)
+  assert.match(e2eeCall.prompt, /OC-0002/)
+  assert.ok(!e2eeCall.prompt.includes('OC-0003'), 'a cluster prompt must not leak another file\'s findings')
+  assert.match(e2eeCall.prompt, /do not run any git command/i)
+  assert.equal(result.results.length, 3)
+}
+
+// F4: a dead fix agent marks only its own cluster; siblings still report.
+scenarios.f4_dead_agent_does_not_poison_siblings = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (opts.label.includes('hub_sweep')) throw new Error('agent died')
+      return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+    },
+  })
+  const byId = Object.fromEntries(result.results.map((r) => [r.id, r.outcome]))
+  assert.equal(byId['OC-0001'], 'fixed')
+  assert.equal(byId['OC-0003'], 'blocked')
+  const reason = result.results.find((r) => r.id === 'OC-0003').rationale
+  assert.match(reason, /agent/i)
+}
+
+// F5: a declined finding keeps its rationale and is not treated as fixed.
+scenarios.f5_decline_propagates = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: () => ({
+      results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'intended behaviour, locked by test X' }],
+    }),
+  })
+  assert.equal(result.results[0].outcome, 'declined')
+  assert.equal(result.results[0].rationale, 'intended behaviour, locked by test X')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
