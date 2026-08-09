@@ -168,4 +168,96 @@ log(`fix: ${allResults.filter((r) => r.outcome === 'fixed').length} fixed, ` +
   `${allResults.filter((r) => r.outcome === 'declined').length} declined, ` +
   `${allResults.filter((r) => r.outcome === 'blocked').length} blocked`)
 
-return { branch: BRANCH, clusters: publicClusters, excluded, commits: [], results: allResults, gate: null }
+// ---------- phase 3: prove + commit ----------
+phase('Prove')
+
+const PROVE_RESULT = {
+  type: 'object',
+  required: ['committed', 'sha', 'redObserved', 'greenObserved', 'note'],
+  properties: {
+    committed: { type: 'boolean' },
+    sha: { type: 'string', description: 'short sha of the commit, empty when not committed' },
+    redObserved: { type: 'boolean', description: 'did the tests FAIL with the source reverted' },
+    greenObserved: { type: 'boolean', description: 'did the tests PASS with the fix restored' },
+    note: { type: 'string', description: 'why it was not committed, empty on success' },
+  },
+}
+
+function provePrompt(cluster, fixedIds, testPaths) {
+  return (
+    `You are proving and committing ONE cluster of fixes in the OwnCord repo ` +
+    `(D:/Local-Lab/Repos/OwnCord), on branch ${BRANCH}.\n\n` +
+    `Source file: ${cluster.file}\n` +
+    `Findings fixed here: ${fixedIds.join(', ')}\n` +
+    `Test files written: ${testPaths.join(', ') || '(none reported)'}\n\n` +
+    `You are running SERIALLY. No other agent is touching git right now, so you may use git freely.\n\n` +
+    `Do exactly this, in order:\n` +
+    `  1. Copy the current (fixed) contents of the SOURCE file to a scratch location outside the repo.\n` +
+    `  2. Run: git checkout HEAD -- ${cluster.file}\n` +
+    `     Revert ONLY the source file. Do NOT revert or delete the test files - a brand-new test file is ` +
+    `untracked and this leaves it alone, and a new case in an existing test file is a modification to a ` +
+    `path you did not name, so it survives too. Either way the new assertions are present while the fix ` +
+    `is gone.\n` +
+    `  3. Run the tests listed above. They MUST fail. Set redObserved accordingly.\n` +
+    `     If they PASS, the tests do not pin the bug - they are vacuous. Restore the fixed source from ` +
+    `scratch, set committed=false, explain in note, and STOP. Do not commit. Do not try to repair the ` +
+    `test yourself.\n` +
+    `  4. Restore the fixed source file from your scratch copy.\n` +
+    `  5. Run the tests again. They MUST pass. Set greenObserved accordingly. If they do not pass, set ` +
+    `committed=false, explain in note, and STOP.\n` +
+    `  6. Stage the source file AND the test files, then commit with subject:\n` +
+    `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
+    `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
+    `Co-Authored-By trailer.\n` +
+    `  7. Return the short sha.\n\n` +
+    `Client tests run from Client/tauri-client with:\n` +
+    `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
+    `Server tests run from Server with:\n` +
+    `  go test ./<pkg>/ -run <TestName>`
+  )
+}
+
+const commits = []
+// Serial on purpose: parallel git commands collide on .git/index.lock.
+for (const { cluster, results } of fixed) {
+  const fixedHere = results.filter((r) => r.outcome === 'fixed')
+  if (!fixedHere.length) {
+    log(`prove ${cluster.file}: no fixes to prove - skipped`)
+    continue
+  }
+  const ids = fixedHere.map((r) => r.id)
+  const testPaths = [...new Set(fixedHere.map((r) => r.testPath).filter(Boolean))]
+  // A dead/thrown prove agent must not take down the sibling clusters still waiting in this
+  // serial loop - same "one blocked cluster does not poison the rest" rule Phase 2 gets from
+  // parallel()'s catch. Fold it into a null result so the ok/why logic below handles it uniformly.
+  const p = await agent(provePrompt(cluster, ids, testPaths), {
+    label: `prove:${cluster.file}`,
+    phase: 'Prove',
+    model: 'sonnet',
+    effort: 'medium',
+    schema: PROVE_RESULT,
+  }).catch(() => null)
+
+  const ok = p && p.committed && p.redObserved && p.greenObserved && p.sha
+  if (!ok) {
+    const why = !p
+      ? 'prove agent failed'
+      : !p.redObserved
+        ? `revert-proof failed: tests still passed with the fix reverted (${p.note || 'no note'})`
+        : !p.greenObserved
+          ? `tests did not pass after restoring the fix (${p.note || 'no note'})`
+          : `not committed (${p.note || 'no note'})`
+    log(`prove ${cluster.file}: ${why} - ${ids.length} finding(s) blocked`)
+    for (const r of results) {
+      if (r.outcome === 'fixed') {
+        r.outcome = 'blocked'
+        r.rationale = why
+      }
+    }
+    continue
+  }
+  commits.push({ sha: p.sha, file: cluster.file, ids })
+  log(`prove ${cluster.file}: committed ${p.sha} (${ids.join(', ')})`)
+}
+
+return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate: null }

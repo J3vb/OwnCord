@@ -151,6 +151,8 @@ scenarios.f4_dead_agent_does_not_poison_siblings = async () => {
     args: { findings },
     agentStub: (prompt, opts) => {
       if (opts.label.includes('hub_sweep')) throw new Error('agent died')
+      if (String(opts.label).startsWith('prove:'))
+        return { committed: true, sha: 'aaa0000', redObserved: true, greenObserved: true, note: '' }
       return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
     },
   })
@@ -189,6 +191,106 @@ scenarios.f5b_foreign_id_is_dropped_and_announced = async () => {
   })
   assert.deepEqual(result.results.map((r) => r.id), ['OC-0001'])
   assert.match(logs.join('\n'), /OC-9999/, 'the dropped foreign id must be announced in the logs')
+}
+
+// F6: prove agents run serially (never overlapping) and only for clusters that produced a fix.
+scenarios.f6_prove_is_serial = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  let inFlight = 0
+  let maxInFlight = 0
+  const { result, calls } = await run({
+    args: { findings },
+    agentStub: async (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.ts`, rationale: '' })) }
+      }
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      return { committed: true, sha: 'abc1234', redObserved: true, greenObserved: true, note: '' }
+    },
+  })
+  assert.equal(maxInFlight, 1, 'prove/commit must be serial - git index contention')
+  const proveCalls = calls.filter((c) => String(c.opts.label).startsWith('prove:'))
+  assert.equal(proveCalls.length, 2)
+  for (const c of proveCalls) {
+    assert.equal(c.opts.model, 'sonnet')
+    assert.equal(c.opts.effort, 'medium')
+  }
+  assert.equal(result.commits.length, 2)
+  assert.deepEqual(result.commits[0], { sha: 'abc1234', file: findings[0].file, ids: ['OC-0001'] })
+}
+
+// F7: a vacuous test (revert-proof does not go RED) is NOT committed and its findings go blocked.
+scenarios.f7_vacuous_test_is_not_committed = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      return { committed: false, sha: '', redObserved: false, greenObserved: true, note: 'test passed with the fix reverted' }
+    },
+  })
+  assert.equal(result.commits.length, 0, 'a cluster that failed its revert-proof must not be committed')
+  assert.equal(result.results[0].outcome, 'blocked')
+  assert.match(result.results[0].rationale, /revert-proof/i)
+}
+
+// F7b: RED was observed but the restored fix does not go GREEN - also not committed.
+scenarios.f7b_restored_fix_must_be_green = async () => {
+  const findings = [rec('OC-0001')]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
+      return { committed: false, sha: '', redObserved: true, greenObserved: false, note: 'still failing after restore' }
+    },
+  })
+  assert.equal(result.commits.length, 0)
+  assert.equal(result.results[0].outcome, 'blocked')
+  assert.match(result.results[0].rationale, /after restoring the fix/i)
+}
+
+// F8: a cluster with only declines is never sent to prove, and produces no commit.
+scenarios.f8_declined_cluster_skips_prove = async () => {
+  const findings = [rec('OC-0001')]
+  const { result, calls } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:'))
+        return { results: [{ id: 'OC-0001', outcome: 'declined', testPath: '', rationale: 'by design' }] }
+      throw new Error('prove must not run for a cluster with no fixes')
+    },
+  })
+  assert.ok(!calls.some((c) => String(c.opts.label).startsWith('prove:')))
+  assert.equal(result.commits.length, 0)
+  assert.equal(result.results[0].outcome, 'declined')
+}
+
+// F9: one failing cluster does not stop its siblings from committing.
+scenarios.f9_blocked_cluster_does_not_block_siblings = async () => {
+  const findings = [rec('OC-0001'), rec('OC-0003', { file: 'Server/ws/hub_sweep.go' })]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
+        return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })) }
+      }
+      if (opts.label.includes('livekitE2EE'))
+        return { committed: false, sha: '', redObserved: false, greenObserved: true, note: 'vacuous' }
+      return { committed: true, sha: 'def5678', redObserved: true, greenObserved: true, note: '' }
+    },
+  })
+  assert.equal(result.commits.length, 1)
+  assert.equal(result.commits[0].sha, 'def5678')
+  const byId = Object.fromEntries(result.results.map((r) => [r.id, r.outcome]))
+  assert.equal(byId['OC-0001'], 'blocked')
+  assert.equal(byId['OC-0003'], 'fixed')
 }
 
 // ---------- runner ----------
