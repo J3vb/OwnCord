@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "owncord-client"
-version = "1.2.0-alpha.1"
+version = "1.2.0-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "device_query",

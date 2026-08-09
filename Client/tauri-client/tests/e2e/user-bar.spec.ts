@@ -36,6 +36,13 @@ test.describe("User Bar", () => {
     await expect(status).toHaveText("Online");
   });
 
+  test("status picker dot sits on the avatar", async ({ page }) => {
+    const dot = page.locator(
+      "[data-testid='user-bar'] .ub-avatar [data-testid='status-picker-wrap'] .status-picker-dot",
+    );
+    await expect(dot).toBeVisible();
+  });
+
   test("user bar has settings button with correct label", async ({ page }) => {
     const controls = page.locator("[data-testid='user-bar'] .ub-controls");
     await expect(controls).toBeVisible();
@@ -53,10 +60,5 @@ test.describe("User Bar", () => {
     const count = await buttons.count();
     // UserBar renders settings + optionally disconnect (no mute/deafen in user bar)
     expect(count).toBeGreaterThanOrEqual(1);
-  });
-
-  test("user bar has status dot", async ({ page }) => {
-    const statusDot = page.locator("[data-testid='user-bar'] .status-dot");
-    await expect(statusDot).toBeAttached();
   });
 });

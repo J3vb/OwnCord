@@ -199,7 +199,7 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined);
+      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false);
     });
 
     it("calls onServerClick with host AND username for full profiles", () => {
@@ -211,7 +211,31 @@ describe("ServerPanel", () => {
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser");
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false);
+    });
+
+    it("calls onServerClick with autoConnect true when the profile has it enabled", () => {
+      const onServerClick = vi.fn();
+      const fp = fullProfile({ autoConnect: true });
+      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
+      container.appendChild(panel.element);
+
+      const item = container.querySelector(".server-item") as HTMLElement;
+      item.click();
+
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", true);
+    });
+
+    it("calls onServerClick with autoConnect false when the profile has it disabled", () => {
+      const onServerClick = vi.fn();
+      const fp = fullProfile({ autoConnect: false });
+      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
+      container.appendChild(panel.element);
+
+      const item = container.querySelector(".server-item") as HTMLElement;
+      item.click();
+
+      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false);
     });
 
     it("attempts to load credentials from credential store on click", async () => {

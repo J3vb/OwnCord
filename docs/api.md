@@ -1973,7 +1973,7 @@ Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
 
 ```json
 {
-  "current": "v1.2.0-alpha.1",
+  "current": "v1.2.0-alpha.2",
   "latest": "v1.2.0",
   "update_available": true,
   "required_assets_present": true,

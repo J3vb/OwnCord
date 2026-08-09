@@ -51,11 +51,13 @@ export function createConnectPage(
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
   getRememberPassword(): boolean;
+  /** Whether the auto-connect checkbox is ticked. */
+  getAutoConnect(): boolean;
   getPassword(): string;
   /** Re-render the server profile list with updated data. */
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
   /** Pre-select a server by host — fills the login form and loads saved credentials. */
-  selectServer(host: string, username?: string): void;
+  selectServer(host: string, username?: string, autoConnect?: boolean): void;
   /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
   applyInviteLink(code: string, host?: string): void;
 } {
@@ -80,11 +82,12 @@ export function createConnectPage(
   const serverPanel = createServerPanel(
     {
       signal,
-      onServerClick(host: string, username?: string) {
+      onServerClick(host: string, username?: string, autoConnect?: boolean) {
         loginForm.setHost(host);
         if (username) {
           loginForm.setCredentials(username);
         }
+        loginForm.setAutoConnect(autoConnect === true);
       },
       onCredentialLoaded(host: string, username: string, password?: string) {
         // Guard: user may have clicked a different profile while loading
@@ -313,22 +316,24 @@ export function createConnectPage(
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),
     getRememberPassword: () => loginForm.getRememberPassword(),
+    getAutoConnect: () => loginForm.getAutoConnect(),
     getPassword: () => loginForm.getPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       serverPanel.renderProfiles(profiles);
     },
-    selectServer(host: string, username?: string): void {
+    selectServer(host: string, username?: string, autoConnect?: boolean): void {
       loginForm.setHost(host);
       if (username) {
         loginForm.setCredentials(username);
       }
+      loginForm.setAutoConnect(autoConnect === true);
       // Load saved credentials asynchronously (same flow as clicking a server card)
       void (async () => {
         try {
           const cred = await loadCredential(host);
           if (cred && loginForm.getHost() === host) {
-            // Password is no longer returned from credential store over IPC
-            loginForm.setCredentials(cred.username);
+            // Prefill the saved password so the user isn't retyping it.
+            loginForm.setCredentials(cred.username, cred.password);
           }
         } catch {
           // Credential loading is best-effort; user can type manually

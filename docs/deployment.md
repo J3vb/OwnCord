@@ -16,13 +16,13 @@ Production deployment guide for OwnCord server on Windows and Linux.
 **Windows:**
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.2" .
 ```
 
 **Linux:**
 ```bash
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.1" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.2" .
 ```
 
 - `-s -w` strips debug info (smaller binary)

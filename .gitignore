@@ -27,6 +27,11 @@ docs/research/
 docs/superpowers/
 /skills/
 
+# Mutation-testing output (npm run test:mutate). Local-only by design: a
+# surviving-mutant report maps exactly which behaviour nothing tests.
+Client/tauri-client/.stryker-tmp/
+Client/tauri-client/reports/
+
 # Server runtime artifacts
 Server/chatserver.exe
 Server/chatserver.exe~

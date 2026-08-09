@@ -136,15 +136,27 @@ describe("loadCredential", () => {
     expect(invoke).toHaveBeenCalledWith("load_credential", { host: "h.example" });
   });
 
+  it("returns the stored password so the login form can prefill it", async () => {
+    invoke.mockResolvedValue({ username: "alice", token: "tok", password: "pass123" });
+
+    await expect(loadCredential("h.example")).resolves.toEqual({
+      username: "alice",
+      token: "tok",
+      password: "pass123",
+    });
+  });
+
   it("drops any extra fields the backend returns", async () => {
-    // The Rust side deliberately stopped returning the password over IPC; if it
-    // ever regresses, the password must not make it into the JS heap.
-    invoke.mockResolvedValue({ username: "alice", token: "tok", password: "leaked" });
+    // Only the known fields should survive reconstruction — an unrecognised
+    // field must not make it into the JS heap.
+    invoke.mockResolvedValue({ username: "alice", token: "tok", bogus: "x" });
 
     const got = await loadCredential("h.example");
 
+    // toEqual ignores the explicit `password: undefined`, so this still pins
+    // the exact shape and catches any unknown field, not just `bogus`.
     expect(got).toEqual({ username: "alice", token: "tok" });
-    expect(got).not.toHaveProperty("password");
+    expect(got).not.toHaveProperty("bogus");
   });
 
   it("returns null when nothing is stored", async () => {

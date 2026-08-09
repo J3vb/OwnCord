@@ -288,9 +288,9 @@ describe("ConnectPage", () => {
       expect(usernameInput.value).toBe("saveduser");
     });
 
-    // Password is no longer returned from credential store over IPC (security hardening)
+    // The stored password prefills the field so the user isn't retyping it.
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("");
+    expect(passwordInput.value).toBe("savedpass");
 
     page.destroy?.();
   });
@@ -453,6 +453,57 @@ describe("ConnectPage", () => {
     const checkbox = container.querySelector("#remember-password") as HTMLInputElement;
     checkbox.checked = true;
     expect(page.getRememberPassword()).toBe(true);
+
+    page.destroy?.();
+  });
+
+  // --- getAutoConnect ---
+
+  it("getAutoConnect returns checkbox state", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    expect(page.getAutoConnect()).toBe(false);
+
+    const checkbox = container.querySelector("#auto-connect") as HTMLInputElement;
+    checkbox.checked = true;
+    expect(page.getAutoConnect()).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("ticking auto-connect forces and disables remember password", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
+    const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
+
+    autoConnectCheckbox.checked = true;
+    autoConnectCheckbox.dispatchEvent(new Event("change"));
+
+    expect(rememberCheckbox.checked).toBe(true);
+    expect(rememberCheckbox.disabled).toBe(true);
+    expect(page.getRememberPassword()).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("unticking auto-connect re-enables remember password", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
+    const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
+
+    autoConnectCheckbox.checked = true;
+    autoConnectCheckbox.dispatchEvent(new Event("change"));
+
+    autoConnectCheckbox.checked = false;
+    autoConnectCheckbox.dispatchEvent(new Event("change"));
+
+    expect(rememberCheckbox.disabled).toBe(false);
+    expect(rememberCheckbox.checked).toBe(true);
 
     page.destroy?.();
   });
@@ -940,25 +991,20 @@ describe("ConnectPage", () => {
 
   // --- setCredentials with password sets remember checkbox ---
 
-  it("setCredentials with password checks the remember password checkbox", () => {
+  it("setCredentials with password checks the remember password checkbox", async () => {
+    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", password: "pass123" });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
-    // Use selectServer which calls setCredentials internally
-    mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", password: "pass123" });
-    page.selectServer("localhost:8443");
-
-    // Wait for credential loading isn't needed for checking setCredentials behavior
-    // Let's check via the sync path: onServerClick doesn't set a password
-    // We need to verify that setCredentials with password enables remember
-    // Simulating by using credential loaded callback
-    // Actually let's verify through server panel click path
     const serverItem = container.querySelector(".server-item") as HTMLElement;
     serverItem.click();
 
-    // The rememberPassword should eventually be true after cred loaded
-    // For now, let's just verify getRememberPassword baseline
-    expect(page.getRememberPassword()).toBe(false);
+    await vi.waitFor(() => {
+      expect(page.getRememberPassword()).toBe(true);
+    });
+
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    expect(passwordInput.value).toBe("pass123");
 
     page.destroy?.();
   });
