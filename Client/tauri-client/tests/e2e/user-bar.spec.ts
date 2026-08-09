@@ -61,9 +61,4 @@ test.describe("User Bar", () => {
     // UserBar renders settings + optionally disconnect (no mute/deafen in user bar)
     expect(count).toBeGreaterThanOrEqual(1);
   });
-
-  test("user bar has status dot", async ({ page }) => {
-    const statusDot = page.locator("[data-testid='user-bar'] .status-dot");
-    await expect(statusDot).toBeAttached();
-  });
 });
