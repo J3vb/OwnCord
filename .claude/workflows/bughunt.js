@@ -18,12 +18,15 @@ const ARGS = (() => {
 })()
 const MAX_ROUNDS = ARGS.maxRounds || 8
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
+// A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
+// adaptive, so hotspot and fresh-eyes coverage - and therefore convergence - still work.
+const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
 // ponytail: rough floor for one round (up to 12 high-effort finders + verifiers); tune after live runs
 const ROUND_BUDGET_FLOOR = 150000
 // The args channel has already been observed delivering something the script
 // could not read; an unnoticed fallback here is an 8x cost surprise, so say out
 // loud what the run is actually going to do.
-log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}`)
+log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''}`)
 
 // ---------- schemas: copied VERBATIM from the current bughunt.js ----------
 const FINDINGS = {
@@ -268,12 +271,14 @@ const FLOW_LENSES = [
 ]
 
 function lensesForRound(round) {
+  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses()
   if (round === 1) return SURFACE_LENSES
   if (round === 2) return BUGCLASS_LENSES
   if (round === 3) return FLOW_LENSES
   return buildAdaptiveLenses()
 }
 function familyName(round) {
+  if (CUSTOM_LENSES) return round === 1 ? 'custom' : 'adaptive'
   return ['surfaces', 'bug-classes', 'flows'][round - 1] || 'adaptive'
 }
 function clusterOf(file) {

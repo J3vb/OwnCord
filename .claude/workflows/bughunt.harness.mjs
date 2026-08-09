@@ -485,6 +485,35 @@ scenarios.s_known_ledger_suppresses = async () => {
   assert.equal(result.confirmed.length, 0)
 }
 
+// S-lenses: args.lenses replaces the round-1 family entirely, and the round label reflects it.
+scenarios.s_custom_lenses = async () => {
+  const lenses = [
+    { key: 'voice-e2ee-keyholder', prompt: 'Hunt the key-holder election.' },
+    { key: 'voice-e2ee-rotation', prompt: 'Hunt the rotation paths.' },
+  ]
+  const { result, calls } = await run({
+    args: { lenses, maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  const keys = calls
+    .map((c) => /^r1:hunt:([a-z0-9-]+):(opus|sonnet)$/.exec(c.opts.label || ''))
+    .filter(Boolean)
+    .map((m) => m[1])
+  assert.deepEqual([...new Set(keys)].sort(), ['voice-e2ee-keyholder', 'voice-e2ee-rotation'])
+  assert.ok(!keys.includes('ws-hub'), 'the default surface family must not run when lenses are supplied')
+  assert.equal(result.rounds[0].family, 'custom')
+  assert.equal(result.rounds[0].lenses, 2)
+}
+
+// S-lenses-default: omitting args.lenses leaves the rotation untouched.
+scenarios.s_custom_lenses_absent = async () => {
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds[0].family, 'surfaces')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
