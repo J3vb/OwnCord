@@ -513,7 +513,10 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
         log(`r${round} ${r.lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
         continue
       }
-      unmatched.splice(idx, 1)
+      // Keep the matched candidate: the verdict schema has no why/repro/evidence, and the
+      // ledger needs them. Verdict fields are spread last so the verifier's re-rated severity
+      // and its corrected title/file/line win over the finder's.
+      const [cand] = unmatched.splice(idx, 1)
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
       if (seen.some((p) => isDup(rec, p))) continue // cross-lens same-round duplicate
       seen.push(rec)
@@ -521,7 +524,7 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       else {
         newConfirmed++
         lensConfirmed++
-        confirmedAll.push({ ...v, lens: r.lens.key, round })
+        confirmedAll.push({ ...cand, ...v, lens: r.lens.key, round })
       }
     }
     if (unmatched.length) {

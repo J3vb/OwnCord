@@ -514,6 +514,43 @@ scenarios.s_custom_lenses_absent = async () => {
   assert.equal(result.rounds[0].family, 'surfaces')
 }
 
+// S-ledger-fields: a confirmed record must carry finder detail (why/repro/evidence) as well as
+// verifier detail (severity/fix), because the ledger needs both.
+scenarios.s_confirmed_carries_finder_detail = async () => {
+  const cand = {
+    title: 'distinct bug alpha1 omega1',
+    file: 'Server/ws/hub.go',
+    line: 140,
+    severity: 'low',
+    why: 'WHY_TEXT',
+    repro: 'REPRO_TEXT',
+    evidence: 'EVIDENCE_TEXT',
+  }
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [cand] } : none,
+      verify: (round, key, cands) => ({
+        verdicts: cands.map((c) => ({
+          title: c.title, file: c.file, line: c.line,
+          refuted: false, reason: 'confirmed', confidence: 'high',
+          severity: 'high', fix: 'FIX_TEXT',
+        })),
+      }),
+    }),
+  })
+  assert.equal(result.confirmed.length, 1)
+  const r = result.confirmed[0]
+  assert.equal(r.why, 'WHY_TEXT')
+  assert.equal(r.repro, 'REPRO_TEXT')
+  assert.equal(r.evidence, 'EVIDENCE_TEXT')
+  assert.equal(r.severity, 'high', 'verifier severity must win over the finder rating')
+  assert.equal(r.fix, 'FIX_TEXT')
+  assert.equal(r.lens, 'ws-hub')
+  assert.equal(r.round, 1)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
