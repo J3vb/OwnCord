@@ -152,7 +152,15 @@ scenarios.f4_dead_agent_does_not_poison_siblings = async () => {
     agentStub: (prompt, opts) => {
       if (opts.label.includes('hub_sweep')) throw new Error('agent died')
       if (String(opts.label).startsWith('prove:'))
-        return { committed: true, sha: 'aaa0000', redObserved: true, greenObserved: true, note: '' }
+        return {
+          committed: true,
+          sha: 'aaa0000',
+          redObserved: true,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nFAIL t.ts > OC-0001 (reverted)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (fixed)',
+          note: '',
+        }
       return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
     },
   })
@@ -209,7 +217,15 @@ scenarios.f6_prove_is_serial = async () => {
       maxInFlight = Math.max(maxInFlight, inFlight)
       await new Promise((r) => setTimeout(r, 5))
       inFlight--
-      return { committed: true, sha: 'abc1234', redObserved: true, greenObserved: true, note: '' }
+      return {
+        committed: true,
+        sha: 'abc1234',
+        redObserved: true,
+        greenObserved: true,
+        redOutput: '$ go test ./ws/ -run TestSweep\nFAIL: reverted source',
+        greenOutput: '$ go test ./ws/ -run TestSweep\nPASS: fix restored',
+        note: '',
+      }
     },
   })
   assert.equal(maxInFlight, 1, 'prove/commit must be serial - git index contention')
@@ -231,7 +247,15 @@ scenarios.f7_vacuous_test_is_not_committed = async () => {
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
         return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
-      return { committed: false, sha: '', redObserved: false, greenObserved: true, note: 'test passed with the fix reverted' }
+      return {
+        committed: false,
+        sha: '',
+        redObserved: false,
+        greenObserved: true,
+        redOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (reverted, should have failed)',
+        greenOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (fixed)',
+        note: 'test passed with the fix reverted',
+      }
     },
   })
   assert.equal(result.commits.length, 0, 'a cluster that failed its revert-proof must not be committed')
@@ -247,7 +271,15 @@ scenarios.f7b_restored_fix_must_be_green = async () => {
     agentStub: (prompt, opts) => {
       if (String(opts.label).startsWith('fix:'))
         return { results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't.ts', rationale: '' }] }
-      return { committed: false, sha: '', redObserved: true, greenObserved: false, note: 'still failing after restore' }
+      return {
+        committed: false,
+        sha: '',
+        redObserved: true,
+        greenObserved: false,
+        redOutput: '$ npx vitest run t.ts\nFAIL t.ts > OC-0001 (reverted)',
+        greenOutput: '$ npx vitest run t.ts\nFAIL t.ts > OC-0001 (still failing after restore)',
+        note: 'still failing after restore',
+      }
     },
   })
   assert.equal(result.commits.length, 0)
@@ -282,8 +314,24 @@ scenarios.f9_blocked_cluster_does_not_block_siblings = async () => {
         return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: 't.ts', rationale: '' })) }
       }
       if (opts.label.includes('livekitE2EE'))
-        return { committed: false, sha: '', redObserved: false, greenObserved: true, note: 'vacuous' }
-      return { committed: true, sha: 'def5678', redObserved: true, greenObserved: true, note: '' }
+        return {
+          committed: false,
+          sha: '',
+          redObserved: false,
+          greenObserved: true,
+          redOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (reverted, should have failed)',
+          greenOutput: '$ npx vitest run t.ts\nPASS t.ts > OC-0001 (fixed)',
+          note: 'vacuous',
+        }
+      return {
+        committed: true,
+        sha: 'def5678',
+        redObserved: true,
+        greenObserved: true,
+        redOutput: '$ go test ./ws/ -run TestSweep\nFAIL: reverted source',
+        greenOutput: '$ go test ./ws/ -run TestSweep\nPASS: fix restored',
+        note: '',
+      }
     },
   })
   assert.equal(result.commits.length, 1)
@@ -291,6 +339,40 @@ scenarios.f9_blocked_cluster_does_not_block_siblings = async () => {
   const byId = Object.fromEntries(result.results.map((r) => [r.id, r.outcome]))
   assert.equal(byId['OC-0001'], 'blocked')
   assert.equal(byId['OC-0003'], 'fixed')
+}
+
+// F9b: a mixed cluster (one fixed + one declined) whose prove fails demotes only the fixed
+// finding to blocked; the declined finding and its original rationale are left untouched.
+scenarios.f9b_declined_survives_a_failed_prove = async () => {
+  const declinedRationale = 'intentional: rate limit is a product decision, not a bug'
+  const findings = [rec('OC-0001'), rec('OC-0002', { line: 800 })]
+  const { result } = await run({
+    args: { findings },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        return {
+          results: [
+            { id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' },
+            { id: 'OC-0002', outcome: 'declined', testPath: '', rationale: declinedRationale },
+          ],
+        }
+      }
+      return {
+        committed: false,
+        sha: '',
+        redObserved: false,
+        greenObserved: true,
+        redOutput: '$ npx vitest run t/OC-0001.test.ts\nPASS (reverted, should have failed)',
+        greenOutput: '$ npx vitest run t/OC-0001.test.ts\nPASS (fixed)',
+        note: 'test passed with the fix reverted',
+      }
+    },
+  })
+  const byId = Object.fromEntries(result.results.map((r) => [r.id, r]))
+  assert.equal(byId['OC-0001'].outcome, 'blocked')
+  assert.match(byId['OC-0001'].rationale, /revert-proof/i)
+  assert.equal(byId['OC-0002'].outcome, 'declined')
+  assert.equal(byId['OC-0002'].rationale, declinedRationale)
 }
 
 // ---------- runner ----------

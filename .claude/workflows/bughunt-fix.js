@@ -173,12 +173,26 @@ phase('Prove')
 
 const PROVE_RESULT = {
   type: 'object',
-  required: ['committed', 'sha', 'redObserved', 'greenObserved', 'note'],
+  required: ['committed', 'sha', 'redObserved', 'greenObserved', 'redOutput', 'greenOutput', 'note'],
   properties: {
     committed: { type: 'boolean' },
     sha: { type: 'string', description: 'short sha of the commit, empty when not committed' },
     redObserved: { type: 'boolean', description: 'did the tests FAIL with the source reverted' },
     greenObserved: { type: 'boolean', description: 'did the tests PASS with the fix restored' },
+    redOutput: {
+      type: 'string',
+      description:
+        'the ACTUAL output of the test run performed with the source reverted (step 3), including the ' +
+        'command that was run. This run must FAIL. Paste the real captured output verbatim - not a ' +
+        'summary, not a paraphrase.',
+    },
+    greenOutput: {
+      type: 'string',
+      description:
+        'the ACTUAL output of the test run performed after the fix was restored (step 5), including the ' +
+        'command that was run. This run must PASS. Paste the real captured output verbatim - not a ' +
+        'summary, not a paraphrase.',
+    },
     note: { type: 'string', description: 'why it was not committed, empty on success' },
   },
 }
@@ -198,13 +212,16 @@ function provePrompt(cluster, fixedIds, testPaths) {
     `untracked and this leaves it alone, and a new case in an existing test file is a modification to a ` +
     `path you did not name, so it survives too. Either way the new assertions are present while the fix ` +
     `is gone.\n` +
-    `  3. Run the tests listed above. They MUST fail. Set redObserved accordingly.\n` +
+    `  3. Run the tests listed above. They MUST fail. Set redObserved accordingly. Capture the ACTUAL ` +
+    `output of this run, including the command you ran, and return it verbatim in redOutput - not a ` +
+    `summary, not a paraphrase.\n` +
     `     If they PASS, the tests do not pin the bug - they are vacuous. Restore the fixed source from ` +
     `scratch, set committed=false, explain in note, and STOP. Do not commit. Do not try to repair the ` +
     `test yourself.\n` +
     `  4. Restore the fixed source file from your scratch copy.\n` +
-    `  5. Run the tests again. They MUST pass. Set greenObserved accordingly. If they do not pass, set ` +
-    `committed=false, explain in note, and STOP.\n` +
+    `  5. Run the tests again. They MUST pass. Set greenObserved accordingly. Capture the ACTUAL output ` +
+    `of this run, including the command you ran, and return it verbatim in greenOutput - not a summary, ` +
+    `not a paraphrase. If they do not pass, set committed=false, explain in note, and STOP.\n` +
     `  6. Stage the source file AND the test files, then commit with subject:\n` +
     `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
