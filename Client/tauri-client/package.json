@@ -46,7 +46,7 @@
     "fast-check": "^4.9.0",
     "jsdom": "^29.1.1",
     "knip": "^6.31.0",
-    "oxlint": "^1.76.0",
+    "oxlint": "^1.77.0",
     "prettier": "^3.9.6",
     "typescript": "^5.7",
     "typescript-eslint": "^8.65.0",
