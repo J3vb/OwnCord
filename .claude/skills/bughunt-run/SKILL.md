@@ -51,6 +51,16 @@ revertProof}` once something is actually fixed. Then:
 node .superpowers/render-ledger.mjs
 ```
 
+Each confirmed record carries `finder` — which model in the dual-model panel
+produced it. The run also logs one `panel:` line with the split. The two finders
+are unioned, not voted, so the second model's entire value is what it finds
+alone; because duplicates collapse to the opus-slot record, a `sonnet` tag means
+opus missed it. Watch that count across a few hunts. Consistently zero is the
+evidence for dropping to a single finder — but note that would also weaken
+convergence, since a round is only allowed to count as dry when the full panel
+reported, so a lone finder having a bad day would read as "clean" instead of
+"we didn't fully look".
+
 ## 2. Gate (human)
 
 Read `.superpowers/FINDINGS.md`. Mark anything you do not want fixed as

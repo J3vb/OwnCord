@@ -551,6 +551,96 @@ scenarios.s_confirmed_carries_finder_detail = async () => {
   assert.equal(r.round, 1)
 }
 
+// S_FINDER_ATTRIBUTION: confirmed records name which model found them. The panel unions rather
+// than votes, so this is the only way to tell whether the second finder earns its cost. Because
+// dedupe keeps the first occurrence and opus is index 0, `finder: 'sonnet'` means opus did NOT
+// report it - i.e. a sonnet-unique find. `finder: 'opus'` says nothing about sonnet either way.
+scenarios.s_finder_attribution = async () => {
+  const shared = finding(1)
+  // Different file, not just a different line: isDup treats same-file findings within
+  // TITLE_MATCH_WINDOW as duplicates on title-word overlap, and the finding() fixtures share
+  // enough words to collapse into one another.
+  const sonnetOnly = finding(2, { file: 'Server/api/user.go' })
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) => {
+        if (round !== 1 || key !== 'ws-hub') return none
+        return model === 'opus' ? { findings: [shared] } : { findings: [shared, sonnetOnly] }
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const byTitle = Object.fromEntries(result.confirmed.map((r) => [r.title, r.finder]))
+  assert.equal(byTitle[shared.title], 'opus', 'a find both models made keeps the opus-first record')
+  assert.equal(byTitle[sonnetOnly.title], 'sonnet', 'a find only sonnet made must be attributed to sonnet')
+}
+
+// S_FINDER_ATTRIBUTION_SURVIVES_DEAD_OPUS: the tag must be taken from the panel slot, not from the
+// position in the surviving list. Filtering the nulls out BEFORE reading the index shifts sonnet
+// into slot 0 and mislabels every one of its finds as opus - exactly when attribution matters most.
+scenarios.s_finder_attribution_survives_dead_opus = async () => {
+  const only = finding(3)
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) => {
+        if (round !== 1 || key !== 'ws-hub') return none
+        return model === 'opus' ? null : { findings: [only] }
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  assert.equal(result.confirmed.length, 1)
+  assert.equal(result.confirmed[0].finder, 'sonnet', 'a dead opus must not relabel sonnet finds as opus')
+}
+
+// S_VERIFIER_IS_NOT_TOLD_THE_FINDER: the verifier prompt deliberately says "another model" and
+// never names it. Leaking the attribution tag would tell a refute-by-default verifier that opus
+// found something, which is exactly the kind of authority cue that erodes refute-by-default.
+scenarios.s_verifier_is_not_told_the_finder = async () => {
+  let verifyPromptText = ''
+  await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
+      verify: (round, key, cands, retry, prompt) => {
+        verifyPromptText = prompt
+        return confirmAll(cands)
+      },
+    }),
+  })
+  assert.ok(verifyPromptText, 'the verifier must have been called')
+  assert.doesNotMatch(verifyPromptText, /finder/i, 'the verifier must not be told which model found the candidate')
+  // Guard against over-stripping: the fields the verifier actually needs must survive.
+  for (const field of ['title', 'file', 'line', 'why', 'repro', 'evidence']) {
+    assert.match(verifyPromptText, new RegExp(`"${field}"`), `candidates must still carry ${field}`)
+  }
+}
+
+// S_PANEL_SPLIT_IS_REPORTED: a tag nobody reads is not a measurement. The run must say out loud
+// how many confirmed findings only the second finder produced, which is the number that decides
+// whether the second model is worth its cost.
+scenarios.s_panel_split_is_reported = async () => {
+  const { logs } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) => {
+        if (round !== 1 || key !== 'ws-hub') return none
+        return model === 'opus'
+          ? { findings: [finding(1)] }
+          : { findings: [finding(1), finding(2, { file: 'Server/api/user.go' })] }
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const line = logs.find((l) => /panel:/.test(l))
+  assert.ok(line, 'the run must report the panel split')
+  assert.match(line, /sonnet-only/, 'the split must name the sonnet-only count explicitly')
+  assert.match(line, /\b1\b/, 'exactly one confirmed finding here was sonnet-only')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {

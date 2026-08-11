@@ -449,7 +449,9 @@ function verifyPrompt(lensKey, candidates) {
     `Re-rate severity yourself; do not inherit the hunter's rating. For each survivor, give the smallest ` +
     `correct fix - one guard in the shared function beats a guard in every caller.\n\n` +
     `Return one verdict per candidate, keeping title/file/line so they can be matched up.\n\n` +
-    `--- CANDIDATES ---\n${JSON.stringify(candidates, null, 2)}`
+    // Strip the panel attribution here rather than at the call sites: the prompt above says
+    // "another model" on purpose, and naming it is an authority cue that erodes refute-by-default.
+    `--- CANDIDATES ---\n${JSON.stringify(candidates.map(({ finder, ...c }) => c), null, 2)}`
   )
 }
 
@@ -481,7 +483,14 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     async (r) => {
       const { lens, pair } = r
       const finderFailed = pair.some((p) => p === null)
-      const union = pair.filter(Boolean).flatMap((p) => p.findings || [])
+      // Tag by panel slot, not by position in the surviving list: filtering the nulls out first
+      // would shift sonnet into slot 0 whenever opus dies and mislabel its finds. The panel unions
+      // rather than votes, so this is the only signal for whether the second finder earns its cost
+      // - and since dedupe keeps the first occurrence and opus is slot 0, `finder: 'sonnet'` means
+      // opus did not report it. `finder: 'opus'` says nothing about sonnet either way.
+      const union = pair.flatMap((p, i) =>
+        p ? (p.findings || []).map((f) => ({ ...f, finder: i ? 'sonnet' : 'opus' })) : [],
+      )
       const fresh = dedupe(union, seenAtStart)
       if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], verdicts: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
@@ -543,6 +552,13 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
 }
 
 const converged = dry >= DRY_THRESHOLD
+
+// The panel unions rather than votes, so the second finder's whole value is what it finds alone.
+// dedupe keeps the opus-slot record when both report the same bug, so a confirmed finding tagged
+// sonnet is one opus missed. A run where that count is 0 is the evidence for dropping the second
+// model; anything above 0 is what it bought.
+const sonnetOnly = confirmedAll.filter((f) => f.finder === 'sonnet').length
+log(`panel: ${confirmedAll.length} confirmed, ${sonnetOnly} sonnet-only (opus missed), ${confirmedAll.length - sonnetOnly} found by opus`)
 
 // ---------- report ----------
 phase('Report')
