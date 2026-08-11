@@ -18,12 +18,15 @@ const ARGS = (() => {
 })()
 const MAX_ROUNDS = ARGS.maxRounds || 8
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
+// A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
+// adaptive, so hotspot and fresh-eyes coverage - and therefore convergence - still work.
+const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
 // ponytail: rough floor for one round (up to 12 high-effort finders + verifiers); tune after live runs
 const ROUND_BUDGET_FLOOR = 150000
 // The args channel has already been observed delivering something the script
 // could not read; an unnoticed fallback here is an 8x cost surprise, so say out
 // loud what the run is actually going to do.
-log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}`)
+log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''}`)
 
 // ---------- schemas: copied VERBATIM from the current bughunt.js ----------
 const FINDINGS = {
@@ -268,12 +271,14 @@ const FLOW_LENSES = [
 ]
 
 function lensesForRound(round) {
+  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses()
   if (round === 1) return SURFACE_LENSES
   if (round === 2) return BUGCLASS_LENSES
   if (round === 3) return FLOW_LENSES
   return buildAdaptiveLenses()
 }
 function familyName(round) {
+  if (CUSTOM_LENSES) return round === 1 ? 'custom' : 'adaptive'
   return ['surfaces', 'bug-classes', 'flows'][round - 1] || 'adaptive'
 }
 function clusterOf(file) {
@@ -403,7 +408,16 @@ const churnFiles = String(recon[0] || '')
 log('Recon complete - starting converging rounds')
 
 // ---------- round loop ----------
-const seen = []
+// Cross-run memory: the calling session passes the findings ledger in as args.known.
+// Seeding `seen` is all it takes - finderPrompt() already interpolates seenBlock(seen),
+// and each round already dedupes fresh candidates against it, so one assignment buys both
+// prompt-level suppression ("do not re-derive this") and mechanical dedupe.
+const seen = (ARGS.known || []).map((k) => ({
+  file: k.file,
+  line: k.line,
+  title: k.title,
+  status: k.status || 'known',
+}))
 const confirmedAll = []
 const unverified = []
 const roundStats = []
@@ -499,7 +513,10 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
         log(`r${round} ${r.lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
         continue
       }
-      unmatched.splice(idx, 1)
+      // Keep the matched candidate: the verdict schema has no why/repro/evidence, and the
+      // ledger needs them. Verdict fields are spread last so the verifier's re-rated severity
+      // and its corrected title/file/line win over the finder's.
+      const [cand] = unmatched.splice(idx, 1)
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
       if (seen.some((p) => isDup(rec, p))) continue // cross-lens same-round duplicate
       seen.push(rec)
@@ -507,7 +524,7 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       else {
         newConfirmed++
         lensConfirmed++
-        confirmedAll.push({ ...v, lens: r.lens.key, round })
+        confirmedAll.push({ ...cand, ...v, lens: r.lens.key, round })
       }
     }
     if (unmatched.length) {
