@@ -51,6 +51,16 @@ revertProof}` once something is actually fixed. Then:
 node .superpowers/render-ledger.mjs
 ```
 
+Each confirmed record carries `finder` — which model in the dual-model panel
+produced it. The run also logs one `panel:` line with the split. The two finders
+are unioned, not voted, so the second model's entire value is what it finds
+alone; because duplicates collapse to the opus-slot record, a `sonnet` tag means
+opus missed it. Watch that count across a few hunts. Consistently zero is the
+evidence for dropping to a single finder — but note that would also weaken
+convergence, since a round is only allowed to count as dry when the full panel
+reported, so a lone finder having a bad day would read as "clean" instead of
+"we didn't fully look".
+
 ## 2. Gate (human)
 
 Read `.superpowers/FINDINGS.md`. Mark anything you do not want fixed as
@@ -67,12 +77,32 @@ Workflow({
     branch: "fix/bughunt-YYYY-MM-DD",
     only: ["OC-0042"],        // optional
     maxSeverity: "medium",    // optional
+    circuitBreaker: { threshold: 0.5, minAttempts: 3 },  // optional; false to disable
   },
 })
 ```
 
 Create and check out the branch first — the workflow commits to whatever branch
 is current and does not create one.
+
+## When a run trips the breaker
+
+The run stops early if more than `threshold` of attempted findings fail, once at
+least `minAttempts` have been tried. `declined` never counts as a failure — a run
+where several findings are correctly declined is a good run. There are two trip
+points: the fix stage (before any prove agent runs) and inside the prove loop.
+
+**A tripped run means stop and investigate, do not re-run.** The usual causes are
+being on the wrong branch, a broken test runner, or ledger coordinates gone stale
+after a rebase. Re-running without fixing the cause just spends the budget again.
+
+Findings from clusters the run never reached come back `blocked` with a rationale
+naming the breaker. Set those back to `open` once the underlying problem is fixed
+— they were never attempted. Their edits are sitting uncommitted in the working
+tree, so the debris warning above applies to them too.
+
+Whatever committed before the trip still goes through the gate, so `result.gate`
+tells you whether those commits are green.
 
 When it returns, for each entry in `result.results`:
 

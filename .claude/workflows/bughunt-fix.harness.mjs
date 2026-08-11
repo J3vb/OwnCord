@@ -646,6 +646,161 @@ scenarios.f15_prove_prompt_names_every_touched_path = async () => {
   assert.match(provePromptText, /fix\/test-touched/, 'branch guard must name the expected branch')
 }
 
+// ---------- circuit breaker ----------
+// Four findings, one per file, so each becomes its own cluster.
+const FOUR_FILES = [
+  rec('OC-0001'),
+  rec('OC-0002', { file: 'Server/ws/hub_sweep.go' }),
+  rec('OC-0003', { file: 'Client/tauri-client/src/lib/livekitSession.ts' }),
+  rec('OC-0004', { file: 'Client/tauri-client/src/components/VoiceWidget.ts' }),
+]
+// A fix stub that reports every id in its prompt as fixed. Ids go through a Set because rec()
+// puts each id in both `id` and `title`, so the raw matchAll yields every id twice.
+const fixAll = (prompt) => {
+  const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
+  return { results: ids.map((id) => ({ id, outcome: 'fixed', testPath: `t/${id}.ts`, rationale: '' })), touchedPaths: [] }
+}
+const PROVE_FAIL = {
+  committed: false,
+  sha: '',
+  redObserved: false,
+  greenObserved: true,
+  redOutput: '$ npx vitest run t.ts\nPASS t.ts (still passing with the fix reverted)',
+  greenOutput: '$ npx vitest run t.ts\nPASS t.ts',
+  note: 'test did not exercise the bug',
+}
+const proveOk = (sha) => ({
+  committed: true,
+  sha,
+  redObserved: true,
+  greenObserved: true,
+  redOutput: '$ npx vitest run t.ts\nFAIL t.ts (reverted)',
+  greenOutput: '$ npx vitest run t.ts\nPASS t.ts (fixed)',
+  note: '',
+})
+
+// F16: three failed revert-proofs out of three attempts trips the breaker, and the fourth cluster
+// is never handed to an agent. Load-bearing: this is the one that proves the loop actually stops.
+scenarios.f16_breaker_trips_after_majority_prove_failures = async () => {
+  const { result, calls, logs } = await run({
+    args: { findings: FOUR_FILES },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) return fixAll(prompt)
+      if (String(opts.label).startsWith('prove:')) return PROVE_FAIL
+      return { passed: true, stacks: [], output: '' }
+    },
+  })
+  const proveCalls = calls.filter((c) => String(c.opts.label).startsWith('prove:'))
+  assert.equal(proveCalls.length, 3, 'breaker must stop the loop after minAttempts, not run all four')
+  assert.ok(result.breaker, 'breaker report must be present on the result')
+  assert.equal(result.breaker.trippedAt, 'prove')
+  assert.equal(result.breaker.attempted, 3)
+  assert.equal(result.breaker.failed, 3)
+  assert.equal(result.commits.length, 0)
+  // Every finding ends blocked, but the unreached one must say WHY it was never tried.
+  assert.ok(result.results.every((r) => r.outcome === 'blocked'), 'nothing may be left reported as fixed')
+  const unreached = result.results.filter((r) => /circuit breaker/i.test(r.rationale))
+  assert.equal(unreached.length, 1, 'exactly the one unreached finding carries the breaker rationale')
+  assert.match(unreached[0].rationale, /uncommitted/i, 'operator must be told the edits are still in the tree')
+  assert.ok(logs.some((l) => /CIRCUIT BREAKER/.test(l)), 'a trip must be announced in the log')
+}
+
+// F17: two failures out of two is 100%, but below minAttempts it is noise, not a signal.
+scenarios.f17_breaker_holds_below_min_attempts = async () => {
+  const { result, calls } = await run({
+    args: { findings: FOUR_FILES.slice(0, 2) },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) return fixAll(prompt)
+      if (String(opts.label).startsWith('prove:')) return PROVE_FAIL
+      return { passed: true, stacks: [], output: '' }
+    },
+  })
+  assert.equal(calls.filter((c) => String(c.opts.label).startsWith('prove:')).length, 2, 'both clusters must be attempted')
+  assert.equal(result.breaker, null)
+  for (const r of result.results) {
+    assert.equal(r.outcome, 'blocked')
+    assert.match(r.rationale, /revert-proof failed/, 'rationale must be the real reason, not the breaker')
+  }
+}
+
+// F18: one failure in four is a bad cluster, not a bad run.
+scenarios.f18_breaker_holds_under_threshold = async () => {
+  let n = 0
+  const { result } = await run({
+    args: { findings: FOUR_FILES },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) return fixAll(prompt)
+      if (String(opts.label).startsWith('prove:')) return ++n === 1 ? PROVE_FAIL : proveOk(`sha${n}`)
+      return { passed: true, stacks: [], output: '' }
+    },
+  })
+  assert.equal(result.breaker, null)
+  assert.equal(result.commits.length, 3, 'the three good clusters must still land')
+}
+
+// F19: the operator can turn the guard off entirely.
+scenarios.f19_breaker_disabled_by_args = async () => {
+  const { result, calls } = await run({
+    args: { findings: FOUR_FILES, circuitBreaker: false },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) return fixAll(prompt)
+      if (String(opts.label).startsWith('prove:')) return PROVE_FAIL
+      return { passed: true, stacks: [], output: '' }
+    },
+  })
+  assert.equal(calls.filter((c) => String(c.opts.label).startsWith('prove:')).length, 4, 'all four must be attempted when disabled')
+  assert.equal(result.breaker, null)
+}
+
+// F20: when the FIX stage is what is failing, proving each of those costs a serial agent per
+// cluster and cannot succeed. Load-bearing: this is the cheap early exit.
+scenarios.f20_fix_stage_trip_skips_prove_entirely = async () => {
+  const { result, calls } = await run({
+    args: { findings: FOUR_FILES },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) {
+        const ids = [...new Set([...prompt.matchAll(/OC-\d{4}/g)].map((m) => m[0]))]
+        return {
+          results: ids.map((id) =>
+            id === 'OC-0001'
+              ? { id, outcome: 'fixed', testPath: `t/${id}.ts`, rationale: '' }
+              : { id, outcome: 'blocked', testPath: '', rationale: 'could not run the test suite' },
+          ),
+          touchedPaths: [],
+        }
+      }
+      return { passed: true, stacks: [], output: '' }
+    },
+  })
+  assert.ok(result.breaker, 'breaker report must be present')
+  assert.equal(result.breaker.trippedAt, 'fix')
+  assert.equal(
+    calls.filter((c) => String(c.opts.label).startsWith('prove:')).length,
+    0,
+    'a fix-stage trip must spend nothing on prove agents',
+  )
+  assert.equal(result.commits.length, 0)
+  assert.equal(result.gate, null, 'no commits means no gate')
+}
+
+// F21: a trip does not orphan whatever already landed - the operator needs to know if it is green.
+scenarios.f21_trip_still_gates_existing_commits = async () => {
+  let n = 0
+  const { result, calls } = await run({
+    args: { findings: FOUR_FILES },
+    agentStub: (prompt, opts) => {
+      if (String(opts.label).startsWith('fix:')) return fixAll(prompt)
+      if (String(opts.label).startsWith('prove:')) return ++n === 1 ? proveOk('aaa1111') : PROVE_FAIL
+      return { passed: true, stacks: ['client'], output: 'all green' }
+    },
+  })
+  assert.ok(result.breaker, 'breaker report must be present')
+  assert.equal(result.breaker.trippedAt, 'prove')
+  assert.equal(result.commits.length, 1, 'the one proven cluster must survive the trip')
+  assert.equal(calls.filter((c) => c.opts.label === 'gate').length, 1, 'the gate must still run over what landed')
+  assert.equal(result.gate.passed, true)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
