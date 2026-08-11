@@ -982,6 +982,26 @@ func TestHealthCheck_Success(t *testing.T) {
 	}
 }
 
+// httptest.Server.Close calls CloseIdleConnections on the process-wide
+// http.DefaultTransport, so a health-check client that falls back to it can have
+// a pooled connection severed mid-request by any unrelated parallel test closing
+// its own server ("http: CloseIdleConnections called"). The client must own its
+// transport — in production that also keeps the health check off the connection
+// pool every other DefaultTransport user in the process shares.
+func TestHealthCheckClientOwnsItsTransport(t *testing.T) {
+	t.Parallel()
+
+	proc := ws.NewLiveKitProcess(&config.VoiceConfig{}, &config.TLSConfig{}, t.TempDir())
+
+	tr := proc.HTTPTransportForTest()
+	if tr == nil {
+		t.Fatal("health-check client has no Transport, so it falls back to http.DefaultTransport")
+	}
+	if tr == http.DefaultTransport {
+		t.Error("health-check client shares http.DefaultTransport's connection pool")
+	}
+}
+
 func TestHealthCheck_ServerDown(t *testing.T) {
 	t.Parallel()
 

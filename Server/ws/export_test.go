@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"time"
 
@@ -191,6 +192,12 @@ func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, jo
 // GenerateConfigForTest exposes LiveKitProcess.generateConfig for external tests.
 func (p *LiveKitProcess) GenerateConfigForTest() (string, error) {
 	return p.generateConfig()
+}
+
+// HTTPTransportForTest exposes the health-check client's transport so tests can
+// assert it does not share http.DefaultTransport's connection pool.
+func (p *LiveKitProcess) HTTPTransportForTest() http.RoundTripper {
+	return p.httpClient.Transport
 }
 
 // SetProcessCmdForTest sets cmd to a non-nil value to simulate "already running".
