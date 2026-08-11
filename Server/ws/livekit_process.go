@@ -45,6 +45,10 @@ func NewLiveKitProcess(cfg *config.VoiceConfig, tlsCfg *config.TLSConfig, dataDi
 		tlsCfg:  tlsCfg,
 		dataDir: dataDir,
 		httpClient: &http.Client{
+			// Own the transport rather than inheriting http.DefaultTransport:
+			// its pool is shared process-wide, and httptest.Server.Close closes
+			// its idle connections, which severs in-flight health checks.
+			Transport: http.DefaultTransport.(*http.Transport).Clone(),
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
