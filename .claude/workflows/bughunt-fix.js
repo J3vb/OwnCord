@@ -27,6 +27,18 @@ const BRANCH = ARGS.branch || 'fix/bughunt'
 const ONLY = Array.isArray(ARGS.only) && ARGS.only.length ? new Set(ARGS.only) : null
 const MAX_SEVERITY = ARGS.maxSeverity || 'low'
 const ALL = Array.isArray(ARGS.findings) ? ARGS.findings : []
+// Circuit breaker: stop a run that is going systematically wrong instead of spending a
+// high-effort agent on every remaining cluster. `declined` is not a failure - it is a
+// judgement the fix prompt explicitly invites - so only `blocked` counts.
+// ?? not || so an explicit threshold of 0 is honoured.
+const BREAKER =
+  ARGS.circuitBreaker === false
+    ? null
+    : {
+        threshold: ARGS.circuitBreaker?.threshold ?? 0.5,
+        minAttempts: ARGS.circuitBreaker?.minAttempts ?? 3,
+      }
+let breaker = null // set to a report object if it trips
 
 // ---------- phase 1: plan ----------
 phase('Plan')
@@ -61,7 +73,10 @@ const clusters = [...byFile.entries()].map(([file, findings]) => ({
   findings,
 }))
 
-log(`plan: ${selected.length} finding(s) in ${clusters.length} file cluster(s) on ${BRANCH}`)
+log(`plan: ${selected.length} finding(s) in ${clusters.length} file cluster(s) on ${BRANCH}` +
+  (BREAKER
+    ? ` (breaker: stop above ${Math.round(BREAKER.threshold * 100)}% failures after ${BREAKER.minAttempts} attempts)`
+    : ' (breaker disabled)'))
 for (const c of clusters) log(`  ${c.file}: ${c.ids.join(', ')}`)
 // Announce every exclusion by id. Silent truncation reads as "covered everything" when it did not.
 for (const e of excluded) log(`  excluded ${e.id}: ${e.reason}`)
@@ -219,6 +234,25 @@ log(`fix: ${allResults.filter((r) => r.outcome === 'fixed').length} fixed, ` +
   `${allResults.filter((r) => r.outcome === 'declined').length} declined, ` +
   `${allResults.filter((r) => r.outcome === 'blocked').length} blocked`)
 
+// ---------- phase 2.6: circuit breaker (fix stage) ----------
+// A high blocked rate here means the fixing itself is failing - bad ledger coordinates, a
+// broken test runner, agents that cannot run the suite. Proving each of those costs a
+// serial agent per cluster and cannot succeed, so stop before spending it.
+if (BREAKER) {
+  const attempted = allResults.filter((r) => r.outcome !== 'declined').length
+  const failed = allResults.filter((r) => r.outcome === 'blocked').length
+  if (attempted >= BREAKER.minAttempts && failed / attempted > BREAKER.threshold) {
+    breaker = {
+      trippedAt: 'fix',
+      attempted,
+      failed,
+      threshold: BREAKER.threshold,
+      reason: `${failed}/${attempted} finding(s) could not be fixed - skipping prove and commit entirely`,
+    }
+    log(`CIRCUIT BREAKER: ${breaker.reason}`)
+  }
+}
+
 // ---------- phase 3: prove + commit ----------
 phase('Prove')
 
@@ -293,8 +327,22 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
 }
 
 const commits = []
+let proveAttempts = 0
+let proveFailures = 0
 // Serial on purpose: parallel git commands collide on .git/index.lock.
 for (const { cluster, results, union } of fixed) {
+  if (breaker) {
+    // Tripped either before the loop (fix stage) or on an earlier iteration. Everything
+    // from here on was never attempted; say so rather than leaving it reported as fixed,
+    // which would put a `fixed` status in the ledger with no commit behind it.
+    for (const r of results) {
+      if (r.outcome === 'fixed') {
+        r.outcome = 'blocked'
+        r.rationale = `circuit breaker tripped before this cluster was attempted (${breaker.reason}); edits are uncommitted in the working tree`
+      }
+    }
+    continue
+  }
   const fixedHere = results.filter((r) => r.outcome === 'fixed')
   if (!fixedHere.length) {
     log(`prove ${cluster.file}: no fixes to prove - skipped`)
@@ -313,6 +361,10 @@ for (const { cluster, results, union } of fixed) {
     schema: PROVE_RESULT,
   }).catch(() => null)
 
+  // Counted before the ok check on purpose: successes belong in the denominator. Increment
+  // this inside the failure branch instead and the ratio is failures-over-failures, which is
+  // always 1.0 - the breaker would trip on the first failed cluster at any threshold.
+  proveAttempts++
   const ok = p && p.committed && p.redObserved && p.greenObserved && p.sha
   if (!ok) {
     const why = !p
@@ -328,6 +380,17 @@ for (const { cluster, results, union } of fixed) {
         r.outcome = 'blocked'
         r.rationale = why
       }
+    }
+    proveFailures++
+    if (BREAKER && proveAttempts >= BREAKER.minAttempts && proveFailures / proveAttempts > BREAKER.threshold) {
+      breaker = {
+        trippedAt: 'prove',
+        attempted: proveAttempts,
+        failed: proveFailures,
+        threshold: BREAKER.threshold,
+        reason: `${proveFailures}/${proveAttempts} cluster(s) failed their revert-proof - stopping before the rest`,
+      }
+      log(`CIRCUIT BREAKER: ${breaker.reason}`)
     }
     continue
   }
@@ -407,4 +470,4 @@ if (commits.length) {
   log('gate: nothing committed - skipped')
 }
 
-return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate }
+return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate, breaker }
