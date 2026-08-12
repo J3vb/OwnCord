@@ -15,6 +15,13 @@ reach a commit, an issue, or a PR body.
 
 ## 1. Hunt
 
+**Launch the hunt from a turn that carries a token-budget directive** (recommended:
+`+25M`, comfortably above a full 8-round run). The workflow's cost ceiling is gated
+on `budget.total`, which is null without a directive — a directive-less run has **no
+ceiling at all**. The workflow's first log line echoes the state: `budget=25M` means
+armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
+directive.
+
 Read the ledger and pass every record in as `known`, so the hunt does not
 re-derive anything already found, fixed, declined, or refuted:
 

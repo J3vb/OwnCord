@@ -91,7 +91,7 @@ const scenarios = {}
 
 // S1: happy convergence - one bug in round 1, rounds 2-3 dry -> converged.
 scenarios.s1_convergence = async () => {
-  const { result, calls } = await run({
+  const { result, calls, logs } = await run({
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
@@ -110,6 +110,7 @@ scenarios.s1_convergence = async () => {
   assert.match(result.report, /CONVERGED after 3 round\(s\)/)
   assert.match(result.report, /### high - distinct bug alpha1 omega1/)
   assert.match(result.report, /\| 1 \| surfaces \|/)
+  assert.ok(logs.some((l) => /budget=NONE - cost ceiling disarmed/.test(l)), 'a directive-less run must announce the dead ceiling')
 }
 
 // S2: panel dedupe - opus and sonnet report the same bug -> one candidate, one verify call.
@@ -349,7 +350,7 @@ scenarios.s8_budget_floor = async () => {
 scenarios.s8b_budget_midrun = async () => {
   let n = 0
   const { result } = await run({
-    budget: { total: 1000000, spent: () => 0, remaining: () => (n++ === 0 ? 200000 : 100000) },
+    budget: { total: 10000000, spent: () => 0, remaining: () => (n++ === 0 ? 3000000 : 1000000) },
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
@@ -692,6 +693,18 @@ scenarios.s_targeted_retry = async () => {
   assert.deepEqual(retryBatches[0].map((c) => c.file), ['Server/api/b.go'], 'only the unmatched candidate is re-sent')
   assert.equal(result.confirmed.length, 2)
   assert.equal(result.unverified.length, 0)
+}
+
+// New (spec Testing #9): the retuned floor must stop a run the old 150k floor let through.
+// 1M remaining is under the ~2M measured per-round cost - starting a round would overshoot.
+scenarios.s9_budget_ceiling_retuned = async () => {
+  const { result, logs } = await run({
+    budget: { total: 10000000, spent: () => 9000000, remaining: () => 1000000 },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 0, '1M remaining must not start a ~2M round')
+  assert.equal(result.stoppedOnBudget, true)
+  assert.ok(logs.some((l) => /Budget floor/.test(l)))
 }
 
 // ---------- runner ----------

@@ -20,12 +20,13 @@ const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
 // adaptive, so hotspot and fresh-eyes coverage - and therefore convergence - still work.
 const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
-// ponytail: rough floor for one round (up to 12 high-effort finders + verifiers); tune after live runs
-const ROUND_BUDGET_FLOOR = 150000
+// Floor for one round, tuned from the 2026-08-12 run: ~2.6M output tokens per round measured.
+// The old 150k floor would overshoot the ceiling by nearly a full round.
+const ROUND_BUDGET_FLOOR = 2000000
 // The args channel has already been observed delivering something the script
 // could not read; an unnoticed fallback here is an 8x cost surprise, so say out
 // loud what the run is actually going to do.
-log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''}`)
+log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''} budget=${budget.total ? Math.round(budget.total / 1e6) + 'M' : 'NONE - cost ceiling disarmed'}`)
 
 // ---------- schemas: copied VERBATIM from the current bughunt.js ----------
 const FINDINGS = {
