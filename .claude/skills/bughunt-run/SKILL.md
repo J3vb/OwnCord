@@ -47,7 +47,21 @@ validated — it reaches the finder prompt as the literal string `undefined`,
 silently degrading that lens instead of failing loudly. Check your lens
 objects before passing them.
 
-When it returns, append each entry of `result.confirmed` to the ledger with
+When it returns, first save the raw result verbatim to
+`.superpowers/hunts/<YYYY-MM-DD>-raw.json`, then:
+
+```bash
+node .superpowers/render-run-stats.mjs .superpowers/hunts/<YYYY-MM-DD>-raw.json <hunt-name>
+```
+
+This validates the result shape, appends the run's telemetry to
+`.superpowers/run-history.json`, updates `.superpowers/explored-clean.json`, and
+checks **every** confirmed finding's coordinates against the working tree (file
+exists, line within length — the report agent that used to spot-check two findings
+is gone). Resolve any `COORD` warnings before appending to the ledger: stale
+coordinates poison `bughunt-fix`.
+
+Then append each entry of `result.confirmed` to the ledger with
 `status: "open"`, an id from `nextId`, and today's date. Bump `nextId`. The
 incoming record carries a prose `fix` field (bughunt's suggested remedy) —
 rename it to `suggestedFix` when appending, so the ledger's `fix` field starts
@@ -166,6 +180,7 @@ node .claude/workflows/bughunt.harness.mjs
 node .claude/workflows/bughunt-fix.harness.mjs
 node .superpowers/render-ledger.mjs --selftest
 node .superpowers/verify-fixes.mjs --selftest
+node .superpowers/render-run-stats.mjs --selftest
 ```
 
 All four run offline with zero API calls. Run them after any edit to the
