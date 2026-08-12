@@ -18,7 +18,7 @@ const ARGS = (() => {
 const MAX_ROUNDS = ARGS.maxRounds || 8
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
-// adaptive, so hotspot and fresh-eyes coverage - and therefore convergence - still work.
+// adaptive, so hotspot and explore coverage - and therefore convergence - still work.
 const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
 // Floor for one round, tuned from the 2026-08-12 run: ~2.6M output tokens per round measured.
 // The old 150k floor would overshoot the ceiling by nearly a full round.
@@ -326,6 +326,7 @@ function exploreLens(i) {
     key: `explore-${i}`,
     prompt: `${src} Read each one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
       files.map((f) => `  - ${f}`).join('\n'),
+    files,
   }
 }
 
@@ -594,6 +595,11 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     candCount += r.unionCount
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
+    if (r.finderFailed && r.lens.files) {
+      // a dead finder read nothing: un-consume its draw so later rounds can re-offer the
+      // files and the session does not record never-examined files as explored-clean
+      for (const f of r.lens.files) exploreConsumed.delete(f)
+    }
     let lensConfirmed = 0
     let lensRefuted = 0
     for (const { v, cand } of r.matched) {

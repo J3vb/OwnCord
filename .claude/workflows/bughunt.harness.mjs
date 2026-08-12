@@ -778,6 +778,34 @@ scenarios.s_telemetry = async () => {
   assert.match(result.report, /## Run stats/)
 }
 
+// N7 (Task 9 review finding): a dead finder on an explore lens read nothing - its draw is
+// rewound so the files never reach exploredFiles, where the session would record them clean
+// and deprioritize them in every future hunt. maxRounds caps at 4 on purpose: a live round-5
+// lens would legitimately re-read the rewound files and they would CORRECTLY re-enter
+// exploredFiles - the poison-prevention property is only assertable when the run ends here.
+// Re-offering in later rounds follows from the same exploreConsumed state drawExploreFiles
+// filters on, so this one scenario locks the mechanism.
+scenarios.s_explore_rewind_on_dead_finder = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 4, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+        if (round === 4 && key === 'explore-1') return null // dead finder: read nothing
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the ranking')
+  for (let i = 0; i < 10; i++)
+    assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
+  assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
+  assert.ok(result.exploredFiles.includes('Server/gen/g20.go'), 'backfilled live lens files stay reported too')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
