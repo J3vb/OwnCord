@@ -806,6 +806,30 @@ scenarios.s_explore_rewind_on_dead_finder = async () => {
   assert.ok(result.exploredFiles.includes('Server/gen/g20.go'), 'backfilled live lens files stay reported too')
 }
 
+// N8 (final-review finding): a THROWN stage nulls the whole lens result - the second
+// finder-failure mode the code documents. Its explore draw must rewind exactly like the
+// null-finder case, or never-read files reach exploredFiles and poison explored-clean.
+scenarios.s_explore_rewind_on_thrown_stage = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 4, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+        if (round === 4 && key === 'explore-1') throw new Error('finder infrastructure blew up')
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the ranking')
+  for (let i = 0; i < 10; i++)
+    assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
+  assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
+  assert.equal(result.rounds[3].dryEligible, false, 'a nulled lens result still makes the round ineligible')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {

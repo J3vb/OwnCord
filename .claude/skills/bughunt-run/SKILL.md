@@ -193,5 +193,5 @@ node .superpowers/rank-explore.mjs --selftest
 node .superpowers/render-run-stats.mjs --selftest
 ```
 
-All four run offline with zero API calls. Run them after any edit to the
+All six run offline with zero API calls. Run them after any edit to the
 relevant script.

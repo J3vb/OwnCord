@@ -358,7 +358,7 @@ function buildAdaptiveLenses(round) {
       `here did NOT cover. Do not re-report the findings listed above - they are already known.`,
   }))
   const shortfall = hotspotQuota - hotspots.length
-  if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} (cooldown/demotion) - backfilling from explore`)
+  if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} - trying explore backfill`)
   const explores = []
   for (let i = 1; i <= exploreQuota + shortfall; i++) {
     if ((cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
@@ -581,6 +581,12 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       return { lens, finderFailed, unionCount: union.length, fresh, matched, unmatched }
     },
   )
+
+  // a thrown stage nulls the whole lens result - rewind its explore draw too, or the
+  // session records never-read files as explored-clean (the same poison as a null finder)
+  lensResults.forEach((r, i) => {
+    if (!r && lenses[i].files) for (const f of lenses[i].files) exploreConsumed.delete(f)
+  })
 
   let eligible = !lensResults.some((r) => !r)
   let newConfirmed = 0
