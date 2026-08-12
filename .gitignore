@@ -98,3 +98,4 @@ Client/tauri-client/.env
 
 # local server run logs
 server.log
+graphify-out/
