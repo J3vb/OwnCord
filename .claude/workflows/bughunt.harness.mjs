@@ -43,7 +43,7 @@ export async function run({ agentStub, args = undefined, budget = undefined }) {
 }
 
 // ---------- stub kit (used from Task 2 onward; harmless now) ----------
-export function makeStub({ hunt, verify, report = () => 'REPORT_MD', recon = defaultRecon }) {
+export function makeStub({ hunt, verify, recon = defaultRecon }) {
   return (prompt, opts) => {
     const label = opts.label || ''
     if (label.startsWith('recon:')) return recon(label)
@@ -54,7 +54,6 @@ export function makeStub({ hunt, verify, report = () => 'REPORT_MD', recon = def
       const candidates = JSON.parse(prompt.split('--- CANDIDATES ---')[1])
       return verify(Number(m[1]), m[2], candidates, Boolean(m[3]), prompt)
     }
-    if (label === 'report') return report(prompt)
     throw new Error(`unexpected agent label: ${label}`)
   }
 }
@@ -92,16 +91,11 @@ const scenarios = {}
 
 // S1: happy convergence - one bug in round 1, rounds 2-3 dry -> converged.
 scenarios.s1_convergence = async () => {
-  const reportPrompts = []
   const { result, calls } = await run({
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
       verify: (round, key, cands) => confirmAll(cands),
-      report: (prompt) => {
-        reportPrompts.push(prompt)
-        return 'REPORT_MD'
-      },
     }),
   })
   for (const k of ['converged', 'stoppedOnBudget', 'rounds', 'confirmed', 'unverified', 'report'])
@@ -111,10 +105,11 @@ scenarios.s1_convergence = async () => {
   assert.deepEqual(result.rounds.map((r) => r.dryAfter), [0, 1, 2])
   assert.deepEqual(result.rounds.map((r) => r.family), ['surfaces', 'bug-classes', 'flows'])
   assert.equal(result.confirmed.length, 1)
-  assert.equal(result.report, 'REPORT_MD')
   assert.ok(!calls.some((c) => (c.opts.label || '').startsWith('r4:')), 'no round 4 after convergence')
-  assert.match(reportPrompts[0], /CONVERGED after 3 round\(s\)/)
-  assert.match(reportPrompts[0], /\| 1 \| surfaces \|/)
+  assert.ok(!calls.some((c) => c.opts.label === 'report'), 'the report is built in-script')
+  assert.match(result.report, /CONVERGED after 3 round\(s\)/)
+  assert.match(result.report, /### high - distinct bug alpha1 omega1/)
+  assert.match(result.report, /\| 1 \| surfaces \|/)
 }
 
 // S2: panel dedupe - opus and sonnet report the same bug -> one candidate, one verify call.
@@ -639,6 +634,31 @@ scenarios.s_panel_split_is_reported = async () => {
   assert.ok(line, 'the run must report the panel split')
   assert.match(line, /sonnet-only/, 'the split must name the sonnet-only count explicitly')
   assert.match(line, /\b1\b/, 'exactly one confirmed finding here was sonnet-only')
+}
+
+// New (spec Testing #8): the report is built in-script. Section count must equal the confirmed
+// count at 82 (the agent version emitted 79 for 82), and the unverified section must survive
+// the agent's removal - it used to exist only inside the report agent's prompt.
+scenarios.s_report_deterministic = async () => {
+  const many = Array.from({ length: 82 }, (_, i) =>
+    finding(i, { file: `Server/ws/f${i}.go`, line: 10, title: `unique bug row${i} tag${i}` }))
+  const stuck = finding(999, { file: 'Server/api/stuck.go', line: 40, title: 'stuck bug never verified' })
+  const { result, calls } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [...many, stuck] } : none,
+      verify: (round, key, cands) => confirmAll(cands.filter((c) => c.file !== 'Server/api/stuck.go')),
+    }),
+  })
+  assert.equal(result.confirmed.length, 82)
+  assert.equal(result.unverified.length, 1)
+  assert.ok(!calls.some((c) => c.opts.label === 'report'), 'no report agent may run')
+  const sections = (result.report.match(/^### /gm) || []).length
+  assert.equal(sections, 82, 'one section per confirmed finding, none dropped')
+  assert.match(result.report, /## Unverified - re-run/)
+  assert.match(result.report, /stuck bug never verified/)
+  assert.match(result.report, /## Convergence/)
 }
 
 // ---------- runner ----------

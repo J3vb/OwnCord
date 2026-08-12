@@ -4,7 +4,6 @@ export const meta = {
   whenToUse: 'Hunting real bugs across the Go server, Tauri Rust backend, and TS client until consecutive rounds go dry. Not a security-only scan.',
   phases: [
     { title: 'Recon', detail: 'haiku: churn + concurrency-surface inventory' },
-    { title: 'Report', detail: 'fable: ranked findings + convergence table' },
   ],
 }
 
@@ -560,39 +559,48 @@ const converged = dry >= DRY_THRESHOLD
 const sonnetOnly = confirmedAll.filter((f) => f.finder === 'sonnet').length
 log(`panel: ${confirmedAll.length} confirmed, ${sonnetOnly} sonnet-only (opus missed), ${confirmedAll.length - sonnetOnly} found by opus`)
 
-// ---------- report ----------
-phase('Report')
+// ---------- report (deterministic) ----------
+// A report agent silently dropped findings (79 sections for 82 confirmed on 2026-08-12), so the
+// markdown is assembled in-script from confirmedSorted. Coordinate spot-checking moved to the
+// calling session, which validates EVERY finding's file/line after return (see bughunt-run).
 const RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 const confirmedSorted = confirmedAll.slice().sort((a, b) => RANK[a.severity] - RANK[b.severity])
 const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
 const table = convergenceTable(roundStats, converged, stoppedOnBudget)
 
-let report
-if (!confirmedSorted.length && !unverifiedFinal.length) {
-  const outcome = converged ? 'Converged' : stoppedOnBudget ? 'Stopped on budget - NOT converged' : 'Hit the round backstop - NOT converged'
-  report = `${outcome} after ${round} round(s) with zero confirmed findings.\n\n${table}`
-} else {
-  report = await agent(
-    `You are writing the final bug-hunt report for OwnCord (D:/Local-Lab/Repos/OwnCord).\n\n` +
-      `The findings below already survived adversarial verification - do NOT re-litigate them, and do NOT add new ` +
-      `ones. Your job is presentation and prioritization for a maintainer who will fix these today.\n\n` +
-      `Spot-check the two highest-severity findings against the real files to make sure file paths and line numbers ` +
-      `are accurate; correct them silently if they drifted.\n\n` +
-      `Write markdown:\n` +
-      `  - Open with one paragraph: how many real bugs, in which subsystems, whether the hunt CONVERGED, and which ` +
-      `finding to fix first and why.\n` +
-      `  - Then one section per finding, ordered by severity: a "### <severity> - <title>" heading, the ` +
-      `\`file:line\` reference, what breaks and under exactly what conditions, and the smallest correct fix.\n` +
-      (unverifiedFinal.length
-        ? `  - Then an "## Unverified - re-run" section listing these candidates whose verification failed twice: ` +
-          `${JSON.stringify(unverifiedFinal)}\n`
-        : '') +
-      `  - End with the convergence table below, VERBATIM.\n` +
-      `Write in complete sentences. No emoji, no "consider" hedging.\n\n` +
-      `--- CONFIRMED FINDINGS ---\n${JSON.stringify(confirmedSorted, null, 2)}\n\n` +
-      `--- CONVERGENCE TABLE ---\n${table}`,
-    { label: 'report', phase: 'Report', model: 'fable', effort: 'high' },
+function buildReport() {
+  const outcome = converged
+    ? `CONVERGED after ${round} round(s).`
+    : stoppedOnBudget
+      ? `NOT converged - stopped on budget after ${round} round(s).`
+      : `NOT converged - hit the round backstop after ${round} round(s).`
+  const sev = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const f of confirmedSorted) sev[f.severity] = (sev[f.severity] || 0) + 1
+  const lines = ['# Bug hunt report', '']
+  lines.push(
+    `${confirmedSorted.length} confirmed finding(s) - ${sev.critical} critical, ${sev.high} high, ` +
+      `${sev.medium} medium, ${sev.low} low. ${outcome}` +
+      (confirmedSorted.length
+        ? ` Fix first: ${confirmedSorted[0].title} (\`${confirmedSorted[0].file}:${confirmedSorted[0].line}\`).`
+        : ''),
+    '',
   )
+  for (const f of confirmedSorted) {
+    lines.push(`### ${f.severity} - ${f.title}`, '')
+    lines.push(`\`${f.file}:${f.line}\` - lens \`${f.lens}\`, round ${f.round}, confidence ${f.confidence}`, '')
+    if (f.why) lines.push(f.why, '')
+    if (f.repro) lines.push(`**Repro:** ${f.repro}`, '')
+    if (f.evidence) lines.push(`**Evidence:** ${f.evidence}`, '')
+    if (f.fix) lines.push(`**Fix:** ${f.fix}`, '')
+  }
+  if (unverifiedFinal.length) {
+    lines.push('## Unverified - re-run', '')
+    for (const u of unverifiedFinal) lines.push(`- \`${u.file}:${u.line}\` ${u.title} (lens \`${u.lens}\`, round ${u.round})`)
+    lines.push('')
+  }
+  lines.push(table)
+  return lines.join('\n')
 }
+const report = buildReport()
 
 return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, report }
