@@ -22,20 +22,32 @@ ceiling at all**. The workflow's first log line echoes the state: `budget=25M` m
 armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
 directive.
 
-Read the ledger and pass every record in as `known`, so the hunt does not
-re-derive anything already found, fixed, declined, or refuted:
+Before launching, in order:
+
+1. **Rebuild the graph** (stale coordinates aim the explore lens at moved code):
+   `graphify update . --no-cluster` — local tree-sitter, zero LLM cost, ~10.7k nodes.
+2. **Rank explore targets**: `node .superpowers/rank-explore.mjs` — writes
+   `.superpowers/explore-ranking.json`, deprioritizing files recorded clean in
+   `.superpowers/explored-clean.json` and dropping files that no longer exist.
+3. Read the ledger and pass every record in as `known`, so the hunt does not
+   re-derive anything already found, fixed, declined, or refuted.
 
 ```
 Workflow({
   name: "bughunt",
   args: {
     known: <every record from findings-ledger.json, as {file, line, title, status}>,
+    graph: <the rows of .superpowers/explore-ranking.json>,
     lenses: [ {key, prompt}, ... ],   // optional: scope the hunt to one subsystem
     maxRounds: 8,
     dryThreshold: 2,
   },
 })
 ```
+
+If `graph` is omitted or empty the hunt logs
+`explore: args.graph absent/empty - falling back to churn-based fresh eyes` and
+still runs — degraded targeting, never a smaller lens family.
 
 Omit `lenses` for a general hunt across the rotating families.
 
@@ -177,6 +189,7 @@ node .claude/workflows/bughunt.harness.mjs
 node .claude/workflows/bughunt-fix.harness.mjs
 node .superpowers/render-ledger.mjs --selftest
 node .superpowers/verify-fixes.mjs --selftest
+node .superpowers/rank-explore.mjs --selftest
 node .superpowers/render-run-stats.mjs --selftest
 ```
 
