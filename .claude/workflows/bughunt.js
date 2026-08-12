@@ -483,23 +483,38 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       const { lens, pair } = r
       const finderFailed = pair.some((p) => p === null)
       // Tag by panel slot, not by position in the surviving list: filtering the nulls out first
-      // would shift sonnet into slot 0 whenever opus dies and mislabel its finds. The panel unions
-      // rather than votes, so this is the only signal for whether the second finder earns its cost
-      // - and since dedupe keeps the first occurrence and opus is slot 0, `finder: 'sonnet'` means
-      // opus did not report it. `finder: 'opus'` says nothing about sonnet either way.
+      // would shift sonnet into slot 0 whenever opus dies and mislabel its finds.
       const union = pair.flatMap((p, i) =>
         p ? (p.findings || []).map((f) => ({ ...f, finder: i ? 'sonnet' : 'opus' })) : [],
       )
       const fresh = dedupe(union, seenAtStart)
-      if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], verdicts: [] }
+      if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], matched: [], unmatched: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
       const vopts = { phase: `Round ${rnd}`, model: 'fable', effort: 'high', schema: VERDICTS }
-      let v = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}` })
-      if (!v || (v.verdicts || []).length < fresh.length) {
-        const retry = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}:retry` })
-        if (((retry && retry.verdicts) || []).length > ((v && v.verdicts) || []).length) v = retry
+      // Pair verdicts to candidates as they arrive, then retry ONLY what got no usable verdict.
+      // Retrying the whole batch re-burned every verdict on a partial return, and the old
+      // count-based trigger let N unmatched garbage verdicts skip the retry entirely.
+      const matched = []
+      const unmatched = fresh.slice()
+      const absorb = (vs) => {
+        for (const v of vs || []) {
+          const vRec = { file: v.file, line: v.line, title: v.title }
+          const idx = unmatched.findIndex((f) => isDup(vRec, f) || isDup(f, vRec))
+          if (idx === -1) {
+            log(`r${rnd} ${lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
+            continue
+          }
+          const [cand] = unmatched.splice(idx, 1)
+          matched.push({ v, cand })
+        }
       }
-      return { lens, finderFailed, unionCount: union.length, fresh, verdicts: (v && v.verdicts) || [] }
+      const v1 = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}` })
+      absorb(v1 && v1.verdicts)
+      if (unmatched.length) {
+        const v2 = await agent(verifyPrompt(lens.key, unmatched.slice()), { ...vopts, label: `r${rnd}:verify:${lens.key}:retry` })
+        absorb(v2 && v2.verdicts)
+      }
+      return { lens, finderFailed, unionCount: union.length, fresh, matched, unmatched }
     },
   )
 
@@ -513,18 +528,10 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
     let lensConfirmed = 0
-    const unmatched = r.fresh.slice()
-    for (const v of r.verdicts) {
-      const vRec = { file: v.file, line: v.line, title: v.title }
-      const idx = unmatched.findIndex((f) => isDup(vRec, f) || isDup(f, vRec))
-      if (idx === -1) {
-        log(`r${round} ${r.lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
-        continue
-      }
+    for (const { v, cand } of r.matched) {
       // Keep the matched candidate: the verdict schema has no why/repro/evidence, and the
       // ledger needs them. Verdict fields are spread last so the verifier's re-rated severity
       // and its corrected title/file/line win over the finder's.
-      const [cand] = unmatched.splice(idx, 1)
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
       if (seen.some((p) => isDup(rec, p))) continue // cross-lens same-round duplicate
       seen.push(rec)
@@ -535,12 +542,12 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
         confirmedAll.push({ ...cand, ...v, lens: r.lens.key, round })
       }
     }
-    if (unmatched.length) {
+    if (r.unmatched.length) {
       eligible = false // partial verifier failure: some candidates got no verdict at all
-      for (const f of unmatched) unverified.push({ ...f, lens: r.lens.key, round })
+      for (const f of r.unmatched) unverified.push({ ...f, lens: r.lens.key, round })
     }
     // a lens hunted at partial panel strength, or whose candidates never got a verdict, is not evidence of cleanliness
-    if (!r.finderFailed && !unmatched.length) cleanStreak[r.lens.key] = lensConfirmed > 0 ? 0 : (cleanStreak[r.lens.key] || 0) + 1
+    if (!r.finderFailed && !r.unmatched.length) cleanStreak[r.lens.key] = lensConfirmed > 0 ? 0 : (cleanStreak[r.lens.key] || 0) + 1
   }
 
   if (newConfirmed > 0) dry = 0

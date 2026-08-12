@@ -661,6 +661,39 @@ scenarios.s_report_deterministic = async () => {
   assert.match(result.report, /## Convergence/)
 }
 
+// New (spec Testing #7): the retry re-sends ONLY unmatched candidates, and N garbage verdicts
+// (count == candidate count, zero of them matching) must still trigger it - the hole S10 misses
+// because S10's verdict list is empty rather than full of junk.
+scenarios.s_targeted_retry = async () => {
+  const a = finding(1, { file: 'Server/ws/a.go', title: 'alpha bug one paired' })
+  const b = finding(2, { file: 'Server/api/b.go', title: 'beta bug two orphaned' })
+  const retryBatches = []
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [a, b] } : none,
+      verify: (round, key, cands, isRetry) => {
+        if (isRetry) {
+          retryBatches.push(cands)
+          return confirmAll(cands)
+        }
+        // one real verdict for a, one garbage verdict pointing nowhere: count matches, content doesn't
+        return {
+          verdicts: [
+            { title: a.title, file: a.file, line: a.line, refuted: false, reason: 'ok', confidence: 'high', severity: 'high', fix: 'f' },
+            { title: 'hallucinated', file: 'Server/nowhere.go', line: 1, refuted: false, reason: 'x', confidence: 'low', severity: 'low' },
+          ],
+        }
+      },
+    }),
+  })
+  assert.equal(retryBatches.length, 1, 'retry must fire despite verdict count == candidate count')
+  assert.deepEqual(retryBatches[0].map((c) => c.file), ['Server/api/b.go'], 'only the unmatched candidate is re-sent')
+  assert.equal(result.confirmed.length, 2)
+  assert.equal(result.unverified.length, 0)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
