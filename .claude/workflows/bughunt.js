@@ -1,6 +1,6 @@
 export const meta = {
   name: 'bughunt',
-  description: 'Converging multi-round bug hunt: rotating lens families, dual-model panels, fable refute-by-default verification, dry-threshold stop',
+  description: 'Converging multi-round bug hunt: rotating lens families, single opus finder, fable refute-by-default verification, dry-threshold stop',
   whenToUse: 'Hunting real bugs across the Go server, Tauri Rust backend, and TS client until consecutive rounds go dry. Not a security-only scan.',
   phases: [
     { title: 'Recon', detail: 'haiku: churn + concurrency-surface inventory' },
@@ -487,22 +487,17 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   const lensResults = await pipeline(
     lenses,
     (lens) =>
-      parallel([
-        () => agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:opus`, phase: `Round ${rnd}`, model: 'opus', effort: 'high', schema: FINDINGS }),
-        () => agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:sonnet`, phase: `Round ${rnd}`, model: 'sonnet', effort: 'high', schema: FINDINGS }),
-      ]).then((pair) => ({ lens, pair })),
+      agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:opus`, phase: `Round ${rnd}`, model: 'opus', effort: 'high', schema: FINDINGS })
+        .then((res) => ({ lens, res })),
     async (r) => {
-      const { lens, pair } = r
-      const finderFailed = pair.some((p) => p === null)
-      for (const p of pair) {
-        if (p === null) counts.finderNull++
-        else if (!(p.findings || []).length) counts.finderEmpty++
-      }
-      // Tag by panel slot, not by position in the surviving list: filtering the nulls out first
-      // would shift sonnet into slot 0 whenever opus dies and mislabel its finds.
-      const union = pair.flatMap((p, i) =>
-        p ? (p.findings || []).map((f) => ({ ...f, finder: i ? 'sonnet' : 'opus' })) : [],
-      )
+      const { lens, res } = r
+      // agent() returns null on failure; a thrown stage instead nulls the whole lens result,
+      // which the eligibility check catches separately. Both checks are needed.
+      const finderFailed = res === null
+      if (finderFailed) counts.finderNull++
+      else if (!(res.findings || []).length) counts.finderEmpty++
+      // finder is constant now; kept on the record for ledger continuity across hunts
+      const union = res ? (res.findings || []).map((f) => ({ ...f, finder: 'opus' })) : []
       const fresh = dedupe(union, seenAtStart, counts)
       if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], matched: [], unmatched: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
@@ -588,13 +583,6 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
 }
 
 const converged = dry >= DRY_THRESHOLD
-
-// The panel unions rather than votes, so the second finder's whole value is what it finds alone.
-// dedupe keeps the opus-slot record when both report the same bug, so a confirmed finding tagged
-// sonnet is one opus missed. A run where that count is 0 is the evidence for dropping the second
-// model; anything above 0 is what it bought.
-const sonnetOnly = confirmedAll.filter((f) => f.finder === 'sonnet').length
-log(`panel: ${confirmedAll.length} confirmed, ${sonnetOnly} sonnet-only (opus missed), ${confirmedAll.length - sonnetOnly} found by opus`)
 
 // ---------- report (deterministic) ----------
 // A report agent silently dropped findings (79 sections for 82 confirmed on 2026-08-12), so the
