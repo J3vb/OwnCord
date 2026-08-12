@@ -71,6 +71,8 @@ export const finding = (n, over = {}) => ({
   evidence: 'e',
   ...over,
 })
+export const graphRows = (n) =>
+  Array.from({ length: n }, (_, i) => ({ file: `Server/gen/g${i}.go`, score: 1 - i / (n + 1), degree: 10, cited: 5 }))
 export const confirmAll = (cands) => ({
   verdicts: cands.map((c) => ({
     title: c.title, file: c.file, line: c.line,
@@ -234,15 +236,132 @@ scenarios.s6b_verifier_double_failure = async () => {
   assert.equal(result.unverified.length, 0, 'later-confirmed candidate must leave the unverified list')
 }
 
-// S7: rounds 1-3 each confirm a bug -> round 4 runs adaptive lenses built from the stats.
+// N1 (spec #1): the top-ranked hotspot cluster sits out exactly the next round, then returns.
+// The producing cluster keeps running when eligible (the old s7b lock, restated under cooldown).
+scenarios.s_cluster_cooldown = async () => {
+  const { calls } = await run({
+    args: { maxRounds: 6, dryThreshold: 9, graph: graphRows(60) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [
+            finding(1, { file: 'Server/ws/hub.go', title: 'ws bug alpha one' }),
+            finding(2, { file: 'Server/ws/pubsub.go', line: 300, title: 'ws bug beta two' }),
+          ] }
+        if (round === 2 && key === 'concurrency')
+          return { findings: [
+            finding(3, { file: 'Server/ws/emit.go', title: 'ws bug gamma three' }),
+            finding(4, { file: 'Server/api/user.go', title: 'api bug delta four' }),
+          ] }
+        if (round === 4 && key === 'hotspot-server-ws')
+          return { findings: [finding(9, { file: 'Server/ws/late.go', title: 'late ws bug nine' })] }
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const hunted = (rnd, key) => calls.some((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`)
+  assert.ok(hunted(4, 'hotspot-server-ws'), 'top cluster hunts in r4')
+  assert.ok(!hunted(5, 'hotspot-server-ws'), 'the r4 top cluster must sit out r5 even though it produced')
+  assert.ok(hunted(5, 'hotspot-server-api'), 'the next cluster takes the top slot in r5')
+  assert.ok(hunted(6, 'hotspot-server-ws'), 'cooldown lasts exactly one round')
+}
+
+// N2 (spec #2): a cooldown gap FREEZES cleanStreak - neither increments nor resets - so
+// demotion still means two consecutive clean APPEARANCES. If the gap incremented, ws would
+// be demoted before r6; if demotion broke, ws would still run in r8.
+scenarios.s_cooldown_freezes_streak = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 8, dryThreshold: 9, graph: graphRows(100) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [
+            finding(1, { file: 'Server/ws/hub.go', title: 'ws bug alpha one' }),
+            finding(2, { file: 'Server/ws/pubsub.go', line: 300, title: 'ws bug beta two' }),
+          ] }
+        if (round === 2 && key === 'concurrency')
+          return { findings: [finding(3, { file: 'Server/api/user.go', title: 'api bug delta three' })] }
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const hunted = (rnd, key) => calls.some((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`)
+  assert.ok(hunted(4, 'hotspot-server-ws'), 'clean appearance #1 in r4')
+  assert.ok(!hunted(5, 'hotspot-server-ws'), 'cooldown in r5')
+  assert.ok(hunted(6, 'hotspot-server-ws'), 'the gap must freeze the streak at 1, not increment it')
+  assert.equal(result.rounds.length, 8, 'the run must reach r8 for the demotion assert to mean anything')
+  assert.ok(!hunted(8, 'hotspot-server-ws'), 'two clean appearances (r4, r6) demote the lens')
+}
+
+// N3 (spec #3): cooldown+demotion emptying the hotspot pool must backfill from explore and
+// log it - silent family shrinkage is the exact freshEyesLens() defect this rebuild removes.
+scenarios.s_hotspot_backfill = async () => {
+  const { calls, logs } = await run({
+    args: { maxRounds: 5, dryThreshold: 9, graph: graphRows(100) },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'lone ws bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const r5 = calls.filter((c) => /^r5:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2])
+  assert.ok(!r5.some((k) => k.startsWith('hotspot-')), 'the sole cluster is on cooldown in r5')
+  assert.deepEqual([...r5].sort(), ['explore-1', 'explore-2', 'explore-3', 'explore-4'], 'the family backfills to full size from explore')
+  assert.ok(logs.some((l) => /hotspot pool short/.test(l)), 'backfill must be logged, never silent')
+}
+
+// N4 (spec #4): within-run consumption - later rounds draw the NEXT chunk of the ranking,
+// never re-offering files already handed to an explore lens this run.
+scenarios.s_explore_consumption = async () => {
+  const { calls } = await run({
+    args: { maxRounds: 5, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/)
+  assert.match(promptOf(4, 'explore-2'), /Server\/gen\/g10\.go/)
+  assert.match(promptOf(4, 'explore-3'), /Server\/gen\/g20\.go/, 'r4 backfills a third explore lens (single cluster)')
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g30\.go/, 'r5 draws the next chunk')
+  assert.doesNotMatch(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'r5 must not re-offer r4 files')
+}
+
+// N6 (spec #6): args.graph absent -> churn-based fresh-eyes fallback, logged, family intact.
+scenarios.s_graph_missing_fallback = async () => {
+  const { calls, logs } = await run({
+    args: { maxRounds: 4, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  assert.ok(logs.some((l) => /falling back to churn/.test(l)), 'the fallback must be logged')
+  const e1 = calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus')
+  assert.ok(e1, 'an explore lens must still run from churn')
+  assert.match(e1.prompt, /Server\/api\/user\.go/, 'churned file with no findings feeds the fallback')
+}
+
+// S7: rounds 1-3 each confirm a bug -> round 4 runs adaptive lenses: directory-granularity
+// hotspots plus explore (churn fallback here - no args.graph is passed).
 scenarios.s7_adaptive_lenses = async () => {
   const A = finding(1, { file: 'Server/ws/hub.go', line: 120, title: 'alpha race window one' })
   const B = finding(2, { file: 'Server/ws/pubsub.go', line: 60, title: 'beta subscription leak two' })
   const C = finding(3, { file: 'Client/tauri-client/src/lib/livekitE2EE.ts', line: 200, title: 'gamma epoch desync three' })
   const { result, calls } = await run({
     agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
+      hunt: (round, key) => {
         if (round === 1 && key === 'ws-hub') return { findings: [A] }
         if (round === 2 && key === 'concurrency') return { findings: [B] }
         if (round === 3 && key === 'flow-voice') return { findings: [C] }
@@ -254,49 +373,26 @@ scenarios.s7_adaptive_lenses = async () => {
   assert.equal(result.converged, true)
   assert.equal(result.rounds.length, 5) // r4, r5 adaptive + dry
   assert.equal(result.rounds[3].family, 'adaptive')
-  const r4Hunts = calls.filter((c) => /^r4:hunt:/.test(c.opts.label || ''))
-  const r4Keys = [...new Set(r4Hunts.map((c) => c.opts.label.split(':')[2]))]
+  const r4Keys = [...new Set(calls.filter((c) => /^r4:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2]))]
   assert.ok(r4Keys.includes('hotspot-server-ws'), `r4 keys: ${r4Keys}`)
-  assert.ok(r4Keys.includes('fresh-eyes'), `r4 keys: ${r4Keys}`)
-  const hotspot = r4Hunts.find((c) => c.opts.label.includes('hotspot-server-ws'))
+  assert.ok(r4Keys.includes('hotspot-client-tauri-client-src-lib'), `r4 keys: ${r4Keys}`)
+  assert.ok(r4Keys.includes('explore-1'), `r4 keys: ${r4Keys}`)
+  const hotspot = calls.find((c) => (c.opts.label || '').includes('hotspot-server-ws'))
   assert.match(hotspot.prompt, /Server\/ws\/hub\.go/)
   assert.match(hotspot.prompt, /alpha race window one/)
-  const freshEyes = r4Hunts.find((c) => c.opts.label.includes('fresh-eyes'))
-  assert.match(freshEyes.prompt, /Server\/api\/user\.go/) // churned, never a finding
+  const explore = calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus')
+  assert.match(explore.prompt, /Server\/api\/user\.go/) // churned, never a finding
   assert.equal(result.confirmed.length, 3)
 }
 
-// S7b: a lens with 2 consecutive clean rounds is demoted from later rounds.
-scenarios.s7b_demotion = async () => {
-  const { result, calls } = await run({
-    args: { maxRounds: 6 },
-    agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
-        const src = { 1: 'ws-hub', 2: 'concurrency', 3: 'flow-reconnect', 4: 'hotspot-server-ws', 5: 'hotspot-server-ws' }
-        if (key === src[round])
-          return { findings: [finding(round, { file: `Server/ws/a${round}.go`, title: `unique bug number${round} zeta${round}` })] }
-        return none
-      },
-      verify: (round, key, cands) => confirmAll(cands),
-    }),
-  })
-  const labels = calls.map((c) => c.opts.label || '')
-  assert.ok(labels.some((l) => /^r5:hunt:fresh-eyes:/.test(l)), 'fresh-eyes still runs in r5 (streak 1)')
-  assert.ok(!labels.some((l) => /^r6:hunt:fresh-eyes:/.test(l)), 'fresh-eyes demoted in r6 (streak 2)')
-  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'producing hotspot keeps running')
-  assert.equal(result.converged, false)
-  assert.equal(result.confirmed.length, 5)
-}
-
-// S7c: a lens whose VERIFIER died is not demoted; a zero-candidate lens still is.
+// S7c: a lens whose VERIFIER died is not demoted (its cluster returns after cooldown);
+// a zero-candidate explore lens still accrues streak and demotes.
 scenarios.s7c_verifier_failure_not_demoted = async () => {
   const early = { 1: 'ws-hub', 2: 'concurrency', 3: 'flow-reconnect' }
   const { result, calls } = await run({
-    args: { maxRounds: 6 },
+    args: { maxRounds: 6, dryThreshold: 9, graph: graphRows(100) },
     agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
+      hunt: (round, key) => {
         if (round <= 3 && key === early[round])
           return { findings: [finding(round, { file: `Server/ws/a${round}.go`, title: `early bug item${round} kappa${round}` })] }
         if (round >= 4 && key === 'hotspot-server-ws')
@@ -307,12 +403,15 @@ scenarios.s7c_verifier_failure_not_demoted = async () => {
     }),
   })
   const labels = calls.map((c) => c.opts.label || '')
-  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'verifier-dead lens must NOT be demoted')
-  assert.ok(!labels.some((l) => /^r6:hunt:fresh-eyes:/.test(l)), 'zero-candidate lens still accrues streak and demotes')
+  assert.ok(labels.some((l) => /^r4:hunt:hotspot-server-ws:/.test(l)))
+  assert.ok(!labels.some((l) => /^r5:hunt:hotspot-server-ws:/.test(l)), 'cooldown after topping r4')
+  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'a verifier-dead lens must NOT be demoted')
+  assert.ok(!labels.some((l) => /^r6:hunt:explore-1:/.test(l)), 'a zero-candidate explore lens still demotes')
   assert.equal(result.confirmed.length, 3)
-  assert.equal(result.unverified.length, 3)
+  assert.equal(result.unverified.length, 2) // b4 and b6, each denied a verdict twice
   assert.equal(result.converged, false)
-  assert.ok(result.rounds.slice(3).every((r) => r.dryEligible === false))
+  assert.equal(result.rounds[3].dryEligible, false)
+  assert.equal(result.rounds[5].dryEligible, false)
 }
 
 // S12: empty adaptive family (no confirms, no churn) must break honestly, not count dry rounds.

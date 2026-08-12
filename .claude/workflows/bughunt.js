@@ -93,14 +93,16 @@ Out of scope, do not report: naming, formatting, missing tests, "consider adding
 performance that is not a hang, anything you cannot point at specific lines for.
 
 Method:
-  1. Read the actual files. Never report from a filename or a grep hit alone.
+  1. Read the actual files. Never report from a filename, a grep hit, or a graph edge alone - a
+     graphify edge is structural evidence of coupling, not of a bug; open the cited file and confirm.
   2. For every candidate, grep for ALL callers before judging - a guard may already live upstream.
   3. Check whether an existing test already locks the behavior you think is wrong. If a test asserts it,
      it is intended behavior, not a bug. Test files are *_test.go and tests/unit/*.test.ts.
   4. Report EVERY finding you can prove - there is no cap. The quality bar stays: zero findings is a
      valid, respectable answer, and each finding needs file, line, and a concrete repro.
 
-You may run read-only shell commands (grep, git log, go doc). Do not modify any file. Do not run the test suite.
+You may run read-only shell commands (grep, git log, go doc, graphify path, graphify explain).
+Do not modify any file. Do not run the test suite.
 `
 
 // ---------- lens catalog ----------
@@ -271,46 +273,82 @@ const FLOW_LENSES = [
 ]
 
 function lensesForRound(round) {
-  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses()
+  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses(round)
   if (round === 1) return SURFACE_LENSES
   if (round === 2) return BUGCLASS_LENSES
   if (round === 3) return FLOW_LENSES
-  return buildAdaptiveLenses()
+  return buildAdaptiveLenses(round)
 }
 function familyName(round) {
   if (CUSTOM_LENSES) return round === 1 ? 'custom' : 'adaptive'
   return ['surfaces', 'bug-classes', 'flows'][round - 1] || 'adaptive'
 }
+// Directory granularity: the old two/three-segment cluster collapsed the whole TS client into
+// one bucket (35 of 82 findings), so the "top cluster" never changed for five straight rounds.
 function clusterOf(file) {
   const parts = String(file).split('/')
-  return parts.slice(0, parts[0] === 'Client' ? 3 : 2).join('/')
+  return parts.length > 1 ? parts.slice(0, -1).join('/') : parts[0]
 }
-function freshEyesLens() {
-  const files = churnFiles.filter((f) => !seen.some((s) => s.file === f)).slice(0, 10)
-  if (!files.length) return []
-  return [
-    {
-      key: 'fresh-eyes',
-      prompt:
-        `These files churned heavily in the last 8 weeks, yet no hunt round has confirmed or refuted a ` +
-        `single finding in them - either they are clean or every lens so far walked past them. Read each ` +
-        `one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
-        files.map((f) => `  - ${f}`).join('\n'),
-    },
-  ]
+
+// ---------- explore targeting ----------
+// args.graph: session-computed coupling ranking (rank-explore.mjs). The workflow only reads
+// .file - scoring already happened outside, where the filesystem is.
+const GRAPH_ROWS = (Array.isArray(ARGS.graph) ? ARGS.graph : []).filter((r) => r && typeof r.file === 'string')
+const EXPLORE_FILES_PER_LENS = 10
+const exploreConsumed = new Set() // within-run consumption: never re-offer a file to a later round
+let exploreFallbackLogged = false
+function drawExploreFiles() {
+  let pool
+  if (GRAPH_ROWS.length) pool = GRAPH_ROWS.map((r) => r.file)
+  else {
+    if (!exploreFallbackLogged) {
+      log('explore: args.graph absent/empty - falling back to churn-based fresh eyes')
+      exploreFallbackLogged = true
+    }
+    pool = churnFiles
+  }
+  const files = pool
+    .filter((f) => !exploreConsumed.has(f) && !seen.some((s) => s.file === f))
+    .slice(0, EXPLORE_FILES_PER_LENS)
+  for (const f of files) exploreConsumed.add(f)
+  return files
 }
-function buildAdaptiveLenses() {
+function exploreLens(i) {
+  const files = drawExploreFiles()
+  if (!files.length) return null
+  const src = GRAPH_ROWS.length
+    ? `These files are heavily coupled (per the code graph) to files where confirmed bugs live, yet no ` +
+      `hunt has confirmed or refuted a single finding in them - either they are clean or every lens so ` +
+      `far walked past them.`
+    : `These files churned heavily in the last 8 weeks, yet no hunt round has confirmed or refuted a ` +
+      `single finding in them - either they are clean or every lens so far walked past them.`
+  return {
+    key: `explore-${i}`,
+    prompt: `${src} Read each one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
+      files.map((f) => `  - ${f}`).join('\n'),
+  }
+}
+
+let cooldownCluster = null // the top-ranked cluster hunted in round N sits out round N+1
+function buildAdaptiveLenses(round) {
   const byCluster = {}
   for (const c of confirmedAll) {
     const cl = clusterOf(c.file)
     if (!byCluster[cl]) byCluster[cl] = []
     byCluster[cl].push(c)
   }
-  const top = Object.entries(byCluster)
+  // Explore-heavy schedule: measured hotspot yield flattened to 0.25 high+med/agent by round 6.
+  const hotspotQuota = round <= 5 ? 2 : 1
+  const exploreQuota = round <= 5 ? 2 : 3
+  const hotKey = (cl) => ('hotspot ' + cl).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const picked = Object.entries(byCluster)
     .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, 3)
-  const hotspots = top.map(([cluster, items]) => ({
-    key: ('hotspot ' + cluster).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    .filter(([cl]) => cl !== cooldownCluster)
+    .filter(([cl]) => (cleanStreak[hotKey(cl)] || 0) < 2) // pre-filter so backfill sees the real shortfall
+    .slice(0, hotspotQuota)
+  cooldownCluster = picked.length ? picked[0][0] : null
+  const hotspots = picked.map(([cluster, items]) => ({
+    key: hotKey(cluster),
     prompt:
       `Bugs cluster. Confirmed findings so far in ${cluster}:\n` +
       items.map((i) => `  - ${i.file}:${i.line} ${i.title}`).join('\n') +
@@ -318,7 +356,19 @@ function buildAdaptiveLenses() {
       `(subscribe/unsubscribe, open/close, register/transfer, acquire/release), and the paths a past fix ` +
       `here did NOT cover. Do not re-report the findings listed above - they are already known.`,
   }))
-  return [...hotspots, ...freshEyesLens()]
+  const shortfall = hotspotQuota - hotspots.length
+  if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} (cooldown/demotion) - backfilling from explore`)
+  const explores = []
+  for (let i = 1; i <= exploreQuota + shortfall; i++) {
+    if ((cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
+    const lens = exploreLens(i)
+    if (!lens) {
+      log(`adaptive: explore pool exhausted after ${explores.length} lens(es)`)
+      break
+    }
+    explores.push(lens)
+  }
+  return [...hotspots, ...explores]
 }
 
 // ---------- dedupe + ledger helpers ----------
@@ -594,7 +644,7 @@ const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
 const table = convergenceTable(roundStats, converged, stoppedOnBudget)
 const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
 const runStats = {
-  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, budgetTotal: budget.total },
+  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: budget.total },
   spentTotal: budget.spent(),
   rounds: roundStats.length,
   converged,
@@ -655,4 +705,4 @@ function buildReport() {
 }
 const report = buildReport()
 
-return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, report }
+return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, exploredFiles: [...exploreConsumed], report }
