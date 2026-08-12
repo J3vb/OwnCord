@@ -343,10 +343,18 @@ function isDup(a, b) {
   const hits = aw.filter((w) => bw.has(w)).length
   return hits * 2 >= aw.length
 }
-function dedupe(cands, priors) {
+function dedupe(cands, priors, counts) {
   const kept = []
   for (const c of cands) {
-    if (priors.some((p) => isDup(c, p)) || kept.some((k) => isDup(c, k))) continue
+    const prior = priors.find((p) => isDup(c, p))
+    if (prior) {
+      if (counts) counts[prior.fromLedger ? 'suppressedLedger' : 'suppressedRun']++
+      continue
+    }
+    if (kept.some((k) => isDup(c, k))) {
+      if (counts) counts.suppressedRun++
+      continue
+    }
     kept.push(c)
   }
   return kept
@@ -417,6 +425,7 @@ const seen = (ARGS.known || []).map((k) => ({
   line: k.line,
   title: k.title,
   status: k.status || 'known',
+  fromLedger: true, // telemetry: distinguishes ledger suppression from same-run suppression
 }))
 const confirmedAll = []
 const unverified = []
@@ -464,10 +473,12 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   const family = lensesForRound(round + 1)
   if (!family || !family.length) break // nothing to hunt != everything demoted
   round++
+  const spentBefore = budget.spent()
+  const counts = { suppressedLedger: 0, suppressedRun: 0, finderNull: 0, finderEmpty: 0, verifierNull: 0 }
   const lenses = family.filter((l) => (cleanStreak[l.key] || 0) < 2)
   if (!lenses.length) {
     dry++
-    roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry })
+    roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry, severity: { critical: 0, high: 0, medium: 0, low: 0 }, perLens: {}, filesTouched: 0, filesNew: 0, ...counts, spentBefore, spentAfter: budget.spent() })
     log(`Round ${round}: every lens demoted - counts as a dry round (dry=${dry})`)
     continue
   }
@@ -483,12 +494,16 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     async (r) => {
       const { lens, pair } = r
       const finderFailed = pair.some((p) => p === null)
+      for (const p of pair) {
+        if (p === null) counts.finderNull++
+        else if (!(p.findings || []).length) counts.finderEmpty++
+      }
       // Tag by panel slot, not by position in the surviving list: filtering the nulls out first
       // would shift sonnet into slot 0 whenever opus dies and mislabel its finds.
       const union = pair.flatMap((p, i) =>
         p ? (p.findings || []).map((f) => ({ ...f, finder: i ? 'sonnet' : 'opus' })) : [],
       )
-      const fresh = dedupe(union, seenAtStart)
+      const fresh = dedupe(union, seenAtStart, counts)
       if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], matched: [], unmatched: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
       const vopts = { phase: `Round ${rnd}`, model: 'fable', effort: 'high', schema: VERDICTS }
@@ -511,9 +526,11 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       }
       const v1 = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}` })
       absorb(v1 && v1.verdicts)
+      if (!v1) counts.verifierNull++
       if (unmatched.length) {
         const v2 = await agent(verifyPrompt(lens.key, unmatched.slice()), { ...vopts, label: `r${rnd}:verify:${lens.key}:retry` })
         absorb(v2 && v2.verdicts)
+        if (!v2) counts.verifierNull++
       }
       return { lens, finderFailed, unionCount: union.length, fresh, matched, unmatched }
     },
@@ -524,22 +541,28 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   let newRefuted = 0
   let candCount = 0
   let freshCount = 0
+  const perLens = {}
+  const sevMix = { critical: 0, high: 0, medium: 0, low: 0 }
+  const filesTouched = new Set()
+  const filesNew = new Set()
   for (const r of lensResults.filter(Boolean)) {
     candCount += r.unionCount
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
     let lensConfirmed = 0
+    let lensRefuted = 0
     for (const { v, cand } of r.matched) {
       // Keep the matched candidate: the verdict schema has no why/repro/evidence, and the
       // ledger needs them. Verdict fields are spread last so the verifier's re-rated severity
       // and its corrected title/file/line win over the finder's.
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
-      if (seen.some((p) => isDup(rec, p))) continue // cross-lens same-round duplicate
+      if (seen.some((p) => isDup(rec, p))) { counts.suppressedRun++; continue } // cross-lens same-round duplicate
       seen.push(rec)
-      if (v.refuted) newRefuted++
+      if (v.refuted) { newRefuted++; lensRefuted++ }
       else {
         newConfirmed++
         lensConfirmed++
+        sevMix[v.severity] = (sevMix[v.severity] || 0) + 1
         confirmedAll.push({ ...cand, ...v, lens: r.lens.key, round })
       }
     }
@@ -549,12 +572,18 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     }
     // a lens hunted at partial panel strength, or whose candidates never got a verdict, is not evidence of cleanliness
     if (!r.finderFailed && !r.unmatched.length) cleanStreak[r.lens.key] = lensConfirmed > 0 ? 0 : (cleanStreak[r.lens.key] || 0) + 1
+    perLens[r.lens.key] = { candidates: r.unionCount, fresh: r.fresh.length, confirmed: lensConfirmed, refuted: lensRefuted, unverified: r.unmatched.length }
+    // coverage proxy: files that produced fresh candidates this round (finder reading is unobservable)
+    for (const f of r.fresh) {
+      filesTouched.add(f.file)
+      if (!seenAtStart.some((s) => s.file === f.file)) filesNew.add(f.file)
+    }
   }
 
   if (newConfirmed > 0) dry = 0
   else if (eligible) dry++
   // ineligible zero-confirm round: dry unchanged - "we didn't fully look" is not "it's clean"
-  roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry })
+  roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry, severity: sevMix, perLens, filesTouched: filesTouched.size, filesNew: filesNew.size, ...counts, spentBefore, spentAfter: budget.spent() })
   log(`Round ${round} (${familyName(round)}): ${newConfirmed} confirmed, ${newRefuted} refuted, dry=${dry}${eligible ? '' : ' (ineligible)'}`)
 }
 
@@ -575,6 +604,22 @@ const RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 const confirmedSorted = confirmedAll.slice().sort((a, b) => RANK[a.severity] - RANK[b.severity])
 const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
 const table = convergenceTable(roundStats, converged, stoppedOnBudget)
+const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
+const runStats = {
+  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, budgetTotal: budget.total },
+  spentTotal: budget.spent(),
+  rounds: roundStats.length,
+  converged,
+  stoppedOnBudget,
+  confirmed: confirmedSorted.length,
+  refuted: sum('refuted'),
+  unverified: unverifiedFinal.length,
+  suppressedLedger: sum('suppressedLedger'),
+  suppressedRun: sum('suppressedRun'),
+  finderNull: sum('finderNull'),
+  finderEmpty: sum('finderEmpty'),
+  verifierNull: sum('verifierNull'),
+}
 
 function buildReport() {
   const outcome = converged
@@ -607,8 +652,19 @@ function buildReport() {
     lines.push('')
   }
   lines.push(table)
+  lines.push('', '## Run stats', '')
+  lines.push(
+    `Total spent: ${runStats.spentTotal} output tokens across ${runStats.rounds} round(s). ` +
+      `Suppressed by dedupe: ${runStats.suppressedLedger} ledger-known, ${runStats.suppressedRun} same-run. ` +
+      `Agent failures: ${runStats.finderNull} finder null, ${runStats.finderEmpty} finder empty, ${runStats.verifierNull} verifier null.`,
+    '',
+  )
+  lines.push('| round | spent | files (new) | suppressed ledger/run | finder null/empty | verifier null |')
+  lines.push('|---|---|---|---|---|---|')
+  for (const s of roundStats)
+    lines.push(`| ${s.round} | ${s.spentAfter - s.spentBefore} | ${s.filesTouched} (${s.filesNew}) | ${s.suppressedLedger}/${s.suppressedRun} | ${s.finderNull}/${s.finderEmpty} | ${s.verifierNull} |`)
   return lines.join('\n')
 }
 const report = buildReport()
 
-return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, report }
+return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, report }

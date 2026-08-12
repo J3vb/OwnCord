@@ -707,6 +707,42 @@ scenarios.s9_budget_ceiling_retuned = async () => {
   assert.ok(logs.some((l) => /Budget floor/.test(l)))
 }
 
+// New: telemetry. Per-round suppression split (ledger vs same-run), spend sampling, file
+// coverage, severity mix, per-lens precision, and the top-level runStats aggregate. Without
+// this every cost figure from a run is eyewitness-only - the 2026-08-12 problem.
+scenarios.s_telemetry = async () => {
+  let spent = 0
+  const known = [{ file: 'Server/ws/hub.go', line: 100, title: 'known bug from ledger prior', status: 'fixed' }]
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9, known },
+    budget: { total: 50000000, spent: () => (spent += 500000), remaining: () => 40000000 },
+    agentStub: makeStub({
+      hunt: (round, key, model) => {
+        if (round !== 1 || key !== 'ws-hub' || model !== 'opus') return none
+        return { findings: [
+          finding(1, { file: 'Server/ws/hub.go', line: 102, title: 'known bug from ledger prior' }),
+          finding(2, { file: 'Server/api/fresh.go', severity: 'medium', title: 'fresh bug beta gamma' }),
+        ] }
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const r1 = result.rounds[0]
+  assert.equal(r1.suppressedLedger, 1, 'the ledger-known duplicate must be counted as ledger suppression')
+  assert.equal(r1.suppressedRun, 0)
+  assert.ok(r1.spentAfter > r1.spentBefore, 'per-round spend must be sampled')
+  assert.equal(r1.filesTouched, 1)
+  assert.equal(r1.filesNew, 1)
+  assert.deepEqual(r1.severity, { critical: 0, high: 0, medium: 1, low: 0 })
+  assert.equal(r1.perLens['ws-hub'].confirmed, 1)
+  assert.equal(r1.perLens['ws-hub'].fresh, 1)
+  assert.ok(result.runStats, 'runStats missing from the result')
+  assert.equal(result.runStats.confirmed, 1)
+  assert.equal(result.runStats.suppressedLedger, 1)
+  assert.equal(result.runStats.config.maxRounds, 1)
+  assert.match(result.report, /## Run stats/)
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
