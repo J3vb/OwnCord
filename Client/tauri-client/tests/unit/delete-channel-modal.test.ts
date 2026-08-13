@@ -123,6 +123,29 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("re-arms the confirm button when onConfirm resolves without closing the modal", async () => {
+    // A caller may handle the failure itself (toast) and resolve instead of
+    // rejecting; the modal must not stay stuck disabled on "Deleting...".
+    const onConfirm = vi.fn(async () => {});
+    const { modal } = makeModal({ onConfirm });
+
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
+    deleteBtn.click();
+
+    await vi.waitFor(() => {
+      expect(deleteBtn.hasAttribute("disabled")).toBe(false);
+    });
+    expect(deleteBtn.textContent).toBe("Delete Channel");
+
+    // No rejection reached the modal, so no inline error either.
+    const error = container.querySelector("[data-testid='delete-channel-error']") as HTMLElement;
+    expect(error.style.display).toBe("none");
+
+    modal.destroy?.();
+  });
+
   it("disables button and shows 'Deleting...' during delete", async () => {
     let resolveDelete: (() => void) | undefined;
     const onConfirm = vi.fn<any>(
