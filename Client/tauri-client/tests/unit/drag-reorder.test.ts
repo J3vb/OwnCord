@@ -371,6 +371,35 @@ describe("reorder index arithmetic", () => {
     expect(positionsOf(reorders)).toEqual({ 3: 5, 1: 7, 2: 9 });
   });
 
+  it("still reorders when every channel in the group shares one position", () => {
+    // The server does not enforce unique positions, and newly created
+    // channels commonly all sit at position 0. Reassigning the group's own
+    // slots must still produce distinct positions, or the drop is a no-op.
+    signIn("owner");
+    const rig = buildRig([makeCh(1, 0), makeCh(2, 0), makeCh(3, 0)]);
+
+    drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
+
+    expect(rig.onReorder).toHaveBeenCalledTimes(1);
+    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    // ch3 keeps position 0 (unchanged, so unreported); ch1 and ch2 move up.
+    expect(positionsOf(reorders)).toEqual({ 1: 1, 2: 2 });
+  });
+
+  it("gives partially tied positions a deterministic order after the drop", () => {
+    signIn("owner");
+    // Two channels tied at 0, one at 5.
+    const rig = buildRig([makeCh(1, 0), makeCh(2, 0), makeCh(3, 5)]);
+
+    drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
+
+    expect(rig.onReorder).toHaveBeenCalledTimes(1);
+    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    // Slots [0, 0, 5] become the strictly increasing [0, 1, 5]: every channel
+    // ends at a distinct position, so the rendered order matches the drop.
+    expect(positionsOf(reorders)).toEqual({ 3: 0, 1: 1, 2: 5 });
+  });
+
   it("does not fire when dropped on itself", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);

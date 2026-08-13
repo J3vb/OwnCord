@@ -149,6 +149,17 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
       // non-contiguous positions (interleaved with other categories), and
       // renumbering from 0 would stomp another category's slots.
       const slots = drag.channels.map((c) => c.position).sort((a, b) => a - b);
+      // The server does not enforce unique positions (newly created channels
+      // commonly all sit at 0), and zipping tied slots onto the new order
+      // would drop some or all of the moves. Nudge ties upward so every slot
+      // is distinct; already-distinct groups keep their exact range.
+      for (let i = 1; i < slots.length; i++) {
+        const prev = slots[i - 1];
+        const cur = slots[i];
+        if (prev !== undefined && cur !== undefined && cur <= prev) {
+          slots[i] = prev + 1;
+        }
+      }
       const reorders: ChannelReorderData[] = [];
       for (let i = 0; i < reorderedIds.length; i++) {
         const id = reorderedIds[i];
