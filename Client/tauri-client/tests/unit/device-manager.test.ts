@@ -232,6 +232,33 @@ describe("DeviceManager", () => {
     it("re-enables microphone for empty deviceId (default fallback)", async () => {
       dm.setRoom(mockRoom);
       await dm.switchInputDevice("");
+      // The pinned capture-device constraint must be reset to the system
+      // default before the cycle — otherwise the off/on toggle re-acquires
+      // whatever device a previous switchActiveDevice pinned.
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(mockRoom.switchActiveDevice.mock.invocationCallOrder[0]).toBeLessThan(
+        mockRoom.localParticipant.setMicrophoneEnabled.mock.invocationCallOrder[0],
+      );
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("waits for the default-device reset before cycling the mic", async () => {
+      let resolveSwitch: ((switched: boolean) => void) | null = null;
+      mockRoom.switchActiveDevice.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSwitch = resolve;
+          }),
+      );
+      dm.setRoom(mockRoom);
+      const done = dm.switchInputDevice("");
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+
+      resolveSwitch!(true);
+      await done;
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
@@ -396,6 +423,9 @@ describe("DeviceManager", () => {
       await vi.advanceTimersByTimeAsync(600);
 
       expect(mockSavePref).toHaveBeenCalledWith("audioInputDevice", "");
+      // The removed device's pinned constraint must be reset so the cycle
+      // actually reaches the system default.
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
       expect(onToast).toHaveBeenCalledWith("Audio device disconnected — switched to default");

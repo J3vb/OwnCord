@@ -63,12 +63,20 @@ export class DeviceManager {
     this.onToast = cb;
   }
 
-  /** Toggle the mic off/on to force a fresh capture after a device change,
-   *  skipping the re-enable when a mute/deafen/server-mute/PTT gate is
-   *  active. Shared by handleDeviceChange's device-removed fallback and
-   *  switchInputDevice('') — both drive the exact same false/true cycle, and
-   *  both were unconditionally republishing a gated mic before this guard. */
+  /** Reset the capture device to the system default, then toggle the mic
+   *  off/on to force a fresh capture, skipping the re-enable when a
+   *  mute/deafen/server-mute/PTT gate is active. Shared by
+   *  handleDeviceChange's device-removed fallback and switchInputDevice('')
+   *  — both drive the exact same reset + false/true cycle, and both were
+   *  unconditionally republishing a gated mic before this guard. */
   private async cycleMicForDeviceSwitch(room: Room): Promise<void> {
+    // A previous switchActiveDevice pins audioCaptureDefaults.deviceId as an
+    // exact constraint that survives the off/on cycle, so the cycle alone
+    // re-acquires the old device. Reset the pin to the system default first;
+    // exact=false keeps the constraint ideal so this degrades gracefully
+    // where no "default" device id exists.
+    await room.switchActiveDevice("audioinput", "default", false);
+    if (this.room !== room) return;
     await room.localParticipant.setMicrophoneEnabled(false);
     if (this.room !== room) return;
     if (isMicPolicyGated()) {
