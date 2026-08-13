@@ -68,6 +68,37 @@ interface Rig {
  *  listeners are fully torn down between tests. */
 const rigAborts: AbortController[] = [];
 
+/** jsdom does not lay out, so stub the geometry the module reads: a 20px-tall
+ *  row at y = idx*20 while attached, and — exactly like a real browser — an
+ *  all-zero rect once the row is detached (e.g. a re-render replaced it). */
+function stubRowRect(el: HTMLElement, idx: number): void {
+  const top = idx * 20;
+  el.getBoundingClientRect = () =>
+    el.isConnected
+      ? {
+          top,
+          bottom: top + 20,
+          height: 20,
+          left: 0,
+          right: 100,
+          width: 100,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        }
+      : {
+          top: 0,
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        };
+}
+
 /** Builds a container with one 20px-tall row per channel, stacked vertically. */
 function buildRig(channels: Channel[]): Rig {
   const container = document.createElement("div");
@@ -81,25 +112,35 @@ function buildRig(channels: Channel[]): Rig {
   channels.forEach((ch, idx) => {
     const el = document.createElement("div");
     container.appendChild(el);
-    // jsdom does not lay out, so stub the geometry the module reads.
-    const top = idx * 20;
-    el.getBoundingClientRect = () =>
-      ({
-        top,
-        bottom: top + 20,
-        height: 20,
-        left: 0,
-        right: 100,
-        width: 100,
-        x: 0,
-        y: top,
-        toJSON: () => ({}),
-      }) as DOMRect;
+    stubRowRect(el, idx);
     attachDragHandlers(el, ch, container, channels, abort.signal, onReorder);
     items.set(ch.id, el);
   });
 
   return { container, items, channels, onReorder, abort };
+}
+
+/** Simulates ChannelSidebar.renderChannels() rebuilding a category group:
+ *  fresh rows in a fresh `.category-channels-container` under the same
+ *  sidebar owner, while the previous container sits detached. */
+function rebuildContainer(
+  rig: Rig,
+  channels: Channel[],
+): { container: HTMLElement; items: Map<number, HTMLElement> } {
+  const container = document.createElement("div");
+  container.className = "category-channels-container";
+  document.body.appendChild(container);
+
+  const items = new Map<number, HTMLElement>();
+  channels.forEach((ch, idx) => {
+    const el = document.createElement("div");
+    container.appendChild(el);
+    stubRowRect(el, idx);
+    attachDragHandlers(el, ch, container, channels, rig.abort.signal, rig.onReorder);
+    items.set(ch.id, el);
+  });
+
+  return { container, items };
 }
 
 /** Row `idx` spans y = idx*20 .. idx*20+20; its midpoint is +10. */
@@ -489,6 +530,90 @@ describe("drop indicator", () => {
 
     expect(rig.container.querySelectorAll(".channel-drop-indicator")).toHaveLength(0);
     expect(rig.onReorder).not.toHaveBeenCalled();
+  });
+});
+
+// ── mid-drag re-render ─────────────────────────────────────────────────────
+//
+// ChannelSidebar.renderChannels() clears the channel list and rebuilds every
+// category group, so any store-driven re-render while the mouse button is
+// down detaches the container the drag captured at mousedown. Detached rows
+// report all-zero rects, so the drag must re-resolve the live rows or every
+// hit-test silently fails.
+
+describe("mid-drag sidebar re-render", () => {
+  function setStoreChannels(channels: Channel[]): void {
+    channelsStore.setState(() => ({
+      channels: new Map(channels.map((c) => [c.id, c])),
+      activeChannelId: null,
+      roles: [],
+    }));
+  }
+
+  it("resolves the drop against the live rows after a re-render replaces the container", () => {
+    signIn("owner");
+    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
+    setStoreChannels(channels);
+    const rig = buildRig(channels);
+    const source = rig.items.get(1)!;
+
+    // Start the drag on the original rows.
+    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
+    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    expect(source.classList.contains("dragging")).toBe(true);
+
+    // A store-driven re-render rebuilds the sidebar mid-drag.
+    rig.container.remove();
+    const live = rebuildContainer(rig, channels);
+
+    // Release over the bottom half of row 1 (ch2): ch1 lands after ch2.
+    document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "bottom")));
+
+    expect(rig.onReorder).toHaveBeenCalledTimes(1);
+    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    expect(positionsOf(reorders)).toEqual({ 2: 0, 1: 1 });
+    expect(channelsStore.select((s) => s.channels.get(1)?.position)).toBe(1);
+    expect(channelsStore.select((s) => s.channels.get(2)?.position)).toBe(0);
+    expect(live.container.querySelectorAll(".channel-drop-indicator")).toHaveLength(0);
+    expect(document.body.classList.contains("channel-reordering")).toBe(false);
+  });
+
+  it("moves the drop indicator to the live rows after a re-render replaces the container", () => {
+    signIn("owner");
+    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
+    setStoreChannels(channels);
+    const rig = buildRig(channels);
+    const source = rig.items.get(1)!;
+
+    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
+    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+
+    rig.container.remove();
+    const live = rebuildContainer(rig, channels);
+
+    document.dispatchEvent(mouse("mousemove", 0, yInRow(2, "top")));
+
+    expect(live.items.get(3)?.classList.contains("channel-drop-indicator")).toBe(true);
+  });
+
+  it("discards the drop when the dragged channel has no live row after the re-render", () => {
+    signIn("owner");
+    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
+    setStoreChannels(channels);
+    const rig = buildRig(channels);
+    const source = rig.items.get(1)!;
+
+    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
+    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+
+    // The re-render drops ch1 entirely (deleted mid-drag).
+    rig.container.remove();
+    rebuildContainer(rig, [makeCh(2, 1), makeCh(3, 2)]);
+
+    document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "bottom")));
+
+    expect(rig.onReorder).not.toHaveBeenCalled();
+    expect(document.body.classList.contains("channel-reordering")).toBe(false);
   });
 });
 
