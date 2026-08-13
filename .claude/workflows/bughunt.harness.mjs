@@ -446,11 +446,25 @@ scenarios.s8_budget_floor = async () => {
   assert.match(result.report, /budget/i)
 }
 
+// S8c: budget.total null (directive failed to arm) but args.budgetTotal supplied ->
+// ceiling armed from args, announced in the config log, computed from spent().
+scenarios.s8c_budget_args_fallback = async () => {
+  const { result, logs } = await run({
+    args: { budgetTotal: 10000000 },
+    budget: { total: null, spent: () => 9500000, remaining: () => Infinity },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 0)
+  assert.equal(result.stoppedOnBudget, true)
+  assert.ok(logs.some((l) => /budget=10M/.test(l)), 'args-armed ceiling must announce 10M, not NONE')
+  assert.equal(result.runStats.config.budgetTotal, 10000000)
+}
+
 // S8b: budget runs low mid-hunt -> finishes the round it started, stops before the next.
 scenarios.s8b_budget_midrun = async () => {
   let n = 0
   const { result } = await run({
-    budget: { total: 10000000, spent: () => 0, remaining: () => (n++ === 0 ? 3000000 : 1000000) },
+    budget: { total: 10000000, spent: () => 0, remaining: () => (n++ === 0 ? 3000000 : 400000) },
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
@@ -731,13 +745,14 @@ scenarios.s_targeted_retry = async () => {
 }
 
 // New (spec Testing #9): the retuned floor must stop a run the old 150k floor let through.
-// 1M remaining is under the ~2M measured per-round cost - starting a round would overshoot.
+// A single opus finder round costs ~100-260k (2026-08-13 run); 400k remaining is under the
+// 600k floor, so starting another round could overshoot the ceiling - stop instead.
 scenarios.s9_budget_ceiling_retuned = async () => {
   const { result, logs } = await run({
-    budget: { total: 10000000, spent: () => 9000000, remaining: () => 1000000 },
+    budget: { total: 10000000, spent: () => 9600000, remaining: () => 400000 },
     agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
   })
-  assert.equal(result.rounds.length, 0, '1M remaining must not start a ~2M round')
+  assert.equal(result.rounds.length, 0, '400k remaining must not start a round under the 600k floor')
   assert.equal(result.stoppedOnBudget, true)
   assert.ok(logs.some((l) => /Budget floor/.test(l)))
 }
