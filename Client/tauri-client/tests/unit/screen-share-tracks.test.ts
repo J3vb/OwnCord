@@ -324,6 +324,42 @@ describe("enableCamera", () => {
     // resurrect it.
     expect(voiceStore.getState().localCamera).toBe(false);
   });
+
+  it("does not announce the camera when disableCamera runs during the publish round-trip", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const track = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+    let resolvePublish!: () => void;
+    rig.publishTrack.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolvePublish = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(rig.publishTrack).toHaveBeenCalled();
+    });
+    // A concurrent disable runs to completion while publishTrack is still in
+    // flight — it announces voice_camera(false) and stops the track.
+    await disableCamera(state, deps);
+    resolvePublish();
+    await enabling;
+
+    // The superseded enable must not announce voice_camera(true) after the
+    // disable's voice_camera(false), or every peer renders a camera tile for
+    // a stopped track while the local store says off.
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(track.mediaStreamTrack);
+    expect(track.stop).toHaveBeenCalled();
+    expect(state.manualCameraTrack).toBeNull();
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────

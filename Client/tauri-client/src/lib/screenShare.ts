@@ -248,6 +248,21 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
         maxFramerate: quality === "low" ? 15 : 30,
       },
     });
+    if ((state.generation ?? 0) !== generation) {
+      // A disableCamera ran to completion while publishTrack was in flight —
+      // it already reset localCamera and sent voice_camera(false). The publish
+      // may have landed after its unpublish, so undo it again, and stay silent:
+      // announcing voice_camera(true) now would override the disable's final
+      // word on the server.
+      try {
+        void room.localParticipant.unpublishTrack(videoTrack.mediaStreamTrack);
+      } catch {
+        /* already unpublished */
+      }
+      videoTrack.stop();
+      if (state.manualCameraTrack === videoTrack) state.manualCameraTrack = null;
+      return;
+    }
     const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "camera");
     deps.reapplyAudioPipeline();
