@@ -842,6 +842,91 @@ describe("applyOgMeta", () => {
   });
 });
 
+describe("renderGenericLinkPreview — fetch timeout covers the body read", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    fetchMock.mockReset();
+    clearEmbedCaches();
+    setServerHost("example.com");
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  function mockSlowBodyResponse() {
+    let capturedSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(((_url: string, opts: RequestInit) => {
+      capturedSignal = opts.signal as AbortSignal;
+      return Promise.resolve({
+        ok: true,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null,
+        },
+        // Body that never finishes on its own; rejects if the signal aborts,
+        // mirroring fetch semantics for an aborted in-progress body read.
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            const fail = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+            if (capturedSignal!.aborted) fail();
+            else capturedSignal!.addEventListener("abort", fail, { once: true });
+          }),
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+    return () => capturedSignal;
+  }
+
+  it("aborts when the body never finishes within the 5 s timeout", async () => {
+    const getSignal = mockSlowBodyResponse();
+
+    const card = renderGenericLinkPreview("https://slow-body.example.com/page");
+    document.body.appendChild(card);
+
+    // Let the header phase resolve and the body read begin.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(getSignal()?.aborted).toBe(true);
+
+    // The aborted fetch settles as an empty result: the card keeps its
+    // hostname fallback and the URL is cached without a refetch loop.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("slow-body.example.com");
+
+    const again = renderGenericLinkPreview("https://slow-body.example.com/page");
+    document.body.appendChild(again);
+    expect(again.querySelector(".msg-embed-link-title")?.textContent).toBe("slow-body.example.com");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not abort when the body arrives before the timeout", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(((_url: string, opts: RequestInit) => {
+      capturedSignal = opts.signal as AbortSignal;
+      return Promise.resolve(mockHtmlResponse("<html><head><title>Timely</title></head></html>"));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+
+    const card = renderGenericLinkPreview("https://timely.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("Timely");
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(capturedSignal?.aborted).toBe(false);
+  });
+});
+
 describe("renderGenericLinkPreview — cache stale during non-HTML response", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
