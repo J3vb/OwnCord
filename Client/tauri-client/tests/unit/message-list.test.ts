@@ -357,6 +357,40 @@ describe("MessageList", () => {
     expect(btn?.textContent).toBe("\u2193");
   });
 
+  it("anchors the floating controls outside the scroller so they cannot scroll away", () => {
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const scroller = container.querySelector(".messages-container") as HTMLDivElement;
+    const btn = container.querySelector(".scroll-to-bottom-btn") as HTMLButtonElement;
+    const pill = container.querySelector('[data-testid="jump-to-present"]') as HTMLButtonElement;
+    expect(scroller).not.toBeNull();
+    expect(btn).not.toBeNull();
+    expect(pill).not.toBeNull();
+
+    // Anything inside the overflow scroller is part of its scrollable
+    // overflow and translates with the content, so the controls must not be
+    // descendants of it.
+    expect(scroller.contains(btn)).toBe(false);
+    expect(scroller.contains(pill)).toBe(false);
+
+    // They anchor to the component's non-scrolling frame around the scroller
+    // (the positioned containing block that keeps them pinned to the
+    // viewport edge).
+    const region = scroller.parentElement as HTMLDivElement;
+    expect(region.classList.contains("messages-region")).toBe(true);
+    expect(container.contains(region)).toBe(true);
+    expect(btn.parentElement).toBe(region);
+    expect(pill.parentElement).toBe(region);
+
+    // destroy removes the frame — and with it the controls — not just the
+    // scroller.
+    msgList.destroy?.();
+    expect(container.querySelector(".messages-region")).toBeNull();
+    expect(container.querySelector(".scroll-to-bottom-btn")).toBeNull();
+    expect(container.querySelector('[data-testid="jump-to-present"]')).toBeNull();
+  });
+
   it("calls onScrollTop when scrolling near the top and there are more messages", () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 1 })]);

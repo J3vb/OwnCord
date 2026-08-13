@@ -243,6 +243,11 @@ export type MessageListComponent = MountableComponent & {
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const ac = new AbortController();
   const unsubscribers: Array<() => void> = [];
+  /** Non-scrolling frame around the scroller; what is actually appended to
+   *  the parent. The floating controls anchor to this box — an absolutely
+   *  positioned box whose containing block is the scroller itself sits in
+   *  its scrollable overflow and translates with the content. */
+  let region: HTMLDivElement | null = null;
   let root: HTMLDivElement | null = null;
   let wasAtBottom = true;
 
@@ -781,6 +786,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function mount(parentContainer: Element): void {
+    region = createElement("div", { class: "messages-region" });
     root = createElement("div", { class: "messages-container" });
 
     topSpacer = createElement("div", { class: "virtual-spacer-top" });
@@ -812,8 +818,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     root.appendChild(contentContainer);
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
-    root.appendChild(scrollToBottomBtn);
-    root.appendChild(jumpToPresentPill);
+    region.appendChild(root);
+    region.appendChild(scrollToBottomBtn);
+    region.appendChild(jumpToPresentPill);
 
     root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
@@ -852,7 +859,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     });
     resizeObserver.observe(contentContainer);
 
-    parentContainer.appendChild(root);
+    parentContainer.appendChild(region);
 
     renderAll();
     updateJumpToPresentPill();
@@ -938,10 +945,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     heightCache.clear();
     tree = null;
     releaseTrackedMedia();
-    if (root !== null) {
-      root.remove();
-      root = null;
+    if (region !== null) {
+      region.remove();
+      region = null;
     }
+    root = null;
     contentContainer = null;
     topSpacer = null;
     bottomSpacer = null;
