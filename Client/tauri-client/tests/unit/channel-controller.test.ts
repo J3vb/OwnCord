@@ -130,11 +130,13 @@ vi.mock("@lib/read-state", () => ({
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
 
-const { mockReattachToPresent, mockJumpToMessage, mockIsWindowDetached } = vi.hoisted(() => ({
-  mockReattachToPresent: vi.fn(),
-  mockJumpToMessage: vi.fn(),
-  mockIsWindowDetached: vi.fn(() => false),
-}));
+const { mockReattachToPresent, mockJumpToMessage, mockIsWindowDetached, mockInvalidateWindow } =
+  vi.hoisted(() => ({
+    mockReattachToPresent: vi.fn(),
+    mockJumpToMessage: vi.fn(),
+    mockIsWindowDetached: vi.fn(() => false),
+    mockInvalidateWindow: vi.fn(),
+  }));
 
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
@@ -144,6 +146,7 @@ vi.mock("@stores/messages.store", () => ({
   removeOptimistic: mockRemoveOptimistic,
   reattachToPresent: mockReattachToPresent,
   isWindowDetached: mockIsWindowDetached,
+  invalidateChannelMessageWindow: mockInvalidateWindow,
 }));
 
 vi.mock("@lib/message-navigation", () => ({
@@ -400,6 +403,36 @@ describe("createChannelController", () => {
     ctrl.mountChannel(42, "general");
 
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
+  });
+
+  it("invalidates the previous channel's loaded window when switching away, so a revisit refetches the tail", () => {
+    // The server only delivers live broadcasts for the focused channel, so
+    // the window being left stops updating the moment focus moves away.
+    // loadMessages short-circuits on the loaded flag — leaving must drop it
+    // or the revisit renders the old snapshot as if it were current.
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+
+    ctrl.mountChannel(42, "general");
+    expect(mockInvalidateWindow).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(99, "random");
+    expect(mockInvalidateWindow).toHaveBeenCalledWith(42);
+
+    ctrl.mountChannel(42, "general");
+    expect(mockInvalidateWindow).toHaveBeenCalledWith(99);
+    // Each mount still asks for the tail exactly once.
+    expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not invalidate any window on the very first mount, which fetches exactly once", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+
+    ctrl.mountChannel(42, "general");
+
+    expect(mockInvalidateWindow).not.toHaveBeenCalled();
+    expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(1);
   });
 
   it("updates chat header name", () => {

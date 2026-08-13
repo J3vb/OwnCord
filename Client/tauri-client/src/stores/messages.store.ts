@@ -560,6 +560,27 @@ export function invalidateLoadedMessageWindows(): void {
 }
 
 /**
+ * Drop one channel's loaded flag so the next history fetch reloads the live
+ * tail. The server only delivers live broadcasts for the focused channel, so
+ * a window left behind on a channel switch stops updating the moment focus
+ * moves away — the next visit must refetch instead of short-circuiting on
+ * "already loaded". The rows themselves are kept (the old window stays
+ * rendered until the refetch lands) and setMessages' merge carries
+ * pending/failed rows across that refetch. Like reattachToPresent, this
+ * leaves detachedChannels alone: setMessages clears it once the tail has
+ * actually landed, and until then a detached window must keep refusing live
+ * broadcasts.
+ */
+export function invalidateChannelMessageWindow(channelId: number): void {
+  messagesStore.setState((prev) => {
+    if (!prev.loadedChannels.has(channelId)) return prev;
+    const updatedLoaded = new Set(prev.loadedChannels);
+    updatedLoaded.delete(channelId);
+    return { ...prev, loadedChannels: updatedLoaded };
+  });
+}
+
+/**
  * Drop a channel's loaded flag so the next history fetch reloads the live
  * tail — otherwise MessageController short-circuits on "already loaded" and
  * the stale window stays on screen.
