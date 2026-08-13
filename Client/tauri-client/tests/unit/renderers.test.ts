@@ -1196,6 +1196,65 @@ describe("renderers", () => {
     });
   });
 
+  describe("formatMessageTimestamp — DST day boundaries", () => {
+    // These cases only exist in a DST-observing zone, so pin one for the
+    // duration of this block. Node honors runtime TZ changes on Linux; the
+    // precondition assertion in each test proves the pin took effect.
+    const originalTZ = process.env.TZ;
+
+    beforeEach(() => {
+      process.env.TZ = "America/New_York";
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      if (originalTZ === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTZ;
+      }
+    });
+
+    function assertEasternTime(): void {
+      // EST is UTC-5 (offset 300), EDT is UTC-4 (offset 240). If these differ
+      // the runtime is genuinely observing DST transitions.
+      expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(300);
+      expect(new Date(2026, 6, 15).getTimezoneOffset()).toBe(240);
+    }
+
+    it("does not label a two-day-old message 'Yesterday' across spring forward", () => {
+      assertEasternTime();
+      // DST starts Sun Mar 8, 2026 (23-hour local day). Now: Mon Mar 9, 11:00 EDT.
+      vi.setSystemTime(new Date("2026-03-09T15:00:00Z"));
+      // Sat Mar 7, 23:30 EST — two calendar days before "today".
+      const result = formatMessageTimestamp("2026-03-08T04:30:00Z");
+      expect(result).not.toMatch(/^Yesterday/);
+      expect(result).toMatch(/^03\/07\/2026 /);
+      // Sun Mar 8, 08:00 EDT really is yesterday.
+      expect(formatMessageTimestamp("2026-03-08T12:00:00Z")).toMatch(/^Yesterday at /);
+    });
+
+    it("labels the whole previous calendar day 'Yesterday' across fall back", () => {
+      assertEasternTime();
+      // DST ends Sun Nov 1, 2026 (25-hour local day). Now: Mon Nov 2, 10:00 EST.
+      vi.setSystemTime(new Date("2026-11-02T15:00:00Z"));
+      // Sun Nov 1, 00:30 EDT — inside the previous calendar day.
+      expect(formatMessageTimestamp("2026-11-01T04:30:00Z")).toMatch(/^Yesterday at /);
+      // Sat Oct 31, 23:30 EDT — two calendar days back stays absolute.
+      expect(formatMessageTimestamp("2026-11-01T03:30:00Z")).toMatch(/^10\/31\/2026 /);
+    });
+
+    it("keeps Today/Yesterday/absolute labels on an ordinary day", () => {
+      assertEasternTime();
+      // Wed Jun 17, 2026, 11:00 EDT — nowhere near a DST transition.
+      vi.setSystemTime(new Date("2026-06-17T15:00:00Z"));
+      expect(formatMessageTimestamp("2026-06-17T14:00:00Z")).toMatch(/^Today at /);
+      expect(formatMessageTimestamp("2026-06-17T03:30:00Z")).toMatch(/^Yesterday at /);
+      expect(formatMessageTimestamp("2026-06-15T16:00:00Z")).toMatch(/^06\/15\/2026 /);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // getUserRole / roleColorVar
   // ---------------------------------------------------------------------------
