@@ -615,12 +615,16 @@ export function prependMessages(
     // Keep the OLDEST rows (start of array) when the cap is exceeded: the
     // user is scrolling up, so the fetched page must survive — trimming it
     // would make every cap-hit prepend a content-identical no-op that
-    // refetches the same page forever. The dropped live tail is restored via
+    // refetches the same page forever. Dropped "sent" rows are restored via
     // the detached-window machinery ("Jump to Present"), mirroring
-    // setAroundMessages' window semantics.
+    // setAroundMessages' window semantics — but pending/failed rows in the
+    // tail are the only copy of the user's composed text, so they are carried
+    // across the trim exactly as every other window-replacing writer does.
     const wasTrimmed = combined.length > MAX_MESSAGES_PER_CHANNEL;
     if (wasTrimmed) {
-      combined = combined.slice(0, MAX_MESSAGES_PER_CHANNEL);
+      const kept = combined.slice(0, MAX_MESSAGES_PER_CHANNEL);
+      const carried = combined.slice(MAX_MESSAGES_PER_CHANNEL).filter((m) => m.status !== "sent");
+      combined = carried.length > 0 ? [...kept, ...carried] : kept;
     }
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, combined);

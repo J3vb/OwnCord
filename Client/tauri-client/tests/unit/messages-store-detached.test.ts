@@ -285,6 +285,49 @@ describe("prependMessages at the message cap", () => {
     // Nothing above was dropped, so "more above" is what the server said.
     expect(hasMoreMessages(1)).toBe(false);
   });
+
+  it("carries pending and failed rows across the trim instead of destroying them", () => {
+    // Fill to the 500-row cap with sent history: ids 101..600 (newest-first).
+    const initial: MessageResponse[] = [];
+    for (let id = 600; id >= 101; id--) initial.push(response(id));
+    setMessages(1, initial, true);
+
+    // Two optimistic rows sit at the live end of the array. Their text has no
+    // server copy, so the detached-window machinery cannot restore them.
+    addOptimisticMessage({
+      correlationId: "c1",
+      channelId: 1,
+      user: USER,
+      content: "still sending",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    addOptimisticMessage({
+      correlationId: "c2",
+      channelId: 1,
+      user: USER,
+      content: "went nowhere",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:01Z",
+    });
+    markSendFailed("c2", "OFFLINE");
+
+    prependMessages(1, [response(100), response(99)], false);
+
+    const loaded = getChannelMessages(1);
+    // Sent rows obey the cap exactly as before: the fetched page survives at
+    // the head, the sent tail is dropped, and the window detaches.
+    const sent = loaded.filter((m) => m.status === "sent");
+    expect(sent).toHaveLength(500);
+    expect(loaded[0]!.id).toBe(99);
+    expect(loaded[1]!.id).toBe(100);
+    expect(isWindowDetached(1)).toBe(true);
+    // The pending/failed rows survive the trim, in order, at the live end.
+    expect(loaded.at(-2)!.correlationId).toBe("c1");
+    expect(loaded.at(-2)!.status).toBe("pending");
+    expect(loaded.at(-1)!.correlationId).toBe("c2");
+    expect(loaded.at(-1)!.status).toBe("failed");
+  });
 });
 
 describe("hasMessageLoaded", () => {
