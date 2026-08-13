@@ -1,6 +1,6 @@
 export const meta = {
   name: 'bughunt',
-  description: 'Converging multi-round bug hunt: rotating lens families, single opus finder, fable refute-by-default verification, dry-threshold stop',
+  description: 'Converging multi-round bug hunt: rotating lens families, single opus finder, opus refute-by-default verification, dry-threshold stop',
   whenToUse: 'Hunting real bugs across the Go server, Tauri Rust backend, and TS client until consecutive rounds go dry. Not a security-only scan.',
   phases: [
     { title: 'Recon', detail: 'haiku: churn + concurrency-surface inventory' },
@@ -20,13 +20,21 @@ const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
 // adaptive, so hotspot and explore coverage - and therefore convergence - still work.
 const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
-// Floor for one round, tuned from the 2026-08-12 run: ~2.6M output tokens per round measured.
-// The old 150k floor would overshoot the ceiling by nearly a full round.
-const ROUND_BUDGET_FLOOR = 2000000
+// Floor for one round. The single opus finder (sonnet retired 2026-08-12) costs ~100-260k per
+// round, measured across the 8-round 2026-08-13 run. The old 2M floor was a dual-finder-era
+// anchor (~2.6M/round) that would zero-out any hunt launched with a budget under 2M - now that
+// budgetTotal is a first-class arg, that cliff is a foot-gun. 600k is ~3x a measured round.
+const ROUND_BUDGET_FLOOR = 600000
+// The turn directive failed to arm budget.total on the 2026-08-13 live run (+25M present,
+// total still null), so args.budgetTotal is the deterministic fallback. budget.spent()
+// works even when total is null; budget.remaining() stays authoritative when the
+// directive DID arm, because stubs (and the runtime) may track it statefully.
+const BUDGET_TOTAL = budget.total || Number(ARGS.budgetTotal) || null
+const remainingBudget = () => (budget.total ? budget.remaining() : BUDGET_TOTAL ? Math.max(0, BUDGET_TOTAL - budget.spent()) : Infinity)
 // The args channel has already been observed delivering something the script
 // could not read; an unnoticed fallback here is an 8x cost surprise, so say out
 // loud what the run is actually going to do.
-log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''} budget=${budget.total ? Math.round(budget.total / 1e6) + 'M' : 'NONE - cost ceiling disarmed'}`)
+log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''} budget=${BUDGET_TOTAL ? Math.round(BUDGET_TOTAL / 1e6) + 'M' : 'NONE - cost ceiling disarmed'}`)
 
 // ---------- schemas: copied VERBATIM from the current bughunt.js ----------
 const FINDINGS = {
@@ -516,9 +524,9 @@ function verifyPrompt(lensKey, candidates) {
 }
 
 while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
-  if (budget.total && budget.remaining() < ROUND_BUDGET_FLOOR) {
+  if (BUDGET_TOTAL && remainingBudget() < ROUND_BUDGET_FLOOR) {
     stoppedOnBudget = true
-    log(`Budget floor reached (${Math.round(budget.remaining() / 1000)}k left) - stopping before round ${round + 1}`)
+    log(`Budget floor reached (${Math.round(remainingBudget() / 1000)}k left) - stopping before round ${round + 1}`)
     break
   }
   const family = lensesForRound(round + 1)
@@ -552,7 +560,9 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       const fresh = dedupe(union, seenAtStart, counts)
       if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], matched: [], unmatched: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
-      const vopts = { phase: `Round ${rnd}`, model: 'fable', effort: 'high', schema: VERDICTS }
+      // opus, not fable: fable verify agents hit usage limits and nulled out en masse on
+      // the 2026-08-13 live run (and were the dominant cost even when they worked)
+      const vopts = { phase: `Round ${rnd}`, model: 'opus', effort: 'high', schema: VERDICTS }
       // Pair verdicts to candidates as they arrive, then retry ONLY what got no usable verdict.
       // Retrying the whole batch re-burned every verdict on a partial return, and the old
       // count-based trigger let N unmatched garbage verdicts skip the retry entirely.
@@ -657,7 +667,7 @@ const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
 const table = convergenceTable(roundStats, converged, stoppedOnBudget)
 const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
 const runStats = {
-  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: budget.total },
+  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: BUDGET_TOTAL },
   spentTotal: budget.spent(),
   rounds: roundStats.length,
   converged,
