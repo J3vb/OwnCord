@@ -280,6 +280,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             } catch (err) {
               const msg = err instanceof Error ? err.message : "Failed to create channel";
               getToast()?.show(msg, "error");
+              // The modal's own catch re-enables its submit button and renders
+              // the inline error, so the failure must propagate to it.
+              throw err;
             }
           },
           onClose: () => {
@@ -314,6 +317,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             } catch (err) {
               const msg = err instanceof Error ? err.message : "Failed to update channel";
               getToast()?.show(msg, "error");
+              // Propagate so the modal re-enables its save button and shows
+              // the inline error.
+              throw err;
             }
           },
           onClose: () => {
@@ -337,6 +343,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             } catch (err) {
               const msg = err instanceof Error ? err.message : "Failed to delete channel";
               getToast()?.show(msg, "error");
+              // Propagate so the modal re-enables its confirm button and shows
+              // the inline error.
+              throw err;
             }
           },
           onClose: () => {
