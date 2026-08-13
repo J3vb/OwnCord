@@ -43,18 +43,17 @@ export async function run({ agentStub, args = undefined, budget = undefined }) {
 }
 
 // ---------- stub kit (used from Task 2 onward; harmless now) ----------
-export function makeStub({ hunt, verify, report = () => 'REPORT_MD', recon = defaultRecon }) {
+export function makeStub({ hunt, verify, recon = defaultRecon }) {
   return (prompt, opts) => {
     const label = opts.label || ''
     if (label.startsWith('recon:')) return recon(label)
-    let m = /^r(\d+):hunt:([a-z0-9-]+):(opus|sonnet)$/.exec(label)
-    if (m) return hunt(Number(m[1]), m[2], m[3], prompt)
+    let m = /^r(\d+):hunt:([a-z0-9-]+):opus$/.exec(label)
+    if (m) return hunt(Number(m[1]), m[2], 'opus', prompt)
     m = /^r(\d+):verify:([a-z0-9-]+?)(:retry)?$/.exec(label)
     if (m) {
       const candidates = JSON.parse(prompt.split('--- CANDIDATES ---')[1])
       return verify(Number(m[1]), m[2], candidates, Boolean(m[3]), prompt)
     }
-    if (label === 'report') return report(prompt)
     throw new Error(`unexpected agent label: ${label}`)
   }
 }
@@ -72,6 +71,8 @@ export const finding = (n, over = {}) => ({
   evidence: 'e',
   ...over,
 })
+export const graphRows = (n) =>
+  Array.from({ length: n }, (_, i) => ({ file: `Server/gen/g${i}.go`, score: 1 - i / (n + 1), degree: 10, cited: 5 }))
 export const confirmAll = (cands) => ({
   verdicts: cands.map((c) => ({
     title: c.title, file: c.file, line: c.line,
@@ -92,16 +93,11 @@ const scenarios = {}
 
 // S1: happy convergence - one bug in round 1, rounds 2-3 dry -> converged.
 scenarios.s1_convergence = async () => {
-  const reportPrompts = []
-  const { result, calls } = await run({
+  const { result, calls, logs } = await run({
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
       verify: (round, key, cands) => confirmAll(cands),
-      report: (prompt) => {
-        reportPrompts.push(prompt)
-        return 'REPORT_MD'
-      },
     }),
   })
   for (const k of ['converged', 'stoppedOnBudget', 'rounds', 'confirmed', 'unverified', 'report'])
@@ -111,23 +107,23 @@ scenarios.s1_convergence = async () => {
   assert.deepEqual(result.rounds.map((r) => r.dryAfter), [0, 1, 2])
   assert.deepEqual(result.rounds.map((r) => r.family), ['surfaces', 'bug-classes', 'flows'])
   assert.equal(result.confirmed.length, 1)
-  assert.equal(result.report, 'REPORT_MD')
   assert.ok(!calls.some((c) => (c.opts.label || '').startsWith('r4:')), 'no round 4 after convergence')
-  assert.match(reportPrompts[0], /CONVERGED after 3 round\(s\)/)
-  assert.match(reportPrompts[0], /\| 1 \| surfaces \|/)
+  assert.ok(!calls.some((c) => c.opts.label === 'report'), 'the report is built in-script')
+  assert.match(result.report, /CONVERGED after 3 round\(s\)/)
+  assert.match(result.report, /### high - distinct bug alpha1 omega1/)
+  assert.match(result.report, /\| 1 \| surfaces \|/)
+  assert.ok(logs.some((l) => /budget=NONE - cost ceiling disarmed/.test(l)), 'a directive-less run must announce the dead ceiling')
 }
 
-// S2: panel dedupe - opus and sonnet report the same bug -> one candidate, one verify call.
-scenarios.s2_panel_dedupe = async () => {
+// S2: near-duplicate findings from a single finder collapse - one candidate, one verify call.
+scenarios.s2_finder_dedupe = async () => {
   const verifyBatches = []
-  const { result } = await run({
+  const { result, calls } = await run({
     agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (round !== 1 || key !== 'ws-hub') return none
-        return model === 'opus'
-          ? { findings: [finding(1, { line: 100 })] }
-          : { findings: [finding(1, { line: 105, title: 'distinct bug alpha1 omega1 variant' })] }
-      },
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { line: 100 }), finding(1, { line: 105, title: 'distinct bug alpha1 omega1 variant' })] }
+          : none,
       verify: (round, key, cands) => {
         verifyBatches.push(cands)
         return confirmAll(cands)
@@ -137,6 +133,9 @@ scenarios.s2_panel_dedupe = async () => {
   assert.equal(verifyBatches.length, 1)
   assert.equal(verifyBatches[0].length, 1)
   assert.equal(result.confirmed.length, 1)
+  const hunts = calls.filter((c) => /^r1:hunt:ws-hub:/.test(c.opts.label || ''))
+  assert.equal(hunts.length, 1, 'exactly one finder call per lens - the sonnet slot is gone')
+  assert.match(hunts[0].opts.label, /:opus$/, 'the label keeps the :opus suffix the harness parses')
 }
 
 // S3: refuted findings stay dead - re-reported next round, never re-verified; refutes count toward dry.
@@ -237,15 +236,132 @@ scenarios.s6b_verifier_double_failure = async () => {
   assert.equal(result.unverified.length, 0, 'later-confirmed candidate must leave the unverified list')
 }
 
-// S7: rounds 1-3 each confirm a bug -> round 4 runs adaptive lenses built from the stats.
+// N1 (spec #1): the top-ranked hotspot cluster sits out exactly the next round, then returns.
+// The producing cluster keeps running when eligible (the old s7b lock, restated under cooldown).
+scenarios.s_cluster_cooldown = async () => {
+  const { calls } = await run({
+    args: { maxRounds: 6, dryThreshold: 9, graph: graphRows(60) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [
+            finding(1, { file: 'Server/ws/hub.go', title: 'ws bug alpha one' }),
+            finding(2, { file: 'Server/ws/pubsub.go', line: 300, title: 'ws bug beta two' }),
+          ] }
+        if (round === 2 && key === 'concurrency')
+          return { findings: [
+            finding(3, { file: 'Server/ws/emit.go', title: 'ws bug gamma three' }),
+            finding(4, { file: 'Server/api/user.go', title: 'api bug delta four' }),
+          ] }
+        if (round === 4 && key === 'hotspot-server-ws')
+          return { findings: [finding(9, { file: 'Server/ws/late.go', title: 'late ws bug nine' })] }
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const hunted = (rnd, key) => calls.some((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`)
+  assert.ok(hunted(4, 'hotspot-server-ws'), 'top cluster hunts in r4')
+  assert.ok(!hunted(5, 'hotspot-server-ws'), 'the r4 top cluster must sit out r5 even though it produced')
+  assert.ok(hunted(5, 'hotspot-server-api'), 'the next cluster takes the top slot in r5')
+  assert.ok(hunted(6, 'hotspot-server-ws'), 'cooldown lasts exactly one round')
+}
+
+// N2 (spec #2): a cooldown gap FREEZES cleanStreak - neither increments nor resets - so
+// demotion still means two consecutive clean APPEARANCES. If the gap incremented, ws would
+// be demoted before r6; if demotion broke, ws would still run in r8.
+scenarios.s_cooldown_freezes_streak = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 8, dryThreshold: 9, graph: graphRows(100) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [
+            finding(1, { file: 'Server/ws/hub.go', title: 'ws bug alpha one' }),
+            finding(2, { file: 'Server/ws/pubsub.go', line: 300, title: 'ws bug beta two' }),
+          ] }
+        if (round === 2 && key === 'concurrency')
+          return { findings: [finding(3, { file: 'Server/api/user.go', title: 'api bug delta three' })] }
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const hunted = (rnd, key) => calls.some((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`)
+  assert.ok(hunted(4, 'hotspot-server-ws'), 'clean appearance #1 in r4')
+  assert.ok(!hunted(5, 'hotspot-server-ws'), 'cooldown in r5')
+  assert.ok(hunted(6, 'hotspot-server-ws'), 'the gap must freeze the streak at 1, not increment it')
+  assert.equal(result.rounds.length, 8, 'the run must reach r8 for the demotion assert to mean anything')
+  assert.ok(!hunted(8, 'hotspot-server-ws'), 'two clean appearances (r4, r6) demote the lens')
+}
+
+// N3 (spec #3): cooldown+demotion emptying the hotspot pool must backfill from explore and
+// log it - silent family shrinkage is the exact freshEyesLens() defect this rebuild removes.
+scenarios.s_hotspot_backfill = async () => {
+  const { calls, logs } = await run({
+    args: { maxRounds: 5, dryThreshold: 9, graph: graphRows(100) },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'lone ws bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const r5 = calls.filter((c) => /^r5:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2])
+  assert.ok(!r5.some((k) => k.startsWith('hotspot-')), 'the sole cluster is on cooldown in r5')
+  assert.deepEqual([...r5].sort(), ['explore-1', 'explore-2', 'explore-3', 'explore-4'], 'the family backfills to full size from explore')
+  assert.ok(logs.some((l) => /hotspot pool short/.test(l)), 'backfill must be logged, never silent')
+}
+
+// N4 (spec #4): within-run consumption - later rounds draw the NEXT chunk of the ranking,
+// never re-offering files already handed to an explore lens this run.
+scenarios.s_explore_consumption = async () => {
+  const { calls } = await run({
+    args: { maxRounds: 5, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/)
+  assert.match(promptOf(4, 'explore-2'), /Server\/gen\/g10\.go/)
+  assert.match(promptOf(4, 'explore-3'), /Server\/gen\/g20\.go/, 'r4 backfills a third explore lens (single cluster)')
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g30\.go/, 'r5 draws the next chunk')
+  assert.doesNotMatch(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'r5 must not re-offer r4 files')
+}
+
+// N6 (spec #6): args.graph absent -> churn-based fresh-eyes fallback, logged, family intact.
+scenarios.s_graph_missing_fallback = async () => {
+  const { calls, logs } = await run({
+    args: { maxRounds: 4, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 1 && key === 'ws-hub'
+          ? { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+          : none,
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  assert.ok(logs.some((l) => /falling back to churn/.test(l)), 'the fallback must be logged')
+  const e1 = calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus')
+  assert.ok(e1, 'an explore lens must still run from churn')
+  assert.match(e1.prompt, /Server\/api\/user\.go/, 'churned file with no findings feeds the fallback')
+}
+
+// S7: rounds 1-3 each confirm a bug -> round 4 runs adaptive lenses: directory-granularity
+// hotspots plus explore (churn fallback here - no args.graph is passed).
 scenarios.s7_adaptive_lenses = async () => {
   const A = finding(1, { file: 'Server/ws/hub.go', line: 120, title: 'alpha race window one' })
   const B = finding(2, { file: 'Server/ws/pubsub.go', line: 60, title: 'beta subscription leak two' })
   const C = finding(3, { file: 'Client/tauri-client/src/lib/livekitE2EE.ts', line: 200, title: 'gamma epoch desync three' })
   const { result, calls } = await run({
     agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
+      hunt: (round, key) => {
         if (round === 1 && key === 'ws-hub') return { findings: [A] }
         if (round === 2 && key === 'concurrency') return { findings: [B] }
         if (round === 3 && key === 'flow-voice') return { findings: [C] }
@@ -257,49 +373,26 @@ scenarios.s7_adaptive_lenses = async () => {
   assert.equal(result.converged, true)
   assert.equal(result.rounds.length, 5) // r4, r5 adaptive + dry
   assert.equal(result.rounds[3].family, 'adaptive')
-  const r4Hunts = calls.filter((c) => /^r4:hunt:/.test(c.opts.label || ''))
-  const r4Keys = [...new Set(r4Hunts.map((c) => c.opts.label.split(':')[2]))]
+  const r4Keys = [...new Set(calls.filter((c) => /^r4:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2]))]
   assert.ok(r4Keys.includes('hotspot-server-ws'), `r4 keys: ${r4Keys}`)
-  assert.ok(r4Keys.includes('fresh-eyes'), `r4 keys: ${r4Keys}`)
-  const hotspot = r4Hunts.find((c) => c.opts.label.includes('hotspot-server-ws'))
+  assert.ok(r4Keys.includes('hotspot-client-tauri-client-src-lib'), `r4 keys: ${r4Keys}`)
+  assert.ok(r4Keys.includes('explore-1'), `r4 keys: ${r4Keys}`)
+  const hotspot = calls.find((c) => (c.opts.label || '').includes('hotspot-server-ws'))
   assert.match(hotspot.prompt, /Server\/ws\/hub\.go/)
   assert.match(hotspot.prompt, /alpha race window one/)
-  const freshEyes = r4Hunts.find((c) => c.opts.label.includes('fresh-eyes'))
-  assert.match(freshEyes.prompt, /Server\/api\/user\.go/) // churned, never a finding
+  const explore = calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus')
+  assert.match(explore.prompt, /Server\/api\/user\.go/) // churned, never a finding
   assert.equal(result.confirmed.length, 3)
 }
 
-// S7b: a lens with 2 consecutive clean rounds is demoted from later rounds.
-scenarios.s7b_demotion = async () => {
-  const { result, calls } = await run({
-    args: { maxRounds: 6 },
-    agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
-        const src = { 1: 'ws-hub', 2: 'concurrency', 3: 'flow-reconnect', 4: 'hotspot-server-ws', 5: 'hotspot-server-ws' }
-        if (key === src[round])
-          return { findings: [finding(round, { file: `Server/ws/a${round}.go`, title: `unique bug number${round} zeta${round}` })] }
-        return none
-      },
-      verify: (round, key, cands) => confirmAll(cands),
-    }),
-  })
-  const labels = calls.map((c) => c.opts.label || '')
-  assert.ok(labels.some((l) => /^r5:hunt:fresh-eyes:/.test(l)), 'fresh-eyes still runs in r5 (streak 1)')
-  assert.ok(!labels.some((l) => /^r6:hunt:fresh-eyes:/.test(l)), 'fresh-eyes demoted in r6 (streak 2)')
-  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'producing hotspot keeps running')
-  assert.equal(result.converged, false)
-  assert.equal(result.confirmed.length, 5)
-}
-
-// S7c: a lens whose VERIFIER died is not demoted; a zero-candidate lens still is.
+// S7c: a lens whose VERIFIER died is not demoted (its cluster returns after cooldown);
+// a zero-candidate explore lens still accrues streak and demotes.
 scenarios.s7c_verifier_failure_not_demoted = async () => {
   const early = { 1: 'ws-hub', 2: 'concurrency', 3: 'flow-reconnect' }
   const { result, calls } = await run({
-    args: { maxRounds: 6 },
+    args: { maxRounds: 6, dryThreshold: 9, graph: graphRows(100) },
     agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (model !== 'opus') return none
+      hunt: (round, key) => {
         if (round <= 3 && key === early[round])
           return { findings: [finding(round, { file: `Server/ws/a${round}.go`, title: `early bug item${round} kappa${round}` })] }
         if (round >= 4 && key === 'hotspot-server-ws')
@@ -310,12 +403,15 @@ scenarios.s7c_verifier_failure_not_demoted = async () => {
     }),
   })
   const labels = calls.map((c) => c.opts.label || '')
-  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'verifier-dead lens must NOT be demoted')
-  assert.ok(!labels.some((l) => /^r6:hunt:fresh-eyes:/.test(l)), 'zero-candidate lens still accrues streak and demotes')
+  assert.ok(labels.some((l) => /^r4:hunt:hotspot-server-ws:/.test(l)))
+  assert.ok(!labels.some((l) => /^r5:hunt:hotspot-server-ws:/.test(l)), 'cooldown after topping r4')
+  assert.ok(labels.some((l) => /^r6:hunt:hotspot-server-ws:/.test(l)), 'a verifier-dead lens must NOT be demoted')
+  assert.ok(!labels.some((l) => /^r6:hunt:explore-1:/.test(l)), 'a zero-candidate explore lens still demotes')
   assert.equal(result.confirmed.length, 3)
-  assert.equal(result.unverified.length, 3)
+  assert.equal(result.unverified.length, 2) // b4 and b6, each denied a verdict twice
   assert.equal(result.converged, false)
-  assert.ok(result.rounds.slice(3).every((r) => r.dryEligible === false))
+  assert.equal(result.rounds[3].dryEligible, false)
+  assert.equal(result.rounds[5].dryEligible, false)
 }
 
 // S12: empty adaptive family (no confirms, no churn) must break honestly, not count dry rounds.
@@ -354,7 +450,7 @@ scenarios.s8_budget_floor = async () => {
 scenarios.s8b_budget_midrun = async () => {
   let n = 0
   const { result } = await run({
-    budget: { total: 1000000, spent: () => 0, remaining: () => (n++ === 0 ? 200000 : 100000) },
+    budget: { total: 10000000, spent: () => 0, remaining: () => (n++ === 0 ? 3000000 : 1000000) },
     agentStub: makeStub({
       hunt: (round, key, model) =>
         round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [finding(1)] } : none,
@@ -496,7 +592,7 @@ scenarios.s_custom_lenses = async () => {
     agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
   })
   const keys = calls
-    .map((c) => /^r1:hunt:([a-z0-9-]+):(opus|sonnet)$/.exec(c.opts.label || ''))
+    .map((c) => /^r1:hunt:([a-z0-9-]+):opus$/.exec(c.opts.label || ''))
     .filter(Boolean)
     .map((m) => m[1])
   assert.deepEqual([...new Set(keys)].sort(), ['voice-e2ee-keyholder', 'voice-e2ee-rotation'])
@@ -549,50 +645,7 @@ scenarios.s_confirmed_carries_finder_detail = async () => {
   assert.equal(r.fix, 'FIX_TEXT')
   assert.equal(r.lens, 'ws-hub')
   assert.equal(r.round, 1)
-}
-
-// S_FINDER_ATTRIBUTION: confirmed records name which model found them. The panel unions rather
-// than votes, so this is the only way to tell whether the second finder earns its cost. Because
-// dedupe keeps the first occurrence and opus is index 0, `finder: 'sonnet'` means opus did NOT
-// report it - i.e. a sonnet-unique find. `finder: 'opus'` says nothing about sonnet either way.
-scenarios.s_finder_attribution = async () => {
-  const shared = finding(1)
-  // Different file, not just a different line: isDup treats same-file findings within
-  // TITLE_MATCH_WINDOW as duplicates on title-word overlap, and the finding() fixtures share
-  // enough words to collapse into one another.
-  const sonnetOnly = finding(2, { file: 'Server/api/user.go' })
-  const { result } = await run({
-    args: { maxRounds: 1, dryThreshold: 9 },
-    agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (round !== 1 || key !== 'ws-hub') return none
-        return model === 'opus' ? { findings: [shared] } : { findings: [shared, sonnetOnly] }
-      },
-      verify: (round, key, cands) => confirmAll(cands),
-    }),
-  })
-  const byTitle = Object.fromEntries(result.confirmed.map((r) => [r.title, r.finder]))
-  assert.equal(byTitle[shared.title], 'opus', 'a find both models made keeps the opus-first record')
-  assert.equal(byTitle[sonnetOnly.title], 'sonnet', 'a find only sonnet made must be attributed to sonnet')
-}
-
-// S_FINDER_ATTRIBUTION_SURVIVES_DEAD_OPUS: the tag must be taken from the panel slot, not from the
-// position in the surviving list. Filtering the nulls out BEFORE reading the index shifts sonnet
-// into slot 0 and mislabels every one of its finds as opus - exactly when attribution matters most.
-scenarios.s_finder_attribution_survives_dead_opus = async () => {
-  const only = finding(3)
-  const { result } = await run({
-    args: { maxRounds: 1, dryThreshold: 9 },
-    agentStub: makeStub({
-      hunt: (round, key, model) => {
-        if (round !== 1 || key !== 'ws-hub') return none
-        return model === 'opus' ? null : { findings: [only] }
-      },
-      verify: (round, key, cands) => confirmAll(cands),
-    }),
-  })
-  assert.equal(result.confirmed.length, 1)
-  assert.equal(result.confirmed[0].finder, 'sonnet', 'a dead opus must not relabel sonnet finds as opus')
+  assert.equal(r.finder, 'opus', 'the finder tag is constant now but the ledger still expects it')
 }
 
 // S_VERIFIER_IS_NOT_TOLD_THE_FINDER: the verifier prompt deliberately says "another model" and
@@ -619,26 +672,162 @@ scenarios.s_verifier_is_not_told_the_finder = async () => {
   }
 }
 
-// S_PANEL_SPLIT_IS_REPORTED: a tag nobody reads is not a measurement. The run must say out loud
-// how many confirmed findings only the second finder produced, which is the number that decides
-// whether the second model is worth its cost.
-scenarios.s_panel_split_is_reported = async () => {
-  const { logs } = await run({
+// New (spec Testing #8): the report is built in-script. Section count must equal the confirmed
+// count at 82 (the agent version emitted 79 for 82), and the unverified section must survive
+// the agent's removal - it used to exist only inside the report agent's prompt.
+scenarios.s_report_deterministic = async () => {
+  const many = Array.from({ length: 82 }, (_, i) =>
+    finding(i, { file: `Server/ws/f${i}.go`, line: 10, title: `unique bug row${i} tag${i}` }))
+  const stuck = finding(999, { file: 'Server/api/stuck.go', line: 40, title: 'stuck bug never verified' })
+  const { result, calls } = await run({
     args: { maxRounds: 1, dryThreshold: 9 },
     agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [...many, stuck] } : none,
+      verify: (round, key, cands) => confirmAll(cands.filter((c) => c.file !== 'Server/api/stuck.go')),
+    }),
+  })
+  assert.equal(result.confirmed.length, 82)
+  assert.equal(result.unverified.length, 1)
+  assert.ok(!calls.some((c) => c.opts.label === 'report'), 'no report agent may run')
+  const sections = (result.report.match(/^### /gm) || []).length
+  assert.equal(sections, 82, 'one section per confirmed finding, none dropped')
+  assert.match(result.report, /## Unverified - re-run/)
+  assert.match(result.report, /stuck bug never verified/)
+  assert.match(result.report, /## Convergence/)
+}
+
+// New (spec Testing #7): the retry re-sends ONLY unmatched candidates, and N garbage verdicts
+// (count == candidate count, zero of them matching) must still trigger it - the hole S10 misses
+// because S10's verdict list is empty rather than full of junk.
+scenarios.s_targeted_retry = async () => {
+  const a = finding(1, { file: 'Server/ws/a.go', title: 'alpha bug one paired' })
+  const b = finding(2, { file: 'Server/api/b.go', title: 'beta bug two orphaned' })
+  const retryBatches = []
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9 },
+    agentStub: makeStub({
+      hunt: (round, key, model) =>
+        round === 1 && key === 'ws-hub' && model === 'opus' ? { findings: [a, b] } : none,
+      verify: (round, key, cands, isRetry) => {
+        if (isRetry) {
+          retryBatches.push(cands)
+          return confirmAll(cands)
+        }
+        // one real verdict for a, one garbage verdict pointing nowhere: count matches, content doesn't
+        return {
+          verdicts: [
+            { title: a.title, file: a.file, line: a.line, refuted: false, reason: 'ok', confidence: 'high', severity: 'high', fix: 'f' },
+            { title: 'hallucinated', file: 'Server/nowhere.go', line: 1, refuted: false, reason: 'x', confidence: 'low', severity: 'low' },
+          ],
+        }
+      },
+    }),
+  })
+  assert.equal(retryBatches.length, 1, 'retry must fire despite verdict count == candidate count')
+  assert.deepEqual(retryBatches[0].map((c) => c.file), ['Server/api/b.go'], 'only the unmatched candidate is re-sent')
+  assert.equal(result.confirmed.length, 2)
+  assert.equal(result.unverified.length, 0)
+}
+
+// New (spec Testing #9): the retuned floor must stop a run the old 150k floor let through.
+// 1M remaining is under the ~2M measured per-round cost - starting a round would overshoot.
+scenarios.s9_budget_ceiling_retuned = async () => {
+  const { result, logs } = await run({
+    budget: { total: 10000000, spent: () => 9000000, remaining: () => 1000000 },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 0, '1M remaining must not start a ~2M round')
+  assert.equal(result.stoppedOnBudget, true)
+  assert.ok(logs.some((l) => /Budget floor/.test(l)))
+}
+
+// New: telemetry. Per-round suppression split (ledger vs same-run), spend sampling, file
+// coverage, severity mix, per-lens precision, and the top-level runStats aggregate. Without
+// this every cost figure from a run is eyewitness-only - the 2026-08-12 problem.
+scenarios.s_telemetry = async () => {
+  let spent = 0
+  const known = [{ file: 'Server/ws/hub.go', line: 100, title: 'known bug from ledger prior', status: 'fixed' }]
+  const { result } = await run({
+    args: { maxRounds: 1, dryThreshold: 9, known },
+    budget: { total: 50000000, spent: () => (spent += 500000), remaining: () => 40000000 },
+    agentStub: makeStub({
       hunt: (round, key, model) => {
-        if (round !== 1 || key !== 'ws-hub') return none
-        return model === 'opus'
-          ? { findings: [finding(1)] }
-          : { findings: [finding(1), finding(2, { file: 'Server/api/user.go' })] }
+        if (round !== 1 || key !== 'ws-hub' || model !== 'opus') return none
+        return { findings: [
+          finding(1, { file: 'Server/ws/hub.go', line: 102, title: 'known bug from ledger prior' }),
+          finding(2, { file: 'Server/api/fresh.go', severity: 'medium', title: 'fresh bug beta gamma' }),
+        ] }
       },
       verify: (round, key, cands) => confirmAll(cands),
     }),
   })
-  const line = logs.find((l) => /panel:/.test(l))
-  assert.ok(line, 'the run must report the panel split')
-  assert.match(line, /sonnet-only/, 'the split must name the sonnet-only count explicitly')
-  assert.match(line, /\b1\b/, 'exactly one confirmed finding here was sonnet-only')
+  const r1 = result.rounds[0]
+  assert.equal(r1.suppressedLedger, 1, 'the ledger-known duplicate must be counted as ledger suppression')
+  assert.equal(r1.suppressedRun, 0)
+  assert.ok(r1.spentAfter > r1.spentBefore, 'per-round spend must be sampled')
+  assert.equal(r1.filesTouched, 1)
+  assert.equal(r1.filesNew, 1)
+  assert.deepEqual(r1.severity, { critical: 0, high: 0, medium: 1, low: 0 })
+  assert.equal(r1.perLens['ws-hub'].confirmed, 1)
+  assert.equal(r1.perLens['ws-hub'].fresh, 1)
+  assert.ok(result.runStats, 'runStats missing from the result')
+  assert.equal(result.runStats.confirmed, 1)
+  assert.equal(result.runStats.suppressedLedger, 1)
+  assert.equal(result.runStats.config.maxRounds, 1)
+  assert.match(result.report, /## Run stats/)
+}
+
+// N7 (Task 9 review finding): a dead finder on an explore lens read nothing - its draw is
+// rewound so the files never reach exploredFiles, where the session would record them clean
+// and deprioritize them in every future hunt. maxRounds caps at 4 on purpose: a live round-5
+// lens would legitimately re-read the rewound files and they would CORRECTLY re-enter
+// exploredFiles - the poison-prevention property is only assertable when the run ends here.
+// Re-offering in later rounds follows from the same exploreConsumed state drawExploreFiles
+// filters on, so this one scenario locks the mechanism.
+scenarios.s_explore_rewind_on_dead_finder = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 4, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+        if (round === 4 && key === 'explore-1') return null // dead finder: read nothing
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the ranking')
+  for (let i = 0; i < 10; i++)
+    assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
+  assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
+  assert.ok(result.exploredFiles.includes('Server/gen/g20.go'), 'backfilled live lens files stay reported too')
+}
+
+// N8 (final-review finding): a THROWN stage nulls the whole lens result - the second
+// finder-failure mode the code documents. Its explore draw must rewind exactly like the
+// null-finder case, or never-read files reach exploredFiles and poison explored-clean.
+scenarios.s_explore_rewind_on_thrown_stage = async () => {
+  const { result, calls } = await run({
+    args: { maxRounds: 4, dryThreshold: 9, graph: graphRows(80) },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug one' })] }
+        if (round === 4 && key === 'explore-1') throw new Error('finder infrastructure blew up')
+        return none
+      },
+      verify: (round, key, cands) => confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the ranking')
+  for (let i = 0; i < 10; i++)
+    assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
+  assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
+  assert.equal(result.rounds[3].dryEligible, false, 'a nulled lens result still makes the round ineligible')
 }
 
 // ---------- runner ----------

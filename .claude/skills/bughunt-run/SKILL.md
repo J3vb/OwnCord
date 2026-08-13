@@ -15,20 +15,39 @@ reach a commit, an issue, or a PR body.
 
 ## 1. Hunt
 
-Read the ledger and pass every record in as `known`, so the hunt does not
-re-derive anything already found, fixed, declined, or refuted:
+**Launch the hunt from a turn that carries a token-budget directive** (recommended:
+`+25M`, comfortably above a full 8-round run). The workflow's cost ceiling is gated
+on `budget.total`, which is null without a directive — a directive-less run has **no
+ceiling at all**. The workflow's first log line echoes the state: `budget=25M` means
+armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
+directive.
+
+Before launching, in order:
+
+1. **Rebuild the graph** (stale coordinates aim the explore lens at moved code):
+   `graphify update . --no-cluster` — local tree-sitter, zero LLM cost, ~10.7k nodes.
+2. **Rank explore targets**: `node .superpowers/rank-explore.mjs` — writes
+   `.superpowers/explore-ranking.json`, deprioritizing files recorded clean in
+   `.superpowers/explored-clean.json` and dropping files that no longer exist.
+3. Read the ledger and pass every record in as `known`, so the hunt does not
+   re-derive anything already found, fixed, declined, or refuted.
 
 ```
 Workflow({
   name: "bughunt",
   args: {
     known: <every record from findings-ledger.json, as {file, line, title, status}>,
+    graph: <the rows of .superpowers/explore-ranking.json>,
     lenses: [ {key, prompt}, ... ],   // optional: scope the hunt to one subsystem
     maxRounds: 8,
     dryThreshold: 2,
   },
 })
 ```
+
+If `graph` is omitted or empty the hunt logs
+`explore: args.graph absent/empty - falling back to churn-based fresh eyes` and
+still runs — degraded targeting, never a smaller lens family.
 
 Omit `lenses` for a general hunt across the rotating families.
 
@@ -40,7 +59,21 @@ validated — it reaches the finder prompt as the literal string `undefined`,
 silently degrading that lens instead of failing loudly. Check your lens
 objects before passing them.
 
-When it returns, append each entry of `result.confirmed` to the ledger with
+When it returns, first save the raw result verbatim to
+`.superpowers/hunts/<YYYY-MM-DD>-raw.json`, then:
+
+```bash
+node .superpowers/render-run-stats.mjs .superpowers/hunts/<YYYY-MM-DD>-raw.json <hunt-name>
+```
+
+This validates the result shape, appends the run's telemetry to
+`.superpowers/run-history.json`, updates `.superpowers/explored-clean.json`, and
+checks **every** confirmed finding's coordinates against the working tree (file
+exists, line within length — the report agent that used to spot-check two findings
+is gone). Resolve any `COORD` warnings before appending to the ledger: stale
+coordinates poison `bughunt-fix`.
+
+Then append each entry of `result.confirmed` to the ledger with
 `status: "open"`, an id from `nextId`, and today's date. Bump `nextId`. The
 incoming record carries a prose `fix` field (bughunt's suggested remedy) —
 rename it to `suggestedFix` when appending, so the ledger's `fix` field starts
@@ -51,15 +84,12 @@ revertProof}` once something is actually fixed. Then:
 node .superpowers/render-ledger.mjs
 ```
 
-Each confirmed record carries `finder` — which model in the dual-model panel
-produced it. The run also logs one `panel:` line with the split. The two finders
-are unioned, not voted, so the second model's entire value is what it finds
-alone; because duplicates collapse to the opus-slot record, a `sonnet` tag means
-opus missed it. Watch that count across a few hunts. Consistently zero is the
-evidence for dropping to a single finder — but note that would also weaken
-convergence, since a round is only allowed to count as dry when the full panel
-reported, so a lone finder having a bad day would read as "clean" instead of
-"we didn't fully look".
+Each confirmed record carries `finder: "opus"`. The dual-model finder panel was
+retired 2026-08-12: attribution over the only measured run priced sonnet's unique
+yield (1 high, 4 medium, 9 low) at roughly a third of the run's agents. The known
+cost: with one finder, a lazy-but-non-null finder round can read as "clean" where
+the panel required both models to agree it was. Watch `runStats` — per-lens
+candidate counts make an anomalously empty lens visible after the fact.
 
 ## 2. Gate (human)
 
@@ -159,7 +189,9 @@ node .claude/workflows/bughunt.harness.mjs
 node .claude/workflows/bughunt-fix.harness.mjs
 node .superpowers/render-ledger.mjs --selftest
 node .superpowers/verify-fixes.mjs --selftest
+node .superpowers/rank-explore.mjs --selftest
+node .superpowers/render-run-stats.mjs --selftest
 ```
 
-All four run offline with zero API calls. Run them after any edit to the
+All six run offline with zero API calls. Run them after any edit to the
 relevant script.

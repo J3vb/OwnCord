@@ -1,10 +1,9 @@
 export const meta = {
   name: 'bughunt',
-  description: 'Converging multi-round bug hunt: rotating lens families, dual-model panels, fable refute-by-default verification, dry-threshold stop',
+  description: 'Converging multi-round bug hunt: rotating lens families, single opus finder, fable refute-by-default verification, dry-threshold stop',
   whenToUse: 'Hunting real bugs across the Go server, Tauri Rust backend, and TS client until consecutive rounds go dry. Not a security-only scan.',
   phases: [
     { title: 'Recon', detail: 'haiku: churn + concurrency-surface inventory' },
-    { title: 'Report', detail: 'fable: ranked findings + convergence table' },
   ],
 }
 
@@ -19,14 +18,15 @@ const ARGS = (() => {
 const MAX_ROUNDS = ARGS.maxRounds || 8
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
-// adaptive, so hotspot and fresh-eyes coverage - and therefore convergence - still work.
+// adaptive, so hotspot and explore coverage - and therefore convergence - still work.
 const CUSTOM_LENSES = Array.isArray(ARGS.lenses) && ARGS.lenses.length ? ARGS.lenses : null
-// ponytail: rough floor for one round (up to 12 high-effort finders + verifiers); tune after live runs
-const ROUND_BUDGET_FLOOR = 150000
+// Floor for one round, tuned from the 2026-08-12 run: ~2.6M output tokens per round measured.
+// The old 150k floor would overshoot the ceiling by nearly a full round.
+const ROUND_BUDGET_FLOOR = 2000000
 // The args channel has already been observed delivering something the script
 // could not read; an unnoticed fallback here is an 8x cost surprise, so say out
 // loud what the run is actually going to do.
-log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''}`)
+log(`config: maxRounds=${MAX_ROUNDS} dryThreshold=${DRY_THRESHOLD}${CUSTOM_LENSES ? ` lenses=custom(${CUSTOM_LENSES.length})` : ''} budget=${budget.total ? Math.round(budget.total / 1e6) + 'M' : 'NONE - cost ceiling disarmed'}`)
 
 // ---------- schemas: copied VERBATIM from the current bughunt.js ----------
 const FINDINGS = {
@@ -93,14 +93,16 @@ Out of scope, do not report: naming, formatting, missing tests, "consider adding
 performance that is not a hang, anything you cannot point at specific lines for.
 
 Method:
-  1. Read the actual files. Never report from a filename or a grep hit alone.
+  1. Read the actual files. Never report from a filename, a grep hit, or a graph edge alone - a
+     graphify edge is structural evidence of coupling, not of a bug; open the cited file and confirm.
   2. For every candidate, grep for ALL callers before judging - a guard may already live upstream.
   3. Check whether an existing test already locks the behavior you think is wrong. If a test asserts it,
      it is intended behavior, not a bug. Test files are *_test.go and tests/unit/*.test.ts.
   4. Report EVERY finding you can prove - there is no cap. The quality bar stays: zero findings is a
      valid, respectable answer, and each finding needs file, line, and a concrete repro.
 
-You may run read-only shell commands (grep, git log, go doc). Do not modify any file. Do not run the test suite.
+You may run read-only shell commands (grep, git log, go doc, graphify path, graphify explain).
+Do not modify any file. Do not run the test suite.
 `
 
 // ---------- lens catalog ----------
@@ -271,46 +273,83 @@ const FLOW_LENSES = [
 ]
 
 function lensesForRound(round) {
-  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses()
+  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses(round)
   if (round === 1) return SURFACE_LENSES
   if (round === 2) return BUGCLASS_LENSES
   if (round === 3) return FLOW_LENSES
-  return buildAdaptiveLenses()
+  return buildAdaptiveLenses(round)
 }
 function familyName(round) {
   if (CUSTOM_LENSES) return round === 1 ? 'custom' : 'adaptive'
   return ['surfaces', 'bug-classes', 'flows'][round - 1] || 'adaptive'
 }
+// Directory granularity: the old two/three-segment cluster collapsed the whole TS client into
+// one bucket (35 of 82 findings), so the "top cluster" never changed for five straight rounds.
 function clusterOf(file) {
   const parts = String(file).split('/')
-  return parts.slice(0, parts[0] === 'Client' ? 3 : 2).join('/')
+  return parts.length > 1 ? parts.slice(0, -1).join('/') : parts[0]
 }
-function freshEyesLens() {
-  const files = churnFiles.filter((f) => !seen.some((s) => s.file === f)).slice(0, 10)
-  if (!files.length) return []
-  return [
-    {
-      key: 'fresh-eyes',
-      prompt:
-        `These files churned heavily in the last 8 weeks, yet no hunt round has confirmed or refuted a ` +
-        `single finding in them - either they are clean or every lens so far walked past them. Read each ` +
-        `one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
-        files.map((f) => `  - ${f}`).join('\n'),
-    },
-  ]
+
+// ---------- explore targeting ----------
+// args.graph: session-computed coupling ranking (rank-explore.mjs). The workflow only reads
+// .file - scoring already happened outside, where the filesystem is.
+const GRAPH_ROWS = (Array.isArray(ARGS.graph) ? ARGS.graph : []).filter((r) => r && typeof r.file === 'string')
+const EXPLORE_FILES_PER_LENS = 10
+const exploreConsumed = new Set() // within-run consumption: never re-offer a file to a later round
+let exploreFallbackLogged = false
+function drawExploreFiles() {
+  let pool
+  if (GRAPH_ROWS.length) pool = GRAPH_ROWS.map((r) => r.file)
+  else {
+    if (!exploreFallbackLogged) {
+      log('explore: args.graph absent/empty - falling back to churn-based fresh eyes')
+      exploreFallbackLogged = true
+    }
+    pool = churnFiles
+  }
+  const files = pool
+    .filter((f) => !exploreConsumed.has(f) && !seen.some((s) => s.file === f))
+    .slice(0, EXPLORE_FILES_PER_LENS)
+  for (const f of files) exploreConsumed.add(f)
+  return files
 }
-function buildAdaptiveLenses() {
+function exploreLens(i) {
+  const files = drawExploreFiles()
+  if (!files.length) return null
+  const src = GRAPH_ROWS.length
+    ? `These files are heavily coupled (per the code graph) to files where confirmed bugs live, yet no ` +
+      `hunt has confirmed or refuted a single finding in them - either they are clean or every lens so ` +
+      `far walked past them.`
+    : `These files churned heavily in the last 8 weeks, yet no hunt round has confirmed or refuted a ` +
+      `single finding in them - either they are clean or every lens so far walked past them.`
+  return {
+    key: `explore-${i}`,
+    prompt: `${src} Read each one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
+      files.map((f) => `  - ${f}`).join('\n'),
+    files,
+  }
+}
+
+let cooldownCluster = null // the top-ranked cluster hunted in round N sits out round N+1
+function buildAdaptiveLenses(round) {
   const byCluster = {}
   for (const c of confirmedAll) {
     const cl = clusterOf(c.file)
     if (!byCluster[cl]) byCluster[cl] = []
     byCluster[cl].push(c)
   }
-  const top = Object.entries(byCluster)
+  // Explore-heavy schedule: measured hotspot yield flattened to 0.25 high+med/agent by round 6.
+  const hotspotQuota = round <= 5 ? 2 : 1
+  const exploreQuota = round <= 5 ? 2 : 3
+  const hotKey = (cl) => ('hotspot ' + cl).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const picked = Object.entries(byCluster)
     .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, 3)
-  const hotspots = top.map(([cluster, items]) => ({
-    key: ('hotspot ' + cluster).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    .filter(([cl]) => cl !== cooldownCluster)
+    .filter(([cl]) => (cleanStreak[hotKey(cl)] || 0) < 2) // pre-filter so backfill sees the real shortfall
+    .slice(0, hotspotQuota)
+  cooldownCluster = picked.length ? picked[0][0] : null
+  const hotspots = picked.map(([cluster, items]) => ({
+    key: hotKey(cluster),
     prompt:
       `Bugs cluster. Confirmed findings so far in ${cluster}:\n` +
       items.map((i) => `  - ${i.file}:${i.line} ${i.title}`).join('\n') +
@@ -318,7 +357,19 @@ function buildAdaptiveLenses() {
       `(subscribe/unsubscribe, open/close, register/transfer, acquire/release), and the paths a past fix ` +
       `here did NOT cover. Do not re-report the findings listed above - they are already known.`,
   }))
-  return [...hotspots, ...freshEyesLens()]
+  const shortfall = hotspotQuota - hotspots.length
+  if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} - trying explore backfill`)
+  const explores = []
+  for (let i = 1; i <= exploreQuota + shortfall; i++) {
+    if ((cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
+    const lens = exploreLens(i)
+    if (!lens) {
+      log(`adaptive: explore pool exhausted after ${explores.length} lens(es)`)
+      break
+    }
+    explores.push(lens)
+  }
+  return [...hotspots, ...explores]
 }
 
 // ---------- dedupe + ledger helpers ----------
@@ -343,10 +394,18 @@ function isDup(a, b) {
   const hits = aw.filter((w) => bw.has(w)).length
   return hits * 2 >= aw.length
 }
-function dedupe(cands, priors) {
+function dedupe(cands, priors, counts) {
   const kept = []
   for (const c of cands) {
-    if (priors.some((p) => isDup(c, p)) || kept.some((k) => isDup(c, k))) continue
+    const prior = priors.find((p) => isDup(c, p))
+    if (prior) {
+      if (counts) counts[prior.fromLedger ? 'suppressedLedger' : 'suppressedRun']++
+      continue
+    }
+    if (kept.some((k) => isDup(c, k))) {
+      if (counts) counts.suppressedRun++
+      continue
+    }
     kept.push(c)
   }
   return kept
@@ -417,6 +476,7 @@ const seen = (ARGS.known || []).map((k) => ({
   line: k.line,
   title: k.title,
   status: k.status || 'known',
+  fromLedger: true, // telemetry: distinguishes ledger suppression from same-run suppression
 }))
 const confirmedAll = []
 const unverified = []
@@ -464,10 +524,12 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   const family = lensesForRound(round + 1)
   if (!family || !family.length) break // nothing to hunt != everything demoted
   round++
+  const spentBefore = budget.spent()
+  const counts = { suppressedLedger: 0, suppressedRun: 0, finderNull: 0, finderEmpty: 0, verifierNull: 0 }
   const lenses = family.filter((l) => (cleanStreak[l.key] || 0) < 2)
   if (!lenses.length) {
     dry++
-    roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry })
+    roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry, severity: { critical: 0, high: 0, medium: 0, low: 0 }, perLens: {}, filesTouched: 0, filesNew: 0, ...counts, spentBefore, spentAfter: budget.spent() })
     log(`Round ${round}: every lens demoted - counts as a dry round (dry=${dry})`)
     continue
   }
@@ -476,123 +538,184 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   const lensResults = await pipeline(
     lenses,
     (lens) =>
-      parallel([
-        () => agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:opus`, phase: `Round ${rnd}`, model: 'opus', effort: 'high', schema: FINDINGS }),
-        () => agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:sonnet`, phase: `Round ${rnd}`, model: 'sonnet', effort: 'high', schema: FINDINGS }),
-      ]).then((pair) => ({ lens, pair })),
+      agent(finderPrompt(lens, rnd), { label: `r${rnd}:hunt:${lens.key}:opus`, phase: `Round ${rnd}`, model: 'opus', effort: 'high', schema: FINDINGS })
+        .then((res) => ({ lens, res })),
     async (r) => {
-      const { lens, pair } = r
-      const finderFailed = pair.some((p) => p === null)
-      // Tag by panel slot, not by position in the surviving list: filtering the nulls out first
-      // would shift sonnet into slot 0 whenever opus dies and mislabel its finds. The panel unions
-      // rather than votes, so this is the only signal for whether the second finder earns its cost
-      // - and since dedupe keeps the first occurrence and opus is slot 0, `finder: 'sonnet'` means
-      // opus did not report it. `finder: 'opus'` says nothing about sonnet either way.
-      const union = pair.flatMap((p, i) =>
-        p ? (p.findings || []).map((f) => ({ ...f, finder: i ? 'sonnet' : 'opus' })) : [],
-      )
-      const fresh = dedupe(union, seenAtStart)
-      if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], verdicts: [] }
+      const { lens, res } = r
+      // agent() returns null on failure; a thrown stage instead nulls the whole lens result,
+      // which the eligibility check catches separately. Both checks are needed.
+      const finderFailed = res === null
+      if (finderFailed) counts.finderNull++
+      else if (!(res.findings || []).length) counts.finderEmpty++
+      // finder is constant now; kept on the record for ledger continuity across hunts
+      const union = res ? (res.findings || []).map((f) => ({ ...f, finder: 'opus' })) : []
+      const fresh = dedupe(union, seenAtStart, counts)
+      if (!fresh.length) return { lens, finderFailed, unionCount: union.length, fresh: [], matched: [], unmatched: [] }
       log(`r${rnd} ${lens.key}: ${fresh.length} fresh candidate(s) -> verification`)
       const vopts = { phase: `Round ${rnd}`, model: 'fable', effort: 'high', schema: VERDICTS }
-      let v = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}` })
-      if (!v || (v.verdicts || []).length < fresh.length) {
-        const retry = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}:retry` })
-        if (((retry && retry.verdicts) || []).length > ((v && v.verdicts) || []).length) v = retry
+      // Pair verdicts to candidates as they arrive, then retry ONLY what got no usable verdict.
+      // Retrying the whole batch re-burned every verdict on a partial return, and the old
+      // count-based trigger let N unmatched garbage verdicts skip the retry entirely.
+      const matched = []
+      const unmatched = fresh.slice()
+      const absorb = (vs) => {
+        for (const v of vs || []) {
+          const vRec = { file: v.file, line: v.line, title: v.title }
+          const idx = unmatched.findIndex((f) => isDup(vRec, f) || isDup(f, vRec))
+          if (idx === -1) {
+            const claimed = matched.some(({ cand }) => isDup(vRec, cand) || isDup(cand, vRec))
+            log(`r${rnd} ${lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) ${claimed ? 'duplicates an already-claimed candidate' : 'matched no candidate'} - dropped`)
+            continue
+          }
+          const [cand] = unmatched.splice(idx, 1)
+          matched.push({ v, cand })
+        }
       }
-      return { lens, finderFailed, unionCount: union.length, fresh, verdicts: (v && v.verdicts) || [] }
+      const v1 = await agent(verifyPrompt(lens.key, fresh), { ...vopts, label: `r${rnd}:verify:${lens.key}` })
+      absorb(v1 && v1.verdicts)
+      if (!v1) counts.verifierNull++
+      if (unmatched.length) {
+        const v2 = await agent(verifyPrompt(lens.key, unmatched.slice()), { ...vopts, label: `r${rnd}:verify:${lens.key}:retry` })
+        absorb(v2 && v2.verdicts)
+        if (!v2) counts.verifierNull++
+      }
+      return { lens, finderFailed, unionCount: union.length, fresh, matched, unmatched }
     },
   )
+
+  // a thrown stage nulls the whole lens result - rewind its explore draw too, or the
+  // session records never-read files as explored-clean (the same poison as a null finder)
+  lensResults.forEach((r, i) => {
+    if (!r && lenses[i].files) for (const f of lenses[i].files) exploreConsumed.delete(f)
+  })
 
   let eligible = !lensResults.some((r) => !r)
   let newConfirmed = 0
   let newRefuted = 0
   let candCount = 0
   let freshCount = 0
+  const perLens = {}
+  const sevMix = { critical: 0, high: 0, medium: 0, low: 0 }
+  const filesTouched = new Set()
+  const filesNew = new Set()
   for (const r of lensResults.filter(Boolean)) {
     candCount += r.unionCount
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
+    if (r.finderFailed && r.lens.files) {
+      // a dead finder read nothing: un-consume its draw so later rounds can re-offer the
+      // files and the session does not record never-examined files as explored-clean
+      for (const f of r.lens.files) exploreConsumed.delete(f)
+    }
     let lensConfirmed = 0
-    const unmatched = r.fresh.slice()
-    for (const v of r.verdicts) {
-      const vRec = { file: v.file, line: v.line, title: v.title }
-      const idx = unmatched.findIndex((f) => isDup(vRec, f) || isDup(f, vRec))
-      if (idx === -1) {
-        log(`r${round} ${r.lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
-        continue
-      }
+    let lensRefuted = 0
+    for (const { v, cand } of r.matched) {
       // Keep the matched candidate: the verdict schema has no why/repro/evidence, and the
       // ledger needs them. Verdict fields are spread last so the verifier's re-rated severity
       // and its corrected title/file/line win over the finder's.
-      const [cand] = unmatched.splice(idx, 1)
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
-      if (seen.some((p) => isDup(rec, p))) continue // cross-lens same-round duplicate
+      if (seen.some((p) => isDup(rec, p))) { counts.suppressedRun++; continue } // cross-lens same-round duplicate
       seen.push(rec)
-      if (v.refuted) newRefuted++
+      if (v.refuted) { newRefuted++; lensRefuted++ }
       else {
         newConfirmed++
         lensConfirmed++
+        sevMix[v.severity] = (sevMix[v.severity] || 0) + 1
         confirmedAll.push({ ...cand, ...v, lens: r.lens.key, round })
       }
     }
-    if (unmatched.length) {
+    if (r.unmatched.length) {
       eligible = false // partial verifier failure: some candidates got no verdict at all
-      for (const f of unmatched) unverified.push({ ...f, lens: r.lens.key, round })
+      for (const f of r.unmatched) unverified.push({ ...f, lens: r.lens.key, round })
     }
     // a lens hunted at partial panel strength, or whose candidates never got a verdict, is not evidence of cleanliness
-    if (!r.finderFailed && !unmatched.length) cleanStreak[r.lens.key] = lensConfirmed > 0 ? 0 : (cleanStreak[r.lens.key] || 0) + 1
+    if (!r.finderFailed && !r.unmatched.length) cleanStreak[r.lens.key] = lensConfirmed > 0 ? 0 : (cleanStreak[r.lens.key] || 0) + 1
+    perLens[r.lens.key] = { candidates: r.unionCount, fresh: r.fresh.length, confirmed: lensConfirmed, refuted: lensRefuted, unverified: r.unmatched.length }
+    // coverage proxy: files that produced fresh candidates this round (finder reading is unobservable)
+    for (const f of r.fresh) {
+      filesTouched.add(f.file)
+      if (!seenAtStart.some((s) => s.file === f.file)) filesNew.add(f.file)
+    }
   }
 
   if (newConfirmed > 0) dry = 0
   else if (eligible) dry++
   // ineligible zero-confirm round: dry unchanged - "we didn't fully look" is not "it's clean"
-  roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry })
+  roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry, severity: sevMix, perLens, filesTouched: filesTouched.size, filesNew: filesNew.size, ...counts, spentBefore, spentAfter: budget.spent() })
   log(`Round ${round} (${familyName(round)}): ${newConfirmed} confirmed, ${newRefuted} refuted, dry=${dry}${eligible ? '' : ' (ineligible)'}`)
 }
 
 const converged = dry >= DRY_THRESHOLD
 
-// The panel unions rather than votes, so the second finder's whole value is what it finds alone.
-// dedupe keeps the opus-slot record when both report the same bug, so a confirmed finding tagged
-// sonnet is one opus missed. A run where that count is 0 is the evidence for dropping the second
-// model; anything above 0 is what it bought.
-const sonnetOnly = confirmedAll.filter((f) => f.finder === 'sonnet').length
-log(`panel: ${confirmedAll.length} confirmed, ${sonnetOnly} sonnet-only (opus missed), ${confirmedAll.length - sonnetOnly} found by opus`)
-
-// ---------- report ----------
-phase('Report')
+// ---------- report (deterministic) ----------
+// A report agent silently dropped findings (79 sections for 82 confirmed on 2026-08-12), so the
+// markdown is assembled in-script from confirmedSorted. Coordinate spot-checking moved to the
+// calling session, which validates EVERY finding's file/line after return (see bughunt-run).
 const RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 const confirmedSorted = confirmedAll.slice().sort((a, b) => RANK[a.severity] - RANK[b.severity])
 const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
 const table = convergenceTable(roundStats, converged, stoppedOnBudget)
-
-let report
-if (!confirmedSorted.length && !unverifiedFinal.length) {
-  const outcome = converged ? 'Converged' : stoppedOnBudget ? 'Stopped on budget - NOT converged' : 'Hit the round backstop - NOT converged'
-  report = `${outcome} after ${round} round(s) with zero confirmed findings.\n\n${table}`
-} else {
-  report = await agent(
-    `You are writing the final bug-hunt report for OwnCord (D:/Local-Lab/Repos/OwnCord).\n\n` +
-      `The findings below already survived adversarial verification - do NOT re-litigate them, and do NOT add new ` +
-      `ones. Your job is presentation and prioritization for a maintainer who will fix these today.\n\n` +
-      `Spot-check the two highest-severity findings against the real files to make sure file paths and line numbers ` +
-      `are accurate; correct them silently if they drifted.\n\n` +
-      `Write markdown:\n` +
-      `  - Open with one paragraph: how many real bugs, in which subsystems, whether the hunt CONVERGED, and which ` +
-      `finding to fix first and why.\n` +
-      `  - Then one section per finding, ordered by severity: a "### <severity> - <title>" heading, the ` +
-      `\`file:line\` reference, what breaks and under exactly what conditions, and the smallest correct fix.\n` +
-      (unverifiedFinal.length
-        ? `  - Then an "## Unverified - re-run" section listing these candidates whose verification failed twice: ` +
-          `${JSON.stringify(unverifiedFinal)}\n`
-        : '') +
-      `  - End with the convergence table below, VERBATIM.\n` +
-      `Write in complete sentences. No emoji, no "consider" hedging.\n\n` +
-      `--- CONFIRMED FINDINGS ---\n${JSON.stringify(confirmedSorted, null, 2)}\n\n` +
-      `--- CONVERGENCE TABLE ---\n${table}`,
-    { label: 'report', phase: 'Report', model: 'fable', effort: 'high' },
-  )
+const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
+const runStats = {
+  config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: budget.total },
+  spentTotal: budget.spent(),
+  rounds: roundStats.length,
+  converged,
+  stoppedOnBudget,
+  confirmed: confirmedSorted.length,
+  refuted: sum('refuted'),
+  unverified: unverifiedFinal.length,
+  suppressedLedger: sum('suppressedLedger'),
+  suppressedRun: sum('suppressedRun'),
+  finderNull: sum('finderNull'),
+  finderEmpty: sum('finderEmpty'),
+  verifierNull: sum('verifierNull'),
 }
 
-return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, report }
+function buildReport() {
+  const outcome = converged
+    ? `CONVERGED after ${round} round(s).`
+    : stoppedOnBudget
+      ? `NOT converged - stopped on budget after ${round} round(s).`
+      : `NOT converged - hit the round backstop after ${round} round(s).`
+  const sev = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const f of confirmedSorted) sev[f.severity] = (sev[f.severity] || 0) + 1
+  const lines = ['# Bug hunt report', '']
+  lines.push(
+    `${confirmedSorted.length} confirmed finding(s) - ${sev.critical} critical, ${sev.high} high, ` +
+      `${sev.medium} medium, ${sev.low} low. ${outcome}` +
+      (confirmedSorted.length
+        ? ` Fix first: ${confirmedSorted[0].title} (\`${confirmedSorted[0].file}:${confirmedSorted[0].line}\`).`
+        : ''),
+    '',
+  )
+  for (const f of confirmedSorted) {
+    lines.push(`### ${f.severity} - ${f.title}`, '')
+    lines.push(`\`${f.file}:${f.line}\` - lens \`${f.lens}\`, round ${f.round}, confidence ${f.confidence}`, '')
+    if (f.why) lines.push(f.why, '')
+    if (f.repro) lines.push(`**Repro:** ${f.repro}`, '')
+    if (f.evidence) lines.push(`**Evidence:** ${f.evidence}`, '')
+    if (f.fix) lines.push(`**Fix:** ${f.fix}`, '')
+  }
+  if (unverifiedFinal.length) {
+    lines.push('## Unverified - re-run', '')
+    for (const u of unverifiedFinal) lines.push(`- \`${u.file}:${u.line}\` ${u.title} (lens \`${u.lens}\`, round ${u.round})`)
+    lines.push('')
+  }
+  lines.push(table)
+  lines.push('', '## Run stats', '')
+  lines.push(
+    `Total spent: ${runStats.spentTotal} output tokens across ${runStats.rounds} round(s). ` +
+      `Suppressed by dedupe: ${runStats.suppressedLedger} ledger-known, ${runStats.suppressedRun} same-run. ` +
+      `Agent failures: ${runStats.finderNull} finder null, ${runStats.finderEmpty} finder empty, ${runStats.verifierNull} verifier null.`,
+    '',
+  )
+  lines.push('| round | spent | files (new) | suppressed ledger/run | finder null/empty | verifier null |')
+  lines.push('|---|---|---|---|---|---|')
+  for (const s of roundStats)
+    lines.push(`| ${s.round} | ${s.spentAfter - s.spentBefore} | ${s.filesTouched} (${s.filesNew}) | ${s.suppressedLedger}/${s.suppressedRun} | ${s.finderNull}/${s.finderEmpty} | ${s.verifierNull} |`)
+  return lines.join('\n')
+}
+const report = buildReport()
+
+return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, exploredFiles: [...exploreConsumed], report }
