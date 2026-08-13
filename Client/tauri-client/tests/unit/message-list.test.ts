@@ -252,6 +252,32 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
+  it("rebuilds the virtual window when scrolling outside the rendered range", async () => {
+    setHasMore(1, false);
+    const many = Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, many);
+    msgList.mount(container);
+
+    // renderAll positions the window at the tail; rows near the top are
+    // virtualized away behind the top spacer.
+    expect(container.querySelector('[data-testid="message-1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-300"]')).not.toBeNull();
+
+    // mount's trailing scrollToBottom leaves scrollTop at 0 in jsdom
+    // (scrollHeight is 0 without layout), so the scroll position now sits at
+    // the very top of the list while the rendered window is still the tail —
+    // exactly the state a user scrolling far past the overscan produces.
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    expect(root.scrollTop).toBe(0);
+    root.dispatchEvent(new Event("scroll"));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    // The window must follow the scroll: rows at the top render, and the old
+    // tail rows are released back to the spacers.
+    expect(container.querySelector('[data-testid="message-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="message-300"]')).toBeNull();
+  });
+
   it("renders day dividers between messages on different days", () => {
     const messages = [
       makeMessage({ id: 1, timestamp: "2024-01-15T12:00:00Z" }),
