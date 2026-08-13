@@ -369,6 +369,26 @@ export async function enableScreenshare(
             }
           : {}),
       });
+      if ((state.generation ?? 0) !== generation) {
+        // A disableScreenshare ran to completion while that publish was in
+        // flight — it already reset localScreenshare, sent voice_screenshare
+        // (false) and emptied state.manualScreenTracks, so the tracks still
+        // held by this attempt are unreachable from any later disable. Undo
+        // every one of them here (a publish may have landed after the
+        // disable's unpublish), and stay silent: announcing
+        // voice_screenshare(true) now would override the disable's final
+        // word on the server.
+        for (const t of screenTracks) {
+          try {
+            void room.localParticipant.unpublishTrack(t.mediaStreamTrack);
+          } catch {
+            /* already unpublished */
+          }
+          t.stop();
+        }
+        if (state.manualScreenTracks === screenTracks) state.manualScreenTracks = [];
+        return;
+      }
     }
     // BUG-101: Listen for OS "Stop sharing" so the app runs the full disable path.
     const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
