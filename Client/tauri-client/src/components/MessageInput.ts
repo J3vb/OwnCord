@@ -469,7 +469,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (textarea === null) return;
     const content = textarea.value.trim();
     const hasAttachments = pendingAttachments.length > 0;
-    if (content.length === 0 && !hasAttachments) return;
+    // Edits are text-only, so a queued attachment must not unlock submitting
+    // an edit whose text was cleared -- that would tear down edit mode for a
+    // send the host refuses anyway.
+    if (content.length === 0 && (state.editing !== null || !hasAttachments)) return;
 
     // Block send while uploads are still in flight
     if (pendingUploadCount > 0) {
