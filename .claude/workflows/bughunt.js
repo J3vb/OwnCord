@@ -563,7 +563,8 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
           const vRec = { file: v.file, line: v.line, title: v.title }
           const idx = unmatched.findIndex((f) => isDup(vRec, f) || isDup(f, vRec))
           if (idx === -1) {
-            log(`r${rnd} ${lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) matched no candidate - dropped`)
+            const claimed = matched.some(({ cand }) => isDup(vRec, cand) || isDup(cand, vRec))
+            log(`r${rnd} ${lens.key}: verifier verdict "${v.title}" (${v.file}:${v.line}) ${claimed ? 'duplicates an already-claimed candidate' : 'matched no candidate'} - dropped`)
             continue
           }
           const [cand] = unmatched.splice(idx, 1)

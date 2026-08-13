@@ -592,7 +592,7 @@ scenarios.s_custom_lenses = async () => {
     agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
   })
   const keys = calls
-    .map((c) => /^r1:hunt:([a-z0-9-]+):(opus|sonnet)$/.exec(c.opts.label || ''))
+    .map((c) => /^r1:hunt:([a-z0-9-]+):opus$/.exec(c.opts.label || ''))
     .filter(Boolean)
     .map((m) => m[1])
   assert.deepEqual([...new Set(keys)].sort(), ['voice-e2ee-keyholder', 'voice-e2ee-rotation'])
