@@ -103,6 +103,29 @@ describe("channel-navigation", () => {
 
       expect(dmStore.getState().channels.find((c) => c.channelId === 50)?.unreadCount).toBe(3);
     });
+
+    // OC-0121: a DM present in dmStore from `ready` but never opened this
+    // session (so never selected via selectDmConversation) has no mirror row
+    // in channelsStore yet. A jump affordance (permalink, search hit, pinned,
+    // reply) must still be able to activate it instead of silently no-op'ing.
+    it("activates a DM known only to dmStore by synthesizing its channelsStore mirror", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          unreadCount: 3,
+          mentionCount: 1,
+        }),
+      ]);
+
+      navigateToChannel(50);
+
+      expect(channelsStore.getState().activeChannelId).toBe(50);
+      expect(channelsStore.getState().channels.get(50)?.name).toBe("bob");
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.unreadCount).toBe(0);
+      expect(dm?.mentionCount).toBe(0);
+    });
   });
 
   describe("findChannelById", () => {
@@ -117,6 +140,21 @@ describe("channel-navigation", () => {
 
     it("returns null for an unknown id", () => {
       expect(findChannelById(999)).toBeNull();
+    });
+
+    // OC-0121: findChannelById gated on channelsStore alone, so a DM whose
+    // mirror row has not been synthesized yet (never opened this session)
+    // read as "not visible" even though the user is a member — the first
+    // check in MessageJump.jumpTo rejects it before getMessagesAround is
+    // ever called.
+    it("resolves a DM known only to dmStore, not yet mirrored into channelsStore", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 50,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        }),
+      ]);
+      expect(findChannelById(50)).toEqual({ id: 50, name: "bob" });
     });
   });
 
