@@ -281,6 +281,33 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		id := existing.ID
 
+		// Mark the channel archived BEFORE evicting participants, mirroring the
+		// archive path (handlePatchChannel): CleanupVoiceForChannel snapshots
+		// voice participants ONCE, up front, so a voice_join racing this delete
+		// could otherwise read the still-live channel row, pass the archived
+		// gate (ws/voice_join.go), and insert a voice_states row after the
+		// snapshot but before AdminDeleteChannel's cascade — leaving that
+		// joiner's hub-side voice state and LiveKit session orphaned with no
+		// DB row left for any sweep to find (OC-0035). Persisting archived=1
+		// first makes voice_join's existing archived check refuse that join
+		// outright, the same way it already refuses one racing an archive.
+		if !existing.Archived {
+			if err := database.AdminUpdateChannel(r.Context(), id, db.ChannelUpdate{
+				Name:          existing.Name,
+				Topic:         existing.Topic,
+				Category:      existing.Category,
+				SlowMode:      existing.SlowMode,
+				Position:      existing.Position,
+				Archived:      true,
+				NSFW:          existing.NSFW,
+				VoiceMaxUsers: existing.VoiceMaxUsers,
+				VoiceMaxVideo: existing.VoiceMaxVideo,
+			}); err != nil {
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
+				return
+			}
+		}
+
 		// Evict voice participants BEFORE deleting the row: the voice_states
 		// FK cascade wipes the rows the cleanup reads, and the stale sweeper
 		// cannot recover participants of a channel that no longer exists.
