@@ -530,6 +530,49 @@ func TestVoiceMod_Move_TextChannelDestination_BadRequest(t *testing.T) {
 	}
 }
 
+// TestVoiceMod_Move_ArchivedDestination_BadRequest locks OC-0072: the move
+// pre-flight validates destination type, target access, and capacity, but
+// skipped dest.Archived even though the re-join it hands off to
+// (handleVoiceJoin) refuses an archived channel outright. Without the gate,
+// the pre-flight commits the destructive half of the move — the target is
+// dropped from their current channel — for a re-join guaranteed to bounce,
+// leaving the target stranded out of voice entirely.
+func TestVoiceMod_Move_ArchivedDestination_BadRequest(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-move-archived-from")
+	toID := seedVoiceChan(t, database, "vc-move-archived-to")
+	if err := database.AdminUpdateChannel(context.Background(), toID, db.ChannelUpdate{
+		Name:     "vc-move-archived-to",
+		Archived: true,
+	}); err != nil {
+		t.Fatalf("AdminUpdateChannel: %v", err)
+	}
+	actor := seedVoiceUserWithRole(t, database, "admin-move-archived", 2)
+	target := seedVoiceUserWithRole(t, database, "member-move-archived", 4)
+
+	joinVoice(t, hub, target, fromID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+		t.Fatalf("error code = %q, want BAD_REQUEST", code)
+	}
+	state, err := database.GetVoiceState(context.Background(), target.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil {
+		t.Error("a refused move must leave the target in voice")
+	} else if state.ChannelID != fromID {
+		t.Errorf("target channel = %d, want %d (unchanged)", state.ChannelID, fromID)
+	}
+}
+
 // TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel locks the fix for
 // v024: voiceModTarget authorizes against a DB snapshot, but the eviction ran
 // through the unscoped VoiceModerator.DisconnectFromVoice, which drops the
