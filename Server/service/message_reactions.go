@@ -39,7 +39,7 @@ func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID
 	}
 
 	msg, err := s.st.GetMessage(ctx, msgID)
-	if err != nil || msg == nil || msg.ChannelID != channelID {
+	if err != nil || msg == nil || msg.ChannelID != channelID || msg.Deleted {
 		return nil, fmt.Errorf("%w: message not found", ErrNotFound)
 	}
 
@@ -102,8 +102,16 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrBadRequest)
 	}
 
+	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
+	// lookup failure must not fall through to the non-DM permission branch
+	// below. That branch passes on the base role mask alone
+	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
+	// skipping both IsDMParticipant and requireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	isDM := chErr == nil && ch != nil && ch.Type == "dm"
+	if chErr != nil || ch == nil {
+		return nil, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
+	}
+	isDM := ch.Type == "dm"
 
 	// Archived channels are read-only. handleReaction bypasses
 	// checkSendPermission (it runs its own DM/permission branch below), so it
