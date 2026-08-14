@@ -99,7 +99,12 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
         keyring_get,
         keyring_delete,
         |acct, sec| set_fallback(app, acct, sec),
-        |acct| clear_fallback(app, acct),
+        // Best-effort here: the keyring copy just proved it round-trips, so
+        // it is authoritative regardless of whether the stale fallback copy
+        // actually got flushed off disk.
+        |acct| {
+            let _ = clear_fallback(app, acct);
+        },
     )
 }
 
@@ -213,9 +218,23 @@ fn get_with(
 /// Both stores are cleared even if one errors: a delete that left the fallback
 /// copy behind would resurrect a "deleted" secret on the next read.
 pub fn delete(app: &AppHandle, account: &str) -> Result<(), String> {
+    delete_with(account, keyring_delete, |acct| clear_fallback(app, acct))
+}
+
+/// Core decision logic for [`delete`], with the keyring and fallback removals
+/// injected so the branching is testable without a live OS credential store.
+fn delete_with(
+    account: &str,
+    keyring_delete: impl Fn(&str) -> Result<(), String>,
+    fallback_clear: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
     let keyring_result = keyring_delete(account);
-    clear_fallback(app, account);
-    keyring_result
+    // `Result::and`'s argument is evaluated eagerly, so `fallback_clear` runs
+    // regardless of whether the keyring delete succeeded — both stores are
+    // still cleared even if one errors. Whichever side failed is what gets
+    // reported: a delete must not read as Ok(()) while either store still
+    // holds the "deleted" secret.
+    keyring_result.and(fallback_clear(account))
 }
 
 // ---------------------------------------------------------------------------
@@ -395,19 +414,27 @@ fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
         .ok()
 }
 
-/// Drop any fallback copy of `account`. Best-effort: a failure here is logged,
-/// never propagated, because it must not mask the outcome of the real store.
-fn clear_fallback(app: &AppHandle, account: &str) {
-    let Ok(store) = app.store(CREDENTIAL_FALLBACK_STORE) else {
-        return;
-    };
+/// Drop any fallback copy of `account`, flushing the removal to disk.
+///
+/// Returns the flush error to the caller instead of only logging it: a
+/// `delete()` that reported success while this failed to flush would leave
+/// the sealed secret on disk to resurrect the "deleted" credential on the
+/// next read. Callers where the keyring copy is authoritative (a `set()`
+/// recovering from a stale fallback) may still discard the `Err` themselves.
+fn clear_fallback(app: &AppHandle, account: &str) -> Result<(), String> {
+    let store = app
+        .store(CREDENTIAL_FALLBACK_STORE)
+        .map_err(|e| format!("failed to open credential fallback store: {e}"))?;
     // `delete` reports whether a key was present; only flush when one was, so
     // the common healthy path does not rewrite the file on every save.
     if store.delete(account) {
         if let Err(e) = store.save() {
-            log::warn!("failed to flush credential fallback removal for '{account}': {e}");
+            return Err(format!(
+                "failed to flush credential fallback removal for '{account}': {e}"
+            ));
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +579,43 @@ mod tests {
         );
         assert_eq!(result, Ok(Backend::Keyring));
         assert!(cleared.get(), "a recovered machine must clear any stale fallback copy");
+    }
+
+    // -- delete_with: finding "delete must not report success while the
+    //    fallback copy survives on disk to resurrect a deleted secret" --
+
+    #[test]
+    fn delete_with_propagates_a_fallback_flush_failure() {
+        // The bug: a delete that removed the keyring entry but failed to
+        // flush the fallback file's removal must not report Ok(()) — the
+        // sealed secret is still on disk and comes back on the next launch.
+        let result = delete_with("acct", |_| Ok(()), |_| Err("disk full".to_string()));
+        assert_eq!(result, Err("disk full".to_string()));
+    }
+
+    #[test]
+    fn delete_with_clears_the_fallback_even_when_the_keyring_delete_fails() {
+        use std::cell::Cell;
+        let fallback_cleared = Cell::new(false);
+        let result = delete_with(
+            "acct",
+            |_| Err("keyring delete failed".to_string()),
+            |_| {
+                fallback_cleared.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Err("keyring delete failed".to_string()));
+        assert!(
+            fallback_cleared.get(),
+            "delete must still clear the fallback even when the keyring delete errors"
+        );
+    }
+
+    #[test]
+    fn delete_with_succeeds_when_both_stores_clear() {
+        let result = delete_with("acct", |_| Ok(()), |_| Ok(()));
+        assert_eq!(result, Ok(()));
     }
 
     #[cfg(windows)]
