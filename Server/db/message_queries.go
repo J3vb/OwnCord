@@ -638,8 +638,18 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 	return id, nil
 }
 
-// GetPinnedMessages returns all pinned messages in a channel in the API response shape,
-// including user object, reactions (with me flag), and attachments.
+// MaxPinnedMessages bounds how many pinned messages a single channel query
+// returns. Without a cap, scanAndEnrichMessages feeds every pinned message ID
+// into several `IN (?,?,...)` batch lookups (reactions, attachments,
+// mentions); past SQLite's ~32766 bound-parameter limit that fails outright
+// ("too many SQL variables"), and the pins endpoint then 500s on every call
+// for that channel forever. The cap sits far below that ceiling, with room to
+// spare across all three batch queries.
+const MaxPinnedMessages = 1000
+
+// GetPinnedMessages returns up to MaxPinnedMessages pinned messages in a
+// channel, most-recently-pinned first, in the API response shape, including
+// user object, reactions (with me flag), and attachments.
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
@@ -647,8 +657,8 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 		        m.mentions_everyone
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
-		 ORDER BY m.id DESC`,
-		channelID,
+		 ORDER BY m.id DESC LIMIT ?`,
+		channelID, MaxPinnedMessages,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetPinnedMessages: %w", err)
