@@ -82,6 +82,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formState: FormState = "idle";
   let formMode: FormMode = "login";
   let errorMessage = "";
+  // True while a TOTP challenge is outstanding (from showTotp() until it is
+  // cancelled or resolved). A rejected verify moves formState to "error" for
+  // the banner/shake, but the overlay must stay up so the code can be
+  // re-entered — see updateTotpOverlay().
+  let totpPending = false;
 
   // --- cached DOM references ---
   let formTitle: HTMLHeadingElement;
@@ -521,6 +526,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       totpOverlay.classList.remove("totp-overlay--hidden");
       totpInput.value = "";
       totpInput.focus();
+    } else if (formState === "error" && totpPending) {
+      // A rejected verify lands here — keep the overlay up (and the
+      // already-entered code in place) instead of dropping the user back on
+      // the login form with no way to retry.
+      totpOverlay.classList.remove("totp-overlay--hidden");
     } else {
       totpOverlay.classList.add("totp-overlay--hidden");
     }
@@ -672,6 +682,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   function handleTotpCancel(): void {
+    totpPending = false;
     transitionTo("idle");
   }
 
@@ -686,6 +697,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     autoConnectOverlayElement: autoConnectOverlay,
 
     showTotp(): void {
+      totpPending = true;
       transitionTo("totp");
     },
 
@@ -703,6 +715,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     resetToIdle(): void {
+      totpPending = false;
       transitionTo("idle");
     },
 
