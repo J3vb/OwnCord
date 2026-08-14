@@ -184,6 +184,22 @@ func TestCreateGroupDM_BlockedCannotAddBlocker(t *testing.T) {
 	}
 }
 
+func TestCreateGroupDM_RejectsMutuallyBlockedRecipients(t *testing.T) {
+	database, router, _, tokens := groupFixture(t)
+	// carol blocks bob; neither blocked alice, so alice (an uninvolved third
+	// party) must not be able to force them into a shared group DM.
+	if err := database.BlockUser(context.Background(), 3, 2); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
+		"recipient_ids": []int64{2, 3},
+	})
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when two recipients have blocked each other, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 // ─── listing ────────────────────────────────────────────────────────────────
 
 func TestListDMs_ReturnsGroupWithParticipants(t *testing.T) {
