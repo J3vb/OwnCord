@@ -254,3 +254,55 @@ func TestSendMessage_DoesNotReopenAlreadyOpenDM(t *testing.T) {
 			"for every other connected client's next reconnect", second.OpenedDMFor)
 	}
 }
+
+// OC-0033 residual: the recipient's dm_open_state re-open must survive the
+// sender's disconnect too — GetDMParticipantIDs was detached from ctx but the
+// OpenDM loop was not, so a canceled request ctx silently skipped the re-open
+// and the recipient's sidebar never learned the DM existed.
+func TestSendMessage_DMReopenSurvivesSenderDisconnectAfterCommit(t *testing.T) {
+	database, permSvc := newDMFixture(t)
+	// Bob has closed the DM; this send must genuinely re-open it for him.
+	if err := database.CloseDM(context.Background(), 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := NewMessageService(disconnectAfterWriteStore{Store: database, cancel: cancel}, permSvc, nil)
+
+	result, err := svc.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(result.OpenedDMFor) != 1 || result.OpenedDMFor[0] != 2 {
+		t.Fatalf("OpenedDMFor = %v, want [2] — OpenDM must run detached from the request ctx, "+
+			"or a sender disconnect after commit leaves the DM invisible in the recipient's sidebar",
+			result.OpenedDMFor)
+	}
+}
+
+// Same fail-closed rule the edit path got (OC-0074): DeleteMessage must not
+// fall open into the non-DM permission branch — and past the new archived
+// gate (OC-0077) — when the channel lookup errors.
+func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
+	database, permSvc := newDMFixture(t)
+
+	sendSvc := NewMessageService(database, permSvc, nil)
+	sent, err := sendSvc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "to be deleted",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	svc := NewMessageService(erroringGetChannelStore{Store: database, failFor: 50}, permSvc, nil)
+	if _, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID); err == nil {
+		t.Fatal("DeleteMessage succeeded despite a failed channel lookup — " +
+			"a GetChannel error must fail closed, not fall through to the non-DM permission path")
+	}
+	msg, err := database.GetMessage(context.Background(), sent.MessageID)
+	if err != nil || msg == nil {
+		t.Fatalf("message must survive the refused delete; GetMessage: msg=%v err=%v", msg, err)
+	}
+}

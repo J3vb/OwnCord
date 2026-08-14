@@ -171,33 +171,36 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// DM path: open DM for recipients.
 	if isDM {
-		// The message is already committed, so this lookup must survive the
-		// sender's connection dropping the instant the write commits — the same
-		// reason the compensating deletes and applyMentionCounts below detach
-		// from ctx. Without WithoutCancel, a canceled request ctx here silently
-		// drops every recipient from the fan-out (ParticipantIDs stays nil) with
-		// no error surfaced to anyone: the sender sees chat_send_ok and the
-		// other participant never gets the message live.
-		participantIDs, pErr := s.st.GetDMParticipantIDs(context.WithoutCancel(ctx), p.ChannelID)
+		// The message is already committed, so everything below must survive
+		// the sender's connection dropping the instant the write commits — the
+		// same reason the compensating deletes and applyMentionCounts below
+		// detach from ctx. Without WithoutCancel, a canceled request ctx here
+		// silently drops every recipient from the fan-out (ParticipantIDs
+		// stays nil), skips re-opening the recipient's dm_open_state, and
+		// degrades the payload shape — with no error surfaced to anyone: the
+		// sender sees chat_send_ok and the other participant never gets the
+		// message live.
+		bgCtx := context.WithoutCancel(ctx)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(bgCtx, p.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
 			return result, nil // Message saved, skip DM side effects.
 		}
 		result.ParticipantIDs = participantIDs
 
-		sender, _ := s.st.GetUserByID(ctx, p.UserID)
+		sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
 		result.SenderUser = sender
 
 		// Viewer-neutral (viewerID 0 matches nobody, so every status is
 		// broadcast-collapsed); the ws layer re-derives "who is the recipient"
 		// per addressee. A read failure is non-fatal — the message is already
 		// committed, and the caller falls back to the 1:1 shape.
-		if participants, partErr := s.st.GetDMParticipants(ctx, p.ChannelID, 0); partErr == nil {
+		if participants, partErr := s.st.GetDMParticipants(bgCtx, p.ChannelID, 0); partErr == nil {
 			result.DMParticipants = participants
 		} else {
 			slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 		}
-		if isGroup, gErr := s.st.IsGroupDM(ctx, p.ChannelID); gErr == nil {
+		if isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID); gErr == nil {
 			result.DMIsGroup = isGroup
 		}
 
@@ -212,7 +215,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			// watermark, forcing every other connected client's next reconnect
 			// onto a full resync. An already-open DM must not pay that cost on
 			// every single message.
-			opened, openErr := s.st.OpenDM(ctx, pid, p.ChannelID)
+			opened, openErr := s.st.OpenDM(bgCtx, pid, p.ChannelID)
 			if openErr != nil {
 				slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
 				continue
@@ -367,13 +370,19 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
+	// Fail closed, mirroring EditMessage: a lookup failure must not fall
+	// through to the non-DM permission branch (skipping the DM-participant
+	// check) or past the archived gate below.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	isDM := chErr == nil && ch != nil && ch.Type == "dm"
+	if chErr != nil || ch == nil {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	isDM := ch.Type == "dm"
 
 	// Archived channels are read-only, mirroring SendMessage's gate
 	// (message_crud.go:54): history stays visible, but a member or moderator
 	// must not be able to mutate it by deleting a message out of the archive.
-	if !isDM && ch != nil && ch.Archived {
+	if !isDM && ch.Archived {
 		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
 	}
 
