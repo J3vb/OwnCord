@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/config"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
 )
 
@@ -562,6 +563,55 @@ func TestWebhook_ParticipantLeft_ClearsE2EEState_OnMatch(t *testing.T) {
 	}
 	if dbState != nil {
 		t.Error("voice_states row still present after matching webhook cleanup")
+	}
+}
+
+// TestWebhook_ParticipantLeft_LeaverWithoutReadStillNotified locks OC-0038:
+// voice membership is gated on CONNECT_VOICE alone, so a participant can be
+// in a voice channel without READ_MESSAGES on it. The webhook-driven teardown
+// clears the leaver's own client voice state before broadcasting, so
+// broadcastVoiceEvent's audience — (READ_MESSAGES holders) ∪ (still-in-the-
+// room participants) — can no longer see them, and they never learn the
+// server already tore down their call. finishVoiceLeave and
+// CleanupVoiceForChannel both add the leaver to the audience for exactly
+// this reason; the webhook path must too.
+func TestWebhook_ParticipantLeft_LeaverWithoutReadStillNotified(t *testing.T) {
+	t.Parallel()
+	hub, database := newVoiceHub(t)
+
+	chanID := seedVoiceChannel(t, database, "webhook-noread-ch")
+
+	// Role 3 (Moderator) carries CONNECT_VOICE in its default mask but lacks
+	// the Administrator bit, so a channel-scoped READ_MESSAGES deny actually
+	// applies — an Owner/Admin role would bypass channel_overrides entirely.
+	if _, err := database.CreateUser(context.Background(), "webhook-noread-user", "hash", 3); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	leaver, err := database.GetUserByUsername(context.Background(), "webhook-noread-user")
+	if err != nil || leaver == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if err := database.UpsertChannelOverride(context.Background(), chanID, 3, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	if err := database.JoinVoiceChannel(context.Background(), leaver.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vs, err := database.GetVoiceState(context.Background(), leaver.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
+	}
+
+	leaverSend := make(chan []byte, 16)
+	c := ws.NewTestClient(hub, leaver.ID, leaverSend)
+	ws.SetClientVoiceStateForTest(c, chanID, vs.JoinedAt)
+	hub.RegisterNowForTest(c)
+
+	hub.HandleWebhookParticipantLeftForTest(leaver.ID, chanID, vs.JoinedAt)
+
+	if got := countVoiceLeaves(leaverSend, 200*time.Millisecond); got == 0 {
+		t.Error("the leaver's own client, denied READ_MESSAGES on the voice channel, received no voice_leave after the LiveKit webhook tore down its own session")
 	}
 }
 

@@ -79,6 +79,35 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []by
 	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
 }
 
+// broadcastVoiceEventWithLeaver is broadcastVoiceEvent extended to guarantee
+// leaverID is in the audience even though the caller has already cleared
+// their client-side voice state — which means broadcastVoiceEvent's own
+// still-in-the-room participant union can no longer see them. Every path
+// that tears down a voice participant whose client state is cleared before
+// the voice_leave goes out needs this: voice membership is gated on
+// CONNECT_VOICE alone, so a leaver without READ_MESSAGES on the channel
+// would otherwise never learn the server already ended their call. Mirrors
+// CleanupVoiceForChannel's per-batch leaver union, for the single-leaver case.
+func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64, msg []byte, leaverID int64) {
+	audience := h.channelReadAudience(ctx, channelID)
+	seen := make(map[int64]struct{}, len(audience)+1)
+	for _, uid := range audience {
+		seen[uid] = struct{}{}
+	}
+	h.mu.RLock()
+	for uid, c := range h.clients {
+		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
+			seen[uid] = struct{}{}
+			audience = append(audience, uid)
+		}
+	}
+	h.mu.RUnlock()
+	if _, ok := seen[leaverID]; !ok {
+		audience = append(audience, leaverID)
+	}
+	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
+}
+
 // broadcastChannelScoped enqueues msg for exactly the connected clients whose
 // current role may READ channelID, tagged with that channel id so reconnect
 // replay filters it too (EventsSinceFiltered replays a channelID of 0

@@ -129,7 +129,18 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 	// so we remove the rogue participant from LiveKit.
 	if h.db != nil {
 		state, stateErr := h.db.GetVoiceState(ctx, userID)
-		if stateErr != nil || state == nil || state.ChannelID != channelID {
+		if stateErr != nil {
+			// A transient read failure (I/O error, lock contention, a
+			// maintenance window) is not proof of a rogue participant —
+			// treating it as one would eject a legitimate participant from
+			// the SFU on a single bad read. Mirrors sweepStaleVoiceStates'
+			// hasChannelPermChecked guard: skip and let the participant be;
+			// a later webhook retry or sweep tick resolves it.
+			slog.Error("livekit webhook: GetVoiceState failed, skipping rogue-participant check",
+				"error", stateErr, "user_id", userID, "channel_id", channelID)
+			return
+		}
+		if state == nil || state.ChannelID != channelID {
 			slog.Warn("livekit webhook: rogue participant_joined — no matching voice state, removing",
 				"user_id", userID, "channel_id", channelID)
 			if h.livekit != nil {
@@ -226,7 +237,14 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 			// rejected with NOT_KEY_HOLDER. Safe here: no locks are held.
 			h.updateKeyHolder(channelID)
 
-			h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
+			// The leaver's own client state was just cleared above, so
+			// broadcastVoiceEvent's still-in-the-room union can no longer see
+			// them — without broadcastVoiceEventWithLeaver's extra term, a
+			// participant without READ_MESSAGES on this channel (voice
+			// membership needs only CONNECT_VOICE) never learns the server
+			// already tore down their call. Mirrors finishVoiceLeave and
+			// CleanupVoiceForChannel, which add the leaver for the same reason.
+			h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, userID), userID)
 			slog.Info("livekit webhook: cleaned up stale voice state",
 				"user_id", userID,
 				"channel_id", channelID)
