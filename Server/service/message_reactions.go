@@ -105,6 +105,7 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
+	var participantIDs []int64
 	if isDM {
 		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
 		if dmErr != nil || !ok {
@@ -113,6 +114,18 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
 			return nil, blkErr
 		}
+		// Resolve the fan-out audience before mutating anything. Participants
+		// are unaffected by the reaction itself, so failing here is cheap;
+		// fetching this after AddReaction/RemoveReaction commits (as this
+		// used to) risked a reaction persisted with no participant list to
+		// broadcast it to, which reactionV2Handler would then fan out to
+		// nobody while reporting success to the caller.
+		ids, pErr := s.st.GetDMParticipantIDs(ctx, msg.ChannelID)
+		if pErr != nil {
+			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
+			return nil, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)
+		}
+		participantIDs = ids
 	} else if !s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.AddReactions) {
 		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
 		// react in a channel they cannot read. Mirrors checkSendPermission,
@@ -144,12 +157,7 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	}
 
 	if isDM {
-		participantIDs, pErr := s.st.GetDMParticipantIDs(ctx, msg.ChannelID)
-		if pErr != nil {
-			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
-		} else {
-			result.ParticipantIDs = participantIDs
-		}
+		result.ParticipantIDs = participantIDs
 	}
 
 	return result, nil
