@@ -55,8 +55,17 @@ vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
+const { capturedAutoIdleOptions } = vi.hoisted(() => ({
+  capturedAutoIdleOptions: {
+    current: null as null | { onStatusChange: (status: string) => void },
+  },
+}));
+
 vi.mock("@lib/autoIdle", () => ({
-  startAutoIdle: vi.fn(() => ({ destroy: vi.fn() })),
+  startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
+    capturedAutoIdleOptions.current = options;
+    return { destroy: vi.fn() };
+  },
 }));
 
 const {
@@ -162,6 +171,7 @@ import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
 import { openImageLightbox } from "../../src/components/message-list/media";
+import { saveUserStatus } from "../../src/lib/userStatus";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -519,5 +529,125 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
 
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
+  });
+
+  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(60, dmChannel(60, "dm-carol"));
+      return { ...prev, channels: ch, activeChannelId: 60 };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 60,
+          recipient: { id: 5, username: "carol", avatar: "", status: "online" },
+          participants: [{ id: 5, username: "carol", avatar: "", status: "online" }],
+          name: "carol",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+
+    const hostedApi = {
+      getConfig: () => ({ host: "chat.example.com" }),
+      getReactionUsers: vi.fn(async () => ({ users: [] })),
+    } as unknown as ApiClient;
+
+    page = createMainPage({ ws: fakeWs(), api: hostedApi });
+    page.mount(container);
+
+    const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
+    chatAreaOpts.onToggleDmProfile();
+
+    const noteEl = capturedChatAreaRef.current!.dmProfileSlot.querySelector(
+      '[data-testid="dps-note"]',
+    ) as HTMLTextAreaElement;
+    noteEl.value = "owes me money";
+    noteEl.dispatchEvent(new Event("input"));
+
+    try {
+      // Server A's note about user 5 must land under a key scoped to server A
+      // — the same host scoping already applied to channel mutes, the NSFW
+      // gate and per-user volume (setChannelMutesHost/setNsfwGateHost/
+      // setAudioVolumeHost, all called with apiConfig.host above).
+      expect(localStorage.getItem("owncord:dm-note:chat.example.com:5")).toBe("owes me money");
+      // And it must not have gone to the legacy unscoped key, which server
+      // B's unrelated user 5 would also read from.
+      expect(localStorage.getItem("owncord:dm-note:5")).toBeNull();
+    } finally {
+      localStorage.removeItem("owncord:dm-note:chat.example.com:5");
+      localStorage.removeItem("owncord:dm-note:5");
+    }
+  });
+});
+
+describe("MainPage — presence", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    // Match the client's own idea of the signed-in user's status to the
+    // freshly-reset (default "online") saved preference, so the mount-time
+    // restoreSavedPresence() call (MainPage.ts:340) is the no-op it
+    // documents itself as being, and doesn't spend the single presence
+    // token before this test gets to exercise applyPresence directly.
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, status: "online" },
+    }));
+    capturedAutoIdleOptions.current = null;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+    vi.useRealTimers();
+    localStorage.removeItem("owncord:settings:userStatus");
+    localStorage.removeItem("owncord:settings:userStatusOrigin");
+  });
+
+  it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    const onStatusChange = capturedAutoIdleOptions.current!.onStatusChange;
+
+    // Auto-idle fires idle after ten quiet minutes; this consumes the single
+    // presence token (1 per 10s, rate-limiter.ts).
+    saveUserStatus("idle", "auto");
+    onStatusChange("idle");
+    expect(ws.send).toHaveBeenCalledWith({
+      type: "presence_update",
+      payload: { status: "idle" },
+    });
+    (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+    // The very first mouse event after that flips back to online milliseconds
+    // later (autoIdle.ts's unthrottled return-to-activity path) — the token
+    // is still gone, so the frame cannot go out immediately.
+    saveUserStatus("online", "manual");
+    onStatusChange("online");
+    expect(ws.send).not.toHaveBeenCalled();
+
+    // Once the limiter's 10s window reopens, the deferred "online" frame must
+    // still go out — without a retry the server and every other client stay
+    // stuck on "idle" forever with no further trigger to correct it.
+    vi.advanceTimersByTime(10_000);
+
+    expect(ws.send).toHaveBeenCalledWith({
+      type: "presence_update",
+      payload: { status: "online" },
+    });
   });
 });

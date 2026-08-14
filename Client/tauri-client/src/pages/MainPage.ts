@@ -147,6 +147,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
 
+  // Pending retry for a presence_update the 1-per-10s limiter dropped (see
+  // applyPresence below). Module-scoped so a second dropped frame can
+  // supersede the first instead of stacking retries.
+  let presenceRetry: ReturnType<typeof setTimeout> | null = null;
+
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
 
@@ -181,24 +186,35 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const status = loadUserStatus();
     const serverStatus = authStore.getState().user?.status;
     if (serverStatus === status) return;
-    const userId = getCurrentUserId();
-    if (userId !== 0) {
-      updatePresence(userId, status);
-    }
-    if (limiters.presence.tryConsume()) {
-      ws.send({ type: "presence_update", payload: { status } });
-    }
+    applyPresence(status);
   }
 
   /** Send a presence change and reflect it locally. Shared by the settings
-   *  tab, the user bar and the auto-idle timer so all three agree. */
+   *  tab, the user bar and the auto-idle timer so all three agree.
+   *
+   *  The presence limiter is 1 token per 10s, and auto-idle's return-to-
+   *  online fires unthrottled milliseconds after its own idle transition
+   *  (autoIdle.ts) — routinely losing the token race. Dropping that frame
+   *  silently would leave the server, and everyone else's member list,
+   *  stuck on "idle" with nothing left to correct it. Retry once the window
+   *  reopens instead, re-reading the status at that time so a burst of
+   *  calls in between coalesces onto one retry carrying the latest value. */
   function applyPresence(status: UserStatus): void {
     const userId = getCurrentUserId();
     if (userId !== 0) {
       updatePresence(userId, status);
     }
+    if (presenceRetry !== null) {
+      clearTimeout(presenceRetry);
+      presenceRetry = null;
+    }
     if (limiters.presence.tryConsume()) {
       ws.send({ type: "presence_update", payload: { status } });
+    } else {
+      presenceRetry = setTimeout(() => {
+        presenceRetry = null;
+        applyPresence(loadUserStatus());
+      }, limiters.presence.getRemainingMs());
     }
   }
 
@@ -259,6 +275,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         about: null,
         joinDate: null,
       },
+      host: apiConfig.host ?? "",
       onClose: () => {
         dmProfileSidebar?.destroy?.();
         dmProfileSidebar = null;
@@ -787,6 +804,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       closeActiveLightbox();
       autoIdle?.destroy();
       autoIdle = null;
+      if (presenceRetry !== null) {
+        clearTimeout(presenceRetry);
+        presenceRetry = null;
+      }
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 
