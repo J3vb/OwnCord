@@ -155,6 +155,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
 		Registry:   func() *plugin.Registry { return h.pluginRegistry },
 		MessageSvc: h.messageSvc,
+		Limiter:    h.limiter,
 	})
 	registerVoiceControlsV2(reg, VoiceDeps{
 		DB:          h.db,

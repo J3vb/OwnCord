@@ -14,7 +14,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 )
@@ -23,6 +25,15 @@ import (
 // chat_command payload. This prevents a malicious client from flooding
 // the plugin's allocate/dispatch ABI with thousands of strings.
 const maxCommandArgs = 64
+
+// pluginCommandRateLimit and pluginCommandWindow cap chat_command frames per
+// user (OC-0091). Every other V2 handler is throttled; this one drove a WASM
+// guest invocation once per frame with no cap at all. Tighter than chat send
+// (10/s) because DispatchCommand does real work per call.
+const (
+	pluginCommandRateLimit = 5
+	pluginCommandWindow    = time.Second
+)
 
 // handleChatCommandV2 dispatches a slash command to the owning plugin via the
 // live plugin registry (wired post-construction). It returns:
@@ -34,6 +45,10 @@ const maxCommandArgs = 64
 func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps any) Result {
 	d := deps.(PluginDeps)
 	cc := cmd.(ChatCommandCmd)
+
+	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("plugin_cmd", cc.userID), pluginCommandRateLimit, pluginCommandWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many commands"}}
+	}
 
 	var reg *plugin.Registry
 	if d.Registry != nil {

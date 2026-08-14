@@ -86,6 +86,7 @@ type KeyHolderChecker interface {
 type PluginDeps struct {
 	Registry   func() *plugin.Registry
 	MessageSvc *service.MessageService
+	Limiter    *auth.RateLimiter
 }
 
 // VoiceDeps holds dependencies for voice handlers.
