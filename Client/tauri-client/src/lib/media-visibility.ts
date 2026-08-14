@@ -67,13 +67,11 @@ function freezeImage(img: HTMLImageElement, entry: MediaEntry): void {
   }
   entry.isPlaying = false;
 
-  if (img.src === entry.originalSrc) {
-    if (entry.frozenSrc === null) {
-      entry.frozenSrc = captureStaticFrame(img);
-    }
-    if (entry.frozenSrc !== null) {
-      img.src = entry.frozenSrc;
-    }
+  if (entry.frozenSrc === null) {
+    entry.frozenSrc = captureStaticFrame(img);
+  }
+  if (entry.frozenSrc !== null && img.src !== entry.frozenSrc) {
+    img.src = entry.frozenSrc;
   }
   updateButton(entry);
 }
