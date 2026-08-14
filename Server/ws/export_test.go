@@ -81,6 +81,21 @@ func (h *Hub) SubscribeVoiceTopicForTest(c *Client, channelID int64) {
 	h.pubsub.Subscribe(c, VoiceTopic(channelID))
 }
 
+// SubscribedToChannelTopicForTest reports whether c itself (identity compare,
+// not just its userID) holds the subscription to channelID's channel topic.
+func (h *Hub) SubscribedToChannelTopicForTest(c *Client, channelID int64) bool {
+	h.pubsub.mu.RLock()
+	defer h.pubsub.mu.RUnlock()
+	return h.pubsub.topics[ChannelTopic(channelID)][c.userID] == c
+}
+
+// ApplySetChannelIDForTest exposes Hub.applySetChannelID for external tests —
+// the SetChannelID applier that channel_focus's handleMessage result runs
+// through (subscribe + live re-validate, OC-0024).
+func (h *Hub) ApplySetChannelIDForTest(c *Client, newChID int64) {
+	h.applySetChannelID(c, newChID)
+}
+
 // SetClientVoiceStateForTest sets both the voice channel and join token.
 func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
 	c.voiceMu.Lock()
@@ -177,9 +192,17 @@ func TouchForTest(c *Client) {
 	c.touch()
 }
 
-// RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests.
+// RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests,
+// exercising the empty-joinedAt (re-read) path.
 func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
-	h.rollbackVoiceJoin(context.Background(), c, channelID, true)
+	h.rollbackVoiceJoin(context.Background(), c, channelID, "", true)
+}
+
+// RollbackVoiceJoinWithTokenForTest exposes Hub.rollbackVoiceJoin with an
+// explicit join token, for external tests exercising the join-instance-scoped
+// delete (OC-0044).
+func (h *Hub) RollbackVoiceJoinWithTokenForTest(c *Client, channelID int64, joinedAt string) {
+	h.rollbackVoiceJoin(context.Background(), c, channelID, joinedAt, true)
 }
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
