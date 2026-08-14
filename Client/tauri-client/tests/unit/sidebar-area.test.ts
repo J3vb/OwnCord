@@ -494,6 +494,39 @@ describe("SidebarArea", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Collapsed category persistence (OC-0085)
+  // -------------------------------------------------------------------------
+
+  describe("collapsed category persistence", () => {
+    afterEach(() => {
+      localStorage.removeItem("owncord:collapsed:server-a.example.com");
+      localStorage.removeItem("owncord:collapsed:OwnCord Server");
+    });
+
+    it("scopes collapsed categories to the connected host, not the server display name", () => {
+      // Two servers left at the operator default name collide on one
+      // localStorage entry if persistence is keyed by display name instead
+      // of host — same reason setChannelMutesHost/setNsfwGateHost/
+      // setAudioVolumeHost are all host-scoped.
+      authStore.setState((prev) => ({ ...prev, serverName: "OwnCord Server" }));
+      localStorage.setItem("owncord:collapsed:server-a.example.com", JSON.stringify(["General"]));
+      localStorage.setItem("owncord:collapsed:OwnCord Server", JSON.stringify(["Text Channels"]));
+
+      const opts = defaultOpts();
+      (opts.api as unknown as { getConfig: () => { host: string } }).getConfig = () => ({
+        host: "server-a.example.com",
+      });
+
+      const result = createSidebarArea(opts);
+
+      expect(uiStore.getState().collapsedCategories.has("General")).toBe(true);
+      expect(uiStore.getState().collapsedCategories.has("Text Channels")).toBe(false);
+
+      cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Channels mode
   // -------------------------------------------------------------------------
 
@@ -1431,6 +1464,65 @@ describe("SidebarArea", () => {
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
       expect(channelsStore.getState().activeChannelId).toBe(1);
+
+      cleanup(result);
+    });
+
+    it("onBack keeps the current channel when DM mode was entered without recording channelBeforeDm (OC-0094: 'View all messages' bypass)", () => {
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(1, {
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        next.set(2, {
+          id: 2,
+          name: "random",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        // #random (2) is on screen, and is not first in Map insertion order.
+        return { ...prev, channels: next, activeChannelId: 2 };
+      });
+
+      // Enter DM mode the way SidebarDmSection's "View all messages" button
+      // does: a bare setSidebarMode with no selectDmConversation call, so
+      // channelBeforeDm is never recorded.
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onBack();
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      // Must not silently jump to #general (1), the first text channel in
+      // Map iteration order — the user never asked to leave #random.
+      expect(channelsStore.getState().activeChannelId).toBe(2);
 
       cleanup(result);
     });
