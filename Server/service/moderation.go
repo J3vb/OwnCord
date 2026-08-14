@@ -135,39 +135,45 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 // of: the actor must strictly outrank the target, and may not hand out a role
 // positioned at or above their own — otherwise any admin could promote anyone
 // (including themselves via a second account) to Owner.
-func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetID, newRoleID int64) error {
+//
+// It returns the role that was assigned so callers (the member_update
+// broadcast and visibility refresh, in particular) can use it directly
+// instead of re-reading it: a re-read is racing a possible concurrent role
+// delete for no reason, since this call already loaded and validated the
+// exact same row under the same request.
+func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetID, newRoleID int64) (*db.Role, error) {
 	if targetID <= 0 {
-		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+		return nil, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
 	if actorID == targetID {
-		return fmt.Errorf("%w: cannot change your own role", ErrBadRequest)
+		return nil, fmt.Errorf("%w: cannot change your own role", ErrBadRequest)
 	}
 
 	// Authorization before existence — see BanUser.
 	actorRole, err := s.requirePerm(ctx, actorID, permissions.ManageRoles)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {
-		return fmt.Errorf("%w: user not found", ErrNotFound)
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
-		return err
+		return nil, err
 	}
 
 	newRole, err := s.st.GetRoleByID(ctx, newRoleID)
 	if err != nil || newRole == nil {
-		return fmt.Errorf("%w: role not found", ErrBadRequest)
+		return nil, fmt.Errorf("%w: role not found", ErrBadRequest)
 	}
 	// Administrator bypasses permission bits, never the hierarchy: the owner
 	// role is above every admin, so only the owner can grant it.
 	if newRole.Position >= actorRole.Position {
-		return fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
+		return nil, fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
 	}
 
 	if err := s.st.UpdateUserRole(ctx, targetID, newRoleID); err != nil {
-		return fmt.Errorf("%w: failed to update role: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to update role: %v", ErrInternal, err)
 	}
 	// Drop the target's cached role immediately: without this a demotion keeps
 	// granting the old bits (and the old rank) for up to permCacheTTL.
@@ -178,7 +184,7 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 		fmt.Sprintf("changed %s role to %s", target.Username, newRole.Name))
 
 	slog.Info("role changed", "actor_id", actorID, "target_id", targetID, "new_role_id", newRoleID)
-	return nil
+	return newRole, nil
 }
 
 // ForceLogout revokes every session of the target user (the client's "Kick").

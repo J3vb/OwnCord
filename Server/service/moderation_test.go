@@ -115,11 +115,11 @@ func TestChangeUserRole_RequiresManageRoles(t *testing.T) {
 	svc, database := newTestRoleService(t)
 
 	// A member without MANAGE_ROLES is refused...
-	if err := svc.ChangeUserRole(context.Background(), 4, 5, 3); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 4, 5, 3); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member role change: want ErrForbidden, got %v", err)
 	}
 	// ...and gets Forbidden, not NotFound, for a missing target.
-	if err := svc.ChangeUserRole(context.Background(), 4, 999, 3); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 4, 999, 3); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("unauthorized probe of missing id: want ErrForbidden, got %v", err)
 	}
 	if got := roleIDOf(t, database, 5); got != 4 {
@@ -131,25 +131,25 @@ func TestChangeUserRole_CannotAssignAtOrAboveOwnRank(t *testing.T) {
 	svc, database := newTestRoleService(t)
 
 	// The hole this closes: an Administrator could promote anyone to Owner.
-	if err := svc.ChangeUserRole(context.Background(), 2, 4, 1); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 2, 4, 1); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("admin promoting to owner: want ErrForbidden, got %v", err)
 	}
 	// Equal rank is refused too — an admin cannot mint another admin.
-	if err := svc.ChangeUserRole(context.Background(), 2, 4, 2); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 2, 4, 2); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("admin assigning own rank: want ErrForbidden, got %v", err)
 	}
 	if got := roleIDOf(t, database, 4); got != 4 {
 		t.Fatalf("member role changed to %d despite refusal", got)
 	}
 	// Strictly below own rank is allowed.
-	if err := svc.ChangeUserRole(context.Background(), 2, 4, 3); err != nil {
+	if _, err := svc.ChangeUserRole(context.Background(), 2, 4, 3); err != nil {
 		t.Fatalf("admin promoting to mod: %v", err)
 	}
 	if got := roleIDOf(t, database, 4); got != 3 {
 		t.Fatalf("role after promotion = %d, want 3", got)
 	}
 	// The owner outranks the admin role, so the owner may grant it.
-	if err := svc.ChangeUserRole(context.Background(), 1, 5, 2); err != nil {
+	if _, err := svc.ChangeUserRole(context.Background(), 1, 5, 2); err != nil {
 		t.Fatalf("owner promoting to admin: %v", err)
 	}
 }
@@ -158,26 +158,26 @@ func TestChangeUserRole_HierarchyAndValidation(t *testing.T) {
 	svc, database := newTestRoleService(t)
 
 	// A moderator holding MANAGE_ROLES still cannot touch a higher-ranked user.
-	if err := svc.ChangeUserRole(context.Background(), 3, 2, 4); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 3, 2, 4); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("mod demoting an admin: want ErrForbidden, got %v", err)
 	}
 	if got := roleIDOf(t, database, 2); got != 2 {
 		t.Fatalf("admin role changed to %d despite refusal", got)
 	}
 	// Nor the owner.
-	if err := svc.ChangeUserRole(context.Background(), 3, 1, 4); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.ChangeUserRole(context.Background(), 3, 1, 4); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("mod demoting the owner: want ErrForbidden, got %v", err)
 	}
 	// Self-service promotion is a bad request regardless of authority.
-	if err := svc.ChangeUserRole(context.Background(), 2, 2, 1); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.ChangeUserRole(context.Background(), 2, 2, 1); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("self role change: want ErrBadRequest, got %v", err)
 	}
 	// A nonexistent role is a bad request, not a 500.
-	if err := svc.ChangeUserRole(context.Background(), 1, 4, 9999); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.ChangeUserRole(context.Background(), 1, 4, 9999); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("unknown role id: want ErrBadRequest, got %v", err)
 	}
 	// Authorized actor gets a real NotFound for a missing target.
-	if err := svc.ChangeUserRole(context.Background(), 1, 999, 4); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.ChangeUserRole(context.Background(), 1, 999, 4); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing target: want ErrNotFound, got %v", err)
 	}
 }
@@ -185,7 +185,7 @@ func TestChangeUserRole_HierarchyAndValidation(t *testing.T) {
 func TestChangeUserRole_AuditWritten(t *testing.T) {
 	svc, database := newTestRoleService(t)
 
-	if err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
+	if _, err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
 		t.Fatalf("owner role change: %v", err)
 	}
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)
