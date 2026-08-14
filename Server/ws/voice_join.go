@@ -181,15 +181,20 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
 				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
-			// Restore client voice state so the user knows they're still in the
-			// old channel. The failed leave already dropped the voice-topic
-			// subscription and key-holder entry, and voice state and topic
-			// subscription must move as a pair (see clearVoiceAndUnsubscribe)
-			// — without them the restored session silently misses every
-			// voice_e2ee relay for its channel.
-			c.setVoiceState(vs.ChannelID, vs.JoinedAt)
-			h.pubsub.Subscribe(c, VoiceTopic(vs.ChannelID))
-			h.updateKeyHolder(vs.ChannelID)
+			// OC-0034: do NOT restore the client's local voice state here.
+			// handleVoiceLeave above already broadcast voice_leave for the old
+			// channel to every client that can see it — including this one,
+			// since finishVoiceLeave always adds the leaver to the audience —
+			// so every client, this user's own session included, has already
+			// torn the old membership down (dispatcher.ts runs leaveVoice on a
+			// self voice_leave). Restoring c.voiceChID/the topic subscription
+			// would resurrect a session nobody else believes exists anymore,
+			// while the stale DB row (this branch's trigger) stays orphaned.
+			// Leaving the client cleared keeps it consistent with the
+			// voice_leave it just received: the row now disagrees with every
+			// connected client's voiceChID, so sweepStaleVoiceStates reaps it
+			// (re-broadcasting voice_leave, harmlessly) within one tick, and
+			// the user_id-PK upsert lets the user rejoin immediately.
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
 			return
 		}
