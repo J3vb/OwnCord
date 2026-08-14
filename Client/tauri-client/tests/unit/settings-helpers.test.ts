@@ -126,6 +126,36 @@ describe("settings/helpers", () => {
       const root = document.documentElement;
       expect(root.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
     });
+
+    it("light theme overrides the dark-mode input/border/interactive tokens so composer and form fields aren't dark-on-dark", () => {
+      // OC-0043: the light theme only overrode 4 of ~45 tokens. --bg-input
+      // (used by .message-input-box, .msg-textarea, .form-input, .reply-bar-inner)
+      // was never overridden, so it kept tokens.css's dark default while
+      // --text-normal flipped to dark text -- unreadable dark-on-dark.
+      applyTheme("light");
+      const root = document.documentElement;
+      const darkDefaults: Record<string, string> = {
+        "--bg-input": "#383a40",
+        "--bg-hover": "#35373c",
+        "--bg-active": "#404249",
+        "--border": "#3f4147",
+        "--border-strong": "#4e5058",
+        "--text-muted": "#949ba4",
+        "--text-faint": "#80848e",
+        "--text-micro": "#6d6f78",
+        "--header-primary": "#f2f3f5",
+        "--header-secondary": "#b5bac1",
+        "--interactive-normal": "#b5bac1",
+        "--interactive-hover": "#dbdee1",
+        "--interactive-active": "#fff",
+        "--interactive-muted": "#4e5058",
+      };
+      for (const [token, darkValue] of Object.entries(darkDefaults)) {
+        const applied = root.style.getPropertyValue(token);
+        expect(applied, `${token} must be set by the light theme`).not.toBe("");
+        expect(applied, `${token} must not keep its dark-mode value`).not.toBe(darkValue);
+      }
+    });
   });
 
   describe("THEMES", () => {
