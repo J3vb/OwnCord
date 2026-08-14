@@ -95,6 +95,15 @@ function cancelPendingMarkAll(): void {
   pendingMarkAll = [];
 }
 
+/** Sum of a channel or DM's unread + mention counts, from whichever store
+ *  knows it. 0 for a channel this client does not (or no longer) know. */
+function unreadTotal(channelId: number): number {
+  const ch = channelsStore.getState().channels.get(channelId);
+  if (ch !== undefined) return ch.unreadCount + ch.mentionCount;
+  const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+  return dm !== undefined ? dm.unreadCount + dm.mentionCount : 0;
+}
+
 /**
  * Mark every unread channel and DM read. Returns how many were marked, so the
  * caller can stay silent when there was nothing to do.
@@ -103,6 +112,15 @@ function cancelPendingMarkAll(): void {
  * apart — see the budget note above. Each channel's local badge is cleared at
  * the moment its own frame actually goes out, not up front, so a channel
  * whose send hasn't fired yet still shows unread rather than lying about it.
+ *
+ * The deferred tail snapshots each channel's unread+mention total at click
+ * time and skips its send if that total has grown by the time the timer
+ * fires: a message that arrives during the pacing window postdates the click
+ * and was never seen, so marking it read would silently wipe a genuinely-new
+ * badge (and tell the server the user has read a message they never saw).
+ * The synchronous first burst has no such window — nothing can arrive between
+ * scheduling and firing in the same tick — so it stays unconditional, as does
+ * every other caller of `markChannelRead`.
  */
 export function markAllRead(): number {
   // A second click supersedes the first: its own `unreadChannelIds()` already
@@ -115,7 +133,12 @@ export function markAllRead(): number {
     if (delay === 0) {
       markChannelRead(id);
     } else {
-      pendingMarkAll.push(setTimeout(() => markChannelRead(id), delay));
+      const snapshot = unreadTotal(id);
+      pendingMarkAll.push(
+        setTimeout(() => {
+          if (unreadTotal(id) <= snapshot) markChannelRead(id);
+        }, delay),
+      );
     }
   }
   return ids.length;
