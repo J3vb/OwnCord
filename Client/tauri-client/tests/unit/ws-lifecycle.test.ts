@@ -595,6 +595,72 @@ describe("wsGeneration stale listener guard", () => {
   });
 });
 
+describe("disconnect() cancelling an in-flight connect()", () => {
+  let client: ReturnType<typeof createWsClient>;
+  let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
+    ? R
+    : never;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    originalMockListenImpl = mockListen.getMockImplementation()!;
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    mockListen.mockImplementation(originalMockListenImpl!);
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  // Mirrors main.ts's onAutoLoginCancel: by the time the Cancel button is
+  // clickable, wirePostAuth has already called ws.connect() and connect()
+  // is suspended mid-await (setupEventListeners' tauriListen round trips).
+  // disconnect() runs synchronously while that await is pending, then the
+  // suspended connect() resumes.
+  it("prevents ws_connect from being invoked after disconnect() runs mid-connect()", async () => {
+    let releaseListen: (() => void) | null = null;
+    mockListen.mockImplementation(
+      async (event: string, handler: (e: { payload: unknown }) => void) => {
+        if (event === "ws-message" && releaseListen === null) {
+          // Pause connect() here, mimicking the Cancel click landing while
+          // connect() is still awaiting its Tauri IPC round trips.
+          await new Promise<void>((resolve) => {
+            releaseListen = resolve;
+          });
+        }
+        return originalMockListenImpl!(event, handler);
+      },
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    // Let connect() run past ensureTauriApis()/cleanupEventListeners() and
+    // into the paused first tauriListen("ws-message", ...) call.
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releaseListen).not.toBeNull();
+
+    // Cancel arrives while connect() is suspended mid-await.
+    client.disconnect();
+    expect(client.getState()).toBe("disconnected");
+
+    // Resume the suspended connect() — it must notice the cancellation and
+    // bail out instead of completing setupEventListeners() and invoking
+    // ws_connect.
+    releaseListen!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    const wsConnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(wsConnectCalls).toHaveLength(0);
+    // The cancelled attempt must not have flipped the state back out of
+    // "disconnected" (e.g. to "authenticating"/"reconnecting").
+    expect(client.getState()).toBe("disconnected");
+  });
+});
+
 describe("heartbeat proxyOpen guard", () => {
   let client: ReturnType<typeof createWsClient>;
 

@@ -483,6 +483,10 @@ export function createWsClient() {
 
   async function connect(cfg: WsClientConfig): Promise<void> {
     wsGeneration++;
+    // Captured so a disconnect() landing mid-await (this function has three
+    // await points below) can be detected on resume — disconnect() bumps
+    // wsGeneration too, so a mismatch here means this attempt was cancelled.
+    const gen = wsGeneration;
     config = cfg;
     intentionalClose = false;
     // Belt-and-braces: a fresh connect (even one not routed through
@@ -494,6 +498,11 @@ export function createWsClient() {
     setState("connecting");
 
     await ensureTauriApis();
+    if (gen !== wsGeneration) {
+      // A disconnect() (or a newer connect()) landed while we were
+      // suspended here — this attempt is cancelled, do not proceed.
+      return;
+    }
     if (tauriInvoke === null) {
       log.error("Tauri APIs not available, cannot connect WebSocket");
       setState("disconnected");
@@ -510,6 +519,14 @@ export function createWsClient() {
     // Set up event listeners before connecting
     cleanupEventListeners();
     await setupEventListeners();
+    if (gen !== wsGeneration) {
+      // Cancelled while awaiting the Tauri IPC round trips inside
+      // setupEventListeners(). Tear down the listeners this (now-stale)
+      // attempt just registered instead of leaving them until the next
+      // connect() happens to clean them up.
+      cleanupEventListeners();
+      return;
+    }
 
     try {
       await tauriInvoke("ws_connect", { url: wsUrl });
@@ -583,6 +600,12 @@ export function createWsClient() {
   }
 
   function disconnect(): void {
+    // Invalidate any connect() suspended mid-await (e.g. cancelled
+    // auto-login, logout racing a fresh connect) so it notices on resume
+    // instead of finishing setup and opening the very socket this teardown
+    // was meant to prevent. See setupEventListeners()'s tauriListen guards
+    // and connect()'s own gen checks.
+    wsGeneration++;
     intentionalClose = true;
     log.info("WebSocket disconnecting (intentional)", { host: config?.host ?? "unknown" });
     certMismatchBlock = false;
