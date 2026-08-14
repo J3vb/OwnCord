@@ -789,5 +789,107 @@ describe("ProfileManager", () => {
 
       expect(result).toBeNull();
     });
+
+    it("load salvages the valid profiles when one stored entry is malformed (OC-0060)", async () => {
+      const storedData = {
+        schemaVersion: 1,
+        profiles: [
+          {
+            id: "good-1",
+            name: "Good One",
+            host: "good1.example.com:443",
+            username: "user1",
+            color: "#111111",
+            autoConnect: false,
+            rememberPassword: false,
+            lastConnected: null,
+          },
+          {
+            // Malformed: written by a build predating the color field / partial write.
+            id: "bad-1",
+            name: "",
+            host: "bad1.example.com:443",
+            username: "user2",
+            autoConnect: false,
+            rememberPassword: false,
+            lastConnected: null,
+          },
+          {
+            id: "good-2",
+            name: "Good Two",
+            host: "good2.example.com:443",
+            username: "user3",
+            color: "#222222",
+            autoConnect: false,
+            rememberPassword: false,
+            lastConnected: null,
+          },
+        ],
+      };
+      mockInvoke.mockResolvedValueOnce({ "owncord:profiles": storedData });
+
+      const backend = createTauriBackend();
+      const result = await backend.load();
+
+      // A single corrupt entry must not null out the whole store — only the
+      // bad entry should be dropped, salvaging the other two valid profiles.
+      expect(result).not.toBeNull();
+      expect(result!.profiles.map((p) => p.id)).toEqual(["good-1", "good-2"]);
+    });
+  });
+
+  // ── OC-0060: one bad stored profile must not evict the good ones ──
+
+  describe("OC-0060 malformed profile salvage (end-to-end)", () => {
+    beforeEach(() => {
+      mockInvoke.mockReset();
+    });
+
+    it("does not let a single malformed stored profile wipe out the rest on the next save", async () => {
+      const validProfiles = Array.from({ length: 5 }, (_, i) => ({
+        id: `orig-${i}`,
+        name: `Original ${i}`,
+        host: `orig${i}.example.com:443`,
+        username: `user${i}`,
+        color: "#abcdef",
+        autoConnect: false,
+        rememberPassword: false,
+        lastConnected: null,
+      }));
+      // Corrupt one entry the way a hand-edit / partial write would: empty name.
+      const corrupted = [...validProfiles.slice(0, 4), { ...validProfiles[4], name: "" }];
+
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "get_settings") {
+          return Promise.resolve({
+            "owncord:profiles": { schemaVersion: 1, profiles: corrupted },
+          });
+        }
+        if (cmd === "save_settings") {
+          return Promise.resolve(undefined);
+        }
+        return Promise.resolve(undefined);
+      });
+
+      const backend = createTauriBackend();
+      const m = createProfileManager(backend, mockFetch as unknown as FetchFn);
+
+      await m.loadProfiles();
+      // The four well-formed originals must have survived the load.
+      expect(m.getAll()).toHaveLength(4);
+
+      m.addProfile(sampleData);
+      await m.saveProfiles();
+
+      const saveCall = mockInvoke.mock.calls.find(([cmd]) => cmd === "save_settings");
+      expect(saveCall).toBeDefined();
+      const savedValue = saveCall![1] as { value: { profiles: ServerProfile[] } };
+      // The persisted set must still contain the four originals plus the new
+      // profile — not just the newly added one.
+      expect(savedValue.value.profiles).toHaveLength(5);
+      expect(savedValue.value.profiles.map((p) => p.id)).toEqual(
+        expect.arrayContaining(["orig-0", "orig-1", "orig-2", "orig-3"]),
+      );
+    });
   });
 });

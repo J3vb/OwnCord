@@ -103,6 +103,21 @@ function isValidStoredData(data: unknown): data is StoredData {
   );
 }
 
+/**
+ * Validates only the persistence envelope shape (schema version + a
+ * profiles array), without requiring every individual profile inside it to
+ * be well-formed. Used to tell "nothing/garbage was stored" apart from "a
+ * valid envelope containing some malformed entries" — the latter should
+ * have only the bad entries dropped, not the whole envelope discarded.
+ */
+function isValidStoredEnvelope(
+  data: unknown,
+): data is { schemaVersion: number; profiles: unknown[] } {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.schemaVersion === "number" && Array.isArray(obj.profiles);
+}
+
 // ---------------------------------------------------------------------------
 // Default Tauri persistence backend
 // ---------------------------------------------------------------------------
@@ -114,8 +129,15 @@ export function createTauriBackend(): PersistenceBackend {
       const settings = await invoke<Record<string, unknown>>("get_settings");
       const raw = settings[STORAGE_KEY];
       if (raw === undefined || raw === null) return null;
-      if (isValidStoredData(raw)) return raw;
-      return null;
+      if (!isValidStoredEnvelope(raw)) return null;
+      // The envelope itself is well-formed; salvage whichever individual
+      // profiles are valid rather than discarding the entire stored list
+      // because one entry is malformed (see OC-0060). Mirrors the per-item
+      // tolerance importProfiles() already has.
+      return {
+        schemaVersion: raw.schemaVersion,
+        profiles: raw.profiles.filter(isValidProfileShape),
+      };
     },
     async save(data: StoredData): Promise<void> {
       const { invoke } = await import("@tauri-apps/api/core");
