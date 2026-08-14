@@ -1,4 +1,4 @@
--- name: OpenDM :exec
+-- name: OpenDM :execrows
 INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?);
 
 -- name: CloseDM :exec

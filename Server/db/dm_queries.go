@@ -423,15 +423,19 @@ func (d *DB) GetDMParticipants(ctx context.Context, channelID, viewerID int64) (
 
 // ─── OpenDM / CloseDM ──────────────────────────────────────────────────────
 
-// OpenDM adds a DM channel to a user's open list (idempotent).
-func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) error {
-	if err := d.q.OpenDM(ctx, dbgen.OpenDMParams{
+// OpenDM adds a DM channel to a user's open list (idempotent). The bool
+// reports whether the DM was actually (re)opened by this call — false when it
+// was already open, via the INSERT OR IGNORE's affected-row count — so a
+// caller can distinguish a genuine open from a no-op on an already-open DM.
+func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) {
+	rows, err := d.q.OpenDM(ctx, dbgen.OpenDMParams{
 		UserID:    userID,
 		ChannelID: channelID,
-	}); err != nil {
-		return fmt.Errorf("OpenDM: %w", err)
+	})
+	if err != nil {
+		return false, fmt.Errorf("OpenDM: %w", err)
 	}
-	return nil
+	return rows > 0, nil
 }
 
 // CloseDM removes a DM channel from a user's open list.

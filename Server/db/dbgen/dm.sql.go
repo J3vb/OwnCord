@@ -289,7 +289,7 @@ func (q *Queries) IsGroupDM(ctx context.Context, id int64) (int64, error) {
 	return is_group, err
 }
 
-const openDM = `-- name: OpenDM :exec
+const openDM = `-- name: OpenDM :execrows
 INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)
 `
 
@@ -298,9 +298,12 @@ type OpenDMParams struct {
 	ChannelID int64 `json:"channelId"`
 }
 
-func (q *Queries) OpenDM(ctx context.Context, arg OpenDMParams) error {
-	_, err := q.db.ExecContext(ctx, openDM, arg.UserID, arg.ChannelID)
-	return err
+func (q *Queries) OpenDM(ctx context.Context, arg OpenDMParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, openDM, arg.UserID, arg.ChannelID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const removeDMParticipant = `-- name: RemoveDMParticipant :exec
