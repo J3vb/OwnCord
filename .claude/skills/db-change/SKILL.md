@@ -36,6 +36,13 @@ and SQLite reports "incomplete input".
 in comment prose orphans the rest of that comment as a bogus statement
 ("near <word>: syntax error").
 
+**Regenerate from a tree where the query files carry only YOUR change.**
+sqlc regenerates every `dbgen/` file from every query file on each run, so
+unrelated working-tree edits to any `queries/*.sql` — a parallel agent's
+half-finished work, leftover debris — are silently baked into generated
+output you then commit. Check `git status` on `Server/db/` before
+`sqlc generate`, and diff the regen for hunks that are not yours.
+
 **Do not put `LIMIT 1` on a `:one` query.** It is emitted as a bare `LIMIT`.
 A `:one` uses `QueryRow` and reads a single row regardless — use `ORDER BY` to
 choose which one.

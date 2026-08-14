@@ -133,7 +133,9 @@ function fixPrompt(cluster) {
     `  4. You may edit a shared file outside your own cluster (${cluster.file}) when that is where the ` +
     `root cause lives. If you do, you MUST list every SOURCE file you modified - including this cluster's ` +
     `own file - in touchedPaths, repo-relative with forward slashes. Test files belong in testPath, not ` +
-    `touchedPaths.\n` +
+    `touchedPaths. If you regenerate shared generated output (sqlc, protocol), list EVERY generated ` +
+    `file the regeneration changed - check with git status --porcelain (read-only, allowed despite ` +
+    `rule 6), do not guess: an unlisted generated file defeats the cross-cluster overlap guard.\n` +
     `  5. Because several findings share this file, look for one change that closes more than one of them ` +
     `before writing separate patches.\n` +
     `  6. DO NOT run any git command. No add, no commit, no stash, no checkout. Other agents are working ` +
@@ -313,12 +315,17 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `  6. Run the tests again. They MUST pass. Set greenObserved accordingly. Capture the ACTUAL output ` +
     `of this run, including the command you ran, and return it verbatim in greenOutput - not a summary, ` +
     `not a paraphrase. If they do not pass, set committed=false, explain in note, and STOP.\n` +
-    `  7. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files, ` +
+    `  7. Before staging, diff every file you are about to commit and check the content belongs to ` +
+    `THIS cluster: other agents' uncommitted work shares this tree, and shared test files or ` +
+    `regenerated output can carry their hunks. A test function or comment citing a finding id not ` +
+    `listed above, or a hunk in a generated/shared file unrelated to your findings, must NOT be ` +
+    `committed - set committed=false, name the foreign content in note, and STOP.\n` +
+    `  8. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files, ` +
     `then commit with subject:\n` +
     `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
     `Co-Authored-By trailer.\n` +
-    `  8. Return the short sha.\n\n` +
+    `  9. Return the short sha.\n\n` +
     `Client tests run from Client/tauri-client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
@@ -353,10 +360,13 @@ for (const { cluster, results, union } of fixed) {
   // A dead/thrown prove agent must not take down the sibling clusters still waiting in this
   // serial loop - same "one blocked cluster does not poison the rest" rule Phase 2 gets from
   // parallel()'s catch. Fold it into a null result so the ok/why logic below handles it uniformly.
+  // Opus on purpose: prove is the last eyes before content reaches a public commit. The
+  // 2026-08-14 run's sonnet prove agents staged a sibling cluster's test function and a
+  // regenerated-file hunk from another cluster's uncommitted work without noticing either.
   const p = await agent(provePrompt(cluster, ids, testPaths, union), {
     label: `prove:${cluster.file}`,
     phase: 'Prove',
-    model: 'sonnet',
+    model: 'opus',
     effort: 'medium',
     schema: PROVE_RESULT,
   }).catch(() => null)

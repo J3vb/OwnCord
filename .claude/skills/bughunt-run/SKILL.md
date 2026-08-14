@@ -147,6 +147,12 @@ When it returns, for each entry in `result.results`:
   fix run, exactly the retry loop the design deliberately excludes ("one human
   look beats three agent attempts").
 
+Ledger writes select records by id or `fix.commit` — never by date fields,
+which collide when two batches reconcile on the same day — and every bulk
+mutation asserts its expected match count before writing (a same-day sibling
+batch once inflated a 29-record update to 44 matches; only the count
+assertion caught it).
+
 Check `result.gate`. A failed gate leaves the commits in place on the branch —
 fix it yourself, do not re-run the workflow over it.
 
@@ -165,9 +171,21 @@ It reverts each commit's source files to the parent, runs that stack's tests,
 and requires them to FAIL — then restores and requires them to PASS. This is the
 only check in the pipeline no agent can fabricate.
 
+While it runs it checkouts and restores source files, so the working tree is
+not a stable read surface: anything reading concurrently — review agents,
+scanners, hooks — must read committed objects (`git show HEAD:<path>`) or
+pre-taken snapshots, and any live-tree scanner finding from that window needs
+re-verification against HEAD before it is believed.
+
 Any `FAIL ... VACUOUS TEST` means the fix was committed behind a test that
 proves nothing. Revert that commit and set its findings back to `open`; do not
 talk yourself into keeping it because the code change looks right.
+
+One class is exempt from the insta-revert: a race/deadlock-class fix whose
+test only fails under its detector. verify-fixes escalates to `-race` before
+declaring vacuity; if an older copy of the script reports VACUOUS on such a
+fix, re-prove red/green by hand under the class's detector
+(`go test -race ./<pkg>/`) before reverting anything.
 
 For every commit `verify-fixes.mjs` reports `PASS`, upgrade that commit's
 findings' `fix.revertProof` from `"self-reported"` to `"pass"` — this
@@ -179,7 +197,21 @@ Re-render. Before you review the branch and open the PR, inspect the working
 tree: a blocked or declined cluster can leave its edits and any new failing
 test it wrote sitting uncommitted. Discard what you don't want — a reflexive
 `git add -A` would commit tests that describe unfixed defects into a public
-repo. Then review the branch and open the PR by hand. The workflow never
+repo. Audit what got COMMITTED, too: parallel fix agents share the tree, so a
+prove agent can commit a sibling cluster's content that happened to sit in a
+shared test file or in regenerated output. Grep the committed tests for
+finding ids outside the run's fixed set, and re-run the generated-code
+verifies (sqlc/protocol) after the debris discard — a mismatch means a commit
+carries foreign regen content. Anything pinning or describing an UNFIXED
+finding must be excised from history (amend + rebase onto the amended
+commit), not merely removed by a follow-up commit.
+
+Then review the branch against the merge-base — `git diff
+origin/main...HEAD` (three-dot), never two-dot: a concurrent merge plus a
+background fetch can move origin/main mid-run and turn the two-dot diff into
+phantom deletions. If origin moved, confirm zero file overlap and a clean
+`git merge-tree --write-tree origin/main HEAD` before opening the PR by
+hand. The workflow never
 pushes and never opens a PR.
 
 ## Testing the workflows themselves
