@@ -1397,3 +1397,46 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 		t.Errorf("status = %d, want 403 for DM non-participant", rr2.Code)
 	}
 }
+
+// OC-0112: the admin bypass in handleServeFile must not cover the DM
+// participant check. Every sibling DM read gate (requireChannelRead,
+// PermissionService.RequireChannelAccess, checkSendPermission) denies a
+// non-participant Administrator just like anyone else — the file route must
+// match, not open every private DM to anyone holding the admin bit.
+func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token1 := uploadCreateToken(t, database, "dmadminowner", 4)
+	_ = uploadCreateToken(t, database, "dmadminpartner", 4)
+	adminToken := uploadCreateToken(t, database, "dmadminoutsider", 1) // Owner (admin), not a participant
+
+	// Upload a file.
+	content := []byte("dm attachment content for admin non-participant forbidden test")
+	rr := doUpload(t, router, token1, "file", "dmadminsecret.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Create DM channel with two participants (not the admin).
+	_, err := database.ExecContext(context.Background(), `INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
+	if err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	var ownerID, partnerID int64
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmadminowner'`).Scan(&ownerID)
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmadminpartner'`).Scan(&partnerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, ownerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, partnerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, ownerID)
+	_, _ = database.ExecContext(context.Background(), `UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+
+	// Admin who is not a DM participant must still be denied.
+	rr2 := doServeFile(t, router, fileID, adminToken, nil)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for admin who is not a DM participant", rr2.Code)
+	}
+}
