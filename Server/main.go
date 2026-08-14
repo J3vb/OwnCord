@@ -197,6 +197,13 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	// ── 5b. Build HTTP router ──────────────────────────────────────────────
 	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf, pluginRegistry)
 	defer routerCleanup()
+	// Backstop for every early return below (serve error, ACME shutdown
+	// failure, etc.): hub.GracefulStop is the only caller of
+	// LiveKitProcess.Stop(), so skipping it orphans the companion
+	// livekit-server process and leaves the hub's dispatch goroutine
+	// running. gracefulOnce makes it idempotent alongside the explicit call
+	// on the normal shutdown path below.
+	defer hub.GracefulStop()
 
 	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
 	if cfg.EventPersistence.Enabled && hub != nil {
@@ -287,6 +294,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 
 	stopMaintenance := make(chan struct{})
+	defer close(stopMaintenance) // backstop for early returns below; see hub.GracefulStop defer above
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
@@ -404,7 +412,6 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
-	close(stopMaintenance)
 	log.Info("server stopped cleanly")
 	return nil
 }
