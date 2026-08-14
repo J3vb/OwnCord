@@ -890,6 +890,48 @@ describe("createQuickSwitcherManager", () => {
 
     cleanup();
   });
+
+  it("opens on Ctrl+K with CapsLock on (KeyboardEvent.key reports uppercase 'K')", () => {
+    // OC-0150: `e.key` reflects CapsLock/Shift state. A case-sensitive `=== "k"`
+    // check means CapsLock (or Ctrl+Shift+K) silently does nothing.
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "K", ctrlKey: true }));
+
+    expect(createQuickSwitcher).toHaveBeenCalledOnce();
+
+    cleanup();
+  });
+
+  it("does not open on AltGr+K (Windows reports AltGr as ctrlKey+altKey)", () => {
+    // OC-0150: without an altKey exclusion, AltGr-produced characters on
+    // non-US layouts get swallowed by an unwanted preventDefault().
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true }));
+
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it("does not open while isSuspended() reports true (e.g. settings overlay open)", () => {
+    // OC-0150: every other global shortcut honours isSuspended; the quick
+    // switcher never got the guard, so it could stack on top of Settings.
+    const manager = createQuickSwitcherManager(
+      () => root,
+      () => true,
+    );
+    const cleanup = manager.attach();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+
+    cleanup();
+  });
 });
 
 // ---------------------------------------------------------------------------

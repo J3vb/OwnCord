@@ -519,7 +519,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     children.push(settingsOverlay);
 
     // Quick switcher (Ctrl+K)
-    const qsManager = createQuickSwitcherManager(() => root);
+    // Don't fire while the settings panel is on top of it — same guard as
+    // attachGlobalKeybinds below, reading the same source of truth.
+    const qsManager = createQuickSwitcherManager(
+      () => root,
+      () => uiStore.getState().settingsOpen,
+    );
     unsubscribers.push(qsManager.attach());
 
     // The rest of the shortcuts listed on the settings Keybinds tab.
