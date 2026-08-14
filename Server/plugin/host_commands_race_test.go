@@ -40,19 +40,15 @@ func TestDispatchCommandRuntimePlatformRace(t *testing.T) {
 	// the same field. Before the fix, `go test -race` reports:
 	//   DATA RACE ... Registry.Close() ... Registry.DispatchCommand()
 	var wg sync.WaitGroup
-	for w := 0; w < 8; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 500; i++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 500 {
 				reg.DispatchCommand(ctx, 1, 2, "roll", nil)
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_ = reg.Close(ctx)
-	}()
+	})
 	wg.Wait()
 }
