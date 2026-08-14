@@ -1514,6 +1514,29 @@ describe("renderers", () => {
       expect(container.textContent).toContain("before");
       expect(container.textContent).toContain("after");
     });
+
+    it("keeps a balanced trailing paren that is part of the URL", () => {
+      const url = "https://en.wikipedia.org/wiki/Rust_(programming_language)";
+      const fragment = renderMentions(url);
+      container.appendChild(fragment);
+
+      const link = container.querySelector("a.msg-link") as HTMLAnchorElement;
+      expect(link).not.toBeNull();
+      expect(link.getAttribute("href")).toBe(url);
+      expect(link.textContent).toBe(url);
+      // No stray ")" left dangling as separate trailing text
+      expect(container.textContent).toBe(url);
+    });
+
+    it("still strips a genuinely unbalanced trailing paren used as sentence punctuation", () => {
+      const fragment = renderMentions("(see https://example.com/page)");
+      container.appendChild(fragment);
+
+      const link = container.querySelector("a.msg-link") as HTMLAnchorElement;
+      expect(link).not.toBeNull();
+      expect(link.getAttribute("href")).toBe("https://example.com/page");
+      expect(container.textContent).toBe("(see https://example.com/page)");
+    });
   });
 
   // ---------------------------------------------------------------------------

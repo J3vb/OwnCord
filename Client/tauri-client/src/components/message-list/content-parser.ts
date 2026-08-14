@@ -168,7 +168,15 @@ export function renderMentions(text: string, info?: MentionInfo): DocumentFragme
     }
     // Strip trailing punctuation that is likely sentence-level, not part of the URL
     const rawUrl = match[0];
-    const stripped = rawUrl.replace(/[.,;:!?)]+$/, "");
+    let stripped = rawUrl.replace(/[.,;:!?)]+$/, "");
+    // Give back one trailing ")" if it balances an unmatched "(" earlier in
+    // the URL — e.g. https://en.wikipedia.org/wiki/Rust_(programming_language)
+    // is a real address, not prose wrapped in parens.
+    if (rawUrl.length > stripped.length && rawUrl[stripped.length] === ")") {
+      const opens = (stripped.match(/\(/g) ?? []).length;
+      const closes = (stripped.match(/\)/g) ?? []).length;
+      if (opens > closes) stripped = stripped + ")";
+    }
     const trailing = rawUrl.slice(stripped.length);
     const url = stripped || rawUrl; // fallback if stripping emptied it
     if (isSafeUrl(url)) {
