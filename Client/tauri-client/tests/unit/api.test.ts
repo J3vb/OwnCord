@@ -345,6 +345,36 @@ describe("API Client", () => {
       const headers = fetchCallOpts().headers as Record<string, string>;
       expect(headers["Authorization"]).toBe("Bearer fresh-token");
     });
+
+    // OC-0136: every other layer of this client (livekitSession.ts's
+    // ensureLiveKitProxy, http_proxy.rs / livekit_proxy.rs's
+    // validate_remote_host + parse_server_name) deliberately accepts IPv6
+    // literals, bracketed or bare. setConfig's host gate must not be the one
+    // place that refuses — otherwise login/register/auto-login to an IPv6
+    // server throws "Invalid host format" even though the health check
+    // (which tunnels through the same Rust proxy) already reported it
+    // reachable.
+    describe("host validation accepts IPv6 literals", () => {
+      it("accepts a bracketed IPv6 literal with a port", () => {
+        expect(() => api.setConfig({ host: "[::1]:8443" })).not.toThrow();
+      });
+
+      it("accepts a bracketed IPv6 literal without a port", () => {
+        expect(() => api.setConfig({ host: "[fd00::1]" })).not.toThrow();
+      });
+
+      it("accepts a bare (unbracketed) IPv6 literal", () => {
+        expect(() => api.setConfig({ host: "2001:db8::1" })).not.toThrow();
+      });
+
+      it("still rejects hosts with disallowed characters", () => {
+        expect(() => api.setConfig({ host: "evil host name" })).toThrow("Invalid host format");
+      });
+
+      it("still rejects hosts that could inject headers", () => {
+        expect(() => api.setConfig({ host: "evil\r\nhost:8443" })).toThrow("Invalid host format");
+      });
+    });
   });
 
   describe("user endpoints", () => {
