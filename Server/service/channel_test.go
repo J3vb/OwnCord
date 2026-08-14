@@ -41,6 +41,65 @@ func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
 	}
 }
 
+// TestHandleChannelFocus_RefusedInArchivedChannel locks OC-0070: archived
+// channels are hidden from every other client surface (ListVisibleChannels,
+// the ws ready payload, RefreshChannelVisibility, voice join) but
+// HandleChannelFocus never consulted ch.Archived, so a socket that still held
+// the channel id could re-subscribe to its live event stream — and advance
+// its own read state — on a channel reconnect replay (computeAllowedChannels)
+// would then filter out. focus and mark_read share this one service call, so
+// gating it here closes both.
+func TestHandleChannelFocus_RefusedInArchivedChannel(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+
+	// Precondition: focus succeeds while the channel is not archived.
+	if _, err := svc.HandleChannelFocus(ctx, 1, 10); err != nil {
+		t.Fatalf("precondition: focus on a live channel: %v", err)
+	}
+
+	if _, err := database.ExecContext(ctx,
+		`UPDATE channels SET archived = 1 WHERE id = 10`); err != nil {
+		t.Fatalf("archive channel: %v", err)
+	}
+
+	_, err := svc.HandleChannelFocus(ctx, 1, 10)
+	if err == nil {
+		t.Fatal("HandleChannelFocus on an archived channel succeeded — the socket can still subscribe to its live event stream")
+	}
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("HandleChannelFocus error = %v, want ErrForbidden", err)
+	}
+}
+
+// TestHandleChannelFocus_DMExemptFromArchiveGate makes sure the archive gate
+// above is scoped to non-DM channels only — DMs carry no archived concept.
+func TestHandleChannelFocus_DMExemptFromArchiveGate(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+
+	if _, err := svc.HandleChannelFocus(ctx, 1, 50); err != nil {
+		t.Fatalf("HandleChannelFocus on a DM: %v", err)
+	}
+}
+
 // TestHandleTyping_BlockedInDMEmitsNothing completes the DM-block sweep: a
 // blocked user could still drive a repeatable typing indicator at the blocker,
 // because HandleTyping authorized on DM participation alone. Typing is

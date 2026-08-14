@@ -255,9 +255,30 @@ func (d *DB) GetMentionCount(ctx context.Context, userID, channelID int64) (int,
 	return count, nil
 }
 
-// GetUserIDsByUsernames resolves usernames to ids, keyed by the lowercased
-// username. Matching is case-insensitive because users.username is UNIQUE
-// COLLATE NOCASE, which makes the column's comparisons case-insensitive too.
+// LowerASCII lowercases only ASCII letters ('A'-'Z'), matching the fold
+// SQLite's COLLATE NOCASE applies to users.username (see notBannedClause's
+// sibling comment above and the migration that declares the column). Go's
+// strings.ToLower is Unicode-aware and would fold a non-ASCII uppercase
+// letter (e.g. 'É' -> 'é') that NOCASE does not touch, desyncing a Go-side
+// lookup key from a query bound against the same column. Every mention
+// lookup that builds a key or a query argument from a username must fold
+// through this instead of strings.ToLower, or the two folds silently
+// disagree on any non-ASCII-uppercase username.
+func LowerASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
+}
+
+// GetUserIDsByUsernames resolves usernames to ids, keyed by the ASCII-lowered
+// username (see LowerASCII). Matching is case-insensitive because
+// users.username is UNIQUE COLLATE NOCASE, which makes the column's
+// comparisons case-insensitive too -- but ASCII-only, which is why the map
+// key folds no harder than that.
 func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error) {
 	result := make(map[string]int64)
 	if len(usernames) == 0 {
@@ -288,7 +309,7 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 		if scanErr := rows.Scan(&id, &name); scanErr != nil {
 			return nil, fmt.Errorf("GetUserIDsByUsernames scan: %w", scanErr)
 		}
-		result[strings.ToLower(name)] = id
+		result[LowerASCII(name)] = id
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("GetUserIDsByUsernames rows: %w", rows.Err())

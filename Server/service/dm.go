@@ -247,16 +247,26 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		if auth.IsEffectivelyBanned(user) {
 			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 		}
-		blocked, err := s.st.IsEitherBlocked(ctx, userID, rid)
-		if err != nil {
-			return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
-		}
-		if blocked {
-			return nil, fmt.Errorf("%w: cannot add a blocked user to a group DM", ErrForbidden)
-		}
 	}
 
+	// Block-check every pair in the room, not just creator-vs-recipient:
+	// group DMs are exempt from the send-time block gate (requireDMNotBlocked
+	// skips groups entirely) on the strength of this creation-time check, so
+	// two mutually-blocked recipients must not both end up in the same group
+	// even when neither of them blocked the creator. n <= MaxGroupDMParticipants,
+	// so the O(n^2) scan is trivial.
 	participantIDs := append([]int64{userID}, unique...)
+	for i := range participantIDs {
+		for j := i + 1; j < len(participantIDs); j++ {
+			blocked, err := s.st.IsEitherBlocked(ctx, participantIDs[i], participantIDs[j])
+			if err != nil {
+				return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
+			}
+			if blocked {
+				return nil, fmt.Errorf("%w: cannot add a blocked user to a group DM", ErrForbidden)
+			}
+		}
+	}
 	ch, err := s.st.CreateGroupDMChannel(ctx, cleanName, participantIDs)
 	if err != nil {
 		slog.Error("DMService.CreateGroupDM", "err", err)

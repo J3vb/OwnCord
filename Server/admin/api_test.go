@@ -1479,6 +1479,49 @@ func TestAdminAPI_CreateAPIToken_MissingLabel(t *testing.T) {
 	}
 }
 
+// TestAdminAPI_CreateAPIToken_NegativeExpiresHours pins OC-0145: a caller that
+// asks for a bounded credential (negative expires_hours) must not silently
+// receive a permanent one. The `> 0` check in handleCreateAPIToken sends any
+// negative value down the nil-expiresAt ("never expires") branch.
+func TestAdminAPI_CreateAPIToken_NegativeExpiresHours(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "neg-hours", "expires_hours": -1})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+
+	tokens, _ := database.ListAPITokens(context.Background())
+	for _, tok := range tokens {
+		if tok.Label == "neg-hours" {
+			t.Fatalf("negative expires_hours must not mint a token, got %+v", tok)
+		}
+	}
+}
+
+// TestAdminAPI_CreateAPIToken_HugeExpiresHours pins OC-0145's overflow half: a
+// huge expires_hours must not silently overflow time.Duration into a past
+// timestamp and hand back a token that 401s on first use.
+func TestAdminAPI_CreateAPIToken_HugeExpiresHours(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "huge-hours", "expires_hours": 3000000})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+
+	tokens, _ := database.ListAPITokens(context.Background())
+	for _, tok := range tokens {
+		if tok.Label == "huge-hours" {
+			t.Fatalf("out-of-range expires_hours must not mint a token, got %+v", tok)
+		}
+	}
+}
+
 func TestAdminAPI_ListAPITokens_OK(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))

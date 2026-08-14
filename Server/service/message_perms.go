@@ -41,10 +41,17 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 
 	// Also include DM channels the user participates in. Only the IDs are
 	// needed here, so skip the full DM query's preview/unread work.
+	//
+	// A failed lookup must not silently shrink the accessible set to guild
+	// channels only — SearchMessages (message_query.go) treats this list as
+	// authoritative and would otherwise report a successful, DM-stripped
+	// result instead of failing. Same posture as the ws sibling,
+	// computeAllowedChannels in ws/serve.go.
 	dmIDs, err := s.st.GetUserDMChannelIDs(ctx, userID)
-	if err == nil {
-		ids = append(ids, dmIDs...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to fetch DM channels: %v", ErrInternal, err)
 	}
+	ids = append(ids, dmIDs...)
 
 	return ids, nil
 }

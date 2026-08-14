@@ -1301,6 +1301,39 @@ func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
 	}
 }
 
+// ─── GetPinnedMessages ────────────────────────────────────────────────────────
+
+// TestGetPinnedMessages_Capped pins more messages than db.MaxPinnedMessages and
+// verifies the query stays bounded instead of returning every pinned row. An
+// uncapped GetPinnedMessages feeds an unbounded message-ID slice into the
+// shared IN-list batch fetches (reactions/attachments/mentions); past
+// SQLite's ~32766 bound-parameter limit that fails every call permanently
+// ("too many SQL variables"). This pins the cap well below that ceiling.
+func TestGetPinnedMessages_Capped(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "pinner")
+	chID := seedChannel(t, database, "pins")
+
+	total := db.MaxPinnedMessages + 5
+	for i := range total {
+		id, err := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
+		if err != nil {
+			t.Fatalf("CreateMessage[%d]: %v", i, err)
+		}
+		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+			t.Fatalf("SetMessagePinned[%d]: %v", i, err)
+		}
+	}
+
+	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
+	if err != nil {
+		t.Fatalf("GetPinnedMessages: %v", err)
+	}
+	if len(msgs) > db.MaxPinnedMessages {
+		t.Errorf("GetPinnedMessages returned %d pins, want <= MaxPinnedMessages (%d)", len(msgs), db.MaxPinnedMessages)
+	}
+}
+
 func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "dmforeignalice")

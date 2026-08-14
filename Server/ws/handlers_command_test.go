@@ -111,6 +111,56 @@ func TestChatCommand_MalformedPayload_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
+// TestChatCommand_RateLimited_ReturnsError verifies that chat_command is
+// throttled per-user, same as every other V2 handler (OC-0091): a burst of
+// commands beyond the limit must be rejected with RATE_LIMITED instead of
+// running DispatchCommand (and therefore the plugin's WASM invocation) once
+// per frame with no cap.
+func TestChatCommand_RateLimited_ReturnsError(t *testing.T) {
+	hub, database := newTestHub(t)
+	send := make(chan []byte, 32)
+	c := ws.NewTestClient(hub, 1, send)
+	hub.Register(c)
+	defer hub.Unregister(c)
+
+	reg, err := plugin.NewRegistry(plugin.Config{Store: database})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	hub.SetPluginRegistry(reg)
+
+	sawRateLimited := false
+	for i := range 20 {
+		raw, _ := json.Marshal(map[string]any{
+			"type": "chat_command",
+			"payload": map[string]any{
+				"channel_id": int64(1),
+				"command":    "/notexist",
+				"args":       []string{},
+			},
+		})
+		hub.HandleMessageForTest(c, raw)
+
+		select {
+		case msg := <-send:
+			var env map[string]any
+			if err := json.Unmarshal(msg, &env); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			payload, _ := env["payload"].(map[string]any)
+			if payload != nil && payload["code"] == "RATE_LIMITED" {
+				sawRateLimited = true
+			}
+		default:
+			t.Fatalf("expected a response for message %d", i)
+		}
+	}
+
+	if !sawRateLimited {
+		t.Fatal("expected at least one RATE_LIMITED response within 20 rapid chat_command frames")
+	}
+}
+
 // ─── EventSink.Emit ───────────────────────────────────────────────────────────
 
 // TestEventSink_Emit_DeliversToBroadcaster verifies that Emit calls the wired

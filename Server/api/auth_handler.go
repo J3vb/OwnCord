@@ -109,7 +109,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 
 	r.Route("/api/v1/auth", func(r chi.Router) {
 		r.With(RateLimitMiddleware(registerLimiter, "register:", registerRateLimitPerMinute, time.Minute, trustedProxies)).
-			Post("/register", handleRegister(database))
+			Post("/register", handleRegister(database, trustedProxies))
 
 		r.With(RateLimitMiddleware(loginLimiter, "login:", loginRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
@@ -142,7 +142,8 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 }
 
 // handleRegister processes POST /api/v1/auth/register.
-func handleRegister(database *db.DB) http.HandlerFunc {
+func handleRegister(database *db.DB, trustedProxies []string) http.HandlerFunc {
+	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
 		registrationOpen, err := isRegistrationOpen(r.Context(), database)
 		if err != nil {
@@ -252,7 +253,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		ip := clientIP(r)
+		ip := clientIPWithProxies(r, proxyNets)
 		slog.Info("user registered", "username", req.Username, "user_id", uid, "ip", ip)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "user_register", "user", uid,
 			"new account created via invite")

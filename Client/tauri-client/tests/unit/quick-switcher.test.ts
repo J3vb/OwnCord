@@ -204,6 +204,28 @@ describe("QuickSwitcher", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("Ctrl+K closes the switcher with CapsLock on (KeyboardEvent.key reports uppercase 'K')", () => {
+    // OC-0150: the global close handler compares `e.key === "k"`
+    // case-sensitively, so CapsLock (or Ctrl+Shift+K) leaves the switcher
+    // stuck open.
+    switcher.mount(container);
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "K", ctrlKey: true, bubbles: true }),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("AltGr+K (ctrlKey+altKey) does not close the switcher", () => {
+    // OC-0150: Windows/WebView2 reports AltGr as ctrlKey+altKey, so without
+    // an altKey exclusion an AltGr-produced 'k' character both fails to
+    // reach the composer and closes the switcher underneath it.
+    switcher.mount(container);
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true, bubbles: true }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("Enter is a no-op when search returns no results", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;

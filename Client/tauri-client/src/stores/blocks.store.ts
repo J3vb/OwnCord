@@ -64,6 +64,13 @@ export function clearBlockedByThem(): void {
   );
 }
 
+/** Reset both block directions (called on clearAuth — user ids are only
+ *  unique per-server, so a previous server's block list must not carry
+ *  into the next session). */
+export function resetBlocksStore(): void {
+  blocksStore.setState(() => INITIAL);
+}
+
 /**
  * The composer disable reason for a DM with `recipientId`, or null if unblocked.
  * blockedByMe takes precedence so the user always sees that they are the blocker.

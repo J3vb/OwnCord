@@ -90,6 +90,7 @@ type Updater struct {
 	errCacheExpiry time.Time
 	textAssetCache map[string]textAssetCacheEntry
 	textAssetSF    singleflight.Group
+	releaseSF      singleflight.Group
 	mu             syncutil.Mutex
 	httpClient     *http.Client
 	signingKeyText string
@@ -153,39 +154,66 @@ func detachFetch(ctx context.Context) (context.Context, context.CancelFunc) {
 // fetch is detached from ctx (see detachFetch), so cancelling ctx does not
 // abort it or write a failure into the shared cache.
 func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
-	now := time.Now()
-	u.mu.Lock()
-	if u.cache != nil && now.Before(u.cacheExpiry) {
-		cached := *u.cache
+	if info, err, ok := u.lookupRelease(time.Now()); ok {
+		return info, err
+	}
+
+	// Coalesce concurrent misses: when the cache TTL expires under load, every
+	// caller would otherwise issue its own outbound GitHub fetch (OC-0146).
+	// One flight runs and the rest wait on its result, exactly like
+	// FetchTextAssetCached's textAssetSF.
+	//
+	// The flight is detached from the leader's ctx (see detachFetch): callers
+	// include the unauthenticated client-update endpoint, so a leader that
+	// aborts its request must not fail its followers or write its own
+	// context.Canceled into the shared cache.
+	v, err, _ := u.releaseSF.Do("latest-release", func() (any, error) {
+		now := time.Now()
+		// Re-check: another flight may have filled the cache while we queued.
+		if info, err, ok := u.lookupRelease(now); ok {
+			return info, err
+		}
+
+		fetchCtx, cancel := detachFetch(ctx)
+		defer cancel()
+
+		info, err := u.fetchLatestRelease(fetchCtx)
+		if err != nil {
+			u.mu.Lock()
+			u.cachedErr = err
+			u.errCacheExpiry = now.Add(errorCacheTTL)
+			u.mu.Unlock()
+			return UpdateInfo{}, err
+		}
+
+		u.mu.Lock()
+		u.cache = &info
+		u.cacheExpiry = now.Add(cacheTTL)
+		u.cachedErr = nil
 		u.mu.Unlock()
-		return cached, nil
+
+		return info, nil
+	})
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+	return v.(UpdateInfo), nil
+}
+
+// lookupRelease returns a live cached release or cached error, if either
+// exists. The third return value reports whether the cache was live (a
+// caller should return the first two values directly); a false miss means
+// the caller must fetch.
+func (u *Updater) lookupRelease(now time.Time) (UpdateInfo, error, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.cache != nil && now.Before(u.cacheExpiry) {
+		return *u.cache, nil, true
 	}
 	if u.cachedErr != nil && now.Before(u.errCacheExpiry) {
-		err := u.cachedErr
-		u.mu.Unlock()
-		return UpdateInfo{}, err
+		return UpdateInfo{}, u.cachedErr, true
 	}
-	u.mu.Unlock()
-
-	fetchCtx, cancel := detachFetch(ctx)
-	defer cancel()
-
-	info, err := u.fetchLatestRelease(fetchCtx)
-	if err != nil {
-		u.mu.Lock()
-		u.cachedErr = err
-		u.errCacheExpiry = now.Add(errorCacheTTL)
-		u.mu.Unlock()
-		return UpdateInfo{}, err
-	}
-
-	u.mu.Lock()
-	u.cache = &info
-	u.cacheExpiry = now.Add(cacheTTL)
-	u.cachedErr = nil
-	u.mu.Unlock()
-
-	return info, nil
+	return UpdateInfo{}, nil, false
 }
 
 // fetchLatestRelease queries the GitHub API for the latest release and

@@ -232,9 +232,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   sidebarWrapper.appendChild(serverHeader);
 
-  // Load per-server collapsed category state from localStorage
-  const initialServerName = authStore.getState().serverName ?? "Server";
-  loadCollapsedCategories(initialServerName);
+  // Load per-server collapsed category state from localStorage, scoped to
+  // the connected host (not the display name) — the same convention as
+  // setChannelMutesHost/setNsfwGateHost/setAudioVolumeHost. The display name
+  // defaults to "OwnCord Server" on every unmodified install, so keying on
+  // it would collapse two different servers' saved state onto one entry.
+  loadCollapsedCategories(api.getConfig().host);
 
   // Keep server name in sync with auth store
   const unsubServerName = authStore.subscribeSelector(
@@ -541,12 +544,21 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         if (channelBeforeDm !== null) {
           setActiveChannel(channelBeforeDm);
           channelBeforeDm = null;
-        } else {
-          for (const ch of channelsStore.getState().channels.values()) {
-            if (ch.type === "text") {
-              setActiveChannel(ch.id);
-              break;
-            }
+          return;
+        }
+        // No saved channel — this happens when DM mode was entered without
+        // going through selectDmConversation (e.g. SidebarDmSection's "View
+        // all messages" button, which does a bare setSidebarMode). If a real
+        // non-DM channel is already active, leave it alone instead of
+        // silently jumping to the first text channel in Map order.
+        const st = channelsStore.getState();
+        const current =
+          st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+        if (current !== undefined && current.type !== "dm") return;
+        for (const ch of channelsStore.getState().channels.values()) {
+          if (ch.type === "text") {
+            setActiveChannel(ch.id);
+            break;
           }
         }
       },

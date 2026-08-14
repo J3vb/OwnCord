@@ -87,6 +87,7 @@ import {
   generateECDHKeyPair,
   generateRoomKey,
   importPublicKey,
+  exportPublicKey,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -978,6 +979,125 @@ describe("E2EEManager", () => {
       expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(62);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  // ── Ledger findings OC-0010 / OC-0011 ─────────────────────────────────
+
+  it("[OC-0010] does not stand down a new session's key-holder role when a stale offer's setKey resolves after teardown+rejoin", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // Session A: we are the holder in channel 1, with PEER_ID's key on file.
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    // An offer from PEER_ID arrives and stalls at the keyProvider.setKey
+    // await — AFTER the epoch/keypair guard (checked right after unwrap) has
+    // already passed.
+    let releaseSetKey!: () => void;
+    const stalledSetKey = new Promise<void>((resolve) => {
+      releaseSetKey = resolve;
+    });
+    mockSetKey.mockClear();
+    mockSetKey.mockImplementationOnce(() => stalledSetKey);
+    const offerPromise = mgr.handleOffer(PEER_ID, "enc", "iv");
+    await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalled());
+
+    // Mid-flight: the user leaves channel 1 and rejoins channel 2 as the new
+    // key holder — a distinct keypair, exactly as real ECDH keygen produces.
+    mgr.clearState();
+    vi.mocked(generateECDHKeyPair).mockResolvedValueOnce({
+      publicKey: { type: "chan2-pub" } as unknown as CryptoKey,
+      privateKey: { type: "chan2-priv" } as unknown as CryptoKey,
+    });
+    await mgr.setupKeyExchange(true, 2);
+    expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+
+    // The stale (session-1) offer's setKey now resolves.
+    releaseSetKey();
+    await offerPromise;
+
+    // Channel 2's holder role must survive — the stale continuation must not
+    // stand it down (it re-checks staleness before the setKey await, not
+    // after — the write happens on the far side of that await).
+    expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
+  });
+
+  it("[OC-0010] does not write a stale peer key into a new session's map when clearState()+rejoin lands during the announce's key-import await", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // Session A: holder in channel 1.
+    await mgr.setupKeyExchange(true, 1);
+
+    // The announce's importPublicKey stalls — the "final await" before the
+    // _peerPublicKeys.set write, which today has no re-check after it.
+    let releaseImport!: (v: CryptoKey) => void;
+    const stalledImport = new Promise<CryptoKey>((resolve) => {
+      releaseImport = resolve;
+    });
+    vi.mocked(importPublicKey).mockReturnValueOnce(stalledImport);
+
+    const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    await vi.waitFor(() => expect(importPublicKey).toHaveBeenCalled());
+
+    // Mid-flight: the user leaves channel 1 and rejoins channel 2.
+    mgr.clearState();
+    await mgr.setupKeyExchange(true, 2);
+
+    // The stale announce's import now resolves.
+    releaseImport({ type: "stale-peer-key" } as unknown as CryptoKey);
+    await announcePromise;
+
+    // The new session's peer map must not be polluted by the torn-down
+    // session's announce.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+  });
+
+  it("[OC-0011] rejects a replayed announce carrying a previously-retired peer key instead of overwriting the live key", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair
+
+    // Make import/export round-trip faithfully on the announced base64
+    // string (the shared mock default returns a fixed constant from
+    // exportPublicKey regardless of input, which would mask this bug).
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+
+    // Valid base64 (must decode cleanly — rawFromBase64 uses atob() to build
+    // the signed message bytes). "b2xk"/"bmV3" already prove out elsewhere in
+    // this suite as distinct valid ephemeral-key payloads.
+    const KEY_A = "b2xk";
+    const KEY_B = "bmV3";
+
+    try {
+      // Peer announces key A — accepted as their first (live) key.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_A}` });
+
+      // Peer reconnects and announces a genuinely new key B — a legitimate
+      // change, so key A is now retired.
+      await mgr.handleAnnounce(PEER_ID, KEY_B, "sigB");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+
+      // A malicious relay re-emits the OLD, still validly-signed announce for
+      // key A. No channel/epoch/nonce binds the signed message, so it
+      // verifies cleanly — it must still be rejected as a replay, not
+      // overwrite the live key B.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
     }
   });
 

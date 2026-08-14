@@ -568,6 +568,49 @@ func TestUpload_OversizedFileRejected(t *testing.T) {
 	}
 }
 
+// OC-0137: storage.Save's error strings embed the resolved absolute
+// destination path ("creating file %s", "syncing file %s", "resolved path %q
+// escapes storage directory"). handleUpload must not forward that text to the
+// client — only log it — or any authenticated user who triggers a storage
+// failure (disk full, permission change, read-only mount) learns the
+// server's absolute storage directory layout.
+func TestUpload_StorageErrorDoesNotLeakPath(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "leakuser", 1)
+
+	// Remove the storage directory out from under the already-constructed
+	// Storage so Save's os.Create fails — this is what a disk-full,
+	// permission-change, or read-only-mount failure looks like from the
+	// handler's point of view: a storage-layer error surfaces at Save time.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	content := []byte("content that will fail to persist because the storage dir is gone")
+	rr := doUpload(t, router, token, "file", "leaktest.txt", content)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	message, _ := resp["message"].(string)
+	if strings.Contains(message, dir) {
+		t.Fatalf("response message leaks the absolute storage path: %q", message)
+	}
+	if strings.ContainsAny(message, `/\`) {
+		t.Fatalf("response message looks like it contains a filesystem path: %q", message)
+	}
+}
+
 func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
 	database := newUploadTestDB(t)
 	dir := t.TempDir()

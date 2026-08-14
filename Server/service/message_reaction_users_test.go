@@ -155,6 +155,26 @@ func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
 	}
 }
 
+// A soft-deleted message must not leak its reactor list. Its siblings in the
+// same file/package already refuse a deleted message: handleReaction (this
+// file) and GetMessagesAround (message_query.go) both check msg.Deleted, but
+// GetReactionUsers had no such guard, so a tombstoned message's reactions
+// stayed forever fetchable by direct URL even though the client no longer
+// renders the message at all.
+func TestGetReactionUsers_DeletedMessageIsNotFound(t *testing.T) {
+	svc, database := newTestMessageService(t)
+	msgID := seedReactedMessage(t, svc, database, "👍", 1)
+
+	if err := database.DeleteMessage(context.Background(), msgID, 1, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	_, err := svc.GetReactionUsers(context.Background(), 1, 10, msgID, "👍")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
 // A custom emoji is reacted with as its ":shortcode:" literal, so the longest
 // shortcode the emoji service will accept has to fit inside the reaction length
 // cap. Before the cap was derived from MaxShortcodeLen, a 31- or 32-character

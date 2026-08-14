@@ -237,13 +237,24 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
-	if ch.Type == "dm" {
+	switch {
+	case ch.Type == "dm":
 		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
+	case !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages):
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
+	case ch.Archived:
+		// Archived channels are hidden from every other client surface
+		// (ListVisibleChannels, ready payload, reconnect replay, voice join —
+		// see permissions.Checker.VisibleChannelIDs and ws/voice_join.go).
+		// HasChannelPerm alone doesn't know about the archive flag, so without
+		// this a socket that still held the id could resubscribe to the live
+		// topic and advance its own read state on a channel reconnect replay
+		// then filters back out. channel_focus and mark_read share this one
+		// service call, so the guard closes both at once (OC-0070).
+		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
 	}
 
 	// Mark channel as read. latestID == 0 (no undeleted messages) still

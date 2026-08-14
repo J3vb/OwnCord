@@ -152,11 +152,14 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   }
 
   function handleGlobalKeydown(e: KeyboardEvent): void {
-    if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-      e.preventDefault();
-      if (root !== null && root.parentNode !== null) {
-        options.onClose();
-      }
+    // Same case-insensitive, altKey-excluding match as
+    // OverlayManagers.ts's open handler (OC-0150) — otherwise this close
+    // path goes dead under CapsLock and AltGr swallows a keystroke for
+    // nothing.
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
+    e.preventDefault();
+    if (root !== null && root.parentNode !== null) {
+      options.onClose();
     }
   }
 

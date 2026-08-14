@@ -2348,36 +2348,47 @@ describe("WS Dispatcher", () => {
     expect(mock.ws.disconnect).toHaveBeenCalled();
   });
 
-  it("wires error RATE_LIMITED to transient error", () => {
+  // OC-0064: transientError has exactly one reader in the whole client —
+  // ConnectPage's login-screen subscription. Routing the catch-all fallback
+  // through it means an error raised while the user is in-app (MainPage
+  // never subscribes) is invisible until the user later lands back on the
+  // login screen, where it resurfaces stale and out of context. The
+  // catch-all must use the same in-app toast the sibling CHANNEL_FULL /
+  // VIDEO_LIMIT branches already use, and must leave transientError alone.
+  it("wires error RATE_LIMITED to an in-app toast (OC-0064)", () => {
+    mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "RATE_LIMITED",
       message: "Too many requests",
     });
 
-    const error = uiStore.getState().transientError;
-    expect(error).toBe("Too many requests");
+    expect(mockShowToast).toHaveBeenCalledWith("Too many requests", "error");
+    expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error FORBIDDEN to transient error", () => {
+  it("wires error FORBIDDEN to an in-app toast (OC-0064)", () => {
+    mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "FORBIDDEN",
       message: "Insufficient permissions",
     });
 
-    const error = uiStore.getState().transientError;
-    expect(error).toBe("Insufficient permissions");
+    expect(mockShowToast).toHaveBeenCalledWith("Insufficient permissions", "error");
+    expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error RATE_LIMITED with empty message uses default", () => {
+  it("wires error RATE_LIMITED with empty message uses default (OC-0064)", () => {
+    mockShowToast.mockClear();
     mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
-    const error = uiStore.getState().transientError;
-    expect(error).toBe("Server error");
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+    expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error with an unrecognized code to the generic fallback banner", () => {
+  it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
     // The final fallthrough is the one place every unmatched error code
     // lands (e.g. a rejected fire-and-forget chat_edit) — it must not be
     // silently dropped just because it isn't RATE_LIMITED/FORBIDDEN.
+    mockShowToast.mockClear();
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock.dispatch("error", {
@@ -2385,19 +2396,22 @@ describe("WS Dispatcher", () => {
       message: "Something odd",
     });
 
-    expect(uiStore.getState().transientError).toBe("Something odd");
+    expect(mockShowToast).toHaveBeenCalledWith("Something odd", "error");
+    expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires a BAD_REQUEST error with no pending correlation (e.g. a rejected chat_edit) to a transient error", () => {
+  it("wires a BAD_REQUEST error with no pending correlation (e.g. a rejected chat_edit) to an in-app toast (OC-0064)", () => {
     // chat_edit is fire-and-forget: it never enters pendingSends, so a
     // rejection's envelope id matches nothing above and used to fall through
     // this handler silently, leaving the user's edited text destroyed with
     // no error shown (only RATE_LIMITED/FORBIDDEN were bannered).
+    mockShowToast.mockClear();
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock.dispatch("error", { code: "BAD_REQUEST", message: "Message too long" }, "edit-id-1");
 
-    expect(uiStore.getState().transientError).toBe("Message too long");
+    expect(mockShowToast).toHaveBeenCalledWith("Message too long", "error");
+    expect(uiStore.getState().transientError).toBeNull();
   });
 
   it("wires an error carrying a pending send id to mark that row failed (not a toast)", () => {
@@ -3448,8 +3462,11 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockDisableCamera).mockClear();
       vi.mocked(mockDisableScreenshare).mockClear();
       uiStore.setState((prev) => ({ ...prev, transientError: null }));
+      mockShowToast.mockClear();
     });
 
+    // OC-0064: the catch-all now toasts in-app instead of latching
+    // transientError (which only the login screen ever reads).
     it("rolls back the camera publish on a correlated refusal", async () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
 
@@ -3459,7 +3476,8 @@ describe("WS Dispatcher", () => {
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
       expect(mockDisableCamera).toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(uiStore.getState().transientError).toBe("no permission");
+      expect(mockShowToast).toHaveBeenCalledWith("no permission", "error");
+      expect(uiStore.getState().transientError).toBeNull();
     });
 
     it("rolls back the screenshare publish on a correlated refusal", async () => {
@@ -3470,17 +3488,19 @@ describe("WS Dispatcher", () => {
 
       expect(mockDisableScreenshare).toHaveBeenCalled();
       expect(mockDisableCamera).not.toHaveBeenCalled();
-      expect(uiStore.getState().transientError).toBe("Server error");
+      expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+      expect(uiStore.getState().transientError).toBeNull();
     });
 
-    it("leaves an uncorrelated refusal as a plain transient error — no rollback", () => {
+    it("leaves an uncorrelated refusal as a plain in-app toast — no rollback", () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "unrelated-id");
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(uiStore.getState().transientError).toBe("nope");
+      expect(mockShowToast).toHaveBeenCalledWith("nope", "error");
+      expect(uiStore.getState().transientError).toBeNull();
     });
   });
 });

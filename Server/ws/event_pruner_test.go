@@ -73,6 +73,10 @@ func (*fakeEventStore) GetEventsSinceForChannels(context.Context, int64, []int64
 	panic("unused")
 }
 
+func (*fakeEventStore) CountEventsInRange(context.Context, int64, int64) (int64, error) {
+	panic("unused")
+}
+
 func (*fakeEventStore) GetMaxEventSeq(context.Context) (int64, error) {
 	panic("unused")
 }

@@ -36,6 +36,7 @@ import { createCertMismatchModal, createCertFirstUseModal } from "@components/Ce
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
+import { saveUserStatus } from "@lib/userStatus";
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
@@ -243,15 +244,23 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
 void ws.startCertListener();
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
-// the same presence_update wire message the in-app StatusPicker sends
-// (UserBar.ts/MainPage.ts's applyPresence) — the Rust side only emitted
-// "status-change" with nothing in the webview listening for it. ws.send is a
-// safe no-op (logged) when there is no live session, so no auth guard is
-// needed here.
+// the same path the in-app StatusPicker uses (UserBar.ts): persist through
+// saveUserStatus() — lib/userStatus.ts's documented single source of truth —
+// before sending the wire message, not just a raw ws.send. Without this the
+// tray's choice never reaches loadUserStatus(), so notifications.ts's DND
+// gate, autoIdle's "never touch a manual DND/invisible" guard, and
+// restoreSavedPresence() on the next reconnect all silently disagree with
+// what the tray just set (OC-0037). ws.send is a safe no-op (logged) when
+// there is no live session, so no auth guard is needed here.
 void listen<string>("status-change", (e) => {
   const status = e.payload;
   if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
-    ws.send({ type: "presence_update", payload: { status } });
+    // The tray's legacy "offline" spelling maps to "invisible" the same way
+    // userStatus.ts migrates an old client's stored "offline" value (see its
+    // doc comment) — the local pref and the wire message must agree.
+    const mapped = status === "offline" ? "invisible" : status;
+    saveUserStatus(mapped);
+    ws.send({ type: "presence_update", payload: { status: mapped } });
   }
 });
 
@@ -379,33 +388,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
         // Stop listening once connected so a later transition can't fire this
-        // handler again (which would append a second overlay).
+        // handler again.
         unsubState();
         // Pre-warm the lazily-loaded MainPage chunk (and the LiveKit stack
         // behind it) so navigating past the connected overlay doesn't wait
         // on a dynamic import.
         void import("@pages/MainPage");
-        const auth = authStore.getState();
-        // Ensure exactly one overlay exists at a time.
-        connectedOverlay?.destroy();
-        connectedOverlay = createConnectedOverlay({
-          serverName: auth.serverName ?? host,
-          username: auth.user?.username ?? username,
-          motd: auth.motd ?? "",
-          onReady: () => {
-            connectedOverlay?.destroy();
-            connectedOverlay = null;
-            router.navigate("main");
-          },
-        });
-        appEl!.appendChild(connectedOverlay.element);
-        connectedOverlay.show();
-
-        const unsubReady = ws.on("ready", () => {
-          unsubReady();
-          connectedOverlay?.markReady();
-        });
-        sessionUnsubs.push(unsubReady);
       } else if (wsState === "disconnected") {
         // Terminal non-connected transition (auth_error, cert-mismatch reject,
         // or intentional disconnect before ever connecting): drop the handler
@@ -414,6 +402,38 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       }
     });
     sessionUnsubs.push(unsubState);
+
+    // Build the connected overlay from the auth_ok payload itself, not
+    // authStore: ws.ts fires onStateChange("connected") synchronously BEFORE
+    // dispatching the auth_ok message that carries server_name/motd
+    // (setState() then dispatch() in the same handleMessage() call), so
+    // authStore.setAuth() — run by the dispatcher's own auth_ok handler —
+    // has not applied yet at that point. Reading straight from the payload
+    // sidesteps the race instead of racing it (OC-0063).
+    const unsubAuthOk = ws.on("auth_ok", (payload) => {
+      unsubAuthOk();
+      // Ensure exactly one overlay exists at a time.
+      connectedOverlay?.destroy();
+      connectedOverlay = createConnectedOverlay({
+        serverName: payload.server_name ?? host,
+        username: payload.user.username ?? username,
+        motd: payload.motd ?? "",
+        onReady: () => {
+          connectedOverlay?.destroy();
+          connectedOverlay = null;
+          router.navigate("main");
+        },
+      });
+      appEl!.appendChild(connectedOverlay.element);
+      connectedOverlay.show();
+
+      const unsubReady = ws.on("ready", () => {
+        unsubReady();
+        connectedOverlay?.markReady();
+      });
+      sessionUnsubs.push(unsubReady);
+    });
+    sessionUnsubs.push(unsubAuthOk);
 
     sessionCleanup = () => {
       for (const unsub of sessionUnsubs) unsub();
@@ -521,28 +541,32 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             log.error("TOTP submit without pending partial token");
             return;
           }
-          try {
-            const result = await api.verifyTotp(code, pendingTotpPartialToken);
-            if (result.token) {
-              const remember = connectPage.getRememberPassword();
-              const savedPassword = remember ? connectPage.getPassword() : undefined;
-              ensureProfileExists(
-                pendingTotpHost,
-                pendingTotpUsername,
-                remember,
-                connectPage.getAutoConnect(),
-              );
-              wirePostAuth(
-                pendingTotpHost,
-                result.token,
-                pendingTotpUsername,
-                savedPassword,
-                remember,
-              );
-            }
-          } finally {
-            // Clear sensitive partial token immediately after use (success or failure)
+          const result = await api.verifyTotp(code, pendingTotpPartialToken);
+          if (result.token) {
+            // Clear the sensitive partial token now that it has been
+            // exchanged for a real session token. A rejected code must NOT
+            // clear it here — the TOTP *code* is single-use (the server
+            // 401s a replay), but the partial token is the short-lived 2FA
+            // challenge itself and stays valid for a retry. LoginForm keeps
+            // the TOTP overlay open across a failed verify for exactly that
+            // retry; clearing this unconditionally (the old `finally`) made
+            // every retry hit the guard above and silently do nothing.
             pendingTotpPartialToken = "";
+            const remember = connectPage.getRememberPassword();
+            const savedPassword = remember ? connectPage.getPassword() : undefined;
+            ensureProfileExists(
+              pendingTotpHost,
+              pendingTotpUsername,
+              remember,
+              connectPage.getAutoConnect(),
+            );
+            wirePostAuth(
+              pendingTotpHost,
+              result.token,
+              pendingTotpUsername,
+              savedPassword,
+              remember,
+            );
           }
         },
         onAddProfile(name, host) {

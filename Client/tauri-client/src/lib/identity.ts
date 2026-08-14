@@ -207,9 +207,19 @@ const identityKeyPairCache = new Map<string, Promise<CryptoKeyPair>>();
 /** Composite keyring/memo key scoping the identity keypair by host AND user
  *  id. The keyring commands only take a single opaque `host` string, so the
  *  scope is folded into that one field rather than requiring a Rust-side
- *  change. */
+ *  change.
+ *
+ *  `userId` goes BEFORE `host`, joined with `@` rather than `:` (OC-0118):
+ *  `isValidHost` (api.ts) forbids '@' in any host — DNS name, IPv4, or
+ *  bracketed/bare IPv6 literal — so a scoped key can never collide with a
+ *  legacy host-only account (`identity:{host}`, pre-B3-3) OR with another
+ *  host's literal "host:port" string. The old `${host}:${userId}` format
+ *  had neither guarantee: `identityScopeKey("chat.example", 8443)` produced
+ *  the same string, "chat.example:8443", as the legacy host-only account of
+ *  a *different* server reachable at host "chat.example:8443" — silently
+ *  adopting that server's identity private key. */
 function identityScopeKey(host: string, userId: number): string {
-  return `${host}:${userId}`;
+  return `${userId}@${host}`;
 }
 
 /**

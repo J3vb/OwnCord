@@ -198,3 +198,55 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 		t.Error("ghost voice_states row was not removed by the sweep")
 	}
 }
+
+// TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered pins OC-0050:
+// CleanupVoiceForChannel's client-state clear must be conditional on the
+// participant still being in the channel being cleaned up at the moment it
+// clears, not just at the moment it read (hub_sweep.go's own comment already
+// promises this: "the client-state clear [is] conditional on the participant
+// still being in THIS channel"). A voice_join to a different channel landing
+// between the read and the clear must survive, exactly as
+// TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel already proves
+// for the sibling sweep.
+//
+// The vulnerable window (read, then a separate unconditional clear) is two
+// back-to-back voiceMu acquisitions with no I/O between them, too narrow to
+// land reliably by staggering real goroutines. cleanupVoiceRaceClearHook
+// (test-only, nil in production) fires at exactly that point so the test
+// reproduces the interleaving deterministically instead of by luck.
+func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
+	ctx := context.Background()
+	database := newHarvestVoiceDB(t)
+	uid := seedHarvestVoiceUser(t, database, "cleanup-race")
+	chA := mustCreateVoiceChannel(t, database, "voice-cleanup-a")
+	chB := mustCreateVoiceChannel(t, database, "voice-cleanup-b")
+
+	if err := database.JoinVoiceChannel(ctx, uid, chA); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	h := NewHub(database, auth.NewRateLimiter(), nil)
+	c := NewTestClient(h, uid, make(chan []byte, 8))
+	h.clients[uid] = c
+	c.setVoiceState(chA, "tok-a")
+	h.pubsub.Subscribe(c, VoiceTopic(chA))
+
+	// Simulate handleVoiceJoin's state-setting step (voice_join.go's
+	// c.setVoiceState + pubsub.Subscribe) landing exactly between
+	// CleanupVoiceForChannel's read of the client's current voice channel and
+	// its clear of that state.
+	cleanupVoiceRaceClearHook = func(client *Client) {
+		client.setVoiceState(chB, "tok-b")
+		h.pubsub.Subscribe(client, VoiceTopic(chB))
+	}
+	defer func() { cleanupVoiceRaceClearHook = nil }()
+
+	h.CleanupVoiceForChannel(chA)
+
+	if got := c.getVoiceChID(); got != chB {
+		t.Fatalf("client voiceChID = %d after a voice_join raced CleanupVoiceForChannel's read-then-clear window, want %d — the newer join must survive, not be silently wiped", got, chB)
+	}
+	if !h.SubscribedToVoiceTopicForTest(c, chB) {
+		t.Error("client lost its new channel's voice-topic subscription to a concurrent CleanupVoiceForChannel clear")
+	}
+}

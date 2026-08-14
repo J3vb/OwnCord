@@ -282,6 +282,33 @@ func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestGetUserIDsByUsernames_NonASCIIUppercase locks OC-0131: a username
+// holding an uppercase non-ASCII letter (legal per auth.ValidateUsername,
+// e.g. "Émile") must resolve through the exact same spelling it was queried
+// with. users.username is only COLLATE NOCASE, which folds ASCII A-Z only, so
+// the map key this function builds from the returned row must fold no harder
+// than that column does -- a Unicode-aware strings.ToLower would fold 'É' to
+// 'é' here and desync the key from the caller's (equally ASCII-folded)
+// lookup spelling, making the row permanently unreachable by name.
+func TestGetUserIDsByUsernames_NonASCIIUppercase(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	uid, err := database.CreateUser(ctx, "Émile", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	got, err := database.GetUserIDsByUsernames(ctx, []string{"Émile"})
+	if err != nil {
+		t.Fatalf("GetUserIDsByUsernames: %v", err)
+	}
+	if got["Émile"] != uid {
+		t.Errorf(`result["Émile"] = %d, want %d (map key must match the query spelling for a non-ASCII-uppercase username)`, got["Émile"], uid)
+	}
+}
+
 // TestGetUserIDsByUsernames_LapsedTempBan_StillResolves locks the "reconverged
 // raw column" fix: nothing clears users.banned when a temp ban's ban_expires
 // lapses (that's decided lazily, at login, by auth.IsEffectivelyBanned), so a

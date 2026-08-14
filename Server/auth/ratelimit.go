@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -83,6 +84,8 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 		for i, key := range keys {
 			rl.shardFor(key).lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
 		}
+	} else {
+		slog.Warn("ratelimit: failed to load persisted lockouts; starting with none", "err", err)
 	}
 	return rl
 }

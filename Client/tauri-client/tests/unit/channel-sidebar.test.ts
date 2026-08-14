@@ -1260,6 +1260,70 @@ describe("ChannelSidebar", () => {
     expect(container.querySelector(".category-add-btn")).toBeNull();
   });
 
+  // ── Live role-change repaint (OC-0142) ──
+  // canManageChannels() is evaluated at render time from authStore.user.role,
+  // but the sidebar's only authStore subscription selects serverName. A
+  // MEMBER_UPDATE for the signed-in user (dispatcher.ts writes the new role
+  // via updateUser) must still cause a repaint without any unrelated event.
+
+  it("repaints channel-management affordances when the signed-in user's own role changes", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 2, username: "Member", avatar: null, role: "member" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    // Starts as a plain member: no "+" button.
+    expect(container.querySelector(".category-add-btn")).toBeNull();
+
+    // Promoted to admin (mirrors dispatcher.ts's MEMBER_UPDATE self-branch,
+    // which patches authStore via updateUser({ role })) — no channel/voice
+    // event fires alongside it.
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role: "admin" },
+    }));
+    authStore.flush();
+
+    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+  });
+
+  it("repaints channel-management affordances when the role list's permission mask changes", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.SEND_MESSAGES }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    // Moderator role holds no MANAGE_CHANNELS bit yet.
+    expect(container.querySelector(".category-add-btn")).toBeNull();
+
+    // A ROLES_UPDATE grants MANAGE_CHANNELS to the same role (dispatcher.ts's
+    // ROLES_UPDATE handler replaces the whole list via setRoles) — again with
+    // no accompanying channel/voice event.
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    channelsStore.flush();
+
+    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+  });
+
   // ── Voice user volume context menu ──
 
   it("right-click on other user's voice row opens volume context menu", () => {

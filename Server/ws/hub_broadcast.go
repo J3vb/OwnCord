@@ -175,6 +175,15 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 				"channel_id", channelID, "err", err)
 			return []int64{}
 		}
+		// Archived channels are hidden from every client regardless of
+		// permissions, mirroring RefreshChannelVisibility and VisibleChannelIDs.
+		// Without this, an admin edit to an archived channel (or a voice
+		// teardown inside one) fans out straight to every connected user whose
+		// base role holds READ_MESSAGES, none of whom have the channel in their
+		// ready payload or sidebar.
+		if ch != nil && ch.Archived {
+			return []int64{}
+		}
 		if ch != nil && ch.Type == "dm" {
 			participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)
 			if err != nil {

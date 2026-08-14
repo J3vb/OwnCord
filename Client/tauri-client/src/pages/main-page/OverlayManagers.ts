@@ -92,6 +92,8 @@ export interface QuickSwitcherManager {
 
 export function createQuickSwitcherManager(
   getRoot: () => HTMLDivElement | null,
+  /** Optional: suppress the shortcut while another overlay owns input (e.g. Settings). */
+  isSuspended?: () => boolean,
 ): QuickSwitcherManager {
   let instance: MountableComponent | null = null;
 
@@ -116,13 +118,18 @@ export function createQuickSwitcherManager(
 
   function attach(): () => void {
     const handler = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        if (instance !== null) {
-          close();
-        } else {
-          open();
-        }
+      // Mirrors GlobalKeybinds.ts's guard: `e.key` is layout-dependent and
+      // uppercases under CapsLock/Shift, so compare case-insensitively;
+      // exclude altKey so AltGr (reported as ctrlKey+altKey on Windows)
+      // doesn't swallow a non-US character; and honour the same suspension
+      // every other app-wide shortcut respects.
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
+      if (isSuspended?.() === true) return;
+      e.preventDefault();
+      if (instance !== null) {
+        close();
+      } else {
+        open();
       }
     };
     document.addEventListener("keydown", handler);
