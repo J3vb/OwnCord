@@ -989,6 +989,21 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // OC-0083: destroy() must clear settingsOpen — otherwise MainPage, which
+  // mounts its own SettingsOverlay eagerly and shows it off a stale
+  // settingsOpen === true, pops the settings panel open over the freshly
+  // loaded app right after login.
+  it("closes settings on destroy so the flag doesn't leak into the next page", async () => {
+    const { closeSettings } = await import("../../src/stores/ui.store");
+    vi.mocked(closeSettings).mockClear();
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.destroy?.();
+
+    expect(closeSettings).toHaveBeenCalledTimes(1);
+  });
+
   // --- setCredentials with password sets remember checkbox ---
 
   it("setCredentials with password checks the remember password checkbox", async () => {
