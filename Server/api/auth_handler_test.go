@@ -1746,3 +1746,46 @@ func TestRegister_ExpiredInvite(t *testing.T) {
 		t.Errorf("Register expired invite status = %d, want 400", rr.Code)
 	}
 }
+
+// TestRegister_UsesTrustedForwardedIP pins OC-0093: handleRegister must
+// resolve the client IP through the same trusted-proxy list handleLogin
+// uses, not unconditionally use RemoteAddr. Behind a trusted reverse proxy,
+// the sessions.ip row registration creates must record the real client, not
+// the proxy's own address — otherwise the same client shows two different
+// IPs on the "active sessions" screen depending on whether they registered
+// or logged in.
+func TestRegister_UsesTrustedForwardedIP(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouterWithProxies(database, limiter, []string{"127.0.0.0/8"})
+
+	ownerID, _ := database.CreateUser(context.Background(), "owner", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader([]byte(
+		`{"username":"newuser","password":"securePass1","invite_code":"`+code+`"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.RemoteAddr = "127.0.0.1:9999" // the trusted reverse proxy's own hop
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Register status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	token, _ := resp["token"].(string)
+	if token == "" {
+		t.Fatal("Register response missing token")
+	}
+
+	sess, err := database.GetSessionByTokenHash(context.Background(), auth.HashToken(token))
+	if err != nil || sess == nil {
+		t.Fatalf("GetSessionByTokenHash: %v", err)
+	}
+	if sess.IP != "203.0.113.9" {
+		t.Errorf("session IP = %q, want the trusted-forwarded client IP %q — registration behind a reverse proxy must not record the proxy's own address", sess.IP, "203.0.113.9")
+	}
+}
