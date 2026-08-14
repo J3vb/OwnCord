@@ -829,3 +829,50 @@ func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 		t.Fatalf("blocker is equally refused, matching IsEitherBlocked: got %v", err)
 	}
 }
+
+// TestSetMessagePinned_DeletedMessageReturnsNotFound covers the same
+// deleted-message guard EditMessage (ErrDeletedMessage) and handleReaction
+// (ErrBadRequest) already have on their sinks. GetMessage deliberately still
+// returns a soft-deleted row (history queries rely on that), so the pin SQL's
+// `AND deleted = 0` clause matches zero rows and the store returns
+// db.ErrNotFound — a distinct sentinel from service.ErrNotFound that
+// writeServiceError does not recognize. Unwrapped, that misclassifies a
+// perfectly ordinary not-found as a 500 INTERNAL_ERROR.
+func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "will be deleted",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected service.ErrNotFound for a soft-deleted message, got %v", err)
+	}
+	if errors.Is(err, ErrInternal) {
+		t.Fatalf("must not be classified as an internal error: %v", err)
+	}
+}
