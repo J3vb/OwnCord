@@ -207,12 +207,17 @@ func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) ([]gifRes
 // errGIFUpstream marks a non-200 upstream response.
 var errGIFUpstream = errors.New("gif proxy: upstream error")
 
-// redactKey removes the API key from a string destined for the logs.
+// redactKey removes the API key from a string destined for the logs. It
+// matches both the literal key and its percent-encoded query-string form
+// (url.Error embeds the encoded request URL, and params.Encode() escapes any
+// character outside [A-Za-z0-9-_.~] — common in base64-style keys) so an
+// encoded form is caught too.
 func redactKey(s, apiKey string) string {
 	if apiKey == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, apiKey, "[REDACTED]")
+	s = strings.ReplaceAll(s, apiKey, "[REDACTED]")
+	return strings.ReplaceAll(s, url.QueryEscape(apiKey), "[REDACTED]")
 }
 
 // parseGIFLimit parses and validates the `limit` query param. An empty value
