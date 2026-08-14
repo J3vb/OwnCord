@@ -537,6 +537,37 @@ func TestEmojiDelete_BadIDIs400(t *testing.T) {
 	}
 }
 
+// ─── broadcast fan-out must survive request cancellation ────────────────────
+
+// TestBroadcastEmojiSet_SurvivesCanceledRequestContext pins OC-0139: both
+// handleCreateEmoji and handleDeleteEmoji call broadcastEmojiSet with
+// r.Context() AFTER the mutation has already committed. If the client aborts
+// (or the deadline fires) in that window, the re-read inside
+// broadcastEmojiSet must not ride the same now-canceled context, or the
+// fan-out silently never happens and every connected client keeps the stale
+// set even though the row is already gone (or already created).
+func TestBroadcastEmojiSet_SurvivesCanceledRequestContext(t *testing.T) {
+	h := newEmojiHarness(t)
+	// Seed a row directly, bypassing the upload handler (which broadcasts on
+	// its own success), so this isolates broadcastEmojiSet itself.
+	if _, err := h.database.CreateEmoji(context.Background(), "wave", "stored-1", "image/png", 1); err != nil {
+		t.Fatalf("CreateEmoji: %v", err)
+	}
+
+	svc := service.New(h.database, auth.NewRateLimiter())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the request was already aborted by the time the commit lands
+
+	api.BroadcastEmojiSetForTest(ctx, svc, h.broadcaster)
+
+	if len(h.broadcaster.calls) != 1 {
+		t.Fatalf("broadcast calls = %d, want 1 (fan-out must survive a canceled request context)", len(h.broadcaster.calls))
+	}
+	if got := h.broadcaster.calls[0]; len(got) != 1 || got[0].Shortcode != "wave" {
+		t.Errorf("broadcast payload = %+v, want one :wave:", got)
+	}
+}
+
 // ─── WebP header parsing ─────────────────────────────────────────────────────
 
 func TestWebPDimensions_AllChunkFlavours(t *testing.T) {
