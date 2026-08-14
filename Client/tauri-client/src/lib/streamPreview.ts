@@ -247,6 +247,7 @@ function hidePreview(row: HTMLElement): void {
   const state = previewTimers.get(row);
   if (state !== undefined) {
     clearTimeout(state.debounce);
+    clearTimeout(state.animation);
     if (state.trackCleanup !== null) {
       state.trackCleanup();
       state.trackCleanup = null;
