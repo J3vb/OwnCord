@@ -36,6 +36,7 @@ import {
   enableScreenshare as doEnableScreenshare,
   disableScreenshare as doDisableScreenshare,
   stopManualScreenTracks,
+  bumpGeneration,
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
   getRemoteVideoStream as doGetRemoteVideoStream,
@@ -344,6 +345,14 @@ export class LiveKitSession {
             this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
           }
         }
+        // OC-0080: bump first, mirroring doDisableCamera/doDisableScreenshare
+        // — a concurrent enableCamera()/enableScreenshare() still awaiting
+        // device acquisition (getUserMedia/getDisplayMedia/publishTrack) when
+        // an unexpected disconnect fires must detect it was superseded and
+        // discard its track instead of publishing onto the room about to be
+        // torn down for auto-reconnect.
+        bumpGeneration(this._cameraState);
+        bumpGeneration(this._screenState);
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
@@ -575,6 +584,23 @@ export class LiveKitSession {
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
         // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
         await this.restoreLocalVoiceState("reconnect");
+
+        // OC-0009: mirrors connectAndSetup's post-connect checkpoints
+        // (3/4/5) — this tail keeps awaiting (restoreLocalVoiceState,
+        // switchActiveDevice) after already installing "connected" into the
+        // shared state, so `reconnectSuperseded` (which expects "reconnecting")
+        // can no longer tell a still-current attempt from a superseded one.
+        // A newer connectAndSetup()/attemptAutoReconnect() may have since
+        // claimed `_state` for a different channel; isStateConnected() reads
+        // through a method call so it always sees the live value.
+        if (!this.isStateConnected(channelId)) {
+          log.info("Auto-reconnect: superseded after restoreLocalVoiceState — aborting tail", {
+            channelId,
+          });
+          this.disconnectSupersededLocalRoom(newRoom);
+          return;
+        }
+
         // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
@@ -584,6 +610,15 @@ export class LiveKitSession {
             log.warn("Reconnect: saved input device unavailable, using default", err);
           }
         }
+
+        if (!this.isStateConnected(channelId)) {
+          log.info("Auto-reconnect: superseded after audioinput switch — aborting tail", {
+            channelId,
+          });
+          this.disconnectSupersededLocalRoom(newRoom);
+          return;
+        }
+
         const savedOutput = loadPref<string>("audioOutputDevice", "");
         if (savedOutput) {
           try {
@@ -592,6 +627,15 @@ export class LiveKitSession {
             log.warn("Reconnect: saved output device unavailable, using default", err);
           }
         }
+
+        if (!this.isStateConnected(channelId)) {
+          log.info("Auto-reconnect: superseded after audiooutput switch — aborting tail", {
+            channelId,
+          });
+          this.disconnectSupersededLocalRoom(newRoom);
+          return;
+        }
+
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
@@ -873,6 +917,20 @@ export class LiveKitSession {
         log.warn("Microphone unavailable — joined in listen-only mode", micErr);
         this.onErrorCallback?.("Microphone unavailable — joined in listen-only mode");
       }
+    }
+
+    // OC-0008: setMicrophoneEnabled above can block for seconds on the
+    // browser's mic-permission prompt. If a newer session claimed `_room`
+    // while this call was suspended there (the user switched channels, or an
+    // auto-reconnect installed a fresh room), the writes below re-read
+    // `this._room` fresh (applyMicMuteState) instead of the `room` captured
+    // at the top of this call — applying THIS call's stale muted/deafened
+    // decision to that newer room would mute/unmute or resubscribe audio on
+    // a session that never asked for it. Bail out once the captured room is
+    // no longer the live one; the newer session owns its own state from here.
+    if (this._room !== room) {
+      log.info("restoreLocalVoiceState: superseded mid-call — discarding stale mute/deafen state");
+      return;
     }
 
     // Always enforce mute at the track level even if no pipeline exists yet.
@@ -1381,6 +1439,13 @@ export class LiveKitSession {
     this.clearTokenRefreshTimer();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
+    // OC-0042: bump first, mirroring doDisableCamera/doDisableScreenshare —
+    // a concurrent enableCamera()/enableScreenshare() still awaiting device
+    // acquisition (getUserMedia/getDisplayMedia/publishTrack) when the user
+    // leaves voice must detect it was superseded and discard its track
+    // instead of publishing onto the room this leave already disconnected.
+    bumpGeneration(this._cameraState);
+    bumpGeneration(this._screenState);
     // Clean up manually published tracks.
     stopManualCameraTrack(this._cameraState, this._room);
     stopManualScreenTracks(this._screenState, this._room);

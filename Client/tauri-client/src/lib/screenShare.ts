@@ -161,7 +161,10 @@ interface GenerationGuarded {
   generation?: number;
 }
 
-function bumpGeneration(state: GenerationGuarded): void {
+/** Exported so callers that stop manual tracks outside disableCamera/
+ *  disableScreenshare (leaveVoice, teardownForReconnect) can supersede an
+ *  in-flight enable() the same way — see the doc comment above. */
+export function bumpGeneration(state: GenerationGuarded): void {
   state.generation = (state.generation ?? 0) + 1;
 }
 

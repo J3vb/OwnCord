@@ -27,6 +27,7 @@ const mockRoom = vi.hoisted(() => ({
     setCameraEnabled: vi.fn().mockResolvedValue(undefined),
     getTrackPublication: vi.fn().mockReturnValue(undefined),
     unpublishTrack: vi.fn().mockResolvedValue(undefined),
+    publishTrack: vi.fn().mockResolvedValue(undefined),
     trackPublications: new Map(),
     identity: "user-1",
   },
@@ -189,6 +190,7 @@ globalThis.Worker = vi.fn(function (this: { terminate: () => void }) {
 }) as unknown as typeof Worker;
 
 // Now import
+import { createLocalVideoTrack } from "livekit-client";
 import {
   parseUserId,
   LiveKitSession,
@@ -1224,6 +1226,74 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("leaveVoice camera/screenshare generation guard (OC-0042)", () => {
+    it("discards a camera track whose device-acquisition await resolves after leaveVoice() ran", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      let resolveTrack!: (t: { kind: string; mediaStreamTrack: unknown; stop: () => void }) => void;
+      (createLocalVideoTrack as any).mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveTrack = resolve;
+        }),
+      );
+
+      // enableCamera() captures room + the pre-bump generation, then blocks
+      // on the camera permission prompt (createLocalVideoTrack).
+      const enabling = session.enableCamera();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The user leaves voice while that prompt is still pending.
+      session.leaveVoice(false);
+
+      // Permission is granted after the leave.
+      resolveTrack({ kind: "video", mediaStreamTrack: {}, stop: vi.fn() });
+      await enabling;
+
+      // Without a generation bump in leaveVoice(), the stale enable would
+      // still publish onto the room leaveVoice() already disconnected.
+      expect(mockRoom.localParticipant.publishTrack).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("teardownForReconnect camera/screenshare generation guard (OC-0080)", () => {
+    it("discards a camera track whose device-acquisition await resolves after an unexpected disconnect", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(disconnectedHandler).toBeDefined();
+
+      let resolveTrack!: (t: { kind: string; mediaStreamTrack: unknown; stop: () => void }) => void;
+      (createLocalVideoTrack as any).mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveTrack = resolve;
+        }),
+      );
+
+      const enabling = session.enableCamera();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // An unexpected disconnect fires teardownForReconnect while the camera
+      // permission prompt is still pending.
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      resolveTrack({ kind: "video", mediaStreamTrack: {}, stop: vi.fn() });
+      await enabling;
+
+      // Without a generation bump in teardownForReconnect, the stale enable
+      // would publish onto the room being torn down for auto-reconnect.
+      expect(mockRoom.localParticipant.publishTrack).not.toHaveBeenCalled();
+    });
+  });
+
   describe("handleDisconnected during initial connect", () => {
     it("does not null the room when connecting flag is true", async () => {
       session.setServerHost("localhost:7880");
@@ -1988,6 +2058,67 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect(setListenOnly).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("restoreLocalVoiceState supersession guard (OC-0008)", () => {
+    it("does not apply a stale mute decision to a newer session's room", async () => {
+      mockVoiceState.localMuted = true;
+      mockVoiceState.localDeafened = false;
+
+      let resolveMic!: () => void;
+      const roomA = {
+        localParticipant: {
+          setMicrophoneEnabled: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                resolveMic = resolve;
+              }),
+          ),
+        },
+        removeAllListeners: vi.fn(),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      const roomB = {
+        localParticipant: {
+          setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
+        },
+        removeAllListeners: vi.fn(),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as any;
+
+      (session as any)._state = {
+        type: "connected",
+        room: roomA,
+        channelId: 1,
+        latestToken: "token-a",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+
+      const restoring = (session as any).restoreLocalVoiceState("join");
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(roomA.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+
+      // A newer session takes over with a DIFFERENT room (e.g. the user
+      // switched channels while channel A's mic-permission call was pending).
+      (session as any)._state = {
+        type: "connected",
+        room: roomB,
+        channelId: 2,
+        latestToken: "token-b",
+        lastUrl: "/livekit",
+        lastDirectUrl: undefined,
+      };
+
+      resolveMic();
+      await restoring;
+
+      // Channel A's stale muted=true decision must not touch room B — that
+      // is exactly what applyMicMuteState(true) would do by re-reading
+      // `this._room` fresh instead of the room this call captured.
+      expect(roomB.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
     });
   });
 
@@ -2894,6 +3025,73 @@ describe("LiveKitSession", () => {
 
       expect(mockRoom.disconnect).toHaveBeenCalled();
       expect((session as any)._state.type).not.toBe("connected");
+    });
+  });
+
+  describe("attemptAutoReconnect tail supersession guard (OC-0009)", () => {
+    // reconnectSuperseded() is only checked up through room.connect(); once
+    // the success branch sets state to "connected" it stops being usable
+    // (state is legitimately no longer "reconnecting" for a still-current
+    // attempt too). The tail must instead recheck via isStateConnected(),
+    // the same helper connectAndSetup's post-connect checkpoints use.
+    it("does not touch a newer session's timer or send a stale token refresh when superseded mid-tail", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const sendSpy = vi.fn();
+      session.setWsClient({ send: sendSpy } as any);
+
+      let resolveMic!: () => void;
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveMic = resolve;
+          }),
+      );
+      const startTimerSpy = vi.spyOn(session as any, "startTokenRefreshTimer");
+
+      const ac = new AbortController();
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      // Pass the reconnect delay and let the attempt reach "connected" for
+      // channel 5, where it stalls inside restoreLocalVoiceState's mic-permission await.
+      await vi.advanceTimersByTimeAsync(3100);
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.channelId).toBe(5);
+
+      // A newer join supersedes it: the user switched to channel 9 while
+      // channel 5's reconnect tail was still stalled.
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 9,
+        latestToken: "token-9",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+      };
+      sendSpy.mockClear();
+
+      resolveMic();
+      await reconnectPromise;
+
+      // The stale channel-5 tail must not re-arm the shared timer or send a
+      // token-refresh request against channel 9's live session.
+      expect(startTimerSpy).not.toHaveBeenCalled();
+      expect(sendSpy).not.toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+
+      startTimerSpy.mockRestore();
     });
   });
 
