@@ -152,8 +152,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 
 	members, err := database.ListMembers(ctx)
 	if err != nil {
-		slog.Warn("buildReady ListMembers", "err", err)
-		members = []db.MemberSummary{}
+		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}
 	members = h.presentableMembers(members, userID)
 
@@ -187,8 +186,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	// Per-user unread counts.
 	unreadMap, err := database.GetChannelUnreadCounts(ctx, userID)
 	if err != nil {
-		slog.Warn("buildReady GetChannelUnreadCounts", "err", err)
-		unreadMap = map[int64]db.ChannelUnread{}
+		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
 	// Build protocol-compliant channel objects (strip extra fields).
@@ -241,8 +239,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	// this a DM voice call's voice_state rows would never make it into ready.
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
-		slog.Warn("buildReady GetUserDMChannels", "err", err)
-		dmChannels = []db.DMChannelInfo{}
+		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
 	}
 	// GetUserDMChannels computes unread from read_states but carries no mention
 	// count, so a DM mention badge used to vanish on every reconnect. The
