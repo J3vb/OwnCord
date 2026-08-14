@@ -25,7 +25,7 @@ import { authStore } from "@stores/auth.store";
 /**
  * Stateful keyring double for the legacy-migration tests: a Map keyed by the
  * exact `host` string each command receives (the scoped account
- * `chat.example:1` and the legacy account `chat.example` are just different
+ * `1@chat.example` and the legacy account `chat.example` are just different
  * keys in the same map), so save/delete on one account cannot be confused
  * with another the way a host-agnostic mock would.
  */
@@ -169,7 +169,7 @@ describe("getOrCreateIdentityKeyPair", () => {
     expect(saveCall).toBeDefined();
     // Scoped by host AND user id (B3-3) — not just host — so two accounts
     // signed into the same host never share a keyring blob.
-    expect((saveCall![1] as { host: string }).host).toBe("chat.example:1");
+    expect((saveCall![1] as { host: string }).host).toBe("1@chat.example");
   });
 
   it("reloads the persisted keypair on subsequent logins (no regenerate)", async () => {
@@ -251,6 +251,26 @@ describe("getOrCreateIdentityKeyPair", () => {
     const userA = await getOrCreateIdentityKeyPair("chat.example", 1);
     const userB = await getOrCreateIdentityKeyPair("chat.example", 2);
     expect(await exportPublicKey(userB.publicKey)).not.toBe(await exportPublicKey(userA.publicKey));
+  });
+
+  it("[OC-0118] a scoped host+userId account never collides with a legacy host-only account for a DIFFERENT host", async () => {
+    // Pre-B3-3 install on some other server reachable as "chat.example:8443"
+    // (host string carries an explicit port) stored its identity key under
+    // the legacy host-only keyring account `identity:chat.example:8443`. A
+    // completely different server reachable as "chat.example" (port 443)
+    // signs in as the user whose id happens to be 8443:
+    // identityScopeKey("chat.example", 8443) must NOT produce the same
+    // string "chat.example:8443" as that unrelated legacy account, or this
+    // login silently adopts (and later re-publishes) the other server's
+    // identity private key.
+    const otherServerLegacyKey = await generateIdentityKeyPair();
+    const otherServerLegacyBlob = await exportIdentityKeyPair(otherServerLegacyKey.privateKey);
+    const otherServerLegacyPub = await exportPublicKey(otherServerLegacyKey.publicKey);
+    keyringDouble({ "chat.example:8443": otherServerLegacyBlob });
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 8443);
+
+    expect(await exportPublicKey(kp.publicKey)).not.toBe(otherServerLegacyPub);
   });
 
   it("reports a credential store that accepts the write but drops the value", async () => {
@@ -446,7 +466,7 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
     // The legacy key must be untouched: no adopt-then-delete into a bogus
     // host:0 scope.
     expect(store.get("chat.example")).toBe(legacyBlob);
-    expect(store.has("chat.example:0")).toBe(false);
+    expect(store.has("0@chat.example")).toBe(false);
   });
 });
 
@@ -460,7 +480,7 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
     const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(await exportPublicKey(kp.publicKey)).toBe(legacyPub);
-    expect(store.get("chat.example:1")).toBe(legacyBlob);
+    expect(store.get("1@chat.example")).toBe(legacyBlob);
     // Deleted so it can never be adopted a second time.
     expect(store.has("chat.example")).toBe(false);
   });
@@ -476,8 +496,8 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
 
     const second = await getOrCreateIdentityKeyPair("chat.example", 2);
     expect(await exportPublicKey(second.publicKey)).not.toBe(legacyPub);
-    expect(store.get("chat.example:2")).toBeDefined();
-    expect(store.get("chat.example:2")).not.toBe(legacyBlob);
+    expect(store.get("2@chat.example")).toBeDefined();
+    expect(store.get("2@chat.example")).not.toBe(legacyBlob);
   });
 
   it("falls back to fresh generation, without throwing, when the legacy blob is corrupt", async () => {
@@ -486,8 +506,8 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
     const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(kp.publicKey).toBeDefined();
-    expect(store.get("chat.example:1")).toBeDefined();
-    expect(store.get("chat.example:1")).not.toBe("!!not-valid-jwk!!");
+    expect(store.get("1@chat.example")).toBeDefined();
+    expect(store.get("1@chat.example")).not.toBe("!!not-valid-jwk!!");
   });
 
   it("generates fresh, with no delete attempt, when there is no legacy key either (first login)", async () => {
@@ -512,6 +532,6 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
     await getOrCreateIdentityKeyPair("chat.example", 1);
 
     expect(store.get("chat.example")).toBe(legacyBlob);
-    expect(store.has("chat.example:1")).toBe(false);
+    expect(store.has("1@chat.example")).toBe(false);
   });
 });
