@@ -346,6 +346,16 @@ func (h *Hub) bumpVisibilityWatermark() {
 	}
 }
 
+// MarkVisibilityChanged bumps the visibility watermark. It is the exported
+// entry point REST handlers (api.markDMVisibilityChanged, reached via a
+// dmVisibilityMarker type assertion) use to force the same full-resync
+// guarantee for an unsequenced, targeted DM event that the WS-side emitter of
+// the same event (emit.go DMChannelOpenEvent) already gets via
+// bumpVisibilityWatermark directly.
+func (h *Hub) MarkVisibilityChanged() {
+	h.bumpVisibilityWatermark()
+}
+
 // IsUserConnected returns true if a client with the given userID is already
 // registered in the hub. Safe to call from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {

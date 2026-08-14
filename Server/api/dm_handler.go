@@ -24,15 +24,19 @@ type DMBroadcaster interface {
 // warm-reconnects across the gap takes the full-ready path instead of a
 // sequenced-only replay that can never redeliver it. Reached by type
 // assertion rather than being added to DMBroadcaster directly so the
-// SendToUser-only test doubles in this package keep working.
-//
-// NOTE: *ws.Hub does not export this yet — its watermark bump
-// (ws/hub.go bumpVisibilityWatermark, the same one ws/emit.go forces for the
-// WS-side dm_channel_open) is unexported, so until a one-line exported
-// wrapper lands the assertion below misses and this is a no-op.
+// SendToUser-only test doubles in this package keep working. Satisfied in
+// production by ws.Hub.MarkVisibilityChanged, which forwards to the same
+// bumpVisibilityWatermark the WS-side dm_channel_open emitter uses
+// (ws/emit.go).
 type dmVisibilityMarker interface {
 	MarkVisibilityChanged()
 }
+
+// The production broadcaster must keep satisfying it: a type assertion that
+// silently stops matching would turn the watermark bump back into the no-op
+// this fixed, with nothing failing to say so — mirrors the dmVoiceEvictor
+// assertion below for its sibling capability.
+var _ dmVisibilityMarker = (*ws.Hub)(nil)
 
 // markDMVisibilityChanged bumps the visibility watermark if broadcaster
 // supports it. dm_channel_open/close are unsequenced and targeted, so a
@@ -253,6 +257,12 @@ func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMB
 	if broadcaster == nil || len(targetIDs) == 0 {
 		return
 	}
+	// The mutation that led here has already committed, so this fan-out must
+	// survive the caller's request context being cancelled after that point
+	// (client disconnect mid-handler) — otherwise every DMSummaryFor lookup
+	// below fails with context.Canceled and no participant, including ones
+	// otherwise unaffected by the cancellation, ever receives the open.
+	ctx = context.WithoutCancel(ctx)
 	// dm_channel_open is unsequenced and targeted — a recipient who is
 	// offline or drops the connection right now can never have it replayed
 	// to them by the ordinary seq-based resume path, so a warm reconnect must
