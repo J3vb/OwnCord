@@ -487,9 +487,11 @@ function buildVoiceAudioTabInner(
     startCameraPreview(savedVideoDevice);
   }
 
-  signal.addEventListener("abort", () => {
-    stopCameraPreview();
-  });
+  // Camera teardown on overlay close is already covered by the factory's
+  // single signal.addEventListener("abort", cleanupMic) — registering here
+  // too would add one more permanent listener (and retain this build's DOM
+  // subtree via closure) every time the tab is rebuilt, since `signal` is
+  // shared for the whole overlay lifetime, not per-build.
 
   // Start mic level monitoring for visual feedback
   void (async () => {
