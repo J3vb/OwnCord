@@ -893,6 +893,19 @@
 }
 
 /* ── Messages ── */
+/* Non-scrolling frame around the message scroller. The floating controls
+   (scroll-to-bottom button, Jump to Present pill) anchor to this box: an
+   absolutely positioned box whose containing block is the scroller itself is
+   part of its scrollable overflow and translates with the content, so the
+   controls need a positioned ancestor outside the scroller to stay pinned to
+   the viewport edge. */
+.messages-region {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
 .messages-container {
   flex: 1;
   overflow-y: auto;

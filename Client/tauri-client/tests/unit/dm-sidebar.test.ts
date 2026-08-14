@@ -266,6 +266,68 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
+  it("keeps the presence dot when the fetched avatar image is swapped in", async () => {
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,CCC");
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ avatar: "/api/v1/files/42", status: "online" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
+    // Dot and letter are both there before the bytes arrive.
+    expect(avatar.querySelector(".dm-status")).not.toBeNull();
+    expect(avatar.textContent).toBe("A");
+
+    await vi.waitFor(() => {
+      expect(avatar.querySelector("img")).not.toBeNull();
+    });
+
+    // The image replaces the letter only — presence survives the swap.
+    const dot = avatar.querySelector(".dm-status") as HTMLSpanElement;
+    expect(dot).not.toBeNull();
+    expect(dot.style.background).toBe("var(--green)");
+    expect(avatar.textContent).toBe("");
+
+    sidebar.destroy?.();
+  });
+
+  it("swaps fetched images into group faces, keeping the letter for members without one", async () => {
+    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,DDD");
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({
+          channelId: 9,
+          isGroup: true,
+          username: "Weekend Plans",
+          participants: [
+            { id: 2, username: "Bob", avatar: "/api/v1/files/7" },
+            { id: 3, username: "Carol", avatar: null },
+          ],
+        }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    const faces = container.querySelectorAll(".dm-avatar-face");
+    expect(faces.length).toBe(2);
+    expect(faces[0]!.textContent).toBe("B");
+
+    await vi.waitFor(() => {
+      expect(faces[0]!.querySelector("img")).not.toBeNull();
+    });
+    expect(faces[0]!.textContent).toBe("");
+    // Carol has no avatar: her letter stays and nothing was fetched for her.
+    expect(faces[1]!.textContent).toBe("C");
+    expect(faces[1]!.querySelector("img")).toBeNull();
+    expect(fetchImageAsDataUrl).toHaveBeenCalledTimes(1);
+
+    sidebar.destroy?.();
+  });
+
   it("marks active conversation with active class", () => {
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ active: true })],

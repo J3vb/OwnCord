@@ -165,9 +165,12 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
 
   log.debug("fetchOgMeta START", url.slice(0, 100));
   const promise = (async (): Promise<OgMeta> => {
+    // The abort timer stays armed until the body is fully read (cleared in the
+    // finally below), so the 5 s timeout bounds the body download as well as
+    // the header phase — an unbounded stream is aborted, not buffered.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
       const fetchOpts: RequestInit = {
         signal: controller.signal,
         headers: {
@@ -179,7 +182,6 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       // Self-signed servers are handled by the Rust TLS proxy for WebSocket;
       // OG preview fetches should respect standard certificate validation.
       const res = await tauriFetch(url, fetchOpts);
-      clearTimeout(timer);
 
       if (!res.ok) {
         if (generation !== embedCacheGeneration) {
@@ -213,6 +215,8 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       }
       ogCache.set(url, EMPTY_OG);
       return EMPTY_OG;
+    } finally {
+      clearTimeout(timer);
     }
   })();
 

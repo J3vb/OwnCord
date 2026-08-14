@@ -243,6 +243,11 @@ export type MessageListComponent = MountableComponent & {
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const ac = new AbortController();
   const unsubscribers: Array<() => void> = [];
+  /** Non-scrolling frame around the scroller; what is actually appended to
+   *  the parent. The floating controls anchor to this box — an absolutely
+   *  positioned box whose containing block is the scroller itself sits in
+   *  its scrollable overflow and translates with the content. */
+  let region: HTMLDivElement | null = null;
   let root: HTMLDivElement | null = null;
   let wasAtBottom = true;
 
@@ -492,12 +497,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const start = Math.max(0, firstVisible - OVERSCAN);
     const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
 
-    // Only rebuild DOM if explicitly requested by renderAll (which sets
-    // renderedStart to -1). Scroll-driven renderWindow calls only update
-    // spacers — never rebuild content. This prevents the height oscillation
-    // loop where images loading → height change → range recalculation →
-    // DOM rebuild → images reload → repeat forever.
-    if (renderedStart < 0) {
+    // Rebuild the DOM when explicitly requested by renderAll (which sets
+    // renderedStart to -1) or when the target range has left the rendered
+    // window — scrolling past the overscan must materialize the rows the
+    // spacers are standing in for. When the range is already fully rendered
+    // this is a no-op, which (together with the rebuild rate limiter below)
+    // prevents the height oscillation loop where images loading → height
+    // change → range recalculation → DOM rebuild → images reload → repeat.
+    const rangeAlreadyRendered = renderedStart >= 0 && start >= renderedStart && end <= renderedEnd;
+    if (!rangeAlreadyRendered) {
       // Rate-limit DOM rebuilds only (expensive path).
       // Scroll-driven spacer updates are cheap and don't need limiting.
       renderWindowCount++;
@@ -512,7 +520,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         }, 2000);
       }
 
-      // Full rebuild requested by renderAll
+      // Full rebuild: requested by renderAll, or the window is following a
+      // scroll into a region that is not rendered yet.
       log.debug("renderWindow REBUILD", { start, end });
 
       // Measure current elements before replacing.
@@ -534,9 +543,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       measureRendered();
       updateSpacers();
     } else {
-      // Scroll-driven: no-op. The ResizeObserver handles measurement and
-      // spacer updates when element sizes change. Calling measureRendered +
-      // updateSpacers here creates an infinite feedback loop:
+      // Target range already fully rendered: no-op. The ResizeObserver
+      // handles measurement and spacer updates when element sizes change.
+      // Calling measureRendered + updateSpacers here creates an infinite
+      // feedback loop:
       //   spacer change → scrollHeight change → scroll event → renderWindow
       //   → spacer change → ...
     }
@@ -776,6 +786,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function mount(parentContainer: Element): void {
+    region = createElement("div", { class: "messages-region" });
     root = createElement("div", { class: "messages-container" });
 
     topSpacer = createElement("div", { class: "virtual-spacer-top" });
@@ -807,8 +818,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     root.appendChild(contentContainer);
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
-    root.appendChild(scrollToBottomBtn);
-    root.appendChild(jumpToPresentPill);
+    region.appendChild(root);
+    region.appendChild(scrollToBottomBtn);
+    region.appendChild(jumpToPresentPill);
 
     root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
@@ -847,7 +859,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     });
     resizeObserver.observe(contentContainer);
 
-    parentContainer.appendChild(root);
+    parentContainer.appendChild(region);
 
     renderAll();
     updateJumpToPresentPill();
@@ -933,10 +945,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     heightCache.clear();
     tree = null;
     releaseTrackedMedia();
-    if (root !== null) {
-      root.remove();
-      root = null;
+    if (region !== null) {
+      region.remove();
+      region = null;
     }
+    root = null;
     contentContainer = null;
     topSpacer = null;
     bottomSpacer = null;

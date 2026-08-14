@@ -312,6 +312,101 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── Emptied edits are refused, never submitted ──
+
+  it("does not submit an emptied edit while an attachment is queued", async () => {
+    const uploadResult = { id: "srv-9", url: "http://server/pic.png", filename: "pic.png" };
+    const onUploadFile = vi.fn(async () => uploadResult);
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    // Queue an attachment first, then enter edit mode.
+    const testFile = new File(["image data"], "pic.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+    });
+    // Wait for the upload to fully settle so the send is not blocked by the
+    // uploads-in-flight guard instead of the empty-content one.
+    const previewBar = container.querySelector(".attachment-preview-bar");
+    await vi.waitFor(() => {
+      expect(previewBar!.querySelector(".uploading")).toBeNull();
+    });
+
+    comp.startEdit(77, "old content");
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "";
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    // Same as with no attachment queued: the empty edit is refused and edit
+    // mode survives.
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    const bars = container.querySelectorAll(".reply-bar");
+    const editBar = bars[1] as HTMLDivElement;
+    expect(editBar.classList.contains("visible")).toBe(true);
+
+    // Typing real content and sending again still submits the edit.
+    textarea.value = "fixed content";
+    sendBtn.click();
+    expect(opts.onEditMessage).toHaveBeenCalledWith(77, "fixed content");
+
+    comp.destroy?.();
+  });
+
+  it("emptied edit with no attachment queued is a no-op that stays in edit mode", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.startEdit(88, "old content");
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "";
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onEditMessage).not.toHaveBeenCalled();
+    expect(opts.onSend).not.toHaveBeenCalled();
+    const bars = container.querySelectorAll(".reply-bar");
+    const editBar = bars[1] as HTMLDivElement;
+    expect(editBar.classList.contains("visible")).toBe(true);
+
+    comp.destroy?.();
+  });
+
+  it("sends an attachment-only message with no text", async () => {
+    const uploadResult = { id: "srv-7", url: "http://server/pic.png", filename: "pic.png" };
+    const onUploadFile = vi.fn(async () => uploadResult);
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const testFile = new File(["image data"], "pic.png", { type: "image/png" });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(onUploadFile).toHaveBeenCalledWith(testFile);
+    });
+    const previewBar = container.querySelector(".attachment-preview-bar");
+    await vi.waitFor(() => {
+      expect(previewBar!.querySelector(".uploading")).toBeNull();
+    });
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+
+    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-7"]);
+
+    comp.destroy?.();
+  });
+
   // ── Reply context is included in send ──
 
   it("sending with reply includes replyTo messageId", () => {

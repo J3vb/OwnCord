@@ -252,6 +252,32 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
+  it("rebuilds the virtual window when scrolling outside the rendered range", async () => {
+    setHasMore(1, false);
+    const many = Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, many);
+    msgList.mount(container);
+
+    // renderAll positions the window at the tail; rows near the top are
+    // virtualized away behind the top spacer.
+    expect(container.querySelector('[data-testid="message-1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-300"]')).not.toBeNull();
+
+    // mount's trailing scrollToBottom leaves scrollTop at 0 in jsdom
+    // (scrollHeight is 0 without layout), so the scroll position now sits at
+    // the very top of the list while the rendered window is still the tail —
+    // exactly the state a user scrolling far past the overscan produces.
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    expect(root.scrollTop).toBe(0);
+    root.dispatchEvent(new Event("scroll"));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    // The window must follow the scroll: rows at the top render, and the old
+    // tail rows are released back to the spacers.
+    expect(container.querySelector('[data-testid="message-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="message-300"]')).toBeNull();
+  });
+
   it("renders day dividers between messages on different days", () => {
     const messages = [
       makeMessage({ id: 1, timestamp: "2024-01-15T12:00:00Z" }),
@@ -329,6 +355,40 @@ describe("MessageList", () => {
     const btn = container.querySelector(".scroll-to-bottom-btn");
     expect(btn).not.toBeNull();
     expect(btn?.textContent).toBe("\u2193");
+  });
+
+  it("anchors the floating controls outside the scroller so they cannot scroll away", () => {
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const scroller = container.querySelector(".messages-container") as HTMLDivElement;
+    const btn = container.querySelector(".scroll-to-bottom-btn") as HTMLButtonElement;
+    const pill = container.querySelector('[data-testid="jump-to-present"]') as HTMLButtonElement;
+    expect(scroller).not.toBeNull();
+    expect(btn).not.toBeNull();
+    expect(pill).not.toBeNull();
+
+    // Anything inside the overflow scroller is part of its scrollable
+    // overflow and translates with the content, so the controls must not be
+    // descendants of it.
+    expect(scroller.contains(btn)).toBe(false);
+    expect(scroller.contains(pill)).toBe(false);
+
+    // They anchor to the component's non-scrolling frame around the scroller
+    // (the positioned containing block that keeps them pinned to the
+    // viewport edge).
+    const region = scroller.parentElement as HTMLDivElement;
+    expect(region.classList.contains("messages-region")).toBe(true);
+    expect(container.contains(region)).toBe(true);
+    expect(btn.parentElement).toBe(region);
+    expect(pill.parentElement).toBe(region);
+
+    // destroy removes the frame — and with it the controls — not just the
+    // scroller.
+    msgList.destroy?.();
+    expect(container.querySelector(".messages-region")).toBeNull();
+    expect(container.querySelector(".scroll-to-bottom-btn")).toBeNull();
+    expect(container.querySelector('[data-testid="jump-to-present"]')).toBeNull();
   });
 
   it("calls onScrollTop when scrolling near the top and there are more messages", () => {

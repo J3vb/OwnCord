@@ -25,6 +25,7 @@ import {
   removeOptimistic,
   reattachToPresent,
   isWindowDetached,
+  invalidateChannelMessageWindow,
 } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
@@ -174,6 +175,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // open) — it only repairs the server's view.
     if (previousChannelId !== null) {
       markChannelRead(previousChannelId);
+      // The server only delivers live broadcasts for the focused channel, so
+      // the window being left stops updating the moment focus moves here.
+      // Drop its loaded flag so the next visit refetches the live tail
+      // instead of rendering the old snapshot as current — setMessages'
+      // merge preserves any pending/failed rows across that refetch.
+      invalidateChannelMessageWindow(previousChannelId);
     }
 
     log.info("Switching channel", { channelId, channelName });

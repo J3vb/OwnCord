@@ -324,6 +324,42 @@ describe("enableCamera", () => {
     // resurrect it.
     expect(voiceStore.getState().localCamera).toBe(false);
   });
+
+  it("does not announce the camera when disableCamera runs during the publish round-trip", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const track = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+    let resolvePublish!: () => void;
+    rig.publishTrack.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolvePublish = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(rig.publishTrack).toHaveBeenCalled();
+    });
+    // A concurrent disable runs to completion while publishTrack is still in
+    // flight — it announces voice_camera(false) and stops the track.
+    await disableCamera(state, deps);
+    resolvePublish();
+    await enabling;
+
+    // The superseded enable must not announce voice_camera(true) after the
+    // disable's voice_camera(false), or every peer renders a camera tile for
+    // a stopped track while the local store says off.
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(track.mediaStreamTrack);
+    expect(track.stop).toHaveBeenCalled();
+    expect(state.manualCameraTrack).toBeNull();
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────
@@ -588,6 +624,48 @@ describe("enableScreenshare", () => {
 
     expect(rig.publishTrack).not.toHaveBeenCalled();
     expect(video.stop).toHaveBeenCalled();
+    expect(state.manualScreenTracks).toEqual([]);
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+
+  it("does not announce the share when disableScreenshare runs during the publish loop", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    let resolveFirstPublish!: () => void;
+    rig.publishTrack
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveFirstPublish = resolve;
+        }),
+      )
+      .mockResolvedValue(undefined);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    const enabling = enableScreenshare(state, deps);
+    await vi.waitFor(() => {
+      expect(rig.publishTrack).toHaveBeenCalledTimes(1);
+    });
+    // A concurrent disable runs to completion while the first publish is
+    // still in flight — it announces voice_screenshare(false), stops both
+    // tracks and empties state.manualScreenTracks.
+    await disableScreenshare(state, deps);
+    resolveFirstPublish();
+    await enabling;
+
+    // The superseded enable must not publish the remaining track — after the
+    // disable emptied the state, only this attempt can still reach it — and
+    // must not announce voice_screenshare(true) after the disable's false.
+    expect(rig.publishTrack).toHaveBeenCalledTimes(1);
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: true },
+    });
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+    expect(video.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([]);
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });

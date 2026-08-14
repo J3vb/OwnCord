@@ -1758,7 +1758,10 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onCreate callback shows error toast on API failure", async () => {
+    // The modal's own catch is what re-enables the submit button and renders
+    // the inline error, so the callback must reject on failure — a swallowed
+    // error leaves the modal disabled on "Creating..." with no way to retry.
+    it("onCreate rejects and shows error toast on API failure", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminCreateChannel as MockedFn).mockRejectedValue(new Error("Create failed"));
@@ -1771,14 +1774,18 @@ describe("SidebarArea", () => {
       channelCallArgs.onCreateChannel("General");
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onCreate({ name: "test", type: "text" });
+      await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toThrow(
+        "Create failed",
+      );
 
       expect(mockShow).toHaveBeenCalledWith("Create failed", "error");
+      // The modal stays open so the user can fix the input and retry.
+      expect(getMockDestroy(createCreateChannelModal as MockedFn)).not.toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onCreate shows generic error for non-Error exceptions", async () => {
+    it("onCreate rejects with the original value and shows generic toast for non-Error exceptions", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminCreateChannel as MockedFn).mockRejectedValue("string error");
@@ -1791,7 +1798,9 @@ describe("SidebarArea", () => {
       channelCallArgs.onCreateChannel("General");
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onCreate({ name: "test", type: "text" });
+      await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toBe(
+        "string error",
+      );
 
       expect(mockShow).toHaveBeenCalledWith("Failed to create channel", "error");
 
@@ -1831,7 +1840,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onSave shows error toast on edit API failure", async () => {
+    it("onSave rejects and shows error toast on edit API failure", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminUpdateChannel as MockedFn).mockRejectedValue(new Error("Update failed"));
@@ -1844,14 +1853,15 @@ describe("SidebarArea", () => {
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onSave({ name: "updated" });
+      await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toThrow("Update failed");
 
       expect(mockShow).toHaveBeenCalledWith("Update failed", "error");
+      expect(getMockDestroy(createEditChannelModal as MockedFn)).not.toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onSave shows generic error for non-Error exceptions on edit", async () => {
+    it("onSave rejects with the original value and shows generic toast for non-Error exceptions on edit", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminUpdateChannel as MockedFn).mockRejectedValue(42);
@@ -1864,7 +1874,7 @@ describe("SidebarArea", () => {
       channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
 
       const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onSave({ name: "updated" });
+      await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toBe(42);
 
       expect(mockShow).toHaveBeenCalledWith("Failed to update channel", "error");
 
@@ -1903,7 +1913,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onConfirm shows error toast on delete API failure", async () => {
+    it("onConfirm rejects and shows error toast on delete API failure", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminDeleteChannel as MockedFn).mockRejectedValue(new Error("Delete failed"));
@@ -1916,14 +1926,15 @@ describe("SidebarArea", () => {
       channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
 
       const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onConfirm();
+      await expect(modalCallArgs.onConfirm()).rejects.toThrow("Delete failed");
 
       expect(mockShow).toHaveBeenCalledWith("Delete failed", "error");
+      expect(getMockDestroy(createDeleteChannelModal as MockedFn)).not.toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onConfirm shows generic error for non-Error exceptions on delete", async () => {
+    it("onConfirm rejects with the original value and shows generic toast for non-Error exceptions on delete", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminDeleteChannel as MockedFn).mockRejectedValue(42);
@@ -1936,7 +1947,7 @@ describe("SidebarArea", () => {
       channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
 
       const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onConfirm();
+      await expect(modalCallArgs.onConfirm()).rejects.toBe(42);
 
       expect(mockShow).toHaveBeenCalledWith("Failed to delete channel", "error");
 

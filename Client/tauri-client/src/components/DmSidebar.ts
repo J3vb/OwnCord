@@ -83,7 +83,10 @@ const STATUS_COLORS: Record<string, string> = {
  * directly.
  */
 function paintAvatar(el: HTMLElement, avatar: string | null, label: string): void {
-  setText(el, label.charAt(0).toUpperCase());
+  // The letter lives in its own node so the swap below can remove just it —
+  // anything else in the circle (the 1:1 presence dot) must survive the image.
+  const letter = document.createTextNode(label.charAt(0).toUpperCase());
+  el.appendChild(letter);
   if (!isRenderableAvatar(avatar)) return;
   const resolved = resolveServerUrl(avatar);
   void fetchImageAsDataUrl(resolved).then((dataUrl) => {
@@ -92,8 +95,8 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
-    el.textContent = "";
-    el.appendChild(img);
+    letter.remove();
+    el.insertBefore(img, el.firstChild);
   });
 }
 

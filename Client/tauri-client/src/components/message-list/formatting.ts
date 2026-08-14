@@ -78,7 +78,9 @@ export function formatMessageTimestamp(iso: string): string {
   const timeStr = CLOCK_TIME_FORMAT.format(date);
 
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
+  // Built from the calendar date, not todayStart - 24h: a DST-transition day
+  // is 23 or 25 hours long, and Date normalizes day 0 / negative days.
+  const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
   if (date >= todayStart) {
     return `Today at ${timeStr}`;

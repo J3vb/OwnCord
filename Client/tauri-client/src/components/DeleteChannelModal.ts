@@ -93,8 +93,14 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
         } catch (err) {
           errorEl.style.display = "block";
           setText(errorEl, err instanceof Error ? err.message : "Failed to delete channel");
-          deleteBtn.removeAttribute("disabled");
-          setText(deleteBtn, "Delete Channel");
+        } finally {
+          // Re-arm the button whether the caller rejected or handled the
+          // failure itself and resolved. A successful delete destroys the
+          // modal inside onConfirm, so the overlay is gone and this no-ops.
+          if (overlay?.isConnected === true) {
+            deleteBtn.removeAttribute("disabled");
+            setText(deleteBtn, "Delete Channel");
+          }
         }
       },
       { signal: ac.signal },

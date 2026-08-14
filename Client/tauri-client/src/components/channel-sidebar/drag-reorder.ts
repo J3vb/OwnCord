@@ -4,7 +4,7 @@
  * Gated on MANAGE_CHANNELS, like every other channel-management affordance.
  */
 
-import { updateChannelPosition } from "@stores/channels.store";
+import { channelsStore, updateChannelPosition } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { canManageChannels } from "@lib/permissions";
@@ -53,6 +53,39 @@ function releaseOwner(owner: AbortSignal): void {
   }
 }
 
+/** A sidebar re-render replaces the channel rows mid-drag
+ *  (ChannelSidebar.renderChannels() clears the list and rebuilds every
+ *  group), leaving the captured container detached — and detached rows
+ *  report all-zero rects, so no hit-test against them can succeed. Re-point
+ *  the drag at the dragged channel's live row (found by its stamped id), its
+ *  live container, and the store's current snapshot of that group, so the
+ *  drop still resolves. Returns false when no live row exists (e.g. the
+ *  channel was deleted or its category collapsed mid-drag). */
+function retargetDetachedDrag(drag: DragState): boolean {
+  if (drag.containerEl.isConnected) {
+    return true;
+  }
+  const row = document.querySelector<HTMLElement>(`[data-drag-channel-id="${drag.channelId}"]`);
+  const container = row?.closest<HTMLElement>(".category-channels-container") ?? null;
+  if (row === null || container === null) {
+    return false;
+  }
+  const byId = channelsStore.getState().channels;
+  const channels: Channel[] = [];
+  for (const item of container.querySelectorAll<HTMLElement>("[data-drag-channel-id]")) {
+    const ch = byId.get(Number(item.dataset.dragChannelId));
+    if (ch !== undefined) {
+      channels.push(ch);
+    }
+  }
+  drag.sourceEl.classList.remove("dragging");
+  drag.sourceEl = row;
+  drag.sourceEl.classList.add("dragging");
+  drag.containerEl = container;
+  drag.channels = channels;
+  return true;
+}
+
 export function ensureGlobalDragListeners(owner: AbortSignal): void {
   if (owner.aborted || listenerOwners.has(owner)) {
     return;
@@ -68,6 +101,9 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
     "mousemove",
     (e) => {
       if (activeDrag === null) {
+        return;
+      }
+      if (!retargetDetachedDrag(activeDrag)) {
         return;
       }
       // Clear old indicators
@@ -100,12 +136,20 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
       const drag = activeDrag;
       activeDrag = null;
 
+      // Re-target before cleanup so the classes are cleared from the live
+      // rows, not a detached subtree.
+      const retargeted = retargetDetachedDrag(drag);
+
       // Clean up visual state
       drag.sourceEl.classList.remove("dragging");
       document.body.classList.remove("channel-reordering");
       drag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
         x.classList.remove("channel-drop-indicator");
       });
+
+      if (!retargeted) {
+        return;
+      }
 
       // Find drop target
       const items = drag.containerEl.querySelectorAll("[data-drag-channel-id]");
@@ -149,6 +193,17 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
       // non-contiguous positions (interleaved with other categories), and
       // renumbering from 0 would stomp another category's slots.
       const slots = drag.channels.map((c) => c.position).sort((a, b) => a - b);
+      // The server does not enforce unique positions (newly created channels
+      // commonly all sit at 0), and zipping tied slots onto the new order
+      // would drop some or all of the moves. Nudge ties upward so every slot
+      // is distinct; already-distinct groups keep their exact range.
+      for (let i = 1; i < slots.length; i++) {
+        const prev = slots[i - 1];
+        const cur = slots[i];
+        if (prev !== undefined && cur !== undefined && cur <= prev) {
+          slots[i] = prev + 1;
+        }
+      }
       const reorders: ChannelReorderData[] = [];
       for (let i = 0; i < reorderedIds.length; i++) {
         const id = reorderedIds[i];

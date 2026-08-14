@@ -25,6 +25,8 @@ import {
   setChannelLoadError,
   getHistoryLoadState,
   invalidateLoadedMessageWindows,
+  invalidateChannelMessageWindow,
+  setAroundMessages,
 } from "../../src/stores/messages.store";
 import type {
   ChatMessagePayload,
@@ -1359,6 +1361,68 @@ describe("messages store", () => {
     it("is a no-op when no channel is loaded", () => {
       const before = messagesStore.getState();
       invalidateLoadedMessageWindows();
+      expect(messagesStore.getState()).toBe(before);
+    });
+  });
+
+  describe("invalidateChannelMessageWindow", () => {
+    it("drops only that channel's loaded flag and keeps its rows for instant re-render", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      setMessages(2, [makeMessageResponse({ id: 20, channel_id: 2 })], false);
+
+      invalidateChannelMessageWindow(1);
+
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(isChannelLoaded(2)).toBe(true);
+      // The old rows stay rendered until the refetched tail lands and merges.
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([10]);
+    });
+
+    it("lets the next tail fetch land: setMessages refreshes the window and re-marks it loaded", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      invalidateChannelMessageWindow(1);
+
+      // Wire order is newest-first; the refetched tail carries a message
+      // posted while the channel was not focused.
+      setMessages(1, [makeMessageResponse({ id: 11 }), makeMessageResponse({ id: 10 })], false);
+
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([10, 11]);
+    });
+
+    it("keeps a failed optimistic row across the invalidate-then-refetch cycle", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+
+      invalidateChannelMessageWindow(1);
+      setMessages(1, [makeMessageResponse({ id: 11 }), makeMessageResponse({ id: 10 })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual([10, 11, 0]);
+      expect(msgs[2]!.status).toBe("failed");
+    });
+
+    it("leaves the detached flag alone (setMessages clears it once the tail lands)", () => {
+      setAroundMessages(1, [makeMessageResponse({ id: 10 })], true, true);
+      expect(isWindowDetached(1)).toBe(true);
+
+      invalidateChannelMessageWindow(1);
+
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(isWindowDetached(1)).toBe(true);
+    });
+
+    it("is a no-op for a channel that is not loaded", () => {
+      const before = messagesStore.getState();
+      invalidateChannelMessageWindow(1);
       expect(messagesStore.getState()).toBe(before);
     });
   });
