@@ -163,17 +163,27 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
 
     listeners.forEach((cb) => cb(current));
 
-    // Debounced quality change notification (prevents toast spam on flapping)
+    // Debounced quality change notification (prevents toast spam on flapping).
+    // Only arm the timer when none is already pending — POLL_INTERVAL_MS (2000)
+    // is shorter than QUALITY_DEBOUNCE_MS (3000), so re-arming on every poll
+    // that still disagrees with lastQuality would push the deadline out
+    // forever and the timer would never fire. If quality returns to
+    // lastQuality before the timer elapses, cancel it instead.
     const newQuality = current.quality;
     if (newQuality !== lastQuality) {
-      if (qualityDebounceTimer !== null) clearTimeout(qualityDebounceTimer);
-      qualityDebounceTimer = setTimeout(() => {
-        if (current.quality !== lastQuality) {
-          const prevQuality = lastQuality;
-          lastQuality = current.quality;
-          qualityChangeListeners.forEach((cb) => cb(current.quality, prevQuality));
-        }
-      }, QUALITY_DEBOUNCE_MS);
+      if (qualityDebounceTimer === null) {
+        qualityDebounceTimer = setTimeout(() => {
+          qualityDebounceTimer = null;
+          if (current.quality !== lastQuality) {
+            const prevQuality = lastQuality;
+            lastQuality = current.quality;
+            qualityChangeListeners.forEach((cb) => cb(current.quality, prevQuality));
+          }
+        }, QUALITY_DEBOUNCE_MS);
+      }
+    } else if (qualityDebounceTimer !== null) {
+      clearTimeout(qualityDebounceTimer);
+      qualityDebounceTimer = null;
     }
   }
 
