@@ -5,6 +5,7 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
+  updateMemberProfile,
   updatePresence,
   setTyping,
   clearTyping,
@@ -187,6 +188,35 @@ describe("members store", () => {
       setMembers([MEMBER_ALICE]);
       const before = membersStore.getState();
       updateMemberRole(999, "admin");
+      expect(membersStore.getState()).toBe(before);
+    });
+  });
+
+  describe("updateMemberProfile", () => {
+    it("bumps roleRevision so MessageList's only members subscription re-renders", () => {
+      // MessageList subscribes solely to roleRevision (MessageList.ts:897-903)
+      // to know when to repaint rendered rows. A username/avatar/nickname
+      // change must bump it the same as every other mutator does, or a
+      // rename never repaints already-rendered messages.
+      setMembers([MEMBER_ALICE]);
+      const before = membersStore.getState().roleRevision ?? 0;
+      updateMemberProfile(1, { username: "alice2", avatar: "alice2.png" });
+      expect(membersStore.getState().roleRevision ?? 0).toBe(before + 1);
+    });
+
+    it("updates username, avatar, and displayName of an existing member", () => {
+      setMembers([MEMBER_ALICE]);
+      updateMemberProfile(1, { username: "alice2", avatar: "alice2.png", displayName: "Al" });
+      const member = membersStore.getState().members.get(1)!;
+      expect(member.username).toBe("alice2");
+      expect(member.avatar).toBe("alice2.png");
+      expect(member.displayName).toBe("Al");
+    });
+
+    it("returns same state for unknown userId", () => {
+      setMembers([MEMBER_ALICE]);
+      const before = membersStore.getState();
+      updateMemberProfile(999, { username: "ghost", avatar: null });
       expect(membersStore.getState()).toBe(before);
     });
   });

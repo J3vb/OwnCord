@@ -27,11 +27,13 @@ export interface Member {
 export interface MembersState {
   readonly members: ReadonlyMap<number, Member>;
   readonly typingUsers: ReadonlyMap<number, ReadonlySet<number>>; // channelId -> Set<userId>
-  /** Monotonic counter bumped only when membership or a member's role changes
-   *  (setMembers/addMember/removeMember/updateMemberRole). Subscribers that
-   *  only care about role composition (e.g. MessageList role colors) select
-   *  this instead of rebuilding a role map on every presence/typing update.
-   *  Optional only so the many inline test fixtures need not restate it. */
+  /** Monotonic counter bumped when membership, a member's role, or a member's
+   *  profile (username/displayName/avatar) changes (setMembers/addMember/
+   *  removeMember/updateMemberRole/updateMemberProfile). Subscribers that only
+   *  care about identity, not presence/typing (e.g. MessageList repainting
+   *  author names and avatars), select this instead of rebuilding on every
+   *  presence/typing update. Optional only so the many inline test fixtures
+   *  need not restate it. */
   readonly roleRevision?: number;
 }
 
@@ -149,7 +151,7 @@ export function updateMemberProfile(userId: number, patch: MemberProfilePatch): 
           ? existing.identityPublicKey
           : patch.identityPublicKey,
     });
-    return { ...prev, members: next };
+    return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
 
