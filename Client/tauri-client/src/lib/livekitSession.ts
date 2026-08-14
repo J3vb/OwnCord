@@ -430,6 +430,9 @@ export class LiveKitSession {
       this._eventHandlers.handleAudioPlaybackChanged,
     );
     newRoom.on(RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
+    // OC-0002: the only SDK-level signal that the E2EE worker died after the
+    // key exchange already succeeded — see roomEventHandlers.ts for detail.
+    newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
 
     return newRoom;

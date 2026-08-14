@@ -46,6 +46,7 @@ vi.mock("livekit-client", () => ({
     Disconnected: "disconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
     AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
+    EncryptionError: "encryptionError",
     LocalTrackPublished: "localTrackPublished",
   },
   Track: {
@@ -109,6 +110,7 @@ vi.mock("@stores/voice.store", () => ({
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
+  setEncryptionDegraded: vi.fn(),
 }));
 
 const mockInvoke = vi.hoisted(() =>
@@ -204,6 +206,7 @@ import {
   setVoiceStatus,
   setPeerVerification,
   clearPeerVerifications,
+  setEncryptionDegraded,
 } from "@stores/voice.store";
 import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
@@ -2495,6 +2498,26 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(mockRoom.setE2EEEnabled).toHaveBeenCalledWith(true);
+    });
+
+    // OC-0002: a dead E2EE worker (CSP block, WASM load failure, WebView2
+    // quirk) fails asynchronously, after keyProvider.setKey already resolved
+    // and voiceStatus already reached "connected" — livekit-client's own
+    // signal for this is RoomEvent.EncryptionError (E2eeManager.onWorkerError).
+    // Nothing subscribed to it, so the Secured badge had no way to ever know.
+    it("wires an EncryptionError listener onto the room so a dead worker cannot stay invisible (OC-0002)", async () => {
+      mockRoom.on.mockClear();
+      (setEncryptionDegraded as ReturnType<typeof vi.fn>).mockClear();
+
+      await (session as any).createRoom();
+
+      const call = mockRoom.on.mock.calls.find((c: unknown[]) => c[0] === "encryptionError");
+      expect(call).toBeDefined();
+
+      const handler = call![1] as (error: Error) => void;
+      handler(new Error("e2ee worker crashed"));
+
+      expect(setEncryptionDegraded).toHaveBeenCalledWith(true);
     });
   });
 

@@ -723,6 +723,37 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  // OC-0002: the badge was derived purely from voiceStatus === "connected",
+  // never from the SDK's live encryption state — a dead E2EE worker that
+  // fails asynchronously (after the key exchange and voiceStatus already
+  // reached "connected") had no way to ever un-light the badge.
+  it("shows a not-secured warning instead of the Secured badge once encryption degrades", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setVoiceStatus("connected");
+    const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
+    expect(secured.textContent).toContain("Secured");
+
+    voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+    voiceStore.flush();
+
+    // Still shown (so the warning is not silently missed), but no longer
+    // claiming "Secured" — a dead worker must never look like a live one.
+    expect(secured.style.display).toBe("inline-flex");
+    expect(secured.textContent).not.toContain("Secured");
+
+    widget.destroy?.();
+  });
+
   it("shows 'Reconnecting voice…' during a voice reconnect", () => {
     setVoiceChannel(1, []);
 
