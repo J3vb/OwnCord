@@ -128,7 +128,7 @@ SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_ke
        u.display_name, u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
-WHERE u.banned = 0
+WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
 ORDER BY u.username ASC
 `
 
