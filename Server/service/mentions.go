@@ -66,7 +66,12 @@ func parseMentionTokens(content string) (tokens []mentionCandidate, everyone, he
 		if m[3] == "@" {
 			continue // address-shaped, e.g. "@bob@example.com"
 		}
-		raw := strings.ToLower(m[2])
+		// db.LowerASCII, not strings.ToLower: usernames.username is only
+		// COLLATE NOCASE, which folds ASCII A-Z only. A Unicode fold here
+		// (e.g. 'É' -> 'é') would desync this token from GetUserIDsByUsernames'
+		// equally ASCII-folded map key, so a username holding an uppercase
+		// non-ASCII letter could never resolve (OC-0131).
+		raw := db.LowerASCII(m[2])
 		switch raw {
 		case everyoneToken:
 			everyone = true

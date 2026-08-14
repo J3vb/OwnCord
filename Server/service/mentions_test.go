@@ -168,6 +168,25 @@ func TestSendMessage_CaseInsensitiveUsername(t *testing.T) {
 	}
 }
 
+// TestSendMessage_NonASCIIUppercaseUsernameResolves locks OC-0131: a username
+// holding an uppercase non-ASCII letter is legal (auth.ValidateUsername only
+// rejects control/format runes) and must still be @mentionable. Go's
+// Unicode-aware strings.ToLower would fold "Émile" to "émile" before the
+// lookup ever reaches SQL, but users.username is only COLLATE NOCASE, which
+// folds ASCII A-Z only -- so a Unicode-lowered token can never match the
+// stored non-ASCII-uppercase row, and the mention silently degrades to plain
+// text.
+func TestSendMessage_NonASCIIUppercaseUsernameResolves(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	seedUser(t, database, &db.User{ID: 5, Username: "Émile", Status: "online"})
+	seedUserRole(t, database, 5, permissions.MemberRoleID)
+
+	res := sendAs(t, svc, 1, "hey @Émile")
+	if len(res.Mentions) != 1 || res.Mentions[0] != 5 {
+		t.Fatalf("mentions = %v, want [5] (Émile must resolve)", res.Mentions)
+	}
+}
+
 func TestSendMessage_UnknownWordStaysText(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
