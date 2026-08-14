@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
@@ -10,6 +11,48 @@ import (
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/updater"
 )
+
+// setupLimiterReapInterval and setupLimiterReapMaxWindow control how often
+// the setup endpoint's dedicated rate limiter reaps stale window entries.
+// Vars, not consts, so tests can shrink them instead of waiting on the real
+// interval (see export_test.go).
+var (
+	setupLimiterReapInterval  = 5 * time.Minute
+	setupLimiterReapMaxWindow = 15 * time.Minute
+)
+
+// setupLimiterHook, when non-nil, receives the *auth.RateLimiter NewAdminAPI
+// creates for the /setup endpoint. Test-only seam: NewAdminAPI returns only
+// an http.Handler, so tests otherwise have no way to reach that limiter to
+// verify it gets reaped.
+var setupLimiterHook func(*auth.RateLimiter)
+
+// startSetupLimiterReap keeps rl's window map bounded for the life of the
+// process. Every distinct source IP that ever hits POST /setup leaves an
+// entry that Allow itself only prunes on a repeat call from that same key —
+// a one-shot caller's entry sits forever unless something sweeps the whole
+// map. api/router.go reaps its own limiter with RateLimiter.StartCleanup, a
+// goroutine parked in a ticker select until a stop channel closes — but
+// NewAdminAPI has no shutdown hook and is called directly by ~180 tests that
+// never capture one, so a parked goroutine here would leak under every
+// test's goleak check. time.AfterFunc self-rescheduling avoids that: between
+// fires there is no live goroutine, only a runtime timer, so nothing needs
+// to stop it.
+func startSetupLimiterReap(rl *auth.RateLimiter) {
+	// Capture the timing once, synchronously, on the caller's goroutine.
+	// The rescheduled AfterFunc callbacks below must never re-read the
+	// package vars themselves: those callbacks run on their own goroutine
+	// indefinitely (nothing stops the chain), so a later test's
+	// SetSetupLimiterReapTiming restoring the vars on its own goroutine
+	// would otherwise race an in-flight reap here.
+	interval, maxWindow := setupLimiterReapInterval, setupLimiterReapMaxWindow
+	var reap func()
+	reap = func() {
+		rl.Cleanup(maxWindow)
+		time.AfterFunc(interval, reap)
+	}
+	time.AfterFunc(interval, reap)
+}
 
 // ─── NewAdminAPI ──────────────────────────────────────────────────────────────
 
@@ -32,6 +75,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
 	setupLimiter := auth.NewRateLimiter()
+	if setupLimiterHook != nil {
+		setupLimiterHook(setupLimiter)
+	}
+	startSetupLimiterReap(setupLimiter)
 	r.Get("/setup/status", handleSetupStatus(database, setupOpts))
 	r.Post("/setup", handleSetup(database, setupLimiter, allowedOrigins, hub, setupOpts))
 
