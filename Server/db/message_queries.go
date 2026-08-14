@@ -28,13 +28,21 @@ func messageFromGen(m dbgen.Message) *Message {
 }
 
 // sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
-// query injection. Only allows letters, digits, spaces, and hyphens.
+// query injection. Only allows letters, digits, and spaces through unchanged;
+// '-' is folded to a space rather than kept, because in FTS5's MATCH grammar
+// '-' is not a bareword character -- it introduces a column filter
+// ("-col: expr"), so keeping it turns "well-known" into a filter on a
+// nonexistent column "known" and SQLite errors instead of matching. Folding
+// to a space (rather than dropping it) still matches the indexed tokens.
 func sanitizeFTSQuery(q string) string {
 	var sb strings.Builder
 	sb.Grow(len(q))
 	for _, r := range q {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ':
 			sb.WriteRune(r)
+		case r == '-':
+			sb.WriteRune(' ')
 		}
 	}
 	result := strings.TrimSpace(sb.String())
