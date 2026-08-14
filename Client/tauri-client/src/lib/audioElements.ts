@@ -129,13 +129,20 @@ export class AudioElements {
     const userId = parseUserId(participant.identity);
     if (publication.source === Track.Source.ScreenShareAudio) {
       // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)
-      for (const el of track.detach()) el.remove();
+      // Look up the tracking set before detaching so a fast re-subscribe
+      // (new TrackSubscribed before the old TrackUnsubscribed lands) drops
+      // the stale element from the set instead of leaking it forever — same
+      // hygiene as handleTrackUnsubscribedAudio below.
+      let audioEls = this.screenshareAudioElements.get(userId);
+      for (const el of track.detach()) {
+        el.remove();
+        audioEls?.delete(el);
+      }
       const audioEl = track.attach();
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
       audioEl.volume = this.getEffectiveScreenshareVolume(userId);
       audioEl.muted = this.screenshareAudioMutedByUser.get(userId) ?? false;
-      let audioEls = this.screenshareAudioElements.get(userId);
       if (audioEls === undefined) {
         audioEls = new Set();
         this.screenshareAudioElements.set(userId, audioEls);

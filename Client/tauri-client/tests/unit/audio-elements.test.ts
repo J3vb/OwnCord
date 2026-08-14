@@ -127,6 +127,42 @@ describe("AudioElements", () => {
 
       expect(audioEl.muted).toBe(true);
     });
+
+    it("does not leak the previously-attached element into the tracking set on a fast re-subscribe (OC-0135)", () => {
+      // LiveKit can fire TrackSubscribed for an already-attached screenshare-
+      // audio track before the old TrackUnsubscribed lands (fast reconnect).
+      // The same underlying track's detach() then returns the element from
+      // the prior attach(), which the handler removes from the DOM but must
+      // also drop from screenshareAudioElements — otherwise it lives on in
+      // the Set forever.
+      let lastEl: HTMLAudioElement | null = null;
+      const track = {
+        kind: "audio",
+        sid: "track-ss-resub",
+        attach: vi.fn(() => {
+          const el = document.createElement("audio");
+          lastEl = el;
+          return el;
+        }),
+        detach: vi.fn(() => (lastEl === null ? [] : [lastEl])),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const firstEl = lastEl as unknown as HTMLAudioElement;
+
+      // Re-fire subscribe for the same track before any unsubscribe arrives.
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const secondEl = lastEl as unknown as HTMLAudioElement;
+
+      const trackedEls = (elements as any).screenshareAudioElements.get(
+        42,
+      ) as Set<HTMLAudioElement>;
+      expect(trackedEls.has(firstEl)).toBe(false);
+      expect(trackedEls.has(secondEl)).toBe(true);
+      expect(trackedEls.size).toBe(1);
+    });
   });
 
   describe("handleTrackUnsubscribedAudio", () => {
