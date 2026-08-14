@@ -238,9 +238,15 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
 
   // Starts off; corrected to the real OS state once the plugin answers.
   let enabled = false;
+  // Set as soon as the user interacts with the toggle. Guards the init
+  // read-back below so a slow `isEnabled()` resolving after the user has
+  // already flipped the switch can't clobber their change with a stale
+  // value (see OC-0141).
+  let touched = false;
   const toggle = createToggle(false, {
     signal,
     onChange: (nowOn) => {
+      touched = true;
       void (async () => {
         try {
           const { enable, disable } = await import("@tauri-apps/plugin-autostart");
@@ -261,7 +267,12 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   void (async () => {
     try {
       const { isEnabled } = await import("@tauri-apps/plugin-autostart");
-      enabled = await isEnabled();
+      const initialEnabled = await isEnabled();
+      // If the user already toggled this before the read-back resolved,
+      // their change (and whatever it settles to) wins — don't overwrite it
+      // with the value read before that change was applied.
+      if (touched) return;
+      enabled = initialEnabled;
       toggle.classList.toggle("on", enabled);
       toggle.setAttribute("aria-checked", String(enabled));
     } catch {

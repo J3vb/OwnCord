@@ -9,6 +9,9 @@ const {
   mockClearEmbedCaches,
   mockClearMediaCaches,
   deleteDbState,
+  mockIsEnabled,
+  mockEnable,
+  mockDisable,
 } = vi.hoisted(() => ({
   mockReadDir: vi.fn().mockResolvedValue([]),
   mockRemove: vi.fn().mockResolvedValue(undefined),
@@ -26,6 +29,9 @@ const {
       | "blocked-double"
       | "success-then-blocked",
   },
+  mockIsEnabled: vi.fn().mockResolvedValue(false),
+  mockEnable: vi.fn().mockResolvedValue(undefined),
+  mockDisable: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock Tauri APIs
@@ -42,6 +48,11 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 }));
 vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: mockRelaunch,
+}));
+vi.mock("@tauri-apps/plugin-autostart", () => ({
+  isEnabled: mockIsEnabled,
+  enable: mockEnable,
+  disable: mockDisable,
 }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
@@ -729,5 +740,95 @@ describe("AdvancedTab — Toggles & Structure", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(invoke).toHaveBeenCalledWith("open_devtools");
+  });
+});
+
+describe("AdvancedTab — Launch on Login (autostart)", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    mockIsEnabled.mockReset().mockResolvedValue(false);
+    mockEnable.mockReset().mockResolvedValue(undefined);
+    mockDisable.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  function getAutostartToggle(): HTMLElement {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const rows = Array.from(container.querySelectorAll(".setting-row"));
+    const row = rows.find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Launch on Login",
+    );
+    expect(row).toBeDefined();
+    return row!.querySelector(".toggle") as HTMLElement;
+  }
+
+  async function tick(times = 1): Promise<void> {
+    for (let i = 0; i < times; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  it("keeps the toggle ON when the user enables autostart before the init read-back resolves", async () => {
+    let resolveIsEnabled!: (v: boolean) => void;
+    const isEnabledPromise = new Promise<boolean>((r) => {
+      resolveIsEnabled = r;
+    });
+    mockIsEnabled.mockReturnValueOnce(isEnabledPromise);
+
+    const toggle = getAutostartToggle();
+
+    // Let the init IIFE's dynamic import resolve and its isEnabled() call get
+    // issued, but don't resolve it yet — this is the window the finding
+    // describes.
+    await tick(2);
+
+    // User clicks during that window: turns autostart ON.
+    toggle.click();
+    expect(toggle.classList.contains("on")).toBe(true);
+
+    // Let the click's own async chain (dynamic import + enable()) fully
+    // resolve, so the OS-level write really has completed.
+    await tick(3);
+    expect(mockEnable).toHaveBeenCalledTimes(1);
+
+    // Now the stale init read finally resolves with the pre-click value.
+    resolveIsEnabled(false);
+    await tick(3);
+
+    // The click already turned autostart on for real — the late, stale read
+    // must not clobber that visual/state.
+    expect(toggle.classList.contains("on")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("still applies a fresh init read-back when the user hasn't touched the toggle", async () => {
+    mockIsEnabled.mockResolvedValueOnce(true);
+
+    const toggle = getAutostartToggle();
+    await tick(3);
+
+    expect(toggle.classList.contains("on")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("still reverts the toggle when the OS write itself fails", async () => {
+    mockEnable.mockRejectedValueOnce(new Error("not permitted"));
+
+    const toggle = getAutostartToggle();
+    await tick(3);
+
+    toggle.click();
+    await tick(3);
+
+    expect(toggle.classList.contains("on")).toBe(false);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 });
