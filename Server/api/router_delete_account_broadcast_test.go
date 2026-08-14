@@ -12,6 +12,13 @@ package api_test
 // This test drives the real api.NewRouter wiring end to end, including a live
 // WebSocket connection, so it fails if the router ever again forgets to wire
 // the hub through.
+//
+// The broadcast is observed on a SECOND user's connection, not the deleted
+// user's own: BroadcastMemberBan enqueues the broadcast and then force-
+// disconnects the target, and on a slow runner the disconnect can close the
+// target's socket before its copy of the frame is flushed. The observer
+// socket has no such race — and it is the party the event exists for (every
+// other client must drop the deleted member).
 
 import (
 	"context"
@@ -29,6 +36,47 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 )
+
+// dialAndAuthWS opens a WS connection against srv and completes the auth
+// handshake for token, failing the test on any step.
+func dialAndAuthWS(t *testing.T, srv *httptest.Server, token string) *websocket.Conn {
+	t.Helper()
+
+	dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // test cleanup
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+
+	authMsg := map[string]any{
+		"type":    "auth",
+		"payload": map[string]any{"token": token},
+	}
+	raw, _ := json.Marshal(authMsg)
+	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+
+	_, authOKMsg, err := conn.Read(dialCtx)
+	if err != nil {
+		t.Fatalf("read auth_ok: %v", err)
+	}
+	var authOK map[string]any
+	if err := json.Unmarshal(authOKMsg, &authOK); err != nil {
+		t.Fatalf("unmarshal auth_ok: %v; raw=%s", err, authOKMsg)
+	}
+	if authOK["type"] != "auth_ok" {
+		t.Fatalf("expected auth_ok, got %v; raw=%s", authOK["type"], authOKMsg)
+	}
+	return conn
+}
 
 func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 	database, err := db.Open(":memory:")
@@ -52,62 +100,39 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
 	t.Cleanup(cleanup)
 
-	hash, _ := auth.HashPassword("correctPass1")
-	// role_id=4 ("Member") so the last-admin check doesn't block deletion.
-	uid, err := database.CreateUser(context.Background(), "routerdeletebroadcast", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
+	newUserSession := func(username string) (int64, string) {
+		hash, _ := auth.HashPassword("correctPass1")
+		// role_id=4 ("Member") so the last-admin check doesn't block deletion.
+		uid, err := database.CreateUser(context.Background(), username, hash, 4)
+		if err != nil {
+			t.Fatalf("CreateUser(%s): %v", username, err)
+		}
+		token, err := auth.GenerateToken()
+		if err != nil {
+			t.Fatalf("GenerateToken: %v", err)
+		}
+		if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		return uid, token
 	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+
+	doomedUID, doomedToken := newUserSession("routerdeletebroadcast")
+	_, observerToken := newUserSession("routerdeletebroadcastobs")
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	dialCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // test cleanup
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]any{"token": token},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	_, authOKMsg, err := conn.Read(dialCtx)
-	if err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	var authOK map[string]any
-	if err := json.Unmarshal(authOKMsg, &authOK); err != nil {
-		t.Fatalf("unmarshal auth_ok: %v; raw=%s", err, authOKMsg)
-	}
-	if authOK["type"] != "auth_ok" {
-		t.Fatalf("expected auth_ok, got %v; raw=%s", authOK["type"], authOKMsg)
-	}
+	// The doomed user connects so the hub also has a socket to force-close;
+	// the observer connects to witness the fan-out.
+	_ = dialAndAuthWS(t, srv, doomedToken)
+	observer := dialAndAuthWS(t, srv, observerToken)
 
 	// Self-delete over the real HTTP handler, same as the client would.
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/account",
 		strings.NewReader(`{"password":"correctPass1"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+doomedToken)
 	req.RemoteAddr = "127.0.0.1:9999"
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -115,32 +140,35 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 		t.Fatalf("DELETE /api/v1/auth/account status = %d, want 204; body = %s", rr.Code, rr.Body.String())
 	}
 
-	// The hub must fan out a member_ban message over the still-open WS
-	// connection. Loop with an overall deadline: BroadcastMemberBan enqueues
-	// the broadcast on the hub's async broadcast channel, then separately
-	// force-disconnects the socket, so more than one frame may arrive before
-	// (or instead of, on the buggy wiring) the connection closes.
-	deadline := time.Now().Add(5 * time.Second)
+	// The hub must fan out member_ban for the deleted user to the observer's
+	// still-open connection. Loop with an overall deadline: other broadcasts
+	// (presence, member updates) may arrive first.
+	deadline := time.Now().Add(10 * time.Second)
 	sawMemberBan := false
 	for time.Now().Before(deadline) {
 		readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, msg, readErr := conn.Read(readCtx)
+		_, msg, readErr := observer.Read(readCtx)
 		readCancel()
 		if readErr != nil {
 			break
 		}
-		var frame map[string]any
+		var frame struct {
+			Type    string `json:"type"`
+			Payload struct {
+				UserID int64 `json:"user_id"`
+			} `json:"payload"`
+		}
 		if err := json.Unmarshal(msg, &frame); err != nil {
 			continue
 		}
-		if frame["type"] == "member_ban" {
+		if frame.Type == "member_ban" && frame.Payload.UserID == doomedUID {
 			sawMemberBan = true
 			break
 		}
 	}
 
 	if !sawMemberBan {
-		t.Fatal("no member_ban WS broadcast observed after self-account-deletion — " +
+		t.Fatal("no member_ban WS broadcast for the deleted user observed on a second client — " +
 			"router.go's MountAuthRoutes call must pass the hub as the optional " +
 			"AuthBroadcaster (mount it after ws.NewHub, not before)")
 	}

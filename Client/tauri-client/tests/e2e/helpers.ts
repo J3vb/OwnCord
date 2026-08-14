@@ -356,6 +356,10 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
       type: "voice_join",
       handler: `
         var p = parsed.payload;
+        // Remember the joined channel so the voice_leave echo can carry the
+        // real channel id, like the server does (dispatcher's self-leave
+        // teardown is gated on a channel match, so a wrong id is ignored).
+        globalThis.__mockVoiceChannel = p.channel_id;
         setTimeout(function() {
           // Full VoiceStatePayload shape — the server always sends username
           // (and the flag fields); the sidebar renders user.username directly,
@@ -377,10 +381,12 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
     {
       type: "voice_leave",
       handler: `
+        var ch = globalThis.__mockVoiceChannel || 0;
+        globalThis.__mockVoiceChannel = 0;
         setTimeout(function() {
           __tauriEmitEvent("ws-message", JSON.stringify({
             type: "voice_leave",
-            payload: { user_id: 1, channel_id: 0 }
+            payload: { user_id: 1, channel_id: ch }
           }));
         }, 50);
       `,
