@@ -63,6 +63,14 @@ func handleCreateAPIToken(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "label is required")
 			return
 		}
+		// expires_hours=0 means "never expires" (see createTokenRequest doc).
+		// Negatives must not fall into that same nil-expiresAt branch, and the
+		// upper bound keeps time.Duration(hours)*time.Hour from overflowing
+		// int64 nanoseconds into a past timestamp. 87600h = 10 years.
+		if req.ExpiresHours < 0 || req.ExpiresHours > 24*365*10 {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "expires_hours must be between 0 and 87600")
+			return
+		}
 
 		var user *db.User
 		var err error
