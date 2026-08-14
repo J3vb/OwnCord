@@ -817,8 +817,16 @@ export function wireDispatcher(
         void handleParticipantLeft(payload.user_id);
         if (shouldTeardownSession) void leaveVoice(false);
       });
-      // Clear local voice state if the current user was removed (kick/disconnect)
-      if (isSelf) {
+      // Clear local voice state only for the same channel-match case as the
+      // LiveKit teardown above. A channel switch optimistically moves the
+      // store's currentChannelId to the NEW channel before the server
+      // responds (VoiceCallbacks.onVoiceJoin); the server always leaves the
+      // OLD channel first, so an unconditional clear here would blank the
+      // store back to null on every switch — hiding the whole voice widget
+      // (including its leave/mute controls) until a later voice_state
+      // happens to restore it, or forever if the switch then fails
+      // server-side.
+      if (shouldTeardownSession) {
         leaveVoiceChannel();
       }
     }),
@@ -994,10 +1002,12 @@ export function wireDispatcher(
         // refusal earns no voice_leave (there was no previous channel to
         // leave), so nothing else clears that optimistic state — the sidebar
         // is left keyed on a channel with no LiveKit session. A channel
-        // *switch* refusal doesn't need this: the server always leaves the
-        // old channel first, whose self voice_leave already reset
-        // voiceStatus to idle before this error arrives, so the guard is a
-        // no-op there.
+        // *switch* refusal hits the same guard: the self voice_leave for the
+        // OLD channel that precedes it no longer resets voiceStatus (OC-0015
+        // — that voice_leave's channel no longer matches the already-updated
+        // currentChannelId, so it must not tear down the NEW channel's
+        // optimistic state either), so voiceStatus is still "joining" when
+        // this error lands and the guard clears it here instead.
         if (voiceStore.getState().voiceStatus === "joining") {
           leaveVoiceChannel();
         }

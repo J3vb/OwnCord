@@ -2068,6 +2068,33 @@ describe("WS Dispatcher", () => {
     expect(mockLeaveVoice).not.toHaveBeenCalled();
   });
 
+  // OC-0015: a channel switch optimistically moves currentChannelId to the
+  // NEW channel (VoiceCallbacks.onVoiceJoin) before the server responds. The
+  // server always leaves the OLD channel first, so the self voice_leave for
+  // that old channel must not blank the store back to null — that would hide
+  // the entire voice widget (mute/leave controls included) while a session
+  // may still be live. Same guard as the LiveKit teardown above.
+  it("does not blank voiceStore.currentChannelId on a self voice_leave for a channel mid-switch away from", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // Optimistically already moved to the new channel (7); the incoming
+    // voice_leave is for the old channel (3).
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 7,
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(voiceStore.getState().currentChannelId).toBe(7);
+  });
+
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
     authStore.setState((prev) => ({
       ...prev,
