@@ -666,6 +666,14 @@
   bottom: -1px;
   right: -1px;
 }
+/* UserBar.ts toggles this whenever canSetStatus() is false (socket down, or
+   no ws send path at all) -- without it the dot, dropdown options and
+   custom-status input all stay fully interactive, so anything picked or
+   typed while disconnected is silently dropped instead of refused. */
+.user-bar .ub-status-picker-wrap.ub-status-picker--disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
 .user-bar .ub-info {
   flex: 1;
   min-width: 0;
