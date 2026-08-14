@@ -577,7 +577,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     );
     unsubscribers.push(
       ws.on("call_declined", (payload) => {
-        ringCtrl?.cancel(payload.channel_id);
+        // Addressed to every other DM participant, not just the caller — the
+        // server holds no call state to target with (see handlers_call.go).
+        // In a group DM that includes fellow callees who are also ringing;
+        // only the actual ringer declining should silence this client's ring.
+        const ringing = ringCtrl?.current();
+        if (ringing === null || ringing === undefined) return;
+        if (payload.from_user === ringing.fromUserId) {
+          ringCtrl?.cancel(payload.channel_id);
+        }
       }),
     );
     // The ringer hanging up before anyone answered: their voice_leave is the
