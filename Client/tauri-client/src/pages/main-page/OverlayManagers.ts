@@ -169,6 +169,12 @@ export function createInviteManagerController(opts: {
     opening = true;
     try {
       const raw = await opts.api.getInvites();
+      // Re-derive liveness: a page teardown during the fetch nulls the root
+      // MainPage handed out, but the pre-await `root` const above still
+      // points at the now-detached node. Mounting on it anyway would create
+      // an instance whose document-level listeners nothing ever tears down.
+      const liveRoot = opts.getRoot();
+      if (liveRoot === null) return;
       const invites = raw.filter((r) => !isInviteRevoked(r)).map(mapInviteResponse);
       instance = createInviteManager({
         invites,
@@ -198,9 +204,7 @@ export function createInviteManagerController(opts: {
           showToast(message, "error");
         },
       });
-      if (root !== null) {
-        instance.mount(root);
-      }
+      instance.mount(liveRoot);
     } catch (err) {
       log.error("Failed to open invite manager", { error: String(err) });
       showToast("Failed to load invites", "error");
@@ -261,6 +265,11 @@ export function createPinnedPanelController(opts: {
     opening = true;
     try {
       const resp = await opts.api.getPins(channelId);
+      // Re-derive liveness: a page teardown during the fetch nulls the root
+      // MainPage handed out, but the pre-await `root` const above still
+      // points at the now-detached node — see InviteManagerController.open.
+      const liveRoot = opts.getRoot();
+      if (liveRoot === null) return;
       const pins = resp.messages.map(mapToPinnedMessage);
       instance = createPinnedMessages({
         channelId,
@@ -286,9 +295,7 @@ export function createPinnedPanelController(opts: {
         },
         onClose: close,
       });
-      if (root !== null) {
-        instance.mount(root);
-      }
+      instance.mount(liveRoot);
     } catch (err) {
       log.error("Failed to load pinned messages", { error: String(err) });
       showToast("Failed to load pinned messages", "error");
