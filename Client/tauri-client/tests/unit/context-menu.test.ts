@@ -315,4 +315,116 @@ describe("showContextMenu", () => {
     const menu = document.body.querySelector(".context-menu");
     expect(menu).not.toBeNull();
   });
+
+  describe("OC-0057: abort-listener teardown on the caller signal", () => {
+    it("does not re-invoke menu cleanup off the caller signal after the menu was already dismissed", () => {
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "Action", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "oc0057-menu-a",
+      });
+
+      const menu = document.querySelector(".oc0057-menu-a") as HTMLElement;
+      expect(menu).not.toBeNull();
+
+      // Dismiss the menu through the normal item-click path (NOT via ac.abort()).
+      const item = menu.querySelector(".context-menu-item") as HTMLElement;
+      const removeSpy = vi.spyOn(menu, "remove");
+      item.click();
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+
+      // The component that owns `ac` is destroyed sometime later. A correctly
+      // torn-down showContextMenu invocation must have released its "abort"
+      // listener on `ac.signal` when the menu was dismissed above, so this
+      // must NOT invoke the stale closure's menu.remove() a second time.
+      ac.abort();
+
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not accumulate a live abort listener on the caller signal per invocation", () => {
+      // Open and dismiss (via item click) several menus on the same
+      // long-lived caller signal, as DmSidebar does across repeated
+      // right-clicks without the sidebar being rebuilt.
+      const menus: HTMLElement[] = [];
+      for (let i = 0; i < 3; i++) {
+        showContextMenu({
+          x: 0,
+          y: 0,
+          items: [{ label: "Action", onClick: vi.fn() }],
+          signal: ac.signal,
+          className: "oc0057-menu-b",
+        });
+        const menu = document.querySelector(".oc0057-menu-b") as HTMLElement;
+        menus.push(menu);
+        const item = menu.querySelector(".context-menu-item") as HTMLElement;
+        item.click();
+      }
+
+      const removeSpies = menus.map((m) => vi.spyOn(m, "remove"));
+
+      // Simulate the parent component finally being destroyed.
+      ac.abort();
+
+      // None of the already-dismissed menus' remove() should fire again —
+      // each invocation's abort listener should have been released when that
+      // specific menu was dismissed, not held until component teardown.
+      for (const spy of removeSpies) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+    });
+
+    it("cleans up immediately when the signal is already aborted before the menu is shown", () => {
+      ac.abort();
+
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "Action", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "oc0057-menu-c",
+      });
+
+      // An already-aborted parent signal means the menu must never be left
+      // dangling in the DOM — "abort" already fired before we could listen
+      // for it, so the code must check signal.aborted explicitly.
+      expect(document.querySelector(".oc0057-menu-c")).toBeNull();
+    });
+
+    it("releases the old menu's abort listener when it is swept away by a same-class reopen", () => {
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [{ label: "First", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "oc0057-menu-d",
+      });
+
+      const firstMenu = document.querySelector(".oc0057-menu-d") as HTMLElement;
+      expect(firstMenu).not.toBeNull();
+      const removeSpy = vi.spyOn(firstMenu, "remove");
+
+      // Reopening with the same className sweeps the first menu out via the
+      // querySelectorAll(...).remove() path at the top of the function, not
+      // via item click or outside click.
+      showContextMenu({
+        x: 10,
+        y: 10,
+        items: [{ label: "Second", onClick: vi.fn() }],
+        signal: ac.signal,
+        className: "oc0057-menu-d",
+      });
+
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+
+      // The parent component is destroyed later. The swept-away first menu's
+      // abort listener must have been released at sweep time, not left
+      // pinned on `ac.signal` until now.
+      ac.abort();
+
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });
