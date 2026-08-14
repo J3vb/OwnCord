@@ -930,7 +930,14 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
-    if (this._room !== null) this.leaveVoice(false);
+    // Also tear down (and abort) an in-flight reconnect: `_room` reads null
+    // for the whole "reconnecting" state, so a join issued while the LiveKit
+    // auto-reconnect loop is running would otherwise skip leaveVoice(false)
+    // entirely — meaning _e2ee.clearState() never runs, and setupKeyExchange
+    // below inherits the PREVIOUS channel's residual _isKeyHolder via its
+    // OR-with-server-value guard, joining the new channel as a phantom key
+    // holder the server never elected (OC-0020).
+    if (this._room !== null || this._state.type === "reconnecting") this.leaveVoice(false);
     // Draw the next generation from the monotonic instance counter (never
     // re-derived from `_state`) and embed it into the "connecting" state.
     // Any newer call to connectAndSetup() will produce a strictly larger

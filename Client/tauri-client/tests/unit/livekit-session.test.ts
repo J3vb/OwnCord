@@ -984,6 +984,53 @@ describe("LiveKitSession", () => {
 
       expect(setVoiceStatus).toHaveBeenCalledWith("connected");
     });
+
+    it("[OC-0020] does not carry a stale key-holder promotion into a channel switch made while reconnecting", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      // Join channel 1 as key holder.
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect((session as any)._e2ee["_isKeyHolder"]).toBe(true);
+
+      // The SFU connection drops — auto-reconnect starts, but the WS socket
+      // (and thus the sidebar) is unaffected, so the user can still switch
+      // voice channels while this is in flight.
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      expect((session as any)._state.type).toBe("reconnecting");
+
+      // The user switches to channel 2, which already has a lower-uid
+      // participant — the server elects someone else and sends
+      // is_key_holder=false.
+      const joinPromise = session.handleVoiceToken(
+        "token-2",
+        "/livekit",
+        2,
+        "ws://localhost:7880",
+        false,
+      );
+      // Let the synchronous prefix of setupKeyExchange (keypair generation +
+      // announce signing — mocked async fns, no real delay) run without
+      // needing to fast-forward the non-holder wait-for-offer timers.
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The stale promotion from channel 1 must not leak into channel 2's
+      // election: connectAndSetup only tore down E2EE state via `_room !==
+      // null`, which reads null while "reconnecting", so clearState() never
+      // ran and the residual _isKeyHolder=true survived into this call.
+      expect((session as any)._e2ee["_isKeyHolder"]).toBe(false);
+
+      // Let the (correctly non-holder) wait time out and the join settle so
+      // nothing is left dangling for later tests.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await joinPromise;
+    });
   });
 
   describe("handleVoiceTokenRefresh", () => {
