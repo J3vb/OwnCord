@@ -133,6 +133,37 @@ func TestUpdateProfile_EmptyUsername(t *testing.T) {
 	}
 }
 
+// OC-0100: a rename must canonicalize identically to how login looks the
+// username up. A bare bluemonday sanitizer.Sanitize call HTML-escapes
+// survivor punctuation instead of leaving it as typed, so a name with an
+// apostrophe would be persisted as e.g. "O&#39;Brien" — unreachable by the
+// literal name on the next login.
+func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "apostropheuser", 4)
+
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "O'Brien",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["username"] != "O'Brien" {
+		t.Errorf("username = %v, want %q (must not be HTML-escaped)", resp["username"], "O'Brien")
+	}
+
+	// The row itself must be reachable by the literal name — that is exactly
+	// what a future login looks up.
+	u, err := database.GetUserByUsername(context.Background(), "O'Brien")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername(%q) = %v, %v — rename escaped the username and would lock the account out on next login", "O'Brien", u, err)
+	}
+}
+
 func TestUpdateProfile_UsernameTaken(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)

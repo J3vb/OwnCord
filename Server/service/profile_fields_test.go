@@ -128,6 +128,48 @@ func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
 	}
 }
 
+// OC-0102: an avatar-only patch must not carry a username at all, so a stale
+// pre-lock snapshot (handleUploadAvatar captures user.Username before the
+// multipart parse / image decode / disk write, well before this function's
+// per-user lock) can never overwrite a rename that commits in the meantime.
+// UpdateProfile's read-merge-write already treats DisplayName/About this
+// way (nil-vs-non-nil pointer); Username needs the same "unspecified means
+// leave it alone" contract via its own zero value, since it is a plain
+// string rather than a pointer.
+func TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(t *testing.T) {
+	svc, database := newUserSvc(t)
+	ctx := context.Background()
+
+	// Models a concurrent PATCH /users/me rename that lands and commits
+	// first.
+	if _, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "bob"}); err != nil {
+		t.Fatalf("rename UpdateProfile: %v", err)
+	}
+
+	// An avatar-only caller supplies no username intent at all — Username is
+	// left at its zero value, the way handleUploadAvatar's ProfilePatch must
+	// after the fix (it no longer fills Username from its stale snapshot).
+	avatarURL := "/api/v1/files/abc"
+	u, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Avatar: &avatarURL})
+	if err != nil {
+		t.Fatalf("avatar-only UpdateProfile: %v", err)
+	}
+	if u.Username != "bob" {
+		t.Fatalf("username = %q, want %q — an avatar-only patch must not revert a concurrent rename", u.Username, "bob")
+	}
+	if u.Avatar == nil || *u.Avatar != avatarURL {
+		t.Fatalf("avatar = %v, want %q — the avatar itself must still be applied", u.Avatar, avatarURL)
+	}
+
+	stored, err := database.GetUserByID(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if stored.Username != "bob" {
+		t.Fatalf("stored username = %q, want %q", stored.Username, "bob")
+	}
+}
+
 func TestUpdateProfile_SanitizesAndTrims(t *testing.T) {
 	svc, _ := newUserSvc(t)
 	name := "  <b>Ada</b>  "

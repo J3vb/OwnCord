@@ -177,7 +177,14 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		req.Username = strings.TrimSpace(sanitizer.Sanitize(req.Username))
+		// Use the fixpoint sanitizer (service.SanitizeText), not the bare
+		// sanitizer.Sanitize below — Sanitize's output is always
+		// HTML-escaped, so a plain apostrophe would be persisted as &#39;
+		// and login (which never re-escapes) would look the account up
+		// under a name that no longer matches. See service.SanitizeText's
+		// doc comment and the register path (auth_handler.go), which
+		// already canonicalizes the same way.
+		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 		if req.Username == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error: "INVALID_INPUT", Message: "username is required",
@@ -571,9 +578,16 @@ func handleUploadAvatar(
 		}
 
 		avatarURL := service.AvatarFileURL(fileID)
+		// Username is deliberately omitted (left at its zero value): user
+		// here is a snapshot AuthMiddleware read at the start of the
+		// request, before the multipart parse / image decode / disk write
+		// above — all of which take long enough for a concurrent
+		// PATCH /users/me rename to land first. Sending that stale value
+		// would revert the rename; UpdateProfile treats an empty Username
+		// as "leave it alone", the same contract DisplayName/About already
+		// have via nil.
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
-			Username: user.Username,
-			Avatar:   &avatarURL,
+			Avatar: &avatarURL,
 		})
 		if err != nil {
 			// The column never moved, so the file and its row are orphans.

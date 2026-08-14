@@ -8,7 +8,12 @@ import {
   type LocalTrackPublication,
   DisconnectReason,
 } from "livekit-client";
-import { voiceStore, setSpeakers, leaveVoiceChannel } from "@stores/voice.store";
+import {
+  voiceStore,
+  setSpeakers,
+  leaveVoiceChannel,
+  setEncryptionDegraded,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "@lib/livekitSession";
 import type { AudioElements } from "@lib/audioElements";
@@ -66,6 +71,7 @@ export interface RoomEventHandlers {
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
+  readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
 }
 
@@ -201,6 +207,23 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (isUnexpected) deps.getOnErrorCallback()?.("Voice connection lost — disconnected");
   };
 
+  /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError
+   *  when the per-room E2EE worker dies (onWorkerError — CSP blocking a
+   *  lazily-loaded chunk, WASM load failure, WebView2 quirk) or when an
+   *  encrypted track arrives on a room without encryption enabled. Either
+   *  way the room key exchange can have already succeeded and voiceStatus
+   *  can already read "connected" — this is the SDK's only signal that the
+   *  encoder itself is not actually protecting frames, so it must reach the
+   *  store the Secured badge reads rather than staying invisible.
+   */
+  const handleEncryptionError = (error: Error, participant?: Participant): void => {
+    log.error("LiveKit E2EE encryption error — call may not be secured", {
+      error,
+      participant: participant?.identity,
+    });
+    setEncryptionDegraded(true);
+  };
+
   return {
     handleLocalTrackPublished,
     handleTrackSubscribed,
@@ -208,6 +231,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleActiveSpeakersChanged,
     handleAudioPlaybackChanged,
     handleDisconnected,
+    handleEncryptionError,
     removeAutoplayUnlock,
   };
 }

@@ -182,25 +182,31 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
 				return
 			}
-			if err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID); err != nil {
+			newRole, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
+			if err != nil {
 				writeModerationErr(w, err)
 				return
 			}
 			if permInvalidator != nil {
 				permInvalidator.InvalidateUser(id)
 			}
-			if role, err := database.GetRoleByID(r.Context(), *req.RoleID); err == nil && role != nil {
-				if hub != nil {
-					hub.BroadcastMemberUpdate(id, role.Name)
-					// BroadcastMemberUpdate only revokes subscriptions the new
-					// role can no longer read (hub_broadcast.go's
-					// revokeUnreadableChannels); it never grants the ones the
-					// new role newly gained READ_MESSAGES on. Without this,
-					// a promoted user's sidebar is missing channels until
-					// their next reconnect, unlike a role permission edit or
-					// a role delete, which both re-derive visibility fully.
-					hub.RefreshAllChannelVisibility()
-				}
+			// Use the role ChangeUserRole already loaded and validated rather
+			// than re-reading it: a re-read can race a concurrent role delete
+			// (or a transient read error) and silently skip this whole
+			// fan-out, leaving the demoted user's socket subscribed to
+			// channels it can no longer read (OC-0045). The role change
+			// itself already committed, so the fan-out must not be
+			// conditional on anything past that point.
+			if hub != nil {
+				hub.BroadcastMemberUpdate(id, newRole.Name)
+				// BroadcastMemberUpdate only revokes subscriptions the new
+				// role can no longer read (hub_broadcast.go's
+				// revokeUnreadableChannels); it never grants the ones the
+				// new role newly gained READ_MESSAGES on. Without this,
+				// a promoted user's sidebar is missing channels until
+				// their next reconnect, unlike a role permission edit or
+				// a role delete, which both re-derive visibility fully.
+				hub.RefreshAllChannelVisibility()
 			}
 		}
 

@@ -85,6 +85,7 @@ import {
   roomKeyToBase64,
   wrapRoomKey,
   generateECDHKeyPair,
+  generateRoomKey,
   importPublicKey,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
@@ -859,5 +860,149 @@ describe("E2EEManager", () => {
     // Same contract as "no server host": degrade to an unsigned announce
     // rather than sign/scope under a placeholder id.
     expect((announces[0] as any).payload.signature).toBeUndefined();
+  });
+
+  // ── Ledger findings OC-0098 / OC-0004 / OC-0006 / OC-0005 / OC-0007 ──
+
+  it("[OC-0098] sends its own announce before offering the room key to a drained peer", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // A peer's announce arrives (relayed by voice_join sync) before our own
+    // keypair is ready — it queues.
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    expect(mgr.pendingAnnounces).toHaveLength(1);
+
+    // We become key holder and drain the queued announce, which sends that
+    // peer a voice_e2ee_offer. The peer can only unwrap it if it already has
+    // OUR ephemeral public key on file — which only our own announce
+    // provides. Both land in the same inbound WS queue on the peer's side,
+    // so the order we send them in here IS the order they arrive there.
+    await mgr.setupKeyExchange(true, 1);
+
+    const calls = ws.send.mock.calls.map((c) => c[0] as { type: string });
+    const announceIndex = calls.findIndex((m) => m.type === "voice_e2ee_announce");
+    const offerIndex = calls.findIndex((m) => m.type === "voice_e2ee_offer");
+    expect(announceIndex).toBeGreaterThanOrEqual(0);
+    expect(offerIndex).toBeGreaterThanOrEqual(0);
+    expect(announceIndex).toBeLessThan(offerIndex);
+  });
+
+  it("[OC-0004] elects us key holder on a participant-left even when our own voice_state hasn't landed in the roster yet", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws); // getCurrentChannelId() => 1
+    // mockVoiceState.voiceUsers has NO entry for channel 1: our own
+    // voice_state broadcast hasn't landed (it's still queued behind the
+    // leaver's on the server), and the leaver's own roster entry was just
+    // deleted by removeVoiceUser before this handler runs.
+    expect(mockVoiceState.voiceUsers.has(1)).toBe(false);
+
+    await mgr.handleParticipantLeft(PEER_ID);
+
+    // Client-side election must still run using our own authenticated id
+    // (uid 1) even though the local roster has nothing recorded for the
+    // channel yet — otherwise the server's promotion is silently missed and
+    // the join that provoked it times out 15s later.
+    expect(mgr.epoch).toBe(1);
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+  });
+
+  it("[OC-0006] self-heals the shared key provider when a rotation's setKey resolves after clearState() tore the session down", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+
+    await mgr.setupKeyExchange(true, 1); // epoch 1, holder
+
+    vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
+    try {
+      vi.mocked(generateRoomKey).mockReturnValueOnce(new Uint8Array(32).fill(9)); // this rotation's key
+      let releaseStale!: () => void;
+      const staleSetKey = new Promise<void>((resolve) => {
+        releaseStale = resolve;
+      });
+      mockSetKey.mockImplementationOnce(() => staleSetKey);
+
+      const rotationPromise = mgr.rotateKeyPeriodically();
+      await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalledWith("key-9"));
+
+      // The session is torn down (user hit Disconnect) while that setKey
+      // call is still in flight, and a brand-new session becomes holder
+      // with its OWN key before the stale call resolves.
+      mgr.clearState();
+      vi.mocked(generateRoomKey).mockReturnValueOnce(new Uint8Array(32).fill(7)); // live session's key
+      mockSetKey.mockClear();
+      await mgr.setupKeyExchange(true, 2);
+      expect(mockSetKey).toHaveBeenCalledWith("key-7");
+      mockSetKey.mockClear();
+
+      // The abandoned rotation's setKey call now resolves.
+      releaseStale();
+      await rotationPromise;
+
+      // The shared key provider must end up on the LIVE session's key, not
+      // silently left on the abandoned one — narrow race, but real: nothing
+      // else re-applies the live key once the stale call lands.
+      expect(mockSetKey).toHaveBeenCalledWith("key-7");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+    }
+  });
+
+  it("[OC-0005] paces room-key offers so a large channel's rotation stays under the server's per-second rate limit", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+    await mgr.setupKeyExchange(true, 1); // holder
+
+    // Seed 62 peers directly — well past the server's 64/sec cap for a
+    // single rotation's worth of offers.
+    for (let i = 0; i < 62; i++) {
+      mgr.peerPublicKeys.set(1000 + i, { type: `peer-${i}` } as unknown as CryptoKey);
+    }
+    ws.send.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      const rotationPromise = mgr.rotateKeyPeriodically();
+      // Let every microtask-bound send that doesn't need a real timer run.
+      await vi.advanceTimersByTimeAsync(0);
+      const sentBeforePause = sendsOfType(ws, "voice_e2ee_offer").length;
+      // Must not have blown through the whole 62 in one burst.
+      expect(sentBeforePause).toBeLessThan(62);
+      expect(sentBeforePause).toBeGreaterThan(0);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await rotationPromise;
+
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(62);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("[OC-0007] confirms the room key after a reconnect re-announce instead of declaring it fresh unconditionally", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // Non-key-holder session with an already-established room key from
+    // before the (simulated) disconnect.
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer key known, so the offer below is accepted
+    await mgr.handleOffer(PEER_ID, "enc", "iv"); // stands us down — now a non-holder
+    ws.send.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      await mgr.reannounceForReconnect();
+      // Nothing has confirmed the re-applied key is current yet. If the
+      // holder's fresh offer never arrives, this must not be a silent,
+      // unbounded wait for the next 5-minute rotation — it must retry.
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const announces = sendsOfType(ws, "voice_e2ee_announce");
+      expect(announces.length).toBeGreaterThan(1); // the reconnect announce PLUS a retry
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

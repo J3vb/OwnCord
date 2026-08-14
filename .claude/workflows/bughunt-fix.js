@@ -5,8 +5,8 @@ export const meta = {
   phases: [
     { title: 'Plan', detail: 'cluster open findings by file' },
     { title: 'Fix', detail: 'sonnet/xhigh: one agent per file, test-first, no git' },
-    { title: 'Prove', detail: 'sonnet: serial revert-proof then commit per cluster' },
-    { title: 'Gate', detail: 'sonnet: ci-check for the touched stacks, once' },
+    { title: 'Prove', detail: 'opus/high: serial revert-proof then commit per cluster' },
+    { title: 'Gate', detail: 'sonnet/xhigh: ci-check for the touched stacks, once' },
   ],
 }
 
@@ -367,7 +367,7 @@ for (const { cluster, results, union } of fixed) {
     label: `prove:${cluster.file}`,
     phase: 'Prove',
     model: 'opus',
-    effort: 'medium',
+    effort: 'high',
     schema: PROVE_RESULT,
   }).catch(() => null)
 
@@ -469,7 +469,7 @@ if (commits.length) {
       `Known false alarm: a windows -race failure inside ws whose stack mentions runtime.scanstack or ` +
       `runtime.(*unwinder).next is a Go 1.26.5 runtime GC fault, not a real failure - rerun that package ` +
       `once before reporting it.`,
-    { label: 'gate', phase: 'Gate', model: 'sonnet', effort: 'medium', schema: GATE_RESULT },
+    { label: 'gate', phase: 'Gate', model: 'sonnet', effort: 'xhigh', schema: GATE_RESULT },
   ).catch(() => null)
   // A malformed/missing report (dead agent, or a schema the caller didn't honor) is treated as a
   // failed gate, same as the null-check pattern in phases 2 and 3 - never crash on shape here.

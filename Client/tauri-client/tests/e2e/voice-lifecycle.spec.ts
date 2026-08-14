@@ -348,6 +348,16 @@ test.describe("Voice WS flow", () => {
     await disconnectBtn.click();
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
 
+    // Wait for the mock's delayed voice_state/voice_leave echoes to be
+    // processed before re-joining: the hidden-widget assertion above passes
+    // on the synchronous store clear, but the join's voice_state echo briefly
+    // re-populates the store until the leave echo clears it again. Clicking
+    // the row inside that window toggles a LEAVE instead of a join. Our own
+    // roster entry disappearing is the settle signal for both echoes.
+    await expect(page.locator(".voice-user-item", { hasText: "testuser" })).toHaveCount(0, {
+      timeout: 5_000,
+    });
+
     // Re-join
     await joinVoiceChannelByName(page, "Voice Chat");
   });

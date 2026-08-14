@@ -700,6 +700,26 @@ func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
 	}
 }
 
+// OC-0096: sanitizeFTSQuery kept '-' as an allowed bareword character, but in
+// FTS5's MATCH grammar '-' introduces a column filter ("-col: expr"), so
+// "well-known" parses as "well" followed by a filter on a nonexistent column
+// "known" and SQLite raises "no such column: known" instead of matching.
+func TestSearchMessages_HyphenatedQuery(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "hyphenuser")
+	chID := seedChannel(t, database, "hyphench")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "a well-known fact", nil)
+
+	results, err := database.SearchMessages(context.Background(), "well-known", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages(%q): %v", "well-known", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
 // ─── UpdateReadState ──────────────────────────────────────────────────────────
 
 func TestUpdateReadState_Upsert(t *testing.T) {

@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -471,6 +472,71 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	}
 	if string(data) != "original" {
 		t.Errorf("database was overwritten despite the abort: %q", string(data))
+	}
+}
+
+// TestHandleRestoreBackup_UsesConfiguredDatabasePath verifies that the
+// restore handler writes to the SQLite file the server was actually
+// configured to use (SetDatabasePath), not a hardcoded "data/chatserver.db".
+// A server with database.path set to anything else must not have its real
+// database silently left untouched by a "successful" restore (OC-0097).
+func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+
+	// Configure a non-default database path, as an operator would via
+	// database.path in config.yaml.
+	customDBPath := filepath.Join(tmpDir, "custom", "oc.db")
+	if err := os.MkdirAll(filepath.Dir(customDBPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll custom db dir: %v", err)
+	}
+	if err := os.WriteFile(customDBPath, []byte("original live contents"), 0o644); err != nil {
+		t.Fatalf("WriteFile custom db: %v", err)
+	}
+	admin.SetDatabasePath(customDBPath)
+	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+
+	backupName := "chatserver_20240101_120000.db"
+	backupContent := []byte("restored contents")
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), backupContent, 0o644); err != nil {
+		t.Fatalf("WriteFile backup: %v", err)
+	}
+
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restore did not request a process restart")
+	}
+
+	got, err := os.ReadFile(customDBPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", customDBPath, err)
+	}
+	if !bytes.Equal(got, backupContent) {
+		t.Errorf("configured database file content = %q, want %q — restore wrote to the wrong path", got, backupContent)
+	}
+
+	// The hardcoded default path must NOT have been created/touched.
+	defaultPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	if _, err := os.Stat(defaultPath); err == nil {
+		t.Error("restore wrote to the hardcoded default database path instead of the configured one")
 	}
 }
 

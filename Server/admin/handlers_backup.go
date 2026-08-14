@@ -41,6 +41,23 @@ func init() {
 	}
 }
 
+// dbFilePath is the live SQLite database file that "Restore backup"
+// overwrites. It defaults to the historical "data/chatserver.db" but must be
+// pointed at cfg.Database.Path via SetDatabasePath before the server starts
+// serving requests (main.go, right after db.Open): without that call, a
+// server configured with a non-default database.path would open its real
+// database at cfg.Database.Path while restore keeps copying backups over an
+// unrelated (possibly newly created) file at the default path, reporting
+// success while the live database is never touched.
+var dbFilePath = filepath.Join("data", "chatserver.db")
+
+// SetDatabasePath points the restore handler at the SQLite file the server
+// actually opened. Call once at startup with cfg.Database.Path; tests use it
+// to point restore at an isolated temp file.
+func SetDatabasePath(path string) {
+	dbFilePath = path
+}
+
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
 func handleBackup(database *db.DB) http.Handler {
@@ -174,7 +191,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		dbPath := filepath.Join("data", "chatserver.db")
+		dbPath := dbFilePath
 
 		actor := actorFromContext(r)
 		// Audit the restore BEFORE the pre-restore safety copy is taken, and

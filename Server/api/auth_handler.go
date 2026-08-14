@@ -9,16 +9,24 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // sanitizer strips all HTML from user-supplied strings before storage.
 var sanitizer = bluemonday.StrictPolicy()
+
+// maxLoginUsernameLen bounds the username accepted by handleLogin, mirroring
+// auth.ValidateUsername's 32-rune cap on registered usernames. Enforced
+// before the value is ever used to build a RateLimiter map key — see the
+// check in handleLogin for why.
+const maxLoginUsernameLen = 32
 
 // genericAuthError is returned for all login/register failures to avoid
 // revealing whether a username exists.
@@ -177,7 +185,13 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		req.Username = strings.TrimSpace(sanitizer.Sanitize(req.Username))
+		// F: use the fixpoint sanitizer (service.SanitizeText), not the bare
+		// sanitizer.Sanitize below — Sanitize's output is always HTML-escaped
+		// (' -> &#39;, & -> &amp;, " -> &#34;), so a plain call here would store
+		// a different string than what handleLogin looks up (which only
+		// trims), permanently locking out any username containing one of
+		// those characters. See service.SanitizeText's doc comment.
+		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 		req.InviteCode = strings.TrimSpace(req.InviteCode)
 
 		if req.Username == "" || req.Password == "" || req.InviteCode == "" {
@@ -300,6 +314,21 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
 				Message: "username and password are required",
+			})
+			return
+		}
+
+		// F: reject an over-long username before it is ever used to build a
+		// RateLimiter map key below (unameKey, failKey, userFailKey, lockout
+		// keys). Unlike registration, login has no account to validate
+		// against yet, so nothing else bounds this value — an unauthenticated
+		// caller could otherwise pin an arbitrarily large, body-sized string
+		// as a retained key (Cleanup only evicts it after hours). Mirrors the
+		// same 32-rune cap auth.ValidateUsername enforces at registration.
+		if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: "username is too long",
 			})
 			return
 		}

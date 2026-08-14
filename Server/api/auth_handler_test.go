@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -1104,6 +1105,113 @@ func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("Login space-padded username status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRegister_UsernameNotHTMLEscaped pins OC-0099: handleRegister must not
+// persist an HTML-escaped username. A bare bluemonday sanitizer.Sanitize call
+// HTML-escapes survivors (' -> &#39;, & -> &amp;, " -> &#34;), so a name like
+// "O'Brien" would be stored as "O&#39;Brien" — different from what the user
+// typed and from what handleLogin looks up (which only trims).
+func TestRegister_UsernameNotHTMLEscaped(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	ownerID, _ := database.CreateUser(context.Background(), "owner2", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
+
+	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
+		"username":    "O'Brien",
+		"password":    "securePass1",
+		"invite_code": code,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Register status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	user, _ := resp["user"].(map[string]any)
+	if got, want := user["username"], "O'Brien"; got != want {
+		t.Errorf("registered username = %q, want %q (must not be HTML-escaped)", got, want)
+	}
+
+	stored, err := database.GetUserByUsername(context.Background(), "O'Brien")
+	if err != nil || stored == nil {
+		t.Fatalf("GetUserByUsername(%q) = (%v, %v), want a match", "O'Brien", stored, err)
+	}
+}
+
+// TestLogin_UsernameWithApostropheSucceeds pins OC-0099 end-to-end: a user
+// who registers with an apostrophe/quote/ampersand in their name must be able
+// to log back in with the exact same name. Before the fix, handleRegister
+// stored the HTML-escaped form while handleLogin looked up the raw form, so
+// this login permanently 401s for any such account.
+func TestLogin_UsernameWithApostropheSucceeds(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	ownerID, _ := database.CreateUser(context.Background(), "owner3", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
+
+	regRR := postJSON(t, router, "/api/v1/auth/register", map[string]string{
+		"username":    "O'Brien",
+		"password":    "securePass1",
+		"invite_code": code,
+	})
+	if regRR.Code != http.StatusCreated {
+		t.Fatalf("Register status = %d, want 201; body = %s", regRR.Code, regRR.Body.String())
+	}
+
+	loginRR := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "O'Brien",
+		"password": "securePass1",
+	})
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("Login with registered username status = %d, want 200; body = %s", loginRR.Code, loginRR.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(loginRR.Body).Decode(&resp)
+	if resp["token"] == nil {
+		t.Error("Login response missing token")
+	}
+}
+
+// TestLogin_OversizedUsernameRejectedBeforeRateLimiterKey pins OC-0021:
+// handleLogin never length-checks req.Username before using it to build
+// RateLimiter map keys ("login_user_fail:"+username, "login_user_lock:"+...).
+// An unauthenticated caller could otherwise pin an arbitrarily large key in
+// the limiter's maps (retained for hours by Cleanup's window) on every
+// attempt. The oversized username must be rejected with 400 before any such
+// key is ever recorded, mirroring the same 32-rune cap register enforces via
+// auth.ValidateUsername before touching anything.
+func TestLogin_OversizedUsernameRejectedBeforeRateLimiterKey(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hugeUsername := strings.Repeat("a", 1<<20) // 1 MiB, as in the repro
+
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": hugeUsername,
+		"password": "anypass123",
+	})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Login oversized username status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// The route's own per-IP RateLimitMiddleware ("login:"+ip) legitimately
+	// records one small, IP-bounded window entry regardless of this fix.
+	// What must NOT happen is handleLogin additionally recording a second
+	// entry keyed on the 1 MiB username itself (failKey/userFailKey) — that
+	// unbounded entry is the actual leak, so anything beyond the single
+	// expected IP entry means the oversized username reached key-building
+	// code before being rejected.
+	if windows, lockouts := limiter.Len(); windows > 1 || lockouts != 0 {
+		t.Errorf("RateLimiter retained state after oversized-username login: windows=%d lockouts=%d, want at most 1/0", windows, lockouts)
 	}
 }
 

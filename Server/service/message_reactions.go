@@ -105,6 +105,14 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
+	// Archived channels are read-only. handleReaction bypasses
+	// checkSendPermission (it runs its own DM/permission branch below), so it
+	// needs the shared gate directly — see requireChannelWritable in
+	// message_perms.go.
+	if err := requireChannelWritable(ch); err != nil {
+		return nil, err
+	}
+
 	var participantIDs []int64
 	if isDM {
 		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)

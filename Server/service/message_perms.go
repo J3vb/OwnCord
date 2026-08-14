@@ -59,34 +59,71 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
-	return s.checkSendPermission(ctx, userID, channelID, ch.Type)
+	return s.checkSendPermission(ctx, userID, ch)
 }
 
-// checkSendPermission validates send permission for a channel of the given
-// type. Announcement channels are readable by anyone with READ_MESSAGES but
-// only postable by users with MANAGE_MESSAGES (posting is restricted to
-// moderators/admins); all other non-DM channels require SEND_MESSAGES.
-func (s *MessageService) checkSendPermission(ctx context.Context, userID, channelID int64, chanType string) error {
-	isDM := chanType == "dm"
+// checkSendPermission validates send permission for ch. Announcement channels
+// are readable by anyone with READ_MESSAGES but only postable by users with
+// MANAGE_MESSAGES (posting is restricted to moderators/admins); all other
+// non-DM channels require SEND_MESSAGES. Also enforces requireChannelWritable,
+// so every caller — SendMessage, EditMessage, CanPost — refuses an archived
+// channel without re-implementing that check itself.
+func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
+	isDM := ch.Type == "dm"
 	if isDM {
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
+		ok, err := s.st.IsDMParticipant(ctx, userID, ch.ID)
 		if err != nil {
 			return fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, err)
 		}
 		if !ok {
 			return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
 		}
-		return requireDMNotBlocked(ctx, s.st, userID, channelID)
+		return requireDMNotBlocked(ctx, s.st, userID, ch.ID)
 	}
-	if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.SendMessages) {
+	if err := requireChannelWritable(ch); err != nil {
+		return err
+	}
+	if !s.perms.HasChannelPerm(ctx, userID, ch.ID, permissions.ReadMessages|permissions.SendMessages) {
 		return fmt.Errorf("%w: missing SEND_MESSAGES permission", ErrForbidden)
 	}
 	// Announcement channels: posting is restricted to users who can manage
 	// messages, even though everyone with READ_MESSAGES can view them.
-	if chanType == "announcement" && !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ManageMessages) {
+	if ch.Type == "announcement" && !s.perms.HasChannelPerm(ctx, userID, ch.ID, permissions.ManageMessages) {
 		return fmt.Errorf("%w: announcement channels require MANAGE_MESSAGES to post", ErrForbidden)
 	}
 	return nil
+}
+
+// requireChannelWritable refuses a write against an archived non-DM channel.
+// `archived` used to be consulted only by the visibility predicate
+// (VisibleChannelIDs / RefreshChannelVisibility), so it hid a channel without
+// protecting it: any caller that still held the id — a custom client, or a
+// stock client racing the channel_delete that archiving triggers — could keep
+// posting, editing, reacting, pinning, or bulk-deleting in an archive
+// indefinitely. History stays readable; only writes are refused.
+//
+// DMs carry no archive flag/concept and are exempt. ch == nil is treated as
+// "nothing to check" rather than a panic — the caller's own nil handling (a
+// failed channel lookup) decides what happens next.
+//
+// Single shared gate for every write sink: checkSendPermission (so
+// SendMessage, EditMessage and CanPost inherit it), plus DeleteMessage,
+// handleReaction, SetMessagePinned and PurgeMessages, which route their own
+// permission checks and so call it directly instead.
+func requireChannelWritable(ch *db.Channel) error {
+	if ch == nil || ch.Type == "dm" || !ch.Archived {
+		return nil
+	}
+	return fmt.Errorf("%w: channel is archived", ErrForbidden)
+}
+
+// RequireDMNotBlocked is the exported form of requireDMNotBlocked so callers
+// outside the service package (voice join/token-refresh, ws/voice_join.go)
+// can share this single block-check implementation — same group-DM exemption,
+// same "lookup failure is not a block" posture — instead of reimplementing it
+// against the raw DB. st only needs to be a Store; *db.DB satisfies it.
+func RequireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+	return requireDMNotBlocked(ctx, st, userID, channelID)
 }
 
 // requireDMNotBlocked reports ErrBlocked when userID and the other participant

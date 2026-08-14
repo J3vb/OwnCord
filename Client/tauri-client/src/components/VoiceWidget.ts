@@ -185,15 +185,31 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   /** Header E2EE status: dynamic label + a persistent "secured" lock once the
-   *  room key is ready (docs/architecture/ux/voice-and-e2ee.md §2). */
-  function updateStatus(status: VoiceStatus): void {
+   *  room key is ready (docs/architecture/ux/voice-and-e2ee.md §2).
+   *  `encryptionDegraded` (OC-0002) is the SDK's own signal — via
+   *  RoomEvent.EncryptionError, wired in livekitSession.ts's createRoom() —
+   *  that the E2EE worker died after the key exchange already succeeded.
+   *  voiceStatus alone reaches "connected" in that case, so the badge must
+   *  never claim "Secured" from voiceStatus in isolation: it renders a
+   *  distinct, still-visible not-secured warning instead of just hiding. */
+  function updateStatus(status: VoiceStatus, encryptionDegraded: boolean): void {
     if (statusLabel !== null) {
       setText(statusLabel, STATUS_LABELS[status]);
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
     }
     if (securedBadge !== null) {
-      securedBadge.style.display = status === "connected" ? "inline-flex" : "none";
+      const connected = status === "connected";
+      const degraded = connected && encryptionDegraded;
+      securedBadge.classList.toggle("vw-secured--degraded", degraded);
+      if (degraded) {
+        setText(securedBadge, "⚠️ Unsecured");
+        securedBadge.title = "End-to-end encryption failed — this call may not be protected";
+      } else {
+        setText(securedBadge, "🔒 Secured");
+        securedBadge.title = "End-to-end encrypted";
+      }
+      securedBadge.style.display = connected ? "inline-flex" : "none";
     }
   }
 
@@ -228,7 +244,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root.classList.add("visible");
     startStatsPoller();
     startElapsedTimer();
-    updateStatus(voice.voiceStatus);
+    updateStatus(voice.voiceStatus, voice.encryptionDegraded === true);
     updateFrozen(uiStore.getState().connectionStatus);
 
     // Channel name. A DM call resolves through the DM store rather than the
@@ -464,6 +480,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
           voiceStatus: s.voiceStatus,
+          encryptionDegraded: s.encryptionDegraded === true,
         }),
         () => render(),
         (a, b) =>
@@ -475,7 +492,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
-          a.voiceStatus === b.voiceStatus,
+          a.voiceStatus === b.voiceStatus &&
+          a.encryptionDegraded === b.encryptionDegraded,
       ),
     );
     // Freeze controls reactively when the WS socket drops (§3 connection status).

@@ -254,7 +254,7 @@ scenarios.f6_prove_is_serial = async () => {
   assert.equal(proveCalls.length, 2)
   for (const c of proveCalls) {
     assert.equal(c.opts.model, 'opus')
-    assert.equal(c.opts.effort, 'medium')
+    assert.equal(c.opts.effort, 'high')
   }
   assert.equal(result.commits.length, 2)
   assert.deepEqual(result.commits[0], { sha: 'abc1234', file: findings[0].file, ids: ['OC-0001'] })
@@ -425,7 +425,7 @@ scenarios.f10_gate_targets_touched_stacks = async () => {
   const gateCalls = calls.filter((c) => c.opts.label === 'gate')
   assert.equal(gateCalls.length, 1, 'ci-check runs once, not per fix')
   assert.equal(gateCalls[0].opts.model, 'sonnet')
-  assert.equal(gateCalls[0].opts.effort, 'medium')
+  assert.equal(gateCalls[0].opts.effort, 'xhigh')
   assert.match(gatePrompt, /no-experimental-webstorage/, 'client gate command must be spelled out')
   assert.match(gatePrompt, /go build -tags otel/, 'server gate must cover the tagged build variants')
   assert.equal(result.gate.passed, true)

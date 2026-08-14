@@ -10,6 +10,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // Voice join/leave rate limits. voice_join and voice_leave each fan out a
@@ -82,6 +83,21 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	if ch.Type != "voice" && ch.Type != "dm" {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "not a voice channel"))
 		return
+	}
+
+	// A blocked user is still a DM participant — blocking never touches
+	// dm_participants (service/block.go), so the CONNECT_VOICE + IsDMParticipant
+	// gate above passes them straight through into the blocker's DM voice room.
+	// Every other 1:1-DM interaction sink (send, edit, react, pin, typing,
+	// call_ring) already routes through this same check
+	// (service.requireDMNotBlocked); voice was the one gap. Group DMs are
+	// exempt inside it, matching every other sink. h.db satisfies
+	// service.Store directly, so no MessageService wiring is needed here.
+	if ch.Type == "dm" {
+		if err := service.RequireDMNotBlocked(ctx, h.db, c.userID, channelID); err != nil {
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot join voice: blocked"))
+			return
+		}
 	}
 
 	// Archived channels are hidden from every client and their voice states are
@@ -418,6 +434,19 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	if !hasChannelAccess(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.ConnectVoice) {
 		return Result{
 			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			LeaveVoice: true,
+		}
+	}
+
+	// Same block gate as voice_join (voice_join.go, OC-0018): a block imposed
+	// mid-session must not let the refresh keep minting a fresh SFU credential
+	// for a DM the other participant has since blocked. RequireDMNotBlocked is
+	// a safe no-op for a non-DM channelID (no dm_participants row to match), so
+	// this needs no channel-type fetch of its own. d.DB satisfies service.Store
+	// directly.
+	if err := service.RequireDMNotBlocked(ctx, d.DB, userID, channelID); err != nil {
+		return Result{
+			Error:      ClientError{Code: ErrCodeForbidden, Message: "cannot refresh voice token: blocked"},
 			LeaveVoice: true,
 		}
 	}

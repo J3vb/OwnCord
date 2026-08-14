@@ -373,7 +373,7 @@ export class LiveKitSession {
    *  through the process-lifetime key provider's setKey fan-out. */
   private _e2eeWorker: Worker | null = null;
 
-  private createRoom(): Room {
+  private async createRoom(): Promise<Room> {
     // livekit's per-room E2EEManager registers a SetKey listener on the
     // shared key provider and never removes it; only those managers
     // subscribe, so clear them all before the new Room re-registers.
@@ -412,6 +412,15 @@ export class LiveKitSession {
         worker: this._e2eeWorker,
       },
     });
+    // OC-0095: the Room constructor only wires up the E2EEManager — it never
+    // enables encryption. Without this, LocalParticipant.encryptionType stays
+    // NONE, the worker's encode transform takes the disabled passthrough
+    // branch, and every frame reaches the SFU in plaintext even though the
+    // full ECDH/HKDF/AES-GCM key exchange above completed successfully.
+    // Safe to call before connect(): the manager just records the enabled
+    // flag and it's a no-op today for the "" pre-connect identity, then wires
+    // up for real once the SignalConnected handler has the real identity.
+    await newRoom.setE2EEEnabled(true);
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     newRoom.on(RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
     newRoom.on(RoomEvent.Disconnected, this._eventHandlers.handleDisconnected);
@@ -421,6 +430,9 @@ export class LiveKitSession {
       this._eventHandlers.handleAudioPlaybackChanged,
     );
     newRoom.on(RoomEvent.LocalTrackPublished, this._eventHandlers.handleLocalTrackPublished);
+    // OC-0002: the only SDK-level signal that the E2EE worker died after the
+    // key exchange already succeeded — see roomEventHandlers.ts for detail.
+    newRoom.on(RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
 
     return newRoom;
@@ -483,7 +495,8 @@ export class LiveKitSession {
       // room: this._room is null while state is "reconnecting".
       let attemptRoom: Room | null = null;
       try {
-        const newRoom = this.createRoom();
+        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must create+arm E2EE before connect
+        const newRoom = await this.createRoom();
         attemptRoom = newRoom;
         const cleanupAbortedReconnect = async (): Promise<void> => {
           newRoom.removeAllListeners();
@@ -710,8 +723,11 @@ export class LiveKitSession {
 
   // --- Token refresh ---
 
-  /** Token refresh interval: 23 hours (refresh 1h before 24h TTL expiry). */
-  private static readonly TOKEN_REFRESH_MS = 23 * 60 * 60 * 1000;
+  /** Token refresh interval: 4 minutes (refresh 1 min before the server's
+   *  5-minute TTL expiry — see Server/ws/livekit.go tokenTTL). Must stay
+   *  below that TTL or a network blip after minute 5 hands attemptAutoReconnect
+   *  an already-expired token and every reconnect attempt fails (OC-0014). */
+  private static readonly TOKEN_REFRESH_MS = 4 * 60 * 1000;
 
   private startTokenRefreshTimer(): void {
     this.clearTokenRefreshTimer();
@@ -778,12 +794,12 @@ export class LiveKitSession {
     // rotate the token on an active connection. We store the fresh token so
     // that reconnection (auto-reconnect or manual rejoin) uses it, but the
     // live session continues with the original token. This means:
-    //   - Sessions longer than the 4h TTL remain connected (LiveKit keeps
-    //     active connections alive) but lose the ability to reconnect after a
-    //     network blip once the original token expires.
-    //   - The 23h refresh timer ensures a fresh token is always ready
+    //   - Sessions longer than the server's 5-minute TTL remain connected
+    //     (LiveKit keeps active connections alive) but lose the ability to
+    //     reconnect after a network blip once the original token expires.
+    //   - The 4-minute refresh timer ensures a fresh token is always ready
     //     *before* the original expires, so reconnects within the window work.
-    // See also: Server/ws/livekit.go tokenTTL constant.
+    // See also: Server/ws/livekit.go tokenTTL constant (5 * time.Minute).
     if (token && this._state.type === "connected") {
       this.setState({ ...this._state, latestToken: token });
     } else if (token && this._state.type === "reconnecting") {
@@ -930,7 +946,14 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
-    if (this._room !== null) this.leaveVoice(false);
+    // Also tear down (and abort) an in-flight reconnect: `_room` reads null
+    // for the whole "reconnecting" state, so a join issued while the LiveKit
+    // auto-reconnect loop is running would otherwise skip leaveVoice(false)
+    // entirely — meaning _e2ee.clearState() never runs, and setupKeyExchange
+    // below inherits the PREVIOUS channel's residual _isKeyHolder via its
+    // OR-with-server-value guard, joining the new channel as a phantom key
+    // holder the server never elected (OC-0020).
+    if (this._room !== null || this._state.type === "reconnecting") this.leaveVoice(false);
     // Draw the next generation from the monotonic instance counter (never
     // re-derived from `_state`) and embed it into the "connecting" state.
     // Any newer call to connectAndSetup() will produce a strictly larger
@@ -947,7 +970,7 @@ export class LiveKitSession {
     // been claimed by a newer attempt).
     let localRoom: Room | null = null;
     try {
-      localRoom = this.createRoom();
+      localRoom = await this.createRoom();
       this._audioPipeline.setRoom(localRoom);
       this._audioElements.setRoom(localRoom);
       this._deviceManager.setRoom(localRoom);
@@ -1070,7 +1093,8 @@ export class LiveKitSession {
             }
             if (localRoom === null) throw connectErr;
             localRoom.removeAllListeners();
-            localRoom = this.createRoom();
+            // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
+            localRoom = await this.createRoom();
             this._audioPipeline.setRoom(localRoom);
             this._audioElements.setRoom(localRoom);
             this._deviceManager.setRoom(localRoom);

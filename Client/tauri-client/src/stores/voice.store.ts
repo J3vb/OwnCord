@@ -92,6 +92,16 @@ export interface VoiceState {
   /** Voice-session lifecycle status (drives the widget's connecting/securing/
    *  secured indicators). Written from livekitSession.ts. */
   readonly voiceStatus: VoiceStatus;
+  /** True once livekit-client reports a live E2EE encryption failure
+   *  (RoomEvent.EncryptionError — the per-room worker died after the room key
+   *  exchange already succeeded, e.g. a lazily-loaded worker chunk blocked by
+   *  CSP or a WASM load failure). voiceStatus alone reaches "connected" in
+   *  that case, so the Secured badge must also read this flag rather than
+   *  deriving "secured" from voiceStatus === "connected" in isolation.
+   *  Written from roomEventHandlers.ts; latches until the next join/leave.
+   *  Always written by the store; optional only so the many inline VoiceState
+   *  test fixtures need not restate it (same convention as localServerMuted). */
+  readonly encryptionDegraded?: boolean;
   /** Per-peer E2EE identity verification (F3 TOFU), keyed by userId. The store
    *  always sets it; optional only so the many inline VoiceState test fixtures
    *  need not restate it. */
@@ -112,6 +122,7 @@ const INITIAL_STATE: VoiceState = {
   joinedAt: null,
   listenOnly: false,
   voiceStatus: "idle",
+  encryptionDegraded: false,
   peerVerifications: new Map(),
 };
 
@@ -133,6 +144,7 @@ export function resetVoiceStore(): void {
     joinedAt: null,
     listenOnly: false,
     voiceStatus: "idle",
+    encryptionDegraded: false,
     peerVerifications: new Map(),
   }));
 }
@@ -265,6 +277,9 @@ export function joinVoiceChannel(channelId: number): void {
       // Optimistic: the widget shows "Connecting…" the moment the user clicks,
       // before the voice_token round-trip. livekitSession advances it from here.
       voiceStatus: "joining",
+      // A fresh join starts clean — any degraded flag belongs to the
+      // previous session's worker, not this one.
+      encryptionDegraded: false,
     };
   });
 }
@@ -280,6 +295,7 @@ export function leaveVoiceChannel(): void {
       // Server mute lives with the voice session; a new session starts clean.
       localServerMuted: false,
       localServerDeafened: false,
+      encryptionDegraded: false,
     };
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
@@ -306,6 +322,16 @@ export function leaveVoiceChannel(): void {
 export function setVoiceStatus(status: VoiceStatus): void {
   voiceStore.setState((prev) =>
     prev.voiceStatus === status ? prev : { ...prev, voiceStatus: status },
+  );
+}
+
+/** Mark whether the live E2EE encryption has degraded (OC-0002) — set true
+ *  from roomEventHandlers.ts when the room reports RoomEvent.EncryptionError
+ *  (the SDK's own signal that the per-room worker died). Single-writer aside
+ *  from the join/leave resets above, which clear it for a fresh session. */
+export function setEncryptionDegraded(degraded: boolean): void {
+  voiceStore.setState((prev) =>
+    prev.encryptionDegraded === degraded ? prev : { ...prev, encryptionDegraded: degraded },
   );
 }
 

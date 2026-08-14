@@ -100,11 +100,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// removed in D3).
 	svc := service.New(database, limiter)
 
-	// Auth routes: register, login, logout, me.
-	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
-
-	// Profile routes are mounted after hub creation (below) so the hub can
-	// broadcast user_update events for real-time profile changes.
+	// Auth routes are mounted after hub creation (below) so self-service
+	// account deletion can broadcast member_ban like the admin ban path does.
 
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database, svc)
@@ -140,6 +137,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
+
+	// Auth routes: register, login, logout, me. Mounted with the hub as the
+	// AuthBroadcaster so DELETE /api/v1/auth/account (self-service account
+	// deletion) fans out member_ban and force-disconnects the deleted user's
+	// own socket, exactly like the admin ban path does for the same
+	// anonymise-and-ban DB state.
+	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey, hub)
 
 	// Phase C Step 9 — wire plugin registry and event sink into the hub.
 	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.

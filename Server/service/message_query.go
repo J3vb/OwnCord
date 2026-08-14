@@ -205,6 +205,13 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
+	// Archived channels are read-only. SetMessagePinned bypasses
+	// checkSendPermission (it runs its own DM/permission branch below), so it
+	// needs the shared gate directly — see requireChannelWritable in
+	// message_perms.go.
+	if err := requireChannelWritable(ch); err != nil {
+		return err
+	}
 	if ch.Type == "dm" {
 		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 		if err != nil || !ok {

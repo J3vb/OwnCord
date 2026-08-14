@@ -142,7 +142,12 @@ function participant(identity: string): RemoteParticipant {
 }
 
 beforeEach(() => {
-  voiceStore.setState((prev) => ({ ...prev, localMuted: false, localDeafened: false }));
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localMuted: false,
+    localDeafened: false,
+    encryptionDegraded: false,
+  }));
   vi.stubGlobal(
     "MediaStream",
     class {
@@ -507,6 +512,33 @@ describe("handleAudioPlaybackChanged", () => {
     expect(() => {
       document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     }).not.toThrow();
+  });
+});
+
+// ── handleEncryptionError (OC-0002) ────────────────────────────────────────
+//
+// livekit-client's E2eeManager emits RoomEvent.EncryptionError when the
+// per-room E2EE worker dies (onWorkerError) — the ECDH/HKDF key exchange can
+// still succeed while the worker that actually encrypts frames is dead. With
+// nothing subscribed to this event, that failure was invisible: voiceStatus
+// still reaches "connected" and the widget's Secured badge lit up regardless.
+
+describe("handleEncryptionError", () => {
+  it("marks encryption degraded in the voice store so the Secured badge can react", () => {
+    const h = build();
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
+
+    h.handlers.handleEncryptionError(new Error("worker crashed"));
+
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("marks encryption degraded even when no participant is attributed", () => {
+    const h = build();
+
+    h.handlers.handleEncryptionError(new Error("worker crashed"), undefined);
+
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
   });
 });
 

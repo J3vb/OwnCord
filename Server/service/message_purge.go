@@ -52,6 +52,13 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	if ch.Type == "dm" {
 		return nil, fmt.Errorf("%w: bulk delete is not available in direct messages", ErrForbidden)
 	}
+	// Archived channels are read-only. PurgeMessages bypasses
+	// checkSendPermission (it runs its own MANAGE_MESSAGES check below), so it
+	// needs the shared gate directly — see requireChannelWritable in
+	// message_perms.go.
+	if err := requireChannelWritable(ch); err != nil {
+		return nil, err
+	}
 	if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
 		return nil, fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
 	}

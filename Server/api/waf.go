@@ -93,6 +93,16 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 				# CRS numbering scheme.
 				SecRule REQUEST_URI "@beginsWith /api/v1/uploads" "id:1001,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 
+				# Same exclusion for the other routes with a larger-than-1-MiB
+				# app-level cap (see bodyCapExemptPrefixes in constants.go, and
+				# the mirrored inline-engine rules 900004/900005): keeps this
+				# engine's SecRequestBodyLimitAction ProcessPartial from
+				# evaluating rules against a truncated buffer, and 920420
+				# from rejecting their non-default content types (application/zip,
+				# raw image bytes) under CRS blocking mode.
+				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:1002,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:1003,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
+
 				Include @owasp_crs/*.conf
 
 				# Engine mode: DetectionOnly logs matches without interrupting;
@@ -241,6 +251,15 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 
 				# Exclude file upload endpoint from body inspection (binary content)
 				SecRule REQUEST_URI "@beginsWith /api/v1/uploads" "id:900003,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
+
+				# Exclude the other routes with a larger-than-1-MiB app-level
+				# cap too (see bodyCapExemptPrefixes in constants.go: 16 MiB
+				# plugin installs, 2 MiB avatars). Without this, coraza's
+				# default SecRequestBodyLimitAction (Reject) 413s any body
+				# that reaches this engine's 1 MiB SecRequestBodyLimit before
+				# the app's own, larger limit is ever consulted.
+				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:900004,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:900005,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 			`, paranoiaLevel)),
 	)
 	if err != nil {

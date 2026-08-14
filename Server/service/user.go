@@ -159,6 +159,17 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	// An empty Username means "unspecified", the same as a nil
+	// DisplayName/About pointer — merged against the current row rather
+	// than written verbatim. This is what lets an avatar-only caller
+	// (handleUploadAvatar) leave username alone without handing over a
+	// snapshot that could be stale by the time this call lands: PATCH
+	// /users/me always validates and rejects an empty username before
+	// calling in, so "" never reaches here as a real rename request.
+	username := patch.Username
+	if username == "" {
+		username = current.Username
+	}
 	avatar := current.Avatar
 	if patch.Avatar != nil {
 		avatar = nullable(*patch.Avatar)
@@ -166,7 +177,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	displayName := resolveOptional(patch.DisplayName, current.DisplayName)
 	about := resolveOptional(patch.About, current.About)
 
-	if err := s.st.UpdateUserProfile(ctx, userID, patch.Username, avatar, displayName, about); err != nil {
+	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
@@ -178,8 +189,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", patch.Username))
-	slog.Info("profile updated", "user_id", userID, "username", patch.Username)
+		fmt.Sprintf("username=%s", username))
+	slog.Info("profile updated", "user_id", userID, "username", username)
 	return user, nil
 }
 

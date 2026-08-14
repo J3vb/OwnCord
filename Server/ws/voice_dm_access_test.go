@@ -216,6 +216,67 @@ func TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser(t *testing.T) 
 	}
 }
 
+// OC-0018: voice_join into a 1:1 DM had no block gate. Every other 1:1-DM
+// interaction sink (send, edit, react, pin, typing, call_ring) routes through
+// service.requireDMNotBlocked; voice was the one gap. Blocking never touches
+// dm_participants (service/block.go), so IsDMParticipant still passes a
+// blocked user straight through into the blocker's DM voice room.
+func TestVoiceJoin_DMBlocked_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "dmblock-alice")
+	bob := seedMemberUser(t, database, "dmblock-bob")
+	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, alice, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
+
+	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
+
+	state, err := database.GetVoiceState(context.Background(), alice.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("blocked user was persisted into the DM's voice channel (%d)", state.ChannelID)
+	}
+}
+
+// Second entry point: a block imposed mid-session must also evict on the next
+// token refresh, not just refuse the initial join. Alice joins while still
+// unblocked (so the join succeeds and a real voice_states row exists), then
+// bob blocks her; the refresh must re-check and evict rather than keep
+// minting fresh SFU room-join credentials for the old session.
+func TestVoiceTokenRefresh_DMBlocked_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	alice := seedMemberUser(t, database, "dmblockrefresh-alice")
+	bob := seedMemberUser(t, database, "dmblockrefresh-bob")
+	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, alice, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
+	drainChanTimeout(send, 50*time.Millisecond)
+
+	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
+
+	assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
+}
+
 func TestVoiceJoin_GroupDMNonParticipant_Refused(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	alice := seedMemberUser(t, database, "grpvoice-x-alice")

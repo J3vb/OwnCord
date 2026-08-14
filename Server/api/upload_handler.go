@@ -299,6 +299,29 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		// ── Access control ──────────────────────────────────────────────
 		isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
 
+		// DM participation is required of everyone, including admins — this
+		// matches every other DM read gate in the codebase (requireChannelRead,
+		// PermissionService.RequireChannelAccess, checkSendPermission), none of
+		// which have an admin bypass. Checked ahead of the `!isAdmin` block so
+		// the admin bypass below cannot skip it.
+		if aa.ChannelID != nil && aa.ChannelType == "dm" {
+			if user == nil {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "you do not have access to this file",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "you do not have access to this file",
+				})
+				return
+			}
+		}
+
 		if !isAdmin {
 			if aa.ChannelID == nil {
 				// An unlinked attachment that some user's avatar points at is
@@ -330,25 +353,10 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 					})
 					return
 				}
-			} else {
-				// Linked attachment — check channel permissions.
-				if aa.ChannelType == "dm" {
-					if user == nil {
-						writeJSON(w, http.StatusForbidden, errorResponse{
-							Error:   "FORBIDDEN",
-							Message: "you do not have access to this file",
-						})
-						return
-					}
-					ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
-					if dmErr != nil || !ok {
-						writeJSON(w, http.StatusForbidden, errorResponse{
-							Error:   "FORBIDDEN",
-							Message: "you do not have access to this file",
-						})
-						return
-					}
-				} else if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
+			} else if aa.ChannelType != "dm" {
+				// Linked attachment in a guild channel — check channel
+				// permissions. The DM case is handled unconditionally above.
+				if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",
 						Message: "you do not have access to this file",
