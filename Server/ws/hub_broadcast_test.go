@@ -1,10 +1,12 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
 
@@ -136,6 +138,52 @@ func TestHub_BroadcastDropCount(t *testing.T) {
 	if got := hub.BroadcastDropCount(); got != 0 {
 		t.Errorf("BroadcastDropCount = %d after one delivered broadcast, want 0", got)
 	}
+}
+
+// TestHub_ChannelReadAudience_ExcludesArchivedChannel is OC-0073:
+// channelReadAudience (shared by BroadcastChannelCreate/Update and the voice
+// event / CleanupVoiceForChannel fan-outs) never checked ch.Archived, unlike
+// its sibling RefreshChannelVisibility which treats an archived channel as
+// invisible to every role. A Member has base READ_MESSAGES with no override,
+// so before archiving they are a legitimate audience member for this channel;
+// archiving it must remove them from channelReadAudience even though their
+// role's READ_MESSAGES grant never changed.
+func TestHub_ChannelReadAudience_ExcludesArchivedChannel(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	member := seedMemberUser(t, database, "archived-audience-member")
+	send := make(chan []byte, 8)
+	hub.RegisterNowForTest(ws.NewTestClient(hub, member.ID, send))
+
+	chID := seedTestChannel(t, database, "will-be-archived")
+
+	ch, err := database.GetChannel(context.Background(), chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{
+		Name:     ch.Name,
+		Topic:    ch.Topic,
+		Category: ch.Category,
+		SlowMode: ch.SlowMode,
+		Position: ch.Position,
+		Archived: true,
+	}); err != nil {
+		t.Fatalf("AdminUpdateChannel: %v", err)
+	}
+	archived, err := database.GetChannel(context.Background(), chID)
+	if err != nil || archived == nil {
+		t.Fatalf("GetChannel after archive: %v", err)
+	}
+	if !archived.Archived {
+		t.Fatalf("channel not archived after AdminUpdateChannel")
+	}
+
+	hub.BroadcastChannelUpdate(archived)
+
+	assertNotReceived(t, send, "member with base READ_MESSAGES on an archived channel")
 }
 
 func TestHub_SetEventPersister(t *testing.T) {
