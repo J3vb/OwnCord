@@ -5024,6 +5024,10 @@ ul.md-list-nested {
   object-fit: contain;
 }
 
+.video-cell.track-muted video {
+  visibility: hidden;
+}
+
 .video-username {
   position: absolute;
   bottom: 8px;
