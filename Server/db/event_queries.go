@@ -150,6 +150,24 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 	return scanEventRows(rows)
 }
 
+// CountEventsInRange returns the UNFILTERED (all channels) count of events
+// with afterSeq < seq <= uptoSeq. seq is the events table's primary key, so
+// this can only ever come up short of (uptoSeq - afterSeq), never over —
+// callers use that to detect an interior gap left by a lost row (a dropped
+// EventPersister enqueue, or a failed row in a batch flush) without having to
+// enumerate every seq in the range.
+func (d *DB) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
+	var count int64
+	err := d.reader.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM events WHERE seq > ? AND seq <= ?`,
+		afterSeq, uptoSeq,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("CountEventsInRange: %w", err)
+	}
+	return count, nil
+}
+
 // GetMaxEventSeq returns the largest seq in the events table, or 0 if empty.
 func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	var maxSeq sql.NullInt64

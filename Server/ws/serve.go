@@ -227,24 +227,50 @@ func (h *Hub) handleReconnect(
 					for _, p := range persisted {
 						persistedTail = append(persistedTail, p.Payload)
 					}
-					// The EventPersister flushes asynchronously, so cold rows can
-					// lag the live seq: events broadcast after the last flush sit
-					// only in the ring buffer. Confirm the buffer can cover
-					// everything above the newest persisted row — the
-					// authoritative re-read happens atomically with registerNow
-					// below, but a hole here must still force a full ready
-					// rather than a replay with a silent gap at its end.
 					maxPersistedSeq = uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
-					switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
-					case tail != nil:
-					case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
-						// Post-restart empty buffer with the hub seq seeded from
-						// the store max: nothing was broadcast after the last
-						// persisted row, so the cold rows alone are complete.
-					default:
-						slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
-							"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
+
+					// persisted is channel-filtered, so a hole in a channel
+					// outside allowedChannelIDs would slip past a contiguity
+					// check on persisted itself — and EventPersister can lose a
+					// row outright (a full queue drops silently in Enqueue, a
+					// per-row insert failure inside a batch flush is logged but
+					// never surfaced here; see event_persister.go). Count the
+					// UNFILTERED range (lastSeq, maxPersistedSeq] and require
+					// every seq in it to be present. seq is the events table's
+					// primary key, so the count can only come up short, never
+					// over.
+					expectedCount := maxPersistedSeq - lastSeq
+					switch gapCount, gapErr := es.CountEventsInRange(ctx, int64(lastSeq), int64(maxPersistedSeq)); { //nolint:gosec // bounded well below MaxInt64
+					case gapErr != nil:
+						slog.Warn("ws handleReconnect: cold-tier contiguity probe failed, forcing full ready",
+							"user_id", c.userID, "err", gapErr)
 						persistedTail = nil
+					case uint64(gapCount) != expectedCount: //nolint:gosec // bounded well below MaxInt64
+						slog.Warn("ws handleReconnect: cold-tier replay has an interior gap, forcing full ready",
+							"user_id", c.userID, "last_seq", lastSeq, "max_persisted_seq", maxPersistedSeq,
+							"expected", expectedCount, "found", gapCount)
+						persistedTail = nil
+					}
+
+					if persistedTail != nil {
+						// The EventPersister flushes asynchronously, so cold rows can
+						// lag the live seq: events broadcast after the last flush sit
+						// only in the ring buffer. Confirm the buffer can cover
+						// everything above the newest persisted row — the
+						// authoritative re-read happens atomically with registerNow
+						// below, but a hole here must still force a full ready
+						// rather than a replay with a silent gap at its end.
+						switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
+						case tail != nil:
+						case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
+							// Post-restart empty buffer with the hub seq seeded from
+							// the store max: nothing was broadcast after the last
+							// persisted row, so the cold rows alone are complete.
+						default:
+							slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
+								"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
+							persistedTail = nil
+						}
 					}
 					if persistedTail != nil {
 						events = persistedTail
