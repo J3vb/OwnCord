@@ -179,7 +179,13 @@ export function renderMessage(
   opts: MessageListOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
-  if (msg.user.username === "System") {
+  // id 0 is the reserved sentinel for server-synthesized system rows (DB
+  // user ids are AUTOINCREMENT starting at 1, so no real account can ever
+  // hold it). Dispatching on the username alone let any account that
+  // registered the display name "System" render with no author, no role
+  // colour and no moderation controls — indistinguishable from a genuine
+  // server notice.
+  if (msg.user.id === 0 && msg.user.username === "System") {
     return renderSystemMessage(msg);
   }
 

@@ -814,6 +814,28 @@ describe("renderers", () => {
 
       ac.abort();
     });
+
+    it("does not treat a real registered user named 'System' as a system notice", () => {
+      // Real user ids are DB autoincrement and start at 1 — only the
+      // synthetic sentinel row (id 0) is a genuine system message. A user
+      // who registered the display name "System" must render normally,
+      // with an author name and full moderation controls.
+      const msg = makeMessage({
+        user: { id: 42, username: "System", avatar: null },
+        content: "Your session was flagged — re-enter your password at evil.example",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".system-msg")).toBeNull();
+      expect(container.querySelector(".msg-author")).not.toBeNull();
+      // The hover action bar (react/reply/pin/…) is only built for real
+      // messages — renderSystemMessage returns before it exists at all.
+      expect(container.querySelector('[data-testid="msg-reply-1"]')).not.toBeNull();
+
+      ac.abort();
+    });
   });
 
   // ---------------------------------------------------------------------------
