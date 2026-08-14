@@ -204,6 +204,17 @@ func sanitizeToFixpoint(raw string) string {
 	return s
 }
 
+// SanitizeText runs raw through the same unescape-sanitize-fixpoint pipeline
+// as message content and profile free-text fields (see sanitizeToFixpoint):
+// it strips HTML but leaves survivors as typed instead of persisting them as
+// literal &#39;/&gt;/&amp; entities the way a bare bluemonday sanitizer.Sanitize
+// call would. Exported for call sites outside this package that sanitize a
+// single free-text field before storage — e.g. the username field on
+// registration, which must canonicalize identically to how lookups treat it.
+func SanitizeText(raw string) string {
+	return sanitizeToFixpoint(raw)
+}
+
 // sanitizeContent validates and sanitizes message content.
 func sanitizeContent(raw string, allowEmpty bool) (string, error) {
 	if len(raw) > maxMessageLen*4 {
