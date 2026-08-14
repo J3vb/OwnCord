@@ -218,7 +218,22 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		return
 	}
 	h.pubsub.Subscribe(c, ChannelTopic(newChID))
-	if hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
+	// The re-validation mirrors HandleChannelFocus's admission gate: DMs are
+	// participant-gated (the READ role bit is deliberately waived), non-DMs
+	// need READ_MESSAGES, and a deleted channel is a denial. A transient
+	// lookup error is NOT a denial — the recheck exists to catch a concrete
+	// revoke in the Subscribe race window, the sweeps stay authoritative, and
+	// unwinding on error would turn any DB hiccup into a silently dead
+	// message stream with no error frame sent to the client.
+	ch, chErr := h.db.GetChannel(c.ctx, newChID)
+	if chErr != nil {
+		return
+	}
+	if ch != nil && ch.Type == "dm" {
+		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
+			return
+		}
+	} else if ch != nil && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
 		return
 	}
 	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
