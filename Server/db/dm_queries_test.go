@@ -442,9 +442,12 @@ func TestOpenDM_Idempotent(t *testing.T) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	// Already open from creation — opening again should not error.
-	if err := database.OpenDM(context.Background(), user1, ch.ID); err != nil {
+	// Already open from creation — opening again should not error, and must
+	// report false: the row already existed, so this call is a no-op.
+	if opened, err := database.OpenDM(context.Background(), user1, ch.ID); err != nil {
 		t.Errorf("OpenDM (idempotent) error: %v", err)
+	} else if opened {
+		t.Error("OpenDM (idempotent) reported opened=true for an already-open DM")
 	}
 
 	// Should still have exactly 1 DM.
@@ -513,8 +516,10 @@ func TestOpenDM_AfterClose(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	if err := database.OpenDM(context.Background(), user1, ch.ID); err != nil {
+	if opened, err := database.OpenDM(context.Background(), user1, ch.ID); err != nil {
 		t.Fatalf("OpenDM after close: %v", err)
+	} else if !opened {
+		t.Error("OpenDM after close reported opened=false — a genuine reopen must report true")
 	}
 
 	dms, err := database.GetUserDMChannels(context.Background(), user1)

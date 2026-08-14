@@ -70,10 +70,11 @@ func TestMarkRead_ClearsMentionCount(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "markread-mention-user")
 	chID := seedTestChannel(t, database, "markread-mention-chan")
-	if _, err := database.CreateMessage(context.Background(), chID, user.ID, "@you", nil); err != nil {
+	msgID, err := database.CreateMessage(context.Background(), chID, user.ID, "@you", nil)
+	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if err := database.IncrementMentionCounts(context.Background(), chID, []int64{user.ID}); err != nil {
+	if err := database.IncrementMentionCounts(context.Background(), chID, msgID, []int64{user.ID}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
