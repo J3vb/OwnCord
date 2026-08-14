@@ -1025,10 +1025,16 @@ export function wireDispatcher(
       // send/reaction rollback, not a capacity refusal) — this is the one
       // place every remaining server error lands (a rejected fire-and-forget
       // chat_edit, for one), so it must not be silently dropped just because
-      // it isn't RATE_LIMITED/FORBIDDEN. Set synchronously, independent of
-      // the video-rollback lookup below: both paths produce this exact same
-      // message, so there is nothing left to gate on that lookup resolving.
-      setTransientError(payload.message || "Server error");
+      // it isn't RATE_LIMITED/FORBIDDEN. transientError has exactly one
+      // reader — ConnectPage's login-screen banner — so writing it here is
+      // invisible for the whole time the user is in-app (MainPage never
+      // subscribes) and only resurfaces, stale and out of context, next time
+      // the login screen mounts (OC-0064). Use the same in-app toast the
+      // sibling CHANNEL_FULL/VIDEO_LIMIT branches above already use. Fire
+      // synchronously, independent of the video-rollback lookup below: both
+      // paths react to this exact same message, so there is nothing left to
+      // gate on that lookup resolving.
+      showToast(payload.message || "Server error", "error");
 
       // A server refusal of a voice_camera/voice_screenshare enable other
       // than VIDEO_LIMIT (FORBIDDEN, RATE_LIMITED, INTERNAL, ...): roll back
