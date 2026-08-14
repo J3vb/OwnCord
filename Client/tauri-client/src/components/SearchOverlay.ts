@@ -93,15 +93,6 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       appendChildren(item, header, content);
 
-      item.addEventListener(
-        "click",
-        () => {
-          options.onSelectResult(r);
-          options.onClose();
-        },
-        { signal },
-      );
-
       resultsDiv.appendChild(item);
     }
   }
@@ -200,6 +191,26 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     }
   }
 
+  // Single delegated listener for the results container, registered once at
+  // mount time. renderResults() re-creates row elements on every search and
+  // on every arrow-key navigation, so binding a listener directly to each row
+  // would re-register (and never release) one abort algorithm per discarded
+  // row for the lifetime of the overlay.
+  function handleResultsClick(e: MouseEvent): void {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest(".search-result-item");
+    if (!row) return;
+    const testId = row.getAttribute("data-testid");
+    if (!testId) return;
+    const idx = Number(testId.slice("search-result-".length));
+    const r = results[idx];
+    if (r !== undefined) {
+      options.onSelectResult(r);
+      options.onClose();
+    }
+  }
+
   function mount(container: Element): void {
     root = createElement("div", {
       class: "search-overlay open",
@@ -234,6 +245,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     input.addEventListener("input", handleInput, { signal });
     input.addEventListener("keydown", handleKeydown, { signal });
     root.addEventListener("click", handleBackdropClick, { signal });
+    resultsDiv.addEventListener("click", handleResultsClick, { signal });
 
     requestAnimationFrame(() => input.focus());
   }

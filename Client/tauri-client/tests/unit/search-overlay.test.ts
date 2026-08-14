@@ -294,6 +294,61 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("does not attach a new click listener to each row on every re-render (OC-0147)", async () => {
+    // Per-row click listeners registered on the component-lifetime AbortSignal
+    // never get cleaned up when a row is discarded by a re-render — only
+    // destroy() aborts that signal. Re-renders triggered by ArrowDown/ArrowUp
+    // (which don't create new rows via a fresh search) must not register any
+    // additional listeners directly on ".search-result-item" elements; the
+    // fix delegates a single listener onto the results container instead.
+    const results = [
+      makeResult({ message_id: 1 }),
+      makeResult({ message_id: 2 }),
+      makeResult({ message_id: 3 }),
+    ];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const opts = makeOptions({ onSearch });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "test";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(3);
+
+    // Only start counting after the initial render so we isolate what the
+    // subsequent re-renders (via arrow-key navigation) register. vi.spyOn's
+    // mock.instances isn't reliably typed/populated for non-constructor
+    // methods, so track `this` via a manual monkey-patch instead.
+    const perRowClickRegistrations: Element[] = [];
+    const originalAddEventListener = Element.prototype.addEventListener;
+    Element.prototype.addEventListener = function (
+      this: Element,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (type === "click" && this.classList.contains("search-result-item")) {
+        perRowClickRegistrations.push(this);
+      }
+      originalAddEventListener.call(this, type, listener, options);
+    };
+
+    try {
+      for (let i = 0; i < 5; i++) {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      }
+    } finally {
+      Element.prototype.addEventListener = originalAddEventListener;
+    }
+
+    expect(perRowClickRegistrations).toHaveLength(0);
+
+    overlay.destroy?.();
+  });
+
   it("destroy removes overlay from DOM", () => {
     const opts = makeOptions();
     const overlay = createSearchOverlay(opts);
