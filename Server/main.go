@@ -132,6 +132,11 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 	defer database.Close() //nolint:errcheck
 
+	// The admin "Restore backup" handler needs the real database file path:
+	// without this, it falls back to a hardcoded "data/chatserver.db" and
+	// silently no-ops on any server with a configured database.path.
+	admin.SetDatabasePath(cfg.Database.Path)
+
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
