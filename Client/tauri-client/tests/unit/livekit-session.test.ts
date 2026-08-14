@@ -21,6 +21,7 @@ const mockRoom = vi.hoisted(() => ({
   disconnect: vi.fn().mockResolvedValue(undefined),
   on: vi.fn().mockReturnThis(),
   removeAllListeners: vi.fn(),
+  setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
   localParticipant: {
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
     setCameraEnabled: vi.fn().mockResolvedValue(undefined),
@@ -1048,8 +1049,9 @@ describe("LiveKitSession", () => {
       session.handleVoiceTokenRefresh("new-token");
 
       expect((session as any)._state.latestToken).toBe("new-token");
-      // Timer restarted: the 23h refresh timer is re-armed on every refresh.
-      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 23 * 60 * 60 * 1000);
+      // Timer restarted: the refresh timer is re-armed on every refresh.
+      // OC-0014: must stay under the server's 5-minute token TTL.
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 4 * 60 * 1000);
     });
 
     it("handles undefined token", () => {
@@ -2472,6 +2474,28 @@ describe("LiveKitSession", () => {
 
       expect(worker.terminate).toHaveBeenCalled();
     });
+
+    // OC-0095: room.setE2EEEnabled(true) was never called anywhere, so the
+    // key exchange (ECDH/HKDF/AES-GCM, TOFU identity, key-holder rotation)
+    // ran end-to-end but every media frame still reached the SFU in
+    // plaintext — the local cryptor stayed disabled.
+    it("enables E2EE on the room created by createRoom (OC-0095)", async () => {
+      mockRoom.setE2EEEnabled.mockClear();
+
+      await (session as any).createRoom();
+
+      expect(mockRoom.setE2EEEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("enables E2EE on the room used for a normal voice join", async () => {
+      mockRoom.setE2EEEnabled.mockClear();
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.setE2EEEnabled).toHaveBeenCalledWith(true);
+    });
   });
 
   describe("attemptAutoReconnect (lifecycle)", () => {
@@ -2851,6 +2875,28 @@ describe("LiveKitSession", () => {
   });
 
   describe("token refresh timer", () => {
+    // OC-0014: the server mints LiveKit tokens with a 5-minute TTL
+    // (Server/ws/livekit.go tokenTTL). If the client's only periodic
+    // refresh fires later than that, any reconnect attempt after the first
+    // 5 minutes of a call presents an already-expired token and fails.
+    it("refreshes the token before the server's 5-minute TTL expires (OC-0014)", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      mockWs.send.mockClear();
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+      expect(mockWs.send).toHaveBeenCalledWith({
+        type: "voice_token_refresh",
+        payload: {},
+      });
+    });
+
     it("fires after TOKEN_REFRESH_MS and sends voice_token_refresh WS message", async () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
@@ -2861,7 +2907,7 @@ describe("LiveKitSession", () => {
 
       mockWs.send.mockClear();
 
-      await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 100);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 100);
 
       expect(mockWs.send).toHaveBeenCalledWith({
         type: "voice_token_refresh",
@@ -2904,7 +2950,7 @@ describe("LiveKitSession", () => {
       mockWs.send.mockClear();
       (session as any).clearTokenRefreshTimer();
 
-      await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 100);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 100);
 
       expect(mockWs.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_token_refresh" }),
