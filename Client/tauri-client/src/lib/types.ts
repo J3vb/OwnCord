@@ -256,6 +256,14 @@ export interface AuthOkPayload {
   readonly user: UserWithRole;
   readonly server_name: string;
   readonly motd: string;
+  /**
+   * Which reconnection tier served this auth_ok — "none" (fresh connect or
+   * full re-sync), "buffer" (ring-buffer resume), or "db" (persisted-event
+   * resume). Absent on some older servers. ws.ts resets its lastSeq
+   * watermark on "none" since a full re-sync means the server's own seq
+   * counter may have restarted below the client's stale watermark.
+   */
+  readonly replay_source?: "none" | "buffer" | "db";
 }
 
 export interface AuthErrorPayload {

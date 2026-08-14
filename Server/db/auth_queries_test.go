@@ -774,6 +774,41 @@ func TestListMembers_ExcludesBanned(t *testing.T) {
 	}
 }
 
+// TestListMembers_LapsedTempBan_StillIncluded locks the same "reconverged raw
+// column" fix that GetUserIDsByUsernames and ListMentionTargetsByRoles already
+// carry (db/mention_queries.go's notBannedClause): nothing clears users.banned
+// when a temp ban's ban_expires lapses (that's decided lazily, at login, by
+// auth.IsEffectivelyBanned), so a raw `banned = 0` filter leaves a reinstated
+// user permanently absent from the member roster even though they can log in
+// and post again.
+func TestListMembers_LapsedTempBan_StillIncluded(t *testing.T) {
+	database := newTestDB(t)
+	_, _ = database.CreateUser(context.Background(), "member_visible", "hash", 4)
+	id2, _ := database.CreateUser(context.Background(), "member_lapsed_ban", "hash", 4)
+
+	past := time.Now().Add(-1 * time.Hour)
+	if err := database.BanUser(context.Background(), id2, "temp ban", &past); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	members, err := database.ListMembers(context.Background())
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	found := false
+	for _, m := range members {
+		if m.Username == "member_lapsed_ban" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a lapsed temp ban must not hide the user from the member roster")
+	}
+	if len(members) != 2 {
+		t.Errorf("ListMembers() = %d, want 2 (lapsed ban must not hide the member)", len(members))
+	}
+}
+
 func TestListMembers_SortedByUsername(t *testing.T) {
 	database := newTestDB(t)
 	_, _ = database.CreateUser(context.Background(), "zeta_user", "hash", 4)

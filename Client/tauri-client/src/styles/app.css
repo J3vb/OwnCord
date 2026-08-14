@@ -5227,10 +5227,16 @@ ul.md-list-nested {
 }
 
 /* Accessibility: high contrast */
-.high-contrast {
-  --text-normal: #ffffff;
-  --text-muted: #cccccc;
-  --bg-active: rgba(255, 255, 255, 0.15);
+/* applyTheme() and applyThemeByName() write theme tokens as *inline* styles
+   on documentElement (built-in themes) and body (custom themes) -- an
+   inline declaration beats a plain class rule on the same element, so these
+   overrides must be !important and must target both elements or they're a
+   silent no-op. */
+.high-contrast,
+.high-contrast body {
+  --text-normal: #ffffff !important;
+  --text-muted: #cccccc !important;
+  --bg-active: rgba(255, 255, 255, 0.15) !important;
 }
 
 /* Accessibility: large font */

@@ -545,6 +545,23 @@ func (h *Hub) unregisterNow(c *Client) bool {
 	return exists
 }
 
+// shouldMarkOffline reports whether a disconnect teardown should run
+// MarkUserDisconnected and broadcast an offline presence for c's user.
+//
+// `replaced` (unregisterNow's return, sampled once at the start of teardown)
+// is necessary but not sufficient: both readPump's defer and
+// unregisterFailedHandshake sample it BEFORE handleVoiceLeave, which can
+// block for seconds (DB delete, audience scan, a LiveKit call bounded by
+// lkTimeout=5s). A reconnect landing during that window registers a new
+// client for the same user and is invisible to the stale boolean, so the
+// dead connection's teardown would otherwise mark the live session offline
+// (OC-0019). Re-checking h.clients at decision time closes that gap: any
+// entry present once c has been removed is necessarily a newer connection —
+// unregisterNow only ever deletes c's own slot, never someone else's.
+func (h *Hub) shouldMarkOffline(c *Client, replaced bool) bool {
+	return !replaced && h.GetClient(c.userID) == nil
+}
+
 // ClientCount returns the number of currently registered clients (test helper).
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()

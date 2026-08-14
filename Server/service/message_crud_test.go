@@ -9,8 +9,10 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
@@ -304,5 +306,99 @@ func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 	msg, err := database.GetMessage(context.Background(), sent.MessageID)
 	if err != nil || msg == nil {
 		t.Fatalf("message must survive the refused delete; GetMessage: msg=%v err=%v", msg, err)
+	}
+}
+
+// OC-0036: slow mode's cooldown token is spent by limiter.Allow, which must
+// only run once the send has passed content/attachment validation. Consuming
+// it earlier means a send that gets rejected for an unrelated reason (content
+// too long, in this case) still locks the composer for the full slow-mode
+// window even though nothing was ever posted.
+func TestSendMessage_SlowModeNotConsumedByFailedContentValidation(t *testing.T) {
+	_, database := newTestMessageService(t)
+	if err := database.SetChannelSlowMode(context.Background(), 10, 3600); err != nil {
+		t.Fatalf("SetChannelSlowMode: %v", err)
+	}
+	checker := permissions.NewChecker(database)
+	permSvc := NewPermissionService(database, checker)
+	svc := NewMessageService(database, permSvc, auth.NewRateLimiter())
+	ctx := context.Background()
+
+	overLong := strings.Repeat("a", maxMessageLen+1)
+	if _, err := svc.SendMessage(ctx, SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: overLong,
+	}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("over-length send: err = %v, want ErrBadRequest", err)
+	}
+
+	// The rejected send above must not have spent the once-per-hour slow-mode
+	// token: a valid, short send immediately after should still go through.
+	if _, err := svc.SendMessage(ctx, SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "hi",
+	}); err != nil {
+		t.Fatalf("SendMessage right after a rejected over-length send: %v — slow mode must only be "+
+			"charged once a send clears content/attachment validation, not before", err)
+	}
+}
+
+// disconnectAfterLinkStore models a client whose connection drops the instant
+// LinkAttachmentsToMessage commits — mirrors disconnectAfterWriteStore but for
+// the attachment path. GetAttachmentsByMessageIDs is overridden to fail
+// whenever handed an already-canceled context, so a test can tell whether the
+// post-link attachment read used the (canceled) request ctx or a detached one.
+type disconnectAfterLinkStore struct {
+	Store
+	cancel context.CancelFunc
+}
+
+func (s disconnectAfterLinkStore) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+	n, err := s.Store.LinkAttachmentsToMessage(ctx, messageID, uploaderID, attachmentIDs)
+	s.cancel()
+	return n, err
+}
+
+func (s disconnectAfterLinkStore) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return s.Store.GetAttachmentsByMessageIDs(ctx, msgIDs)
+}
+
+// OC-0128: a sender whose connection drops the instant the attachment link
+// commits must still get the linked attachment back on the broadcast result —
+// not a message with no content and no attachments. The post-link read must
+// run on a detached ctx, the same way the compensating deletes in SendMessage
+// already do.
+func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
+	_, database := newTestMessageService(t)
+	// Grant ATTACH_FILES on top of the base member perms newTestMessageService seeds.
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions | permissions.AttachFiles,
+		Position:    1,
+	})
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"att-1", 1, "photo.png", "stored-photo.png", "image/png", 100,
+	); err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
+	checker := permissions.NewChecker(database)
+	permSvc := NewPermissionService(database, checker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := NewMessageService(disconnectAfterLinkStore{Store: database, cancel: cancel}, permSvc, nil)
+
+	result, err := svc.SendMessage(ctx, SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", AttachmentIDs: []string{"att-1"},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(result.Attachments) != 1 {
+		t.Fatalf("Attachments = %v, want 1 — a disconnect right after the attachment link commits must not "+
+			"broadcast a blank message bubble", result.Attachments)
 	}
 }

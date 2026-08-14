@@ -104,6 +104,43 @@ func TestWebhook_ParticipantJoined_ValidJoinAccepted(t *testing.T) {
 	}
 }
 
+// TestWebhook_ParticipantJoined_TransientReadErrorDoesNotEvict locks OC-0065:
+// a GetVoiceState read failure must not be treated as proof of a rogue
+// participant. sweepStaleVoiceStates already draws this distinction via
+// hasChannelPermChecked ("a transient read failure ... is not a revocation");
+// the webhook path OR'd stateErr into the same branch as "no matching row",
+// so a transient DB error (SQLITE_BUSY, an I/O blip) ejected a legitimate
+// participant from the SFU mid-call.
+func TestWebhook_ParticipantJoined_TransientReadErrorDoesNotEvict(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "joined-dberr-user")
+	chanID := seedVoiceChan(t, database, "joined-dberr-ch")
+
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	// Fault-inject exactly the GetVoiceState read: renaming the table out from
+	// under the query makes it return a genuine DB error instead of the
+	// sql.ErrNoRows GetVoiceState collapses to (nil, nil) for a real "no
+	// membership" case.
+	if _, err := database.ExecContext(context.Background(),
+		`ALTER TABLE voice_states RENAME TO voice_states_offline`); err != nil {
+		t.Fatalf("rename voice_states: %v", err)
+	}
+
+	logs := captureLogs(t)
+
+	hub.HandleWebhookParticipantJoinedForTest(
+		participantIdentityFor(user.ID, "some-token"),
+		roomNameFor(chanID),
+	)
+
+	if out := logs(); strings.Contains(out, "rogue participant_joined") {
+		t.Errorf("a transient GetVoiceState error was treated as a rogue participant and evicted; log:\n%s", out)
+	}
+}
+
 func TestWebhook_ParticipantJoined_WrongChannelFlagged(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "joined-wrongch-user")

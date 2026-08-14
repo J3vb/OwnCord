@@ -1207,6 +1207,67 @@ func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	}
 }
 
+// TestVoice_Join_AbortedSwitch_DoesNotResurrectPhantomSession pins OC-0034:
+// when a voice-channel switch's pre-switch leave leaves the old voice_states
+// row in place (e.g. a missing join token short-circuits the delete via
+// leaveVoiceChannelWithRetry's empty-token guard in voice_leave.go),
+// handleVoiceJoin aborts the switch. finishVoiceLeave has already broadcast
+// voice_leave for the old channel to every client that can see it — including
+// the leaver itself, which finishVoiceLeave always adds to the audience — so
+// every client, this one's own session included, has already torn the old
+// membership down. Restoring the client's local voice state on abort
+// resurrects a session nobody else believes exists anymore. The fix is to
+// leave the client's local state cleared so it agrees with the voice_leave it
+// already received; the stale DB row then disagrees with every connected
+// client's voiceChID and the periodic sweep reaps it.
+func TestVoice_Join_AbortedSwitch_DoesNotResurrectPhantomSession(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "abort-switch-user")
+	chanA := seedVoiceChan(t, database, "vc-abort-a")
+	chanB := seedVoiceChan(t, database, "vc-abort-b")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chanA, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// Join channel A normally.
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
+	drainChanTimeout(send, 30*time.Millisecond)
+
+	stateA, _ := database.GetVoiceState(context.Background(), user.ID)
+	if stateA == nil || stateA.ChannelID != chanA {
+		t.Fatalf("user should be in channel A, got %+v", stateA)
+	}
+
+	// Simulate the repro from the finding: the client's local join token has
+	// gone missing (e.g. a prior partial failure) while its voice channel ID
+	// still agrees with the DB row. leaveVoiceChannelWithRetry's empty-token
+	// guard then skips the DELETE entirely, so the pre-switch leave silently
+	// no-ops and the old row survives.
+	ws.SetClientVoiceStateForTest(c, chanA, "")
+
+	// Attempt to switch to channel B. handleVoiceLeave runs first (broadcasts
+	// voice_leave for chanA to the leaver, per finishVoiceLeave), the DB
+	// delete is skipped, and handleVoiceJoin's stale-state check aborts the
+	// switch.
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanB))
+
+	// Confirm the abort branch actually triggered: the old row must still be
+	// present in the DB.
+	stillA, _ := database.GetVoiceState(context.Background(), user.ID)
+	if stillA == nil || stillA.ChannelID != chanA {
+		t.Fatalf("test setup broken: expected stale row in chanA, got %+v", stillA)
+	}
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Errorf("aborted switch resurrected a phantom session: client voice channel = %d, want 0 (voice_leave for chanA was already broadcast to this client, including itself)", got)
+	}
+	if hub.SubscribedToVoiceTopicForTest(c, chanA) {
+		t.Error("aborted switch re-subscribed the client to chanA's voice topic after voice_leave was already broadcast for it")
+	}
+}
+
 // ─── voice leave on disconnect ────────────────────────────────────────────────
 
 // TestVoice_Leave_OnDisconnect verifies that handleVoiceLeave cleans up

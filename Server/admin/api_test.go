@@ -709,6 +709,43 @@ func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
 	}
 }
 
+// A voice_join racing the delete window must be refused, not silently create
+// a voice_states row the FK cascade then wipes out from under it (OC-0035):
+// CleanupVoiceForChannel snapshots participants ONCE, up front, so a join
+// that lands after that snapshot but before AdminDeleteChannel's cascade
+// leaves the joiner's hub-side voice state and LiveKit session orphaned with
+// nothing left to clean it up. handleDeleteChannel must close that window the
+// same way the archive path does (handlePatchChannel): persist archived=true
+// BEFORE evicting current participants, so voice_join's archived gate
+// (ws/voice_join.go) refuses any concurrent join that reads the channel row
+// during cleanup.
+func TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel(context.Background(), "del-race", "voice", "", "", 0)
+
+	archivedAtCleanup := false
+	hub.onVoiceCleanup = func(channelID int64) {
+		ch, err := database.GetChannel(context.Background(), channelID)
+		if err != nil || ch == nil {
+			t.Fatalf("GetChannel during cleanup: %v", err)
+		}
+		archivedAtCleanup = ch.Archived
+	}
+
+	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+
+	if !archivedAtCleanup {
+		t.Errorf("channel.Archived at CleanupVoiceForChannel time = false, want true — a concurrent voice_join would not be refused by the archived gate")
+	}
+}
+
 func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))

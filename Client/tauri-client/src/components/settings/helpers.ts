@@ -39,6 +39,30 @@ export const THEMES = {
     "--bg-secondary": "#f2f3f5",
     "--bg-tertiary": "#e3e5e8",
     "--text-normal": "#313338",
+    // OC-0043: the 4 keys above are all this theme used to set. Every other
+    // surface/text/border/interactive token then fell through to tokens.css's
+    // dark defaults, so widgets painting --text-normal (now dark) on top of
+    // e.g. --bg-input (still dark) rendered as unreadable dark-on-dark.
+    "--bg-input": "#ebedef",
+    "--bg-hover": "#e8e9ed",
+    "--bg-active": "#dcdfe4",
+    "--bg-modifier-hover": "rgba(0, 0, 0, 0.06)",
+    "--bg-modifier-active": "rgba(0, 0, 0, 0.08)",
+    "--bg-modifier-selected": "rgba(0, 0, 0, 0.1)",
+    "--text-muted": "#5c5e66",
+    "--text-faint": "#747f8d",
+    "--text-micro": "#949ba4",
+    "--header-primary": "#060607",
+    "--header-secondary": "#4e5058",
+    "--interactive-normal": "#4e5058",
+    "--interactive-hover": "#23272a",
+    "--interactive-active": "#000000",
+    "--interactive-muted": "#c7ccd1",
+    "--channel-icon": "#6d6f78",
+    "--border": "#e3e5e8",
+    "--border-strong": "#cbccd1",
+    "--scrollbar-thin-thumb": "#cdcfd4",
+    "--scrollbar-auto-thumb": "#cdcfd4",
   },
 } as const;
 

@@ -108,11 +108,19 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 	}
 }
 
-// When a voice channel switch aborts because the old row's delete failed,
-// the abort branch restores the in-memory voice state — and must restore the
-// voice-topic subscription and key-holder entry torn down with it, or the
-// client silently misses every voice_e2ee relay for the session it is still in.
-func TestHandleVoiceJoin_AbortedSwitchRestoresVoiceTopicSubscription(t *testing.T) {
+// When a voice channel switch aborts because the old row's delete failed, the
+// abort branch used to restore the in-memory voice state, voice-topic
+// subscription and key-holder entry torn down by the leave that preceded it.
+// OC-0034: that restore was itself the bug. handleVoiceLeave's
+// finishVoiceLeave always broadcasts voice_leave for the old channel to the
+// leaver themselves (voice_leave.go), and the client tears its own session
+// down on a self voice_leave — so by the time the abort branch runs, every
+// client including this user's own has already forgotten the old membership.
+// Restoring the server's view of it resurrects a session nobody else
+// believes exists, with no re-broadcast to tell them otherwise. The fix
+// leaves the client's voice state cleared on abort so it agrees with the
+// voice_leave already sent; the periodic sweep reaps the orphaned DB row.
+func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *testing.T) {
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "abort-switch")
@@ -160,14 +168,14 @@ func TestHandleVoiceJoin_AbortedSwitchRestoresVoiceTopicSubscription(t *testing.
 
 	h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chB)))
 
-	if got := c.getVoiceChID(); got != chA {
-		t.Fatalf("aborted switch left client voice state at %d, want restored channel %d", got, chA)
+	if got := c.getVoiceChID(); got != 0 {
+		t.Fatalf("aborted switch resurrected client voice state at channel %d, want 0 — voice_leave for channel %d was already broadcast to this client (OC-0034)", got, chA)
 	}
-	if !h.SubscribedToVoiceTopicForTest(c, chA) {
-		t.Error("aborted switch did not re-subscribe the client to its channel's voice topic — every voice_e2ee relay for the restored session is silently dropped")
+	if h.SubscribedToVoiceTopicForTest(c, chA) {
+		t.Error("aborted switch re-subscribed the client to a voice topic for a channel it already received voice_leave for")
 	}
-	if !h.IsVoiceKeyHolder(chA, uid) {
-		t.Error("aborted switch left the key-holder map without the channel's only participant")
+	if h.IsVoiceKeyHolder(chA, uid) {
+		t.Error("aborted switch left the client named as key holder for a channel it already left")
 	}
 }
 

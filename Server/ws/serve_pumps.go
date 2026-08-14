@@ -183,7 +183,13 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			}
 			slog.Info("websocket disconnected", attrs...)
 
-			if !replaced {
+			// shouldMarkOffline re-checks h.clients instead of trusting
+			// `replaced` alone: that flag was sampled before handleVoiceLeave,
+			// which can block for seconds, so a reconnect landing during that
+			// window would otherwise be invisible here and this dead
+			// connection's teardown would mark the live session's user
+			// offline (OC-0019).
+			if hub.shouldMarkOffline(c, replaced) {
 				// A real disconnect is offline for everyone, the user
 				// included, so this path needs no invisible mapping. The row,
 				// however, keeps a *chosen* status (idle/dnd/invisible)
