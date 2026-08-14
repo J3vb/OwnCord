@@ -119,7 +119,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // controller scope does not turn it into a session-long transcript.
   const draftByCorrelation = new Map<
     string,
-    { content: string; replyTo: number | null; attachments: readonly string[] }
+    {
+      content: string;
+      replyTo: number | null;
+      attachments: readonly string[];
+      // Which channel this cid was actually sent to. chat_send_ok and the
+      // SLOW_MODE error are global ws.on subscriptions with no channel_id of
+      // their own (OC-0059) — a late frame for a send made in a channel the
+      // user has since left must not be attributed to whatever channel is
+      // mounted when it arrives.
+      channelId: number;
+    }
   >();
 
   function destroyChannel(): void {
@@ -223,7 +233,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // failed row with retry rather than silently dropping the message.
         const cid = crypto.randomUUID();
         addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
-        draftByCorrelation.set(cid, { content, replyTo, attachments });
+        draftByCorrelation.set(cid, { content, replyTo, attachments, channelId });
         markSendFailed(cid, "OFFLINE");
         return;
       }
@@ -232,7 +242,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         payload: { channel_id: channelId, content, reply_to: replyTo, attachments },
       });
       addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
-      draftByCorrelation.set(cid, { content, replyTo, attachments });
+      draftByCorrelation.set(cid, { content, replyTo, attachments, channelId });
     }
 
     function retrySend(correlationId: string): void {
@@ -453,9 +463,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     };
     composerGatingUnsubs.push(stopSlowModeTicker);
 
+    // Both chat_send_ok and the SLOW_MODE error are global ws.on
+    // subscriptions carrying no channel_id of their own — only the
+    // correlation id ties a frame back to the send that produced it. A send
+    // made in a channel the user has since left can still be in flight when
+    // its ack/refusal arrives, and by then this listener belongs to whatever
+    // channel is newly mounted (OC-0059). Absent/empty correlation ids never
+    // happen over the real transport, so fall back to attributing to the
+    // mounted channel rather than silently dropping every ack.
+    const sentToMountedChannel = (correlationId: string | undefined): boolean =>
+      correlationId === undefined ||
+      correlationId === "" ||
+      draftByCorrelation.get(correlationId)?.channelId === channelId;
+
     // The server accepted a message — the next one is subject to the cooldown.
     composerGatingUnsubs.push(
       ws.on("chat_send_ok", (_payload, correlationId) => {
+        const sameChannel = sentToMountedChannel(correlationId);
         // An accepted send can never be retried, so its draft is dead weight.
         // The map is controller-scoped (a failed row outlives a channel
         // switch, so its draft must too), which means nothing else would ever
@@ -464,7 +488,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           draftByCorrelation.delete(correlationId);
         }
         const ch = channelsStore.getState().channels.get(channelId);
-        if (ch !== undefined && ch.id === channelsStore.getState().activeChannelId) {
+        if (ch !== undefined && ch.id === channelsStore.getState().activeChannelId && sameChannel) {
           startSlowMode(ch.slowMode);
         }
       }),
@@ -472,8 +496,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // A refused send restarts the full window: the server's limiter is the
     // authority on when the next one is allowed.
     composerGatingUnsubs.push(
-      ws.on("error", (payload) => {
+      ws.on("error", (payload, correlationId) => {
         if (payload.code !== "SLOW_MODE") return;
+        if (!sentToMountedChannel(correlationId)) return;
         const ch = channelsStore.getState().channels.get(channelId);
         if (ch !== undefined) startSlowMode(ch.slowMode);
       }),

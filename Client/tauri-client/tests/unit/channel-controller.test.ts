@@ -1426,6 +1426,56 @@ describe("createChannelController", () => {
       expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
     });
 
+    it("does not gate the newly mounted channel with a late ack for a message sent in the previous channel (OC-0059)", () => {
+      // Channel A has slow mode; channel B does too, with a different value,
+      // so a misattributed ack is unmistakable.
+      setChannels([
+        {
+          id: 42,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          slow_mode: 5,
+        },
+        {
+          id: 43,
+          name: "other",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          slow_mode: 7,
+        },
+      ]);
+      setActiveChannel(42);
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // cid-1 is channel_focus; the chat_send in A gets cid-2. The ack for it
+      // does not arrive before the user switches away.
+      capturedMessageInputOpts.onSend("hello", null, []);
+
+      // Switch to channel B before A's ack arrives.
+      setActiveChannel(43);
+      ctrl.mountChannel(43, "other");
+      mockSetDisabled.mockClear();
+
+      // A's late chat_send_ok now arrives; only B's handler is subscribed.
+      const ackCalls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c: unknown[]) => c[0] === "chat_send_ok",
+      );
+      const onAck = ackCalls[ackCalls.length - 1]![1] as (payload: unknown, id?: string) => void;
+      onAck({ message_id: 7, timestamp: "2024-01-01T00:00:00Z" }, "cid-2");
+
+      // B was never sent to and must not be gated by A's cooldown.
+      expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+    });
+
     it("stops the countdown when the channel unmounts", () => {
       vi.useFakeTimers();
       try {
