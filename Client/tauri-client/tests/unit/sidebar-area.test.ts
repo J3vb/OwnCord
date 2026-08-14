@@ -2087,6 +2087,45 @@ describe("SidebarArea", () => {
 
       cleanup(result);
     });
+
+    it("does not mount an orphaned overlay if torn down while profiles are still loading", async () => {
+      // MainPage.destroy() removes an ANCESTOR of sidebarWrapper (`root`) and
+      // never detaches sidebarWrapper from its own parent, so
+      // `sidebarWrapper.parentElement` stays non-null forever — it cannot be
+      // used as the "were we torn down while awaiting?" check. Reproduce that
+      // exactly: sidebarWrapper stays attached to `container` for the whole
+      // test, teardown runs (the real unsubscriber list, same as
+      // MainPage.destroy()'s loop) while loadProfiles() is still pending, and
+      // only then does the profile load resolve.
+      let resolveLoad!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        resolveLoad = resolve;
+      });
+      (createProfileManager as MockedFn).mockReturnValueOnce({
+        loadProfiles: vi.fn().mockReturnValue(pending),
+        getAll: vi.fn().mockReturnValue([]),
+        store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
+      });
+
+      const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      result.openQuickSwitch();
+
+      // Teardown, as MainPage.destroy() runs it: every unsubscriber fires
+      // (including the one that calls closeQuickSwitch()), but sidebarWrapper
+      // is never removed from its parent.
+      for (const unsub of result.unsubscribers) unsub();
+      expect(result.sidebarWrapper.parentElement).not.toBeNull();
+
+      resolveLoad();
+      await pending;
+
+      // No overlay should have been created for a page that no longer exists.
+      expect((createQuickSwitchOverlay as MockedFn).mock.calls.length).toBe(callsBefore);
+    });
   });
 
   // -------------------------------------------------------------------------
