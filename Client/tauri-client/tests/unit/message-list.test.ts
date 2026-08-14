@@ -678,4 +678,46 @@ describe("MessageList", () => {
       expect(row1!.textContent).toContain("Edited");
     });
   });
+
+  describe("renderAll rapid-fire breaker", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state", () => {
+      setMessages(1, [makeMessage({ id: 1, content: "v0" })]);
+      msgList.mount(container); // 1st renderAll call, starts the 2s window
+
+      // Fire 25 non-append updates (edits) back-to-back, well inside the 2s
+      // window. tryAppendMessages() returns false for every one of these
+      // (same-length array, content changed) so each forces a renderAll().
+      // Combined with the mount's call, this is 26 renderAll invocations —
+      // calls 21+ trip the >20-in-2s breaker and must return without
+      // rendering.
+      for (let i = 1; i <= 25; i++) {
+        setMessages(1, [makeMessage({ id: 1, content: `v${i}` })]);
+        messagesStore.flush();
+      }
+
+      const rowDuringBurst = container.querySelector("[data-testid='message-1']");
+      expect(rowDuringBurst).not.toBeNull();
+      // The breaker tripped partway through, so the DOM is stuck behind the
+      // final store state (still showing an earlier version, not "v25").
+      expect(rowDuringBurst!.textContent).not.toContain("v25");
+
+      // Let the 2s reset window elapse with no further store updates.
+      vi.advanceTimersByTime(2100);
+
+      // Once the burst is over, the list must reflect the final state that
+      // triggered the last suppressed renderAll — not stay frozen on
+      // whatever rendered right before the breaker tripped.
+      const rowAfterReset = container.querySelector("[data-testid='message-1']");
+      expect(rowAfterReset).not.toBeNull();
+      expect(rowAfterReset!.textContent).toContain("v25");
+    });
+  });
 });

@@ -23,6 +23,12 @@ export interface ContextMenuOptions {
   readonly className?: string;
 }
 
+// Tracks each open menu's per-invocation dismiss controller, so a menu swept
+// away by a same-class reopen (see below) can release its own teardown
+// listener on the caller's signal instead of leaving it pinned until the
+// caller's signal eventually aborts.
+const dismissControllers = new WeakMap<Element, AbortController>();
+
 /**
  * Show a context menu at the given coordinates.
  * Automatically removes any existing menu with the same className.
@@ -32,12 +38,20 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   const { x, y, items, signal, className } = opts;
   const menuClass = className ?? "context-menu";
 
-  // Remove any existing context menu with same class
-  document.querySelectorAll(`.${menuClass}`).forEach((el) => el.remove());
+  // Remove any existing context menu with same class, releasing its dismiss
+  // controller so its teardown listener on the caller's signal is dropped
+  // now rather than lingering until the caller itself is destroyed.
+  document.querySelectorAll(`.${menuClass}`).forEach((el) => {
+    dismissControllers.get(el)?.abort();
+    el.remove();
+  });
 
   const menu = createElement("div", { class: `context-menu ${menuClass}` });
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
+
+  const dismissAc = new AbortController();
+  dismissControllers.set(menu, dismissAc);
 
   let hasSeparator = false;
   for (const item of items) {
@@ -69,7 +83,6 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   document.body.appendChild(menu);
 
   // Close on click outside (deferred so the opening click doesn't immediately close)
-  const dismissAc = new AbortController();
   setTimeout(() => {
     if (dismissAc.signal.aborted) return;
     document.addEventListener(
@@ -84,9 +97,25 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     );
   }, 0);
 
-  // Clean up if parent component is destroyed
-  signal.addEventListener("abort", () => {
+  // Clean up if parent component is destroyed. If the caller's signal is
+  // already aborted, "abort" already fired and would never reach a listener
+  // added now, so tear down immediately instead of registering one. When it
+  // isn't, tie the listener's own lifetime to dismissAc: once the menu is
+  // dismissed some other way (item click, outside click), dismissAc aborts
+  // and this listener is dropped from the caller's signal instead of
+  // lingering — with its closure over `menu` — for the rest of the caller's
+  // lifetime.
+  if (signal.aborted) {
     menu.remove();
     dismissAc.abort();
-  });
+  } else {
+    signal.addEventListener(
+      "abort",
+      () => {
+        menu.remove();
+        dismissAc.abort();
+      },
+      { once: true, signal: dismissAc.signal },
+    );
+  }
 }

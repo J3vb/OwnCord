@@ -657,6 +657,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let renderAllRunning = false;
   let renderAllCount = 0;
   let renderAllResetTimer = 0;
+  // Set when the rapid-fire breaker below drops a renderAll() call on the
+  // floor. The store change that triggered the dropped call is still live —
+  // without this, the DOM is left showing pre-burst state until some later,
+  // unrelated store event happens to call renderAll() again. The 2s reset
+  // timeout checks this flag and issues one final renderAll() so the burst's
+  // last state always makes it to the screen.
+  let renderAllSuppressed = false;
 
   function renderAll(): void {
     if (root === null) return;
@@ -667,12 +674,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAllCount++;
     if (renderAllCount > 20) {
       log.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
+      renderAllSuppressed = true;
       return;
     }
     if (renderAllResetTimer === 0) {
       renderAllResetTimer = window.setTimeout(() => {
         renderAllCount = 0;
         renderAllResetTimer = 0;
+        if (renderAllSuppressed) {
+          // Render the burst's final state once, now that it's over.
+          renderAllSuppressed = false;
+          renderAll();
+        }
       }, 2000);
     }
 

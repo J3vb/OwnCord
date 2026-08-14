@@ -152,6 +152,26 @@ describe("media-visibility", () => {
     cleanup();
   });
 
+  it("freezes a GIF whose src the DOM normalizes away from the raw originalSrc (OC-0130)", () => {
+    const cleanup = setupCanvasMocks();
+    // Mixed-case host: the <img> element's src getter returns this
+    // lowercased per the WHATWG URL spec, so it no longer string-matches
+    // the raw originalSrc the caller passed in.
+    const raw = "https://EXAMPLE.com/anim.gif";
+    const img = createFakeImg(raw);
+    const wrap = createWrapper();
+    observeMedia(img, raw, wrap);
+    // Sanity check: the DOM really did normalize it away from `raw`.
+    expect(img.src).toBe("https://example.com/anim.gif");
+    expect(img.src).not.toBe(raw);
+
+    const btn = wrap.querySelector(".gif-play-btn") as HTMLButtonElement;
+    btn.click();
+    expect(img.src).toBe("data:image/png;base64,frozen");
+    expect(wrap.classList.contains("gif-paused")).toBe(true);
+    cleanup();
+  });
+
   it("pause button click freezes immediately", () => {
     const cleanup = setupCanvasMocks();
     const img = createFakeImg("https://example.com/cat.gif");

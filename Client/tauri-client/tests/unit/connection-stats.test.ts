@@ -361,6 +361,66 @@ describe("createConnectionStatsPoller", () => {
     expect(qualityCb).toHaveBeenCalledWith("bad", "excellent");
   });
 
+  it("fires quality change callback once the debounce elapses, even though the room stays active and every 2s poll keeps re-reporting the changed quality (OC-0132)", async () => {
+    // Regression test for OC-0132: POLL_INTERVAL_MS (2000) < QUALITY_DEBOUNCE_MS (3000)
+    // means that while the room stays active and quality remains different from
+    // lastQuality, every poll must NOT keep clearing/rescheduling the debounce
+    // timer — otherwise the timer can never reach its 3s deadline and the
+    // quality-change notification never fires.
+    let currentRtt = 0.01;
+    const room = {
+      engine: {
+        pcManager: {
+          publisher: {
+            pc: {
+              getStats: vi.fn().mockImplementation(() => {
+                const report = new Map();
+                report.set("cp1", {
+                  type: "candidate-pair",
+                  currentRoundTripTime: currentRtt,
+                  bytesSent: 0,
+                  bytesReceived: 0,
+                });
+                return Promise.resolve(report);
+              }),
+            },
+          },
+        },
+      },
+    };
+
+    const qualityCb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onQualityChanged(qualityCb);
+    poller.start();
+
+    // t=2000: first poll establishes "excellent" baseline.
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(qualityCb).not.toHaveBeenCalled();
+
+    // Degrade — the room stays active, so every subsequent 2s poll will keep
+    // observing "bad" (different from lastQuality "excellent") for as long as
+    // the connection stays degraded.
+    currentRtt = 0.5;
+
+    // t=4000: quality first observed as "bad" -> debounce timer armed for t=7000.
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(qualityCb).not.toHaveBeenCalled();
+
+    // t=6000: quality is STILL "bad" (still != lastQuality). Under the bug this
+    // poll clears the pending timer and reschedules a fresh 3s one, pushing the
+    // deadline out indefinitely for as long as the connection stays bad.
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(qualityCb).not.toHaveBeenCalled();
+
+    // t=8000: the original debounce deadline (t=7000) has now passed. The room
+    // never went inactive and never stopped reporting "bad" in between, so the
+    // only way this fires is if same-quality polls stopped resetting the timer.
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(qualityCb).toHaveBeenCalledTimes(1);
+    expect(qualityCb).toHaveBeenCalledWith("bad", "excellent");
+  });
+
   it("unsubscribed onUpdate callback is not called", async () => {
     const room = createMockRoom([
       {

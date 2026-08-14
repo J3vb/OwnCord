@@ -900,4 +900,30 @@ describe("VoiceAudioTab UI structure", () => {
     expect(() => tab.build()).not.toThrow();
     ac.abort();
   });
+
+  it("does not register a new permanent abort listener on every rebuild (OC-0125)", () => {
+    // Simulates the settings overlay staying open for a session while the
+    // user re-opens the Voice & Audio tab (e.g. hide()/show() cycles):
+    // SettingsOverlay's single AbortController lives for the whole session,
+    // and build() is called again each time the tab is (re)rendered.
+    stubNavigator();
+    const ac = new AbortController();
+    const addEventListenerSpy = vi.spyOn(ac.signal, "addEventListener");
+    const abortListenerCount = (): number =>
+      addEventListenerSpy.mock.calls.filter(([type]) => type === "abort").length;
+
+    const tab = createVoiceAudioTab(ac.signal);
+    const afterCreate = abortListenerCount();
+
+    tab.build();
+    tab.build();
+    tab.build();
+
+    // Rebuilding the tab three times must not add three more permanent
+    // "abort" listeners to the overlay-lifetime signal — only the single
+    // listener the factory registers once at creation should exist.
+    expect(abortListenerCount()).toBe(afterCreate);
+
+    ac.abort();
+  });
 });

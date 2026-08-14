@@ -55,6 +55,7 @@ import {
   setDmChannels,
   addDmChannel,
   closeDmLocally,
+  clearDmUnread,
   updateDmLastMessage,
   updateDmLastMessagePreview,
   incrementDmMention,
@@ -447,6 +448,14 @@ export function wireDispatcher(
           // activating it lands on an id ChannelController can't resolve and
           // blanks the chat area with no way to recover.
           addDmToChannelsStore(remaining[0]!);
+          // A DM's unread badge lives in dmStore, not the channelsStore
+          // mirror — setActiveChannel only zeroes the latter. Every other
+          // "open this DM" path (selectDmConversation, navigateToChannel,
+          // markChannelRead) pairs activation with clearDmUnread for exactly
+          // this reason; without it here the badge on the DM we're about to
+          // treat as active survives forever (new messages take the
+          // isDmActive branch below and never increment it back).
+          clearDmUnread(remaining[0]!.channelId);
           setActiveChannel(remaining[0]!.channelId);
           return;
         }

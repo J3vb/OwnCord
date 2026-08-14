@@ -289,6 +289,66 @@ describe("streamPreview", () => {
     expect(getPreview(row)).toBeNull();
   });
 
+  // OC-0124: hidePreview overwrites state.animation without clearing the
+  // timer already sitting there. When stopPreviewDelayed's 150ms grace timer
+  // (T1) is still pending and something else (scroll/focusout) calls
+  // hidePreview directly, T1 survives uncancelled, fires later, and calls
+  // hidePreview a second time — orphaning that call's own 200ms removal
+  // timer in turn. One of those orphaned removal timers eventually runs
+  // `previewTimers.delete(row)` against whatever state a *later* hover
+  // installed, deleting it before its debounce ever fires. showPreview then
+  // finds no state to store trackCleanup on, so the ended/mute listeners it
+  // just registered on the live MediaStreamTrack become permanently
+  // unreachable by hidePreview, clearPreviewState, and the abort handler.
+  it("does not leak track listeners when hidePreview interrupts a pending stopPreviewDelayed timer (OC-0124)", () => {
+    const stream = createMockMediaStream();
+    const track = stream.getVideoTracks()[0]!;
+    const removeSpy = vi.spyOn(track, "removeEventListener");
+    mockGetRemoteVideoStream.mockReturnValue(stream);
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal);
+
+    // t=0: hover -> debounce armed.
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    // t=300: debounce fires -> preview shown, ended/mute listeners #1 registered.
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row)).not.toBeNull();
+
+    // t=400: mouse leaves -> stopPreviewDelayed arms its 150ms grace timer.
+    vi.advanceTimersByTime(100);
+    row.dispatchEvent(new MouseEvent("mouseleave"));
+
+    // t=450: a second, independent trigger (e.g. focusout from a Tab, or a
+    // scroll-collapse) calls hidePreview directly while the grace timer from
+    // t=400 is still pending. This must cancel that timer, not just
+    // overwrite the handle to it.
+    vi.advanceTimersByTime(50);
+    row.dispatchEvent(new FocusEvent("focusout"));
+    // trackCleanup #1 runs synchronously inside this hidePreview call.
+    expect(removeSpy).toHaveBeenCalledTimes(2); // "ended" + "mute" for listener #1
+
+    // t=650: the removal timer armed by the t=450 hidePreview call fires and
+    // tears down the (now empty) preview + state.
+    vi.advanceTimersByTime(200);
+    expect(getPreview(row)).toBeNull();
+
+    // t=660: user hovers again -> a fresh debounce/state is installed.
+    vi.advanceTimersByTime(10);
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+
+    // t=960: the new debounce fires and showPreview runs again, registering
+    // ended/mute listeners #2 on the same track and trying to store
+    // trackCleanup on the freshly-installed state.
+    vi.advanceTimersByTime(300);
+    expect(getPreview(row)).not.toBeNull();
+
+    // Close the second preview. If the fresh state survived intact,
+    // trackCleanup #2 fires here, removing listener set #2 as well.
+    row.dispatchEvent(new FocusEvent("focusout"));
+
+    expect(removeSpy).toHaveBeenCalledTimes(4); // "ended" + "mute" for BOTH listener sets
+  });
+
   // Abort-listener accumulation (leak fix)
   it("registers only one abort listener per signal, not one per attach call", () => {
     mockGetRemoteVideoStream.mockReturnValue(null);

@@ -12,7 +12,7 @@ import {
   setMarkReadSender,
   unreadChannelIds,
 } from "@lib/read-state";
-import { channelsStore, setChannels } from "@stores/channels.store";
+import { channelsStore, setChannels, incrementUnread } from "@stores/channels.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
@@ -206,6 +206,44 @@ describe("unreadChannelIds / markAllRead", () => {
       vi.advanceTimersByTime(5000);
       expect(next).toEqual([]);
       expect(unreadChannelIds()).toHaveLength(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // OC-0123: a message that arrives in a channel while its own send is still
+  // sitting in the paced tail must not be wiped out by that stale click. The
+  // click predates the message; marking it read would silently swallow a
+  // genuinely-new unread the user has not seen.
+  it("does not mark read a channel that got a new message during the pacing window", () => {
+    vi.useFakeTimers();
+    try {
+      setChannels([
+        channel(1, 1),
+        channel(2, 1),
+        channel(3, 1),
+        channel(4, 1),
+        channel(5, 1),
+        channel(6, 1),
+      ]);
+
+      expect(markAllRead()).toBe(6);
+      const firstBurst = new Set(sent);
+      const deferredId = [1, 2, 3, 4, 5, 6].find((id) => !firstBurst.has(id))!;
+
+      // A new message lands in the deferred channel before its paced send fires
+      // — exactly what the dispatcher's chat_message handler does.
+      incrementUnread(deferredId);
+      expect(channelsStore.getState().channels.get(deferredId)?.unreadCount).toBe(2);
+
+      vi.advanceTimersByTime(2000);
+
+      // The paced send must skip this channel: the message postdates the click,
+      // so neither the local badge nor the server's read state should advance
+      // past it.
+      expect(sent).not.toContain(deferredId);
+      expect(hasUnread(deferredId)).toBe(true);
+      expect(channelsStore.getState().channels.get(deferredId)?.unreadCount).toBe(2);
     } finally {
       vi.useRealTimers();
     }

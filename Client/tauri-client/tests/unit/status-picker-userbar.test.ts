@@ -222,4 +222,23 @@ describe("StatusPicker wired to UserBar", () => {
       );
     }
   });
+
+  // UserBar's updatePickerDisabled toggles ub-status-picker--disabled on the
+  // wrap element whenever canSetStatus() is false, but that class has no
+  // effect at all unless app.css actually makes it inert -- otherwise the
+  // dropdown and its custom-status input stay fully clickable while the
+  // socket is down, and anything typed there is silently dropped (never sent
+  // now, never re-sent on reconnect since restoreSavedPresence only re-sends
+  // `status`, not `custom_status`).
+  it("ub-status-picker--disabled actually disables the picker in app.css", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/app.css"), "utf8");
+    const match = /\.ub-status-picker--disabled\s*\{([^}]*)\}/.exec(css);
+    expect(
+      match,
+      "expected a `.ub-status-picker--disabled { ... }` rule in app.css",
+    ).not.toBeNull();
+    expect(match![1], "disabled state must reject pointer input").toMatch(
+      /pointer-events\s*:\s*none/,
+    );
+  });
 });
