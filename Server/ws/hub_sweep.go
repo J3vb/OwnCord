@@ -285,6 +285,14 @@ func (h *Hub) hasChannelPermChecked(ctx context.Context, userID, channelID int64
 	return permissions.EffectiveChannelPerms(role.Permissions, o)&perm == perm, nil
 }
 
+// cleanupVoiceRaceClearHook, when non-nil, runs immediately before
+// CleanupVoiceForChannel clears a still-matching client's voice state.
+// Test-only (always nil in production): the window it pins is two separate
+// voiceMu acquisitions with no I/O between them, too narrow to land reliably
+// by staggering real goroutines, so tests use this hook to reproduce a
+// voice_join racing in at exactly that point deterministically.
+var cleanupVoiceRaceClearHook func(*Client)
+
 // CleanupVoiceForChannel removes all voice participants from the given channel.
 // Called when a channel is deleted.
 func (h *Hub) CleanupVoiceForChannel(channelID int64) {
@@ -309,12 +317,25 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 			slog.Error("CleanupVoiceForChannel LeaveVoiceChannelIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
-		// Clear client voice state and its voice-topic subscription.
+		// Clear client voice state and its voice-topic subscription. The
+		// compare (still in this channel?) and the clear must be one atomic
+		// operation — a getVoiceChID() read followed by a separate
+		// unconditional clear leaves a window where a concurrent voice_join
+		// to another channel commits in between and gets silently wiped
+		// along with its own voice-topic subscription (OC-0050). Mirrors
+		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn /
+		// clearVoiceStateIfMatch and the LiveKit webhook's inline
+		// compare-and-clear.
 		h.mu.RLock()
 		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()
-		if ok && client.getVoiceChID() == channelID {
-			h.clearVoiceAndUnsubscribe(client)
+		if ok {
+			if cleanupVoiceRaceClearHook != nil {
+				cleanupVoiceRaceClearHook(client)
+			}
+			if _, cleared := client.clearVoiceStateIfMatch(channelID); cleared {
+				h.pubsub.Unsubscribe(client, VoiceTopic(channelID))
+			}
 		}
 
 		// Remove from LiveKit (best-effort).
