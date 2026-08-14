@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -528,7 +529,7 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", customDBPath, err)
 	}
-	if string(got) != string(backupContent) {
+	if !bytes.Equal(got, backupContent) {
 		t.Errorf("configured database file content = %q, want %q — restore wrote to the wrong path", got, backupContent)
 	}
 
