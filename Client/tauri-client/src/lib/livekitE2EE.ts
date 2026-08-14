@@ -53,6 +53,12 @@ export class E2EEManager {
   private _roomKey: Uint8Array | null = null;
   /** Peer ECDH public keys indexed by userId. */
   private _peerPublicKeys: Map<number, CryptoKey> = new Map();
+  /** Ephemeral keys we've seen superseded for a given peer this session
+   *  (base64), indexed by userId. A signed announce carries no channel/epoch/
+   *  nonce (F3), so a validly-signed announce replays cleanly — this blocks a
+   *  replay of a key we already moved a peer off of from overwriting their
+   *  current live key (OC-0011). */
+  private _retiredPeerKeys: Map<number, Set<string>> = new Map();
   /** This client's long-term ECDSA identity keypair (F3 TOFU), used to sign our
    *  ephemeral announces. Loaded lazily from the OS keyring, cached per session. */
   private _identityKeyPair: CryptoKeyPair | null = null;
@@ -158,6 +164,7 @@ export class E2EEManager {
       return false;
     }
     this._peerPublicKeys.clear();
+    this._retiredPeerKeys.clear();
     clearPeerVerifications();
     const myPubKeyBase64 = await exportPublicKey(ecdhKeyPair.publicKey);
     // Build the signed announce up front — this loads the identity key from
@@ -668,6 +675,23 @@ export class E2EEManager {
     return run;
   }
 
+  /** True if `publicKeyBase64` is a key we've already moved this peer off of
+   *  in the current session (see `_retiredPeerKeys`). */
+  private isRetiredPeerKey(userId: number, publicKeyBase64: string): boolean {
+    return this._retiredPeerKeys.get(userId)?.has(publicKeyBase64) ?? false;
+  }
+
+  /** Record that `publicKeyBase64` is no longer this peer's live key —
+   *  a later announce carrying it again is a replay, not a legitimate change. */
+  private retirePeerKey(userId: number, publicKeyBase64: string): void {
+    const retired = this._retiredPeerKeys.get(userId);
+    if (retired) {
+      retired.add(publicKeyBase64);
+    } else {
+      this._retiredPeerKeys.set(userId, new Set([publicKeyBase64]));
+    }
+  }
+
   private async handleAnnounceInner(
     userId: number,
     publicKeyBase64: string,
@@ -713,11 +737,41 @@ export class E2EEManager {
           isDuplicate = true;
           log.debug("E2EE: duplicate announce — will re-send offer if key holder", { userId });
         } else {
+          // Reject a replay of a key we've already retired for this peer. The
+          // signed announce message carries no channel/epoch/nonce (F3), so an
+          // old, validly-signed announce replays cleanly — without this check a
+          // malicious relay could re-emit a recorded announce and swap the live
+          // key back to one nobody holds anymore, silently blackholing the peer
+          // (OC-0011). A genuine peer never reuses an ephemeral key across
+          // sessions (freshly generated every join), so this never rejects a
+          // legitimate re-announce.
+          if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
+            log.error("E2EE: rejecting replayed peer key announce (previously retired)", {
+              userId,
+            });
+            return;
+          }
+          this.retirePeerKey(userId, existingB64);
           peerKey = await importPublicKey(publicKeyBase64);
           log.warn("E2EE: peer public key changed (reconnect?)", { userId });
         }
       } else {
+        if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
+          log.error("E2EE: rejecting replayed peer key announce (previously retired)", { userId });
+          return;
+        }
         peerKey = await importPublicKey(publicKeyBase64);
+      }
+      // Re-check after the export/import awaits above: a clearState()+rejoin
+      // landing during either one must not have this stale continuation write
+      // a torn-down session's peer key into the map a NEW session now owns —
+      // the generation guard above only covers the window up to verification,
+      // not this later await (OC-0010).
+      if (this._sessionGeneration !== myGeneration) {
+        log.info("E2EE: discarding stale announce (session torn down during key import)", {
+          userId,
+        });
+        return;
       }
       if (!isDuplicate) {
         this._peerPublicKeys.set(userId, peerKey);
@@ -827,6 +881,19 @@ export class E2EEManager {
       this._roomKey = unwrapped;
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
       log.info("E2EE: room key received and applied", { fromUserId });
+
+      // Re-check after the setKey await too: the guard above only covers the
+      // window up to unwrap, not this call. A teardown-and-rejoin-as-holder
+      // landing here would otherwise have this stale continuation read the
+      // NEW session's live _isKeyHolder/_roomKeyResolver below and stand it
+      // down / resolve it — corrupting a session this attempt no longer owns
+      // (OC-0010).
+      if (this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
+        log.info("E2EE: discarding stale offer after setKey (epoch or session keypair changed)", {
+          fromUserId,
+        });
+        return;
+      }
 
       // Accepting an offer proves the sender is the server-authoritative key
       // holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
@@ -1179,6 +1246,7 @@ export class E2EEManager {
     this._ecdhKeyPair = null;
     this._roomKey = null;
     this._peerPublicKeys.clear();
+    this._retiredPeerKeys.clear();
     clearPeerVerifications();
     this._isKeyHolder = false;
     this._rotatingKey = false;
