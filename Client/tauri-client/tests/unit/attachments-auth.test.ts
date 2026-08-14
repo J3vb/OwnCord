@@ -43,6 +43,7 @@ vi.stubGlobal("indexedDB", {
 import {
   clearAttachmentCaches,
   fetchImageAsDataUrl,
+  isTrustedServerUrl,
   setServerHost,
 } from "../../src/components/message-list/attachments";
 
@@ -97,5 +98,25 @@ describe("attachment fetch authentication", () => {
 
     expect(ensureHttpProxyMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("https://cdn.external.example/image.png");
+  });
+
+  it("still routes through the TOFU proxy with a bearer token when the host is stored with an explicit :443", async () => {
+    setServerHost("chat.example.com:443");
+    getTokenMock.mockReturnValue("session-token");
+    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
+    fetchMock.mockResolvedValue(imageResponse());
+
+    const result = await fetchImageAsDataUrl("https://chat.example.com/api/v1/files/abc-789");
+
+    expect(result).not.toBeNull();
+    expect(ensureHttpProxyMock).toHaveBeenCalledWith("chat.example.com");
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-789", {
+      headers: { Authorization: "Bearer session-token" },
+    });
+  });
+
+  it("treats a :443-suffixed stored host as trusted for the port-less resolved URL", () => {
+    setServerHost("chat.example.com:443");
+    expect(isTrustedServerUrl("https://chat.example.com/api/v1/files/abc")).toBe(true);
   });
 });

@@ -32,9 +32,15 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 /** Module-level server host for resolving relative attachment URLs. */
 let _serverHost: string | null = null;
 
-/** Set the server host (called once from MainPage on connect). */
+/** Set the server host (called once from MainPage on connect).
+ *  Strips a trailing default-HTTPS ":443" and lowercases, mirroring
+ *  normalizeHostForCertCompare in lib/ws.ts and cert_store_key in
+ *  src-tauri/src/tofu.rs — config hosts are stored verbatim (e.g.
+ *  "Example.COM:443") but WHATWG URL drops the default port for https:,
+ *  so isServerUrl's host comparison must normalize the same way or a
+ *  ":443"-suffixed host never matches its own resolved URLs. */
 export function setServerHost(host: string): void {
-  _serverHost = host.toLowerCase();
+  _serverHost = host.replace(/:443$/, "").toLowerCase();
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
