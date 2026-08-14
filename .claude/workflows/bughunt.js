@@ -454,7 +454,7 @@ const recon = await parallel([
         `Count how often each non-test source file changed. Return the 25 most-churned files with their counts, ` +
         `plus any file that changed in more than 6 distinct commits. High churn = where bugs concentrate.\n` +
         `Return plain text: one "path  count" per line, most-churned first. No commentary.`,
-      { label: 'recon:churn', phase: 'Recon', model: 'haiku', effort: 'low' },
+      { label: 'recon:churn', phase: 'Recon', model: 'haiku', effort: 'xhigh' },
     ),
   () =>
     agent(
@@ -464,7 +464,7 @@ const recon = await parallel([
         `  (b) every Client/tauri-client/src/**/*.ts (non-test) containing "addEventListener", "setInterval", "setTimeout", or "new AbortController"\n` +
         `  (c) every Client/tauri-client/src-tauri/src/*.rs containing "unsafe", "Mutex", "RwLock", "spawn", or "unwrap()"\n` +
         `For each file give the path and a rough hit count. Return plain text grouped under (a)/(b)/(c). No commentary, no analysis.`,
-      { label: 'recon:surface', phase: 'Recon', model: 'haiku', effort: 'low' },
+      { label: 'recon:surface', phase: 'Recon', model: 'haiku', effort: 'xhigh' },
     ),
 ])
 const CONTEXT = `\n\n--- RECON: most-churned files (last 8 weeks) ---\n${recon[0] || 'unavailable'}\n\n--- RECON: concurrency & lifecycle surface ---\n${recon[1] || 'unavailable'}\n`
