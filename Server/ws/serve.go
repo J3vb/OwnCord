@@ -452,6 +452,14 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		if voiceChID != 0 {
 			h.handleVoiceLeave(cleanupCtx, c)
 		}
+	}
+	// shouldMarkOffline re-checks h.clients rather than trusting the
+	// `replaced` snapshot alone: it was sampled before handleVoiceLeave,
+	// which can block for seconds, so a reconnect landing during that window
+	// would otherwise be invisible here and mark the live session's user
+	// offline (OC-0019, mirrored from readPump's defer in serve_pumps.go).
+	if h.shouldMarkOffline(c, replaced) {
+		cleanupCtx := context.WithoutCancel(ctx)
 		_ = h.db.MarkUserDisconnected(cleanupCtx, c.userID)
 		// custom_status is nil, not c.user.CustomStatus: see the identical
 		// note in serve_pumps.go's readPump defer — that field is an
