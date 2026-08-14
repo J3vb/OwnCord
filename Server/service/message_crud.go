@@ -45,18 +45,10 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	isDM := ch.Type == "dm"
 
-	// Archived channels are read-only. Until now `archived` was consulted only
-	// by the visibility predicate (VisibleChannelIDs / RefreshChannelVisibility),
-	// so it hid the channel without protecting it: any caller that still held
-	// the id — a custom client, or a stock client racing the channel_delete —
-	// could keep posting into an archive indefinitely. History stays readable;
-	// only writes are refused.
-	if !isDM && ch.Archived {
-		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
-	}
-
-	// Permission check.
-	if err := s.checkSendPermission(ctx, p.UserID, p.ChannelID, ch.Type); err != nil {
+	// Permission check. Also refuses a write against an archived channel — see
+	// requireChannelWritable in message_perms.go, the shared gate every
+	// message write sink routes through.
+	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
 		return nil, err
 	}
 
@@ -290,7 +282,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
 			return nil, blkErr
 		}
-	} else if permErr := s.checkSendPermission(ctx, userID, msg.ChannelID, chanType); permErr != nil {
+	} else if permErr := s.checkSendPermission(ctx, userID, ch); permErr != nil {
 		// An edit injects new text into the channel and is fanned out to every
 		// reader, so it must clear the same gate as a send rather than
 		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
@@ -379,11 +371,11 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	}
 	isDM := ch.Type == "dm"
 
-	// Archived channels are read-only, mirroring SendMessage's gate
-	// (message_crud.go:54): history stays visible, but a member or moderator
-	// must not be able to mutate it by deleting a message out of the archive.
-	if !isDM && ch.Archived {
-		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	// Archived channels are read-only — see requireChannelWritable in
+	// message_perms.go, the shared gate every message write sink routes
+	// through.
+	if err := requireChannelWritable(ch); err != nil {
+		return nil, err
 	}
 
 	var isMod bool
