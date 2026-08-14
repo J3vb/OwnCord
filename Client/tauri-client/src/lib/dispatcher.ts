@@ -938,7 +938,17 @@ export function wireDispatcher(
       });
       if (payload.code === "BANNED") {
         // Banned users must not reconnect — show error and force logout.
+        // The server answers a ban with a generic `error` frame (not
+        // `auth_error`), so ws.ts never sets intentionalClose for this path.
+        // main.ts's authStore subscriber would normally do that teardown,
+        // but it only runs once the router has reached "main" — during
+        // login / auto-login / the connected-overlay window it hasn't, so
+        // left to that subscriber alone the client redials the same banned
+        // token via scheduleReconnect() forever (OC-0107). Disconnect here
+        // directly: it's idempotent with that subscriber's own
+        // ws.disconnect() and covers every router state, not just "main".
         setTransientError(payload.message || "You have been banned");
+        ws.disconnect();
         clearAuth();
         return;
       }

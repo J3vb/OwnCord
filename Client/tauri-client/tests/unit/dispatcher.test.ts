@@ -2300,6 +2300,27 @@ describe("WS Dispatcher", () => {
     expect(error).toBe("You have been banned");
   });
 
+  it("wires error BANNED to disconnect the ws client (OC-0107: without this the banned token reconnects forever)", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      isAuthenticated: true,
+      user: { id: 1, username: "banned-user", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("error", {
+      code: "BANNED",
+      message: "You have been banned from this server",
+    });
+
+    // clearAuth() alone flips isAuthenticated, but main.ts's authStore
+    // subscriber only tears down the ws (and cancels the reconnect loop) when
+    // the router is already on "main". During login / auto-login / the
+    // connected-overlay window it is not, so the BANNED handler itself must
+    // call ws.disconnect() to set intentionalClose and stop scheduleReconnect
+    // from redialing with the now-cleared but still-cached banned token.
+    expect(mock.ws.disconnect).toHaveBeenCalled();
+  });
+
   it("wires error RATE_LIMITED to transient error", () => {
     mock.dispatch("error", {
       code: "RATE_LIMITED",
