@@ -52,14 +52,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		return nil, err
 	}
 
-	// Slow mode (non-DM only).
-	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
-		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
-		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			return nil, fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
-		}
-	}
-
 	// Validate and sanitize content.
 	content, err := sanitizeContent(p.Content, len(p.AttachmentIDs) > 0)
 	if err != nil {
@@ -70,6 +62,19 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if !isDM && len(p.AttachmentIDs) > 0 {
 		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
 			return nil, fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
+		}
+	}
+
+	// Slow mode (non-DM only). Deliberately checked last, after content and
+	// attachment validation: Allow() below records the cooldown timestamp the
+	// instant it returns true, so a send that fails validation after this
+	// point must not have already spent the once-per-window token — that
+	// would lock the composer for up to ch.SlowMode seconds for a send that
+	// never actually posted anything.
+	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
+		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
+		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
+			return nil, fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
 		}
 	}
 
@@ -122,7 +127,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
 		}
 		if linked > 0 {
-			attMap, attErr := s.st.GetAttachmentsByMessageIDs(ctx, []int64{msgID})
+			// Detached from ctx for the same reason as the compensating deletes
+			// above: the link already committed, so a request ctx canceled the
+			// instant it returns (sender disconnects right after) must not turn
+			// a successful attachment-only send into a blank broadcast bubble.
+			attMap, attErr := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{msgID})
 			if attErr != nil {
 				slog.Error("MessageService.SendMessage GetAttachments", "err", attErr)
 			} else {
