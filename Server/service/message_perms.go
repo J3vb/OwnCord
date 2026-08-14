@@ -89,6 +89,15 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 	return nil
 }
 
+// RequireDMNotBlocked is the exported form of requireDMNotBlocked so callers
+// outside the service package (voice join/token-refresh, ws/voice_join.go)
+// can share this single block-check implementation — same group-DM exemption,
+// same "lookup failure is not a block" posture — instead of reimplementing it
+// against the raw DB. st only needs to be a Store; *db.DB satisfies it.
+func RequireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+	return requireDMNotBlocked(ctx, st, userID, channelID)
+}
+
 // requireDMNotBlocked reports ErrBlocked when userID and the other participant
 // of DM channelID have blocked each other in either direction.
 //
