@@ -2965,6 +2965,53 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().activeChannelId).toBe(60);
     });
 
+    // setActiveChannel only zeroes the channelsStore mirror row's counts; a
+    // DM's badge lives in dmStore (SidebarDmSection reads dmStore.unreadCount,
+    // not the channelsStore mirror). Every other "open this DM" path
+    // (selectDmConversation, navigateToChannel, markChannelRead) pairs
+    // activation with clearDmUnread for exactly this reason — the
+    // dm_channel_close fallback must too, or the badge on the DM it just
+    // activated survives forever (it's now "active", so new messages take the
+    // isDmActive branch and never increment it back).
+    it("clears the dmStore unread badge on the DM it falls back to activating", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+          {
+            channelId: 60,
+            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 3,
+            mentionCount: 1,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 60);
+      expect(dm?.unreadCount).toBe(0);
+      expect(dm?.mentionCount).toBe(0);
+    });
+
     // The channelsStore mirror row for a DM is only ever synthesized by
     // addDmToChannelsStore (on open, via selectDmConversation) — a DM present
     // in dmStore from `ready` but never opened this session has none. Without
