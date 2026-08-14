@@ -15,6 +15,7 @@ package plugin
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -397,7 +398,28 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 	// the two can no longer disagree.
 	if row, err := r.cfg.Store.GetPluginByName(ctx, manifest.Name); err == nil && row != nil && row.Enabled {
 		if err := r.EnablePlugin(ctx, row.ID); err != nil {
-			slog.Warn("plugin: reactivate after upgrade failed", "name", manifest.Name, "err", err)
+			if errors.Is(err, ErrRuntimeUnavailable) {
+				// Default (non-wazero) build: nothing can activate here, and
+				// leaving EnablePlugin's rollback in place would persistently
+				// disable a plugin the admin left enabled — after a rebuild
+				// with -tags wazero it would silently stay off. Preserve the
+				// enabled intent instead; the next wazero-tagged start's
+				// activateAll does the real activation.
+				if reErr := r.cfg.Store.EnablePlugin(ctx, row.ID); reErr != nil {
+					slog.Warn("plugin: could not preserve enabled flag across runtime-less upgrade",
+						"name", manifest.Name, "err", reErr)
+				} else {
+					r.mu.Lock()
+					if inst, ok := r.byName[manifest.Name]; ok {
+						inst.Enabled = true
+					}
+					r.mu.Unlock()
+					slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
+						"name", manifest.Name)
+				}
+			} else {
+				slog.Warn("plugin: reactivate after upgrade failed", "name", manifest.Name, "err", err)
+			}
 		}
 	}
 	return manifest.Name, nil
