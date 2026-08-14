@@ -208,6 +208,148 @@ describe("lastSeq tracking", () => {
     expect(authMsg.payload.last_seq).toBe(25);
   });
 
+  it("resets lastSeq when auth_ok reports replay_source: none (full resync)", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    // Initial connect — lastSeq climbs to 5000 via live traffic (no seq on
+    // auth_ok itself, matching the real server: h.buildAuthOK never sets a
+    // top-level "seq" field).
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+        },
+      }),
+    );
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 5000,
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hi",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    // Socket drops; server restarted meanwhile with its seq counter reset
+    // (event_persistence.enabled=false), so the reconnect's replay tier is a
+    // full resync — auth_ok comes back with replay_source: "none" again.
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(1100);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+        },
+      }),
+    );
+
+    // A subsequent drop must send last_seq=0 (adopting the server's new
+    // epoch), not the stale 5000 watermark from the old epoch.
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2100); // 2nd attempt = 2s backoff
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authCall).toBeDefined();
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(0);
+  });
+
+  it("does NOT reset lastSeq when auth_ok reports replay_source: buffer/db (real resume)", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+        },
+      }),
+    );
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 42,
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hi",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(1100);
+    emitTauriEvent("ws-state", "open");
+
+    // A real resume from the ring buffer/DB — must NOT reset lastSeq.
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+          replay_source: "buffer",
+        },
+      }),
+    );
+
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2100);
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
+    );
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(42);
+  });
+
   it("should reset lastSeq to 0 on intentional disconnect", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);

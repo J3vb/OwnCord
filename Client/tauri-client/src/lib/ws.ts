@@ -312,6 +312,17 @@ export function createWsClient() {
           lastSeq,
         });
       }
+      // A full re-sync ("none") means the server built this ready state from
+      // scratch — its own seq counter may have restarted below our stale
+      // watermark (event persistence disabled, pruned events table, restored
+      // DB). Keeping the old watermark would make every future reconnect
+      // request a range the server can silently satisfy as a complete resume
+      // once its counter climbs back through it, dropping the events in
+      // between. Reset so the next sequenced frame re-adopts the server's
+      // current epoch via the normal seq > lastSeq update (OC-0032).
+      if (msg.payload.replay_source === "none") {
+        lastSeq = 0;
+      }
       // Clear dedup cache — replay is complete
       replayDedup = null;
       setState("connected");
