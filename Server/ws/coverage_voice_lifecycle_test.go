@@ -145,6 +145,93 @@ func TestRollbackVoiceJoin_NoDBState_DoesNotPanic(t *testing.T) {
 	}
 }
 
+// OC-0044: rollbackVoiceJoin must not let a stale/failed join's compensating
+// delete destroy a newer voice_states row a second connection for the same
+// user has since legitimately established. A delayed rollback (the dying
+// connection that triggered it is the most common case) firing
+// "DELETE ... WHERE user_id = ?" with no channel/token condition wipes
+// whatever the user is currently in, not just the failed join.
+//
+// This covers the token-generation-failure call site (voice_join.go:300),
+// which already holds the failed join's own JoinedAt by the time it rolls
+// back — that value must scope the delete instead of being discarded.
+func TestRollbackVoiceJoin_StaleTokenDoesNotDeleteNewerJoin(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "rb-stale-token")
+	staleChID := seedVoiceChannel(t, database, "rb-stale-token-old")
+	newChID := seedVoiceChannel(t, database, "rb-stale-token-new")
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// A second connection for the same user has already joined a different
+	// channel and committed its own voice_states row by the time the stale
+	// rollback below runs.
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, newChID); err != nil {
+		t.Fatalf("JoinVoiceChannel (newer): %v", err)
+	}
+	newState, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || newState == nil {
+		t.Fatalf("GetVoiceState (newer): state=%v err=%v", newState, err)
+	}
+
+	// Roll back the stale, now-superseded join to staleChID using a join
+	// token that does not match the row currently in the DB (newChID's).
+	hub.RollbackVoiceJoinWithTokenForTest(c, staleChID, "stale-token-does-not-match-anything")
+
+	got, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after rollback: %v", err)
+	}
+	if got == nil {
+		t.Fatal("rollbackVoiceJoin deleted the newer voice membership it did not own")
+	}
+	if got.ChannelID != newChID || got.JoinedAt != newState.JoinedAt {
+		t.Fatalf("voice state after rollback = %+v, want unchanged channel=%d joined_at=%q",
+			got, newChID, newState.JoinedAt)
+	}
+}
+
+// OC-0044: mirrors the GetVoiceState-failure call site (voice_join.go:208),
+// which never learns the failed join's own JoinedAt and so rolls back with
+// an empty token. That must not degrade to the old unconditional
+// "DELETE ... WHERE user_id = ?" — it must re-read the row and refuse to
+// touch it unless the row still names the channel being rolled back.
+func TestRollbackVoiceJoin_EmptyTokenDoesNotDeleteDifferentChannel(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "rb-empty-token")
+	staleChID := seedVoiceChannel(t, database, "rb-empty-token-old")
+	newChID := seedVoiceChannel(t, database, "rb-empty-token-new")
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, newChID); err != nil {
+		t.Fatalf("JoinVoiceChannel (newer): %v", err)
+	}
+	newState, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || newState == nil {
+		t.Fatalf("GetVoiceState (newer): state=%v err=%v", newState, err)
+	}
+
+	// RollbackVoiceJoinForTest exercises the empty-joinedAt path.
+	hub.RollbackVoiceJoinForTest(c, staleChID)
+
+	got, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after rollback: %v", err)
+	}
+	if got == nil {
+		t.Fatal("rollbackVoiceJoin deleted the newer voice membership it did not own")
+	}
+	if got.ChannelID != newChID || got.JoinedAt != newState.JoinedAt {
+		t.Fatalf("voice state after rollback = %+v, want unchanged channel=%d joined_at=%q",
+			got, newChID, newState.JoinedAt)
+	}
+}
+
 // ─── leaveVoiceChannelWithRetry (voice_leave.go:57) ─────────────────────────
 
 func TestLeaveVoiceChannelWithRetry_SuccessOnFirstAttempt(t *testing.T) {

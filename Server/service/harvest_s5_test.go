@@ -104,7 +104,7 @@ func TestHandleChannelFocus_ClearsMentionBadgeWhenAllMessagesDeleted(t *testing.
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if err := database.IncrementMentionCounts(ctx, 10, []int64{1}); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 10, msgID, []int64{1}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 	if err := database.DeleteMessage(ctx, msgID, 2, false); err != nil {

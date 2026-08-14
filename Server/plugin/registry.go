@@ -15,6 +15,7 @@ package plugin
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -59,6 +60,7 @@ type Registry struct {
 type Instance struct {
 	ID       int64
 	Manifest *Manifest
+	Dir      string // on-disk plugin directory, from foundPlugin.Dir — NOT derived from Manifest.Name
 	WASMPath string
 	Enabled  bool
 
@@ -210,6 +212,7 @@ func (r *Registry) installFromDisk(ctx context.Context, found foundPlugin) error
 	inst := &Instance{
 		ID:       id,
 		Manifest: found.Manifest,
+		Dir:      found.Dir,
 		WASMPath: found.WASMPath,
 		Enabled:  false,
 	}
@@ -383,6 +386,42 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 	}); err != nil {
 		return manifest.Name, fmt.Errorf("installFromDisk: %w", err)
 	}
+
+	// installFromDisk always registers the fresh instance as disabled and
+	// InstallPlugin's upsert never touches the `enabled` column, so a plugin
+	// that was enabled before this upgrade would otherwise come out the
+	// other side with the store row still saying enabled while the runtime
+	// instance sits inactive. LoadAll's startup path avoids this because it
+	// always runs activateAll afterward; this is the one caller of
+	// installFromDisk that doesn't, so it has to reactivate for itself.
+	// EnablePlugin already rolls the DB flag back if activation fails, so
+	// the two can no longer disagree.
+	if row, err := r.cfg.Store.GetPluginByName(ctx, manifest.Name); err == nil && row != nil && row.Enabled {
+		if err := r.EnablePlugin(ctx, row.ID); err != nil {
+			if errors.Is(err, ErrRuntimeUnavailable) {
+				// Default (non-wazero) build: nothing can activate here, and
+				// leaving EnablePlugin's rollback in place would persistently
+				// disable a plugin the admin left enabled — after a rebuild
+				// with -tags wazero it would silently stay off. Preserve the
+				// enabled intent instead; the next wazero-tagged start's
+				// activateAll does the real activation.
+				if reErr := r.cfg.Store.EnablePlugin(ctx, row.ID); reErr != nil {
+					slog.Warn("plugin: could not preserve enabled flag across runtime-less upgrade",
+						"name", manifest.Name, "err", reErr)
+				} else {
+					r.mu.Lock()
+					if inst, ok := r.byName[manifest.Name]; ok {
+						inst.Enabled = true
+					}
+					r.mu.Unlock()
+					slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
+						"name", manifest.Name)
+				}
+			} else {
+				slog.Warn("plugin: reactivate after upgrade failed", "name", manifest.Name, "err", err)
+			}
+		}
+	}
 	return manifest.Name, nil
 }
 
@@ -463,6 +502,10 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	inst, ok := r.plugins[id]
 	r.mu.RUnlock()
 	if !ok {
+		// No in-memory instance to activate — roll the DB flag back so it
+		// doesn't stay stuck at enabled=1 with nothing backing it, the same
+		// way the activation-failure path below rolls back.
+		_ = r.cfg.Store.DisablePlugin(ctx, id)
 		return ErrPluginNotFound
 	}
 	r.mu.Lock()
@@ -505,6 +548,13 @@ func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 	return nil
 }
 
+// removeAll is os.RemoveAll indirected so tests can force a directory-removal
+// failure deterministically. Windows silently succeeds at deleting read-only
+// files (there's no portable, privilege-free way to make a real RemoveAll
+// fail from a test), so this is the seam that lets the error-return path in
+// UninstallPlugin be pinned.
+var removeAll = os.RemoveAll
+
 // UninstallPlugin removes a plugin entirely.
 func (r *Registry) UninstallPlugin(ctx context.Context, id int64) error {
 	if err := r.DisablePlugin(ctx, id); err != nil {
@@ -517,7 +567,7 @@ func (r *Registry) UninstallPlugin(ctx context.Context, id int64) error {
 	inst, instOK := r.plugins[id]
 	var pluginDir string
 	if instOK {
-		pluginDir = filepath.Join(r.cfg.Directory, inst.Manifest.Name)
+		pluginDir = inst.Dir
 	}
 	r.mu.RUnlock()
 
@@ -533,10 +583,15 @@ func (r *Registry) UninstallPlugin(ctx context.Context, id int64) error {
 	r.mu.Unlock()
 
 	// Remove on-disk files so the plugin isn't resurrected on the next
-	// startup by scanPluginDirectory.
+	// startup by scanPluginDirectory. The DB row and in-memory record are
+	// already gone at this point, so a removal failure is reported rather
+	// than swallowed — the caller needs to know the directory still has to
+	// be cleaned up by hand before the next restart, or scanPluginDirectory
+	// will bring the "uninstalled" plugin right back.
 	if pluginDir != "" {
-		if err := os.RemoveAll(pluginDir); err != nil {
+		if err := removeAll(pluginDir); err != nil {
 			slog.Warn("plugin: failed to remove plugin directory after uninstall", "dir", pluginDir, "err", err)
+			return fmt.Errorf("remove plugin dir: %w", err)
 		}
 	}
 	return nil

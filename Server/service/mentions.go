@@ -152,7 +152,7 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 //
 // The message is already committed by the time this runs, so failures are
 // logged rather than surfaced — a lost badge must not fail a delivered send.
-func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) {
+func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) {
 	if len(set.UserIDs) == 0 && !set.Everyone {
 		return
 	}
@@ -212,7 +212,7 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, auth
 	for id := range recipients {
 		ids = append(ids, id)
 	}
-	if err := s.st.IncrementMentionCounts(ctx, channelID, ids); err != nil {
+	if err := s.st.IncrementMentionCounts(ctx, channelID, msgID, ids); err != nil {
 		slog.Error("MessageService.applyMentionCounts IncrementMentionCounts", "err", err, "channel_id", channelID)
 	}
 }

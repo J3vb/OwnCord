@@ -255,11 +255,16 @@ func handleDeleteEmoji(svc *service.Services, store *storage.Storage, broadcaste
 // broadcastEmojiSet re-reads the set and pushes it to every client. A failure
 // here is logged and swallowed: the mutation itself already succeeded, and the
 // caller's own response carries the change.
+//
+// Called after the mutation has already committed, so the caller's request
+// context may be canceled by the time this runs (client aborted, deadline
+// fired) -- context.WithoutCancel detaches the re-read from that, matching
+// the pattern service/emoji.go already uses for its post-commit audit write.
 func broadcastEmojiSet(ctx context.Context, svc *service.Services, broadcaster EmojiBroadcaster) {
 	if broadcaster == nil {
 		return
 	}
-	list, err := svc.Emoji.List(ctx)
+	list, err := svc.Emoji.List(context.WithoutCancel(ctx))
 	if err != nil {
 		slog.Error("failed to load emoji for broadcast", "error", err)
 		return

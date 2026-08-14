@@ -1258,7 +1258,7 @@ func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 	msgID, _ := database.CreateMessage(context.Background(), ch.ID, bob, "hey", nil)
-	if err := database.IncrementMentionCounts(context.Background(), ch.ID, []int64{alice}); err != nil {
+	if err := database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{alice}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 

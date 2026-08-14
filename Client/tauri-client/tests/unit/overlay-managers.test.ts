@@ -513,6 +513,29 @@ describe("createPinnedPanelController", () => {
     expect(api.getPins).toHaveBeenCalledOnce();
   });
 
+  it("re-checks getRoot after the getPins() await and does not mount on a torn-down page", async () => {
+    // Same teardown-during-fetch race as InviteManagerController.open (OC-0055):
+    // toggle() must not mount on the pre-await root once the page has torn
+    // down while getPins() was in flight.
+    const api = makeMockApi();
+    let calls = 0;
+    const getRoot = vi.fn(() => {
+      calls++;
+      return calls === 1 ? root : null;
+    });
+
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot,
+      getCurrentChannelId: () => 42,
+    });
+
+    await controller.toggle();
+
+    expect(createPinnedMessages).not.toHaveBeenCalled();
+    expect(mockPinnedMessagesMount).not.toHaveBeenCalled();
+  });
+
   it("cleanup is safe when no panel is open", () => {
     const api = makeMockApi();
 
@@ -1047,6 +1070,30 @@ describe("createInviteManagerController (additional)", () => {
     opts.onError("Something went wrong");
     expect(mockLogError).toHaveBeenCalledWith("Something went wrong");
     expect(mockShowToast).toHaveBeenCalledWith("Something went wrong", "error");
+  });
+
+  it("re-checks getRoot after the getInvites() await and does not mount on a torn-down page", async () => {
+    // Root is live when open() starts but the page tears down (MainPage.destroy
+    // nulls its root) while getInvites() is still in flight. open() must not
+    // resurrect the overlay on the stale, detached root it captured before the
+    // await — that leaves a document-level keydown listener with no teardown
+    // path (OC-0055).
+    const api = makeMockApi();
+    let calls = 0;
+    const getRoot = vi.fn(() => {
+      calls++;
+      return calls === 1 ? root : null;
+    });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot,
+    });
+
+    await controller.open();
+
+    expect(createInviteManager).not.toHaveBeenCalled();
+    expect(mockInviteManagerMount).not.toHaveBeenCalled();
   });
 
   it("onRevokeInvite passes invite code directly to API", async () => {

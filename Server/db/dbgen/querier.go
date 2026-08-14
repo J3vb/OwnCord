@@ -187,7 +187,7 @@ type Querier interface {
 	// (db.ConnectStatus). A stale choice never renders as "present" because the
 	// read path treats a member with no live connection as offline regardless.
 	MarkUserDisconnected(ctx context.Context, id int64) error
-	OpenDM(ctx context.Context, arg OpenDMParams) error
+	OpenDM(ctx context.Context, arg OpenDMParams) (int64, error)
 	// seq is supplied by the hub so the row seq matches the wrapped-payload seq.
 	PersistEvent(ctx context.Context, arg PersistEventParams) error
 	PluginKVDelete(ctx context.Context, arg PluginKVDeleteParams) error

@@ -205,7 +205,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	state, err := h.db.GetVoiceState(ctx, c.userID)
 	if err != nil || state == nil {
 		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(ctx, c, channelID, false)
+		h.rollbackVoiceJoin(ctx, c, channelID, "", false)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 		return
 	}
@@ -297,7 +297,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(ctx, c, channelID, false)
+			h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
 			return
 		}
@@ -461,7 +461,18 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the
 // client's voice channel ID, removes the DB voice state row, and broadcasts
 // voice_leave so other clients don't see a ghost participant.
-func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, broadcast bool) {
+//
+// joinedAt scopes the compensating delete to the join instance being undone
+// (mirrors LeaveVoiceChannelIfMatch, used for the same reason by every
+// sibling leave path). A rollback fires most often because the connection
+// that started the join just died, and that same cancellation is exactly
+// what lets a second connection for this user race ahead and establish a
+// newer, legitimate voice_states row before this rollback runs — an
+// unconditional "DELETE ... WHERE user_id = ?" would destroy that newer row
+// instead of the failed one. When joinedAt is empty (the caller never read
+// the row back far enough to learn it), the row is re-read here and the
+// delete is skipped unless it still names channelID.
+func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
 	c.clearVoiceChID()
 	// The client's voice state is now set before token generation (BUG-088),
 	// so a concurrent join/leave in the same channel can have elected this
@@ -472,9 +483,17 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64,
 	h.updateKeyHolder(channelID)
 	// The compensating delete must run even when the join failed BECAUSE the
 	// connection died — that cancellation is the most common rollback trigger.
-	if err := h.db.LeaveVoiceChannel(context.WithoutCancel(ctx), c.userID); err != nil {
-		slog.Error("ws rollbackVoiceJoin LeaveVoiceChannel", "err", err,
-			"user_id", c.userID, "channel_id", channelID)
+	rbCtx := context.WithoutCancel(ctx)
+	if joinedAt == "" {
+		if state, err := h.db.GetVoiceState(rbCtx, c.userID); err == nil && state != nil && state.ChannelID == channelID {
+			joinedAt = state.JoinedAt
+		}
+	}
+	if joinedAt != "" {
+		if _, err := h.db.LeaveVoiceChannelIfMatch(rbCtx, c.userID, channelID, joinedAt); err != nil {
+			slog.Error("ws rollbackVoiceJoin LeaveVoiceChannelIfMatch", "err", err,
+				"user_id", c.userID, "channel_id", channelID)
+		}
 	}
 	if broadcast {
 		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, c.userID))

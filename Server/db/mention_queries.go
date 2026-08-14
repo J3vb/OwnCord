@@ -184,13 +184,22 @@ const mentionCountChunkSize = 500
 // last_message_id stays 0 for a created row: the user has read nothing, and the
 // mention they were just given is unread by definition.
 //
+// msgID is the id of the message that triggered this fan-out. The increment
+// is skipped for a recipient whose read state already covers msgID
+// (last_message_id >= msgID): a mark_read that lands between the message
+// commit and this deferred call already zeroed their mention_count, and an
+// unconditional increment would leave a permanent phantom badge on a channel
+// with zero unread — nothing else ever zeroes it again. The guard is atomic
+// with the increment itself (part of the same ON CONFLICT ... DO UPDATE ...
+// WHERE), so there is no separate check-then-write race window.
+//
 // Batched into one multi-row INSERT per chunk of mentionCountChunkSize
 // recipients instead of one exec per recipient: an @everyone mention fans out
 // to every reader of a channel, and the writer txn used to pay one round trip
 // per reader for that. The caller has already excluded the author, so
 // semantics are unchanged — each listed user id still gets exactly one
-// increment (or a fresh row seeded at 1).
-func (d *DB) IncrementMentionCounts(ctx context.Context, channelID int64, userIDs []int64) error {
+// increment (or a fresh row seeded at 1), unless the guard above skips it.
+func (d *DB) IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
@@ -209,12 +218,17 @@ func (d *DB) IncrementMentionCounts(ctx context.Context, channelID int64, userID
 			rowPlaceholders[i] = "(?, ?, 0, 1)"
 			args = append(args, uid, channelID)
 		}
+		// msgID is a bound parameter of the WHERE clause, not a VALUES column:
+		// every conflicting row in this chunk shares the one message that
+		// triggered the fan-out, so one trailing arg covers the whole batch.
+		args = append(args, msgID)
 
 		query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 			`INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
 			 VALUES %s
 			 ON CONFLICT(user_id, channel_id) DO UPDATE SET
-			     mention_count = mention_count + 1`,
+			     mention_count = mention_count + 1
+			 WHERE read_states.last_message_id < ?`,
 			strings.Join(rowPlaceholders, ","),
 		)
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {

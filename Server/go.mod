@@ -2,6 +2,8 @@ module github.com/owncord/server
 
 go 1.26
 
+toolchain go1.26.6
+
 require (
 	aead.dev/minisign v0.3.0
 	github.com/BurntSushi/toml v1.6.0

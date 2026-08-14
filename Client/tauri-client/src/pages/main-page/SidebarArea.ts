@@ -112,6 +112,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // InviteManagerController / PinnedPanelController in OverlayManagers.ts.
   let openingQuickSwitch = false;
 
+  // Set once this SidebarArea's own teardown unsubscriber has run.
+  // `sidebarWrapper.parentElement` can NOT be used for this: MainPage.destroy()
+  // removes an ancestor (`root`) and never detaches sidebarWrapper from its
+  // own parent, so that check is never true and a profile load that resolves
+  // after teardown mounts an orphaned overlay onto document.body.
+  let tornDown = false;
+
   // Track the rename-group prompt so page teardown removes it — every other
   // modal in this file assigns `activeModal` for the same reason.
   let activePrompt: ModalInstance | null = null;
@@ -728,7 +735,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         }
 
         // Ensure we haven't been cleaned up while awaiting
-        if (sidebarWrapper.parentElement === null) return;
+        if (tornDown) return;
 
         quickSwitchInstance = createQuickSwitchOverlay({
           profiles,
@@ -809,6 +816,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   });
 
   unsubscribers.push(() => {
+    tornDown = true;
     closeQuickSwitch();
   });
 

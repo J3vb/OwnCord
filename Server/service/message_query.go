@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -224,5 +225,17 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if err != nil || msg == nil || msg.ChannelID != channelID {
 		return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
-	return s.st.SetMessagePinned(ctx, msgID, pinned)
+	if err := s.st.SetMessagePinned(ctx, msgID, pinned); err != nil {
+		// The pin SQL excludes soft-deleted rows, so a message deleted between
+		// the GetMessage check above and this UPDATE (or one whose Deleted flag
+		// we didn't re-check) surfaces here as db.ErrNotFound. Map it to the
+		// service taxonomy so writeServiceError answers 404, not a 500 — same
+		// class of guard as EditMessage's ErrDeletedMessage and handleReaction's
+		// ErrBadRequest on their own deleted-message paths.
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
+		}
+		return fmt.Errorf("%w: %v", ErrInternal, err)
+	}
+	return nil
 }

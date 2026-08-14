@@ -67,8 +67,10 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		// try to replay missed events from the ring buffer instead of
 		// sending a full ready payload.
 		if lastSeq > 0 {
-			if hub.handleReconnect(ctx, conn, c, database, lastSeq) {
-				startPumps()
+			if handled, shouldStartPumps := hub.handleReconnect(ctx, conn, c, database, lastSeq); handled {
+				if shouldStartPumps {
+					startPumps()
+				}
 				return
 			}
 			// Replay failed (seq too old) — fall through to full ready payload.
@@ -116,9 +118,22 @@ func (h *Hub) upgradeAndAuth(
 	return c, lastSeq, nil
 }
 
+// handleReconnect attempts to resume a client via replay. Its two return
+// values are independent signals for ServeWS:
+//   - handled reports whether this function owns the outcome of the
+//     connection attempt. false means "replay isn't possible, fall through
+//     to handleFreshConnect for a full ready."
+//   - startPumps reports whether ServeWS should start readPump/writePump.
+//     It is only meaningful when handled is true, and is false on the
+//     handshake-write-failure paths below: those paths already ran the full
+//     unregisterFailedHandshake teardown and closed conn themselves, so no
+//     pump may start — readPump's defer would find the client already gone
+//     (unregisterNow reporting replaced=false) and run that same teardown a
+//     second time (OC-0051): a duplicate MarkUserDisconnected, a duplicate
+//     offline presence broadcast, and a duplicate hub seq for it.
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
-) bool {
+) (handled, startPumps bool) {
 	// Channel-visibility changes are delivered as targeted, unsequenced
 	// messages, so replay cannot bring a client that missed one back into a
 	// coherent state — force the full-ready path instead.
@@ -127,7 +142,7 @@ func (h *Hub) handleReconnect(
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return false
+		return false, false
 	}
 	// Compute the set of channel IDs the reconnecting user can access so that
 	// channel-scoped replay events are filtered by current permissions (M3).
@@ -135,7 +150,7 @@ func (h *Hub) handleReconnect(
 	if err != nil {
 		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
 			"user_id", c.userID, "err", err)
-		return false
+		return false, false
 	}
 
 	// Voice membership needs only CONNECT_VOICE, not READ_MESSAGES
@@ -241,7 +256,7 @@ func (h *Hub) handleReconnect(
 		if events == nil {
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false
+			return false, false
 		}
 	}
 
@@ -303,7 +318,7 @@ func (h *Hub) handleReconnect(
 				"user_id", c.userID, "last_seq", lastSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false
+			return false, false
 		}
 		events = fresh
 	case "db":
@@ -318,7 +333,7 @@ func (h *Hub) handleReconnect(
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false
+			return false, false
 		}
 	}
 	h.registerNow(c, allowedChannelIDs)
@@ -350,14 +365,17 @@ func (h *Hub) handleReconnect(
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-		return true
+		// startPumps=false: the teardown above already ran in full. Starting
+		// readPump on this closed conn would hit an immediate Read error and
+		// its defer would run the identical teardown a second time (OC-0051).
+		return true, false
 	}
 	for _, evt := range events {
 		if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-			return true
+			return true, false
 		}
 	}
 	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
@@ -366,7 +384,7 @@ func (h *Hub) handleReconnect(
 	applyConnectStatus(ctx, database, c)
 	h.announceConnectPresence(c)
 
-	return true
+	return true, true
 }
 
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
@@ -410,10 +428,13 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 }
 
 // unregisterFailedHandshake removes c after a post-registerNow handshake
-// write failure. No readPump ever starts for this connection, and the old
-// connection this one replaced already ran its defer (skipping teardown
-// because this client held the slot) — so when no replacement remains, the
-// standard disconnect teardown must run here or the user stays online forever.
+// write failure. No readPump ever starts for this connection — the
+// fresh-connect callers return an error that stops ServeWS before it starts
+// the pumps, and handleReconnect's callers report startPumps=false for the
+// same reason (OC-0051) — and the old connection this one replaced already
+// ran its defer (skipping teardown because this client held the slot) — so
+// when no replacement remains, the standard disconnect teardown must run
+// here or the user stays online forever.
 func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// Snapshot voice state BEFORE unregister, mirroring readPump's defer
 	// (serve_pumps.go): once unregisterNow removes c, there is no way to tell

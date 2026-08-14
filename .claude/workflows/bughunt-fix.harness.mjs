@@ -253,7 +253,7 @@ scenarios.f6_prove_is_serial = async () => {
   const proveCalls = calls.filter((c) => String(c.opts.label).startsWith('prove:'))
   assert.equal(proveCalls.length, 2)
   for (const c of proveCalls) {
-    assert.equal(c.opts.model, 'sonnet')
+    assert.equal(c.opts.model, 'opus')
     assert.equal(c.opts.effort, 'medium')
   }
   assert.equal(result.commits.length, 2)

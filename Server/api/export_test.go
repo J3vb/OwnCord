@@ -4,8 +4,14 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/ws"
 )
+
+// BroadcastDMOpenForTest exposes broadcastDMOpen for external tests.
+func BroadcastDMOpenForTest(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, targetIDs []int64) {
+	broadcastDMOpen(ctx, svc, broadcaster, channelID, targetIDs)
+}
 
 // HandleMetricsForTest exposes handleMetrics for use in external tests.
 var HandleMetricsForTest = handleMetrics
@@ -53,6 +59,11 @@ var IsPrivateIPForTest = isPrivateIP
 // standard-library counterpart to cross-check it against, so the chunk-flavour
 // cases are tested directly rather than only through the upload handler.
 var WebPDimensionsForTest = webpDimensions
+
+// BroadcastEmojiSetForTest exposes broadcastEmojiSet for external tests.
+func BroadcastEmojiSetForTest(ctx context.Context, svc *service.Services, broadcaster EmojiBroadcaster) {
+	broadcastEmojiSet(ctx, svc, broadcaster)
+}
 
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
 // restore func. The production transport uses the SSRF-guarded dialer, which

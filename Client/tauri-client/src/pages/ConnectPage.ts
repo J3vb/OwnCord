@@ -299,6 +299,11 @@ export function createConnectPage(
     // failure rather than whatever set it during this session.
     setTransientError(null);
 
+    // Mirror MainPage.destroy(): clear settingsOpen so the next page to
+    // mount an (initially hidden) SettingsOverlay off that flag — MainPage,
+    // after a successful login — doesn't show it over the freshly loaded app.
+    closeSettings();
+
     if (container && root) {
       container.removeChild(root);
     }

@@ -66,6 +66,33 @@ func TestBumpVisibilityWatermark_ConcurrentCallsNeverRegress(t *testing.T) {
 	}
 }
 
+// TestMarkVisibilityChanged_BumpsWatermarkLikeInternalWriters pins OC-0013:
+// api.markDMVisibilityChanged reaches this bump through a type assertion on
+// an exported MarkVisibilityChanged() method — the same watermark the three
+// internal writers above ratchet via bumpVisibilityWatermark. Without an
+// exported wrapper, the assertion in api/dm_handler.go always misses against
+// the real *ws.Hub, so a REST-originated DM event (group create, rename,
+// close, group-leave) never bumps the watermark and a client that warm-
+// reconnects across it is wrongly admitted onto the replay path — which
+// cannot carry the unsequenced, targeted dm_channel_open/close those REST
+// handlers send.
+func TestMarkVisibilityChanged_BumpsWatermarkLikeInternalWriters(t *testing.T) {
+	h := &Hub{}
+	atomic.StoreUint64(&h.seq, 42)
+
+	h.MarkVisibilityChanged()
+
+	if got := h.visibilityChangeSeq.Load(); got != 42 {
+		t.Fatalf("visibilityChangeSeq = %d after MarkVisibilityChanged, want 42", got)
+	}
+	if !h.mustFullResync(42) {
+		t.Error("a client resuming from a seq at or before the REST DM event must be forced onto the full-ready path")
+	}
+	if h.mustFullResync(43) {
+		t.Error("clients past the change must keep replaying normally")
+	}
+}
+
 // TestRevokeUnreadableChannels_WatermarkNeverRegresses targets the specific
 // defect: revokeUnreadableChannels used `defer h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))`,
 // whose argument Go evaluates at the DEFER STATEMENT (function entry), not at

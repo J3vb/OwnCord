@@ -98,11 +98,10 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		}
 	}
 
-	events = append(events, MessageSentDMEvent{
-		channelID:      sendCmd.ChannelID(),
-		participantIDs: result.ParticipantIDs,
-		payload:        broadcast,
-	})
+	events = append(events, dmEventOrFallback(
+		MessageSentDMEvent{channelID: sendCmd.ChannelID(), participantIDs: result.ParticipantIDs, payload: broadcast},
+		MessageSentChannelEvent{channelID: sendCmd.ChannelID(), payload: broadcast},
+		result.ParticipantIDs))
 
 	return Result{Reply: reply, Events: events}
 }
@@ -120,11 +119,10 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
 		result.Mentions, result.MentionsEveryone)
 	if result.IsDM {
-		return Result{Events: []Event{MessageEditedDMEvent{
-			channelID:      result.ChannelID,
-			participantIDs: result.ParticipantIDs,
-			payload:        editedPayload,
-		}}}
+		return Result{Events: []Event{dmEventOrFallback(
+			MessageEditedDMEvent{channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},
+			MessageEditedChannelEvent{channelID: result.ChannelID, payload: editedPayload},
+			result.ParticipantIDs)}}
 	}
 	return Result{Events: []Event{MessageEditedChannelEvent{
 		channelID: result.ChannelID,
@@ -144,16 +142,27 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 
 	deletedPayload := buildChatDeleted(result.MessageID, result.ChannelID)
 	if result.IsDM {
-		return Result{Events: []Event{MessageDeletedDMEvent{
-			channelID:      result.ChannelID,
-			participantIDs: result.ParticipantIDs,
-			payload:        deletedPayload,
-		}}}
+		return Result{Events: []Event{dmEventOrFallback(
+			MessageDeletedDMEvent{channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: deletedPayload},
+			MessageDeletedChannelEvent{channelID: result.ChannelID, payload: deletedPayload},
+			result.ParticipantIDs)}}
 	}
 	return Result{Events: []Event{MessageDeletedChannelEvent{
 		channelID: result.ChannelID,
 		payload:   deletedPayload,
 	}}}
+}
+
+// dmEventOrFallback returns the participant-targeted DM event, falling back
+// to the channel-topic broadcast when the participant list is empty — the
+// degraded shape a failed post-commit GetDMParticipantIDs leaves behind. A
+// sequenced frame addressed to nobody would consume a seq and reach no one;
+// the topic fallback still reaches whoever has the DM focused.
+func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
+	if len(participantIDs) == 0 {
+		return fallback
+	}
+	return dmEvent
 }
 
 // serviceErrorToResult converts a service-layer error to a WS Result.

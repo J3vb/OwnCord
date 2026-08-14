@@ -295,6 +295,12 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if dest.Type != "voice" {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "destination is not a voice channel"}}
 	}
+	// The re-join this move hands off to (handleVoiceJoin) refuses an
+	// archived channel outright; check it here too, or the pre-flight commits
+	// the destructive half of the move for a re-join guaranteed to bounce.
+	if dest.Archived {
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}}
+	}
 	// The destination is gated on the TARGET's access, not the moderator's:
 	// a move must not become a way to place someone in a channel they could
 	// not join themselves.

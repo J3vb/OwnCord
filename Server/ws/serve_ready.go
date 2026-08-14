@@ -265,12 +265,23 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		slog.Warn("buildReady collectAllVoiceStates", "err", err)
 		allVoiceStates = []db.VoiceState{}
 	}
-	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels))
+	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels)+1)
 	for i := range visibleChannels {
 		visibleSet[visibleChannels[i].ID] = struct{}{}
 	}
 	for i := range dmChannels {
 		visibleSet[dmChannels[i].ChannelID] = struct{}{}
+	}
+	// The caller's own live voice room can never leak by definition -- seed it
+	// even if it fell outside both sets above (e.g. CONNECT_VOICE granted
+	// without READ_MESSAGES, or a DM voice call after the DM was closed:
+	// CloseDM removes dm_open_state but performs no voice eviction). This
+	// mirrors liveVoiceEventsSince's rationale on the reconnect-replay tier
+	// (serve.go), which this full-ready tier had no equivalent for (OC-0028).
+	for i := range allVoiceStates {
+		if allVoiceStates[i].UserID == userID {
+			visibleSet[allVoiceStates[i].ChannelID] = struct{}{}
+		}
 	}
 	voiceStates := make([]db.VoiceState, 0, len(allVoiceStates))
 	for i := range allVoiceStates {

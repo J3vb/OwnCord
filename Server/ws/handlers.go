@@ -8,6 +8,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // HandleMessageForTest dispatches a raw WebSocket message from client c.
@@ -156,20 +157,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
-		oldChID := c.getChannelID()
-		c.mu.Lock()
-		c.channelID = *result.SetChannelID
-		c.mu.Unlock()
-		// Update pub/sub channel topic subscriptions.
-		newChID := *result.SetChannelID
-		if oldChID != newChID {
-			if oldChID > 0 {
-				c.hub.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
-			}
-			if newChID > 0 {
-				c.hub.pubsub.Subscribe(c, ChannelTopic(newChID))
-			}
-		}
+		h.applySetChannelID(c, *result.SetChannelID)
 	}
 	if result.SetE2EEPubKey != nil {
 		sig := ""
@@ -199,6 +187,61 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if result.JoinVoice {
 		h.handleVoiceJoin(c.ctx, c, env.Payload)
 	}
+}
+
+// applySetChannelID moves c's focused channel to newChID and updates its
+// pub/sub topic subscription to match.
+//
+// OC-0024: channel_focus's handler (service/channel.go) checks READ_MESSAGES
+// before returning, but that check and the Subscribe below are separated by
+// two SQLite round trips (GetLatestMessageID/UpdateReadState), and the hub's
+// visibility-revoke sweeps (RefreshChannelVisibility, revokeUnreadableChannels)
+// only ever Unsubscribe a topic the socket already holds at the instant they
+// run — a revoke that commits inside that window finds nothing to undo, and
+// the Subscribe that lands once the window closes is never revisited. Once
+// Subscribe is called we re-validate READ_MESSAGES live and unwind it on
+// failure, which closes the race from both directions: a revoke that already
+// committed is caught right here, and a revoke that commits afterward still
+// finds the subscription the sweeps have always expected to see.
+func (h *Hub) applySetChannelID(c *Client, newChID int64) {
+	oldChID := c.getChannelID()
+	c.mu.Lock()
+	c.channelID = newChID
+	c.mu.Unlock()
+	if oldChID == newChID {
+		return
+	}
+	if oldChID > 0 {
+		h.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
+	}
+	if newChID <= 0 {
+		return
+	}
+	h.pubsub.Subscribe(c, ChannelTopic(newChID))
+	// The re-validation mirrors HandleChannelFocus's admission gate: DMs are
+	// participant-gated (the READ role bit is deliberately waived), non-DMs
+	// need READ_MESSAGES, and a deleted channel is a denial. A transient
+	// lookup error is NOT a denial — the recheck exists to catch a concrete
+	// revoke in the Subscribe race window, the sweeps stay authoritative, and
+	// unwinding on error would turn any DB hiccup into a silently dead
+	// message stream with no error frame sent to the client.
+	ch, chErr := h.db.GetChannel(c.ctx, newChID)
+	if chErr != nil {
+		return
+	}
+	if ch != nil && ch.Type == "dm" {
+		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
+			return
+		}
+	} else if ch != nil && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
+		return
+	}
+	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
+	c.mu.Lock()
+	if c.channelID == newChID {
+		c.channelID = 0
+	}
+	c.mu.Unlock()
 }
 
 // hasChannelPerm reports whether the client's role has all the given permission bits.

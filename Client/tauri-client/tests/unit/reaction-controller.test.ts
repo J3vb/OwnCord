@@ -7,16 +7,41 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const {
   mockGetChannelMessages,
   mockAddOptimisticReaction,
-  createMockEmojiPickerElement,
   mockEmojiPickerDestroy,
-} = vi.hoisted(() => ({
-  mockGetChannelMessages: vi.fn(
-    (): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => [],
-  ),
-  mockAddOptimisticReaction: vi.fn(),
-  createMockEmojiPickerElement: () => document.createElement("div"),
-  mockEmojiPickerDestroy: vi.fn(),
-}));
+  mockListCustomEmoji,
+  mockCreateEmojiPicker,
+  captured,
+} = vi.hoisted(() => {
+  const captured: {
+    onSelect: ((emoji: string) => void) | null;
+    onClose: (() => void) | null;
+  } = { onSelect: null, onClose: null };
+  const createMockEmojiPickerElement = () => document.createElement("div");
+  const mockEmojiPickerDestroy = vi.fn();
+  return {
+    mockGetChannelMessages: vi.fn(
+      (): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => [],
+    ),
+    mockAddOptimisticReaction: vi.fn(),
+    mockEmojiPickerDestroy,
+    mockListCustomEmoji: vi.fn((): Array<{ id: number; shortcode: string; url: string }> => []),
+    mockCreateEmojiPicker: vi.fn(
+      (opts: {
+        onSelect: (e: string) => void;
+        onClose: () => void;
+        customEmoji?: readonly { id: number; shortcode: string; url: string }[];
+      }) => {
+        captured.onSelect = opts.onSelect;
+        captured.onClose = opts.onClose;
+        return {
+          element: createMockEmojiPickerElement(),
+          destroy: mockEmojiPickerDestroy,
+        };
+      },
+    ),
+    captured,
+  };
+});
 
 vi.mock("@lib/dom", () => ({
   createElement: vi.fn((tag: string, attrs?: Record<string, string>) => {
@@ -32,23 +57,17 @@ vi.mock("@lib/dom", () => ({
   }),
 }));
 
-let capturedOnSelect: ((emoji: string) => void) | null = null;
-let capturedOnClose: (() => void) | null = null;
-
 vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: vi.fn((opts: { onSelect: (e: string) => void; onClose: () => void }) => {
-    capturedOnSelect = opts.onSelect;
-    capturedOnClose = opts.onClose;
-    return {
-      element: createMockEmojiPickerElement(),
-      destroy: mockEmojiPickerDestroy,
-    };
-  }),
+  createEmojiPicker: mockCreateEmojiPicker,
 }));
 
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   addOptimisticReaction: mockAddOptimisticReaction,
+}));
+
+vi.mock("@stores/emoji.store", () => ({
+  listCustomEmoji: mockListCustomEmoji,
 }));
 
 // ---------------------------------------------------------------------------
@@ -87,8 +106,9 @@ function makeOpts(overrides: Partial<ReactionControllerOptions> = {}): ReactionC
 describe("createReactionController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedOnSelect = null;
-    capturedOnClose = null;
+    mockListCustomEmoji.mockReturnValue([]);
+    captured.onSelect = null;
+    captured.onClose = null;
     // Clean up any leftover DOM elements
     document.querySelectorAll(".reaction-picker-wrap").forEach((el) => el.remove());
     document.querySelectorAll("[data-testid]").forEach((el) => el.remove());
@@ -176,6 +196,32 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
+    it("passes the server's custom emoji to the picker (OC-0149)", () => {
+      const customEmoji = [{ id: 1, shortcode: "partyparrot", url: "/api/v1/emoji/1/image" }];
+      mockListCustomEmoji.mockReturnValue(customEmoji);
+
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", "msg-react-1");
+      btn.getBoundingClientRect = vi.fn(() => ({
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
+      }));
+      document.body.appendChild(btn);
+
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+      ctrl.handleReaction(1, "");
+
+      expect(mockCreateEmojiPicker).toHaveBeenCalledWith(expect.objectContaining({ customEmoji }));
+    });
+
     it("opens picker when react button exists", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
@@ -249,8 +295,8 @@ describe("createReactionController", () => {
       ctrl.handleReaction(1, "");
 
       // Simulate emoji selection from picker
-      expect(capturedOnSelect).not.toBeNull();
-      capturedOnSelect!("🎉");
+      expect(captured.onSelect).not.toBeNull();
+      captured.onSelect!("🎉");
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "reaction_add",
@@ -281,7 +327,7 @@ describe("createReactionController", () => {
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
 
-      capturedOnSelect!("🎉");
+      captured.onSelect!("🎉");
 
       expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
     });
@@ -306,7 +352,7 @@ describe("createReactionController", () => {
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
 
-      capturedOnClose!();
+      captured.onClose!();
 
       expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();

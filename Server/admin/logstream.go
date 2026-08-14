@@ -279,6 +279,43 @@ func (rh *ringHandler) Enabled(level slog.Level) bool {
 	return level >= rh.level.Level()
 }
 
+// logAttrValue converts an slog.Value to the value stored in the ring
+// buffer's JSON attrs, matching what slog's own JSONHandler does for stdout
+// (see appendJSONValue in log/slog/json_handler.go):
+//
+//   - Resolve() first, so an slog.LogValuer (db.User, db.Session,
+//     config.Config and its secret-bearing sections — see
+//     Server/db/logvalue.go and Server/config/logvalue.go) is redacted before
+//     it reaches JSON. Record.Attrs does not resolve on its own, so without
+//     this the ring buffer bypasses that redaction even though stdout honors it.
+//   - error values marshal to "{}" (errors.errorString / fmt.wrapError have
+//     only unexported fields), so an error not otherwise handled by
+//     json.Marshal is rendered as its Error() string instead.
+//   - a resolved group (LogValue returning slog.GroupValue, as every type
+//     above does) is walked into a map instead of json.Marshal-ed as-is: a
+//     bare []slog.Attr marshals to "{}" per element, since slog.Value's
+//     fields are unexported. Resolve() only resolves the outer LogValuer, not
+//     nested ones (see its doc comment), so nested group members are resolved
+//     by this same recursive call.
+func logAttrValue(v slog.Value) any {
+	v = v.Resolve()
+	if v.Kind() == slog.KindGroup {
+		group := v.Group()
+		m := make(map[string]any, len(group))
+		for _, a := range group {
+			m[a.Key] = logAttrValue(a.Value)
+		}
+		return m
+	}
+	a := v.Any()
+	if err, ok := a.(error); ok {
+		if _, isJSONMarshaler := a.(json.Marshaler); !isJSONMarshaler {
+			return err.Error()
+		}
+	}
+	return a
+}
+
 func (rh *ringHandler) Handle(r slog.Record) {
 	// Build source from file path.
 	source := categorizeSource(r)
@@ -287,7 +324,7 @@ func (rh *ringHandler) Handle(r slog.Record) {
 	attrs := make(map[string]any)
 	// Add pre-set attrs from WithAttrs.
 	for _, a := range rh.attrs {
-		attrs[a.Key] = a.Value.Any()
+		attrs[a.Key] = logAttrValue(a.Value)
 	}
 	// Add record attrs.
 	r.Attrs(func(a slog.Attr) bool {
@@ -295,7 +332,7 @@ func (rh *ringHandler) Handle(r slog.Record) {
 		if len(rh.groups) > 0 {
 			key = strings.Join(rh.groups, ".") + "." + key
 		}
-		attrs[key] = a.Value.Any()
+		attrs[key] = logAttrValue(a.Value)
 		return true
 	})
 

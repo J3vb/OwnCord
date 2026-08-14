@@ -120,10 +120,10 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.IncrementMentionCounts(ctx, 1, []int64{2, 3}); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 1, 100, []int64{2, 3}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
-	if err := database.IncrementMentionCounts(ctx, 1, []int64{2}); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 1, 100, []int64{2}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 		ids = append(ids, uid)
 	}
 
-	if err := database.IncrementMentionCounts(ctx, 1, ids); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 1, 1, ids); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
@@ -180,7 +180,9 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 	}
 
 	// A second pass bumps every one of them again, chunk boundary included.
-	if err := database.IncrementMentionCounts(ctx, 1, ids); err != nil {
+	// msgID is higher than the first pass's so the read-state guard does not
+	// treat this as the same already-seen message.
+	if err := database.IncrementMentionCounts(ctx, 1, 2, ids); err != nil {
 		t.Fatalf("IncrementMentionCounts (second pass): %v", err)
 	}
 	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
@@ -193,8 +195,71 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 func TestIncrementMentionCounts_EmptyIsNoop(t *testing.T) {
 	database := newMigratedTestDB(t)
 	seedMentionFixture(t, database)
-	if err := database.IncrementMentionCounts(context.Background(), 1, nil); err != nil {
+	if err := database.IncrementMentionCounts(context.Background(), 1, 1, nil); err != nil {
 		t.Fatalf("IncrementMentionCounts(nil): %v", err)
+	}
+}
+
+// TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage locks OC-0066:
+// a mark_read that lands between the message commit and the deferred badge
+// increment must not leave a phantom mention_count behind. If the recipient's
+// read state already covers the mentioning message (last_message_id >=
+// msgID), the increment for that message must be a no-op — otherwise the
+// badge is stuck at 1 forever on a channel with zero unread, since nothing
+// else ever zeroes it again.
+func TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	msgID, err := database.CreateMessage(ctx, 1, 1, "hey @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	// The reader (user 2 = bob) marks the channel read before the deferred
+	// badge increment for this same message lands.
+	if err := database.UpdateReadState(ctx, 2, 1, msgID); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 0 {
+		t.Errorf("mention_count = %d after a read state that already covers the mentioning message, want 0 (phantom badge)", n)
+	}
+}
+
+// TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind is the control:
+// the guard must not turn every increment into a no-op — a reader who has NOT
+// read up to msgID still gets the badge.
+func TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	// Bob's read state is behind: he has read message 1's predecessor, not the
+	// mention itself.
+	older, err := database.CreateMessage(ctx, 1, 1, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(older): %v", err)
+	}
+	if err := database.UpdateReadState(ctx, 2, 1, older); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	msgID, err := database.CreateMessage(ctx, 1, 1, "hey @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
+		t.Errorf("mention_count = %d for a reader behind the mentioning message, want 1", n)
 	}
 }
 

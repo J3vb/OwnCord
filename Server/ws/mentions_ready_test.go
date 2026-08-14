@@ -86,7 +86,7 @@ func TestBuildReady_CarriesMentionCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	if err := database.IncrementMentionCounts(ctx, chID, []int64{user.ID}); err != nil {
+	if err := database.IncrementMentionCounts(ctx, chID, 1, []int64{user.ID}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 

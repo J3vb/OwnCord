@@ -42,7 +42,7 @@ type Store interface {
 	// ── Mentions ──
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
 	GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error)
-	IncrementMentionCounts(ctx context.Context, channelID int64, userIDs []int64) error
+	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
@@ -154,7 +154,7 @@ type Store interface {
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
-	OpenDM(ctx context.Context, userID, channelID int64) error
+	OpenDM(ctx context.Context, userID, channelID int64) (bool, error)
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)

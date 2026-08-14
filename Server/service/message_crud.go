@@ -171,26 +171,36 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// DM path: open DM for recipients.
 	if isDM {
-		participantIDs, pErr := s.st.GetDMParticipantIDs(ctx, p.ChannelID)
+		// The message is already committed, so everything below must survive
+		// the sender's connection dropping the instant the write commits — the
+		// same reason the compensating deletes and applyMentionCounts below
+		// detach from ctx. Without WithoutCancel, a canceled request ctx here
+		// silently drops every recipient from the fan-out (ParticipantIDs
+		// stays nil), skips re-opening the recipient's dm_open_state, and
+		// degrades the payload shape — with no error surfaced to anyone: the
+		// sender sees chat_send_ok and the other participant never gets the
+		// message live.
+		bgCtx := context.WithoutCancel(ctx)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(bgCtx, p.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
 			return result, nil // Message saved, skip DM side effects.
 		}
 		result.ParticipantIDs = participantIDs
 
-		sender, _ := s.st.GetUserByID(ctx, p.UserID)
+		sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
 		result.SenderUser = sender
 
 		// Viewer-neutral (viewerID 0 matches nobody, so every status is
 		// broadcast-collapsed); the ws layer re-derives "who is the recipient"
 		// per addressee. A read failure is non-fatal — the message is already
 		// committed, and the caller falls back to the 1:1 shape.
-		if participants, partErr := s.st.GetDMParticipants(ctx, p.ChannelID, 0); partErr == nil {
+		if participants, partErr := s.st.GetDMParticipants(bgCtx, p.ChannelID, 0); partErr == nil {
 			result.DMParticipants = participants
 		} else {
 			slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 		}
-		if isGroup, gErr := s.st.IsGroupDM(ctx, p.ChannelID); gErr == nil {
+		if isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID); gErr == nil {
 			result.DMIsGroup = isGroup
 		}
 
@@ -198,11 +208,21 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			if pid == p.UserID {
 				continue
 			}
-			if openErr := s.st.OpenDM(ctx, pid, p.ChannelID); openErr != nil {
+			// OpenDM is INSERT OR IGNORE and idempotent: opened reports whether
+			// this call actually inserted the row. Only a genuine (re)open goes
+			// into OpenedDMFor — the ws layer emits a dm_channel_open per id in
+			// that slice, and each one bumps the hub's global visibility
+			// watermark, forcing every other connected client's next reconnect
+			// onto a full resync. An already-open DM must not pay that cost on
+			// every single message.
+			opened, openErr := s.st.OpenDM(bgCtx, pid, p.ChannelID)
+			if openErr != nil {
 				slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
 				continue
 			}
-			result.OpenedDMFor = append(result.OpenedDMFor, pid)
+			if opened {
+				result.OpenedDMFor = append(result.OpenedDMFor, pid)
+			}
 		}
 	}
 
@@ -211,12 +231,13 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// the batched increment) must not delay delivering the message to the rest
 	// of the channel. The ctx is detached from cancellation — for the same
 	// reason audit writes are — so a client hanging up mid-request cannot drop
-	// the badges. The count is advisory: if a reader's channel_focus clears it
-	// in the tiny window before the increment lands, the badge simply does not
-	// reappear, which matches Discord's eventual-consistency behaviour.
+	// the badges. If a reader's channel_focus clears the badge in the tiny
+	// window before the increment lands, IncrementMentionCounts' own read-state
+	// guard (msgID vs. last_message_id) makes the increment a no-op instead of
+	// resurrecting it — the badge does not reappear.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	s.bg(func() {
-		s.applyMentionCounts(context.WithoutCancel(ctx), channelID, authorID, mentions, isDM, participantIDs)
+		s.applyMentionCounts(context.WithoutCancel(ctx), channelID, msgID, authorID, mentions, isDM, participantIDs)
 	})
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
@@ -249,12 +270,16 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
 	}
 
-	// Channel type for DM-aware permissions.
+	// Channel type for DM-aware permissions. Fail closed: a lookup failure must
+	// not fall through with chanType="", which routes into the non-DM
+	// permission branch below. That branch passes on the base role mask alone
+	// (SEND_MESSAGES|READ_MESSAGES, no per-channel override exists for a DM),
+	// skipping both the DM-participant check and requireDMNotBlocked entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	chanType := ""
-	if chErr == nil && ch != nil {
-		chanType = ch.Type
+	if chErr != nil || ch == nil {
+		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
+	chanType := ch.Type
 	isDM := chanType == "dm"
 
 	if isDM {
@@ -313,7 +338,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	}
 
 	if isDM {
-		participantIDs, pErr := s.st.GetDMParticipantIDs(ctx, msg.ChannelID)
+		// Detached from ctx for the same reason as the SendMessage post-commit
+		// lookup: the edit already committed, so an editor whose connection
+		// drops right after must not silently drop the chat_edited fan-out.
+		participantIDs, pErr := s.st.GetDMParticipantIDs(context.WithoutCancel(ctx), msg.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
 		} else {
@@ -342,8 +370,21 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
+	// Fail closed, mirroring EditMessage: a lookup failure must not fall
+	// through to the non-DM permission branch (skipping the DM-participant
+	// check) or past the archived gate below.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	isDM := chErr == nil && ch != nil && ch.Type == "dm"
+	if chErr != nil || ch == nil {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	isDM := ch.Type == "dm"
+
+	// Archived channels are read-only, mirroring SendMessage's gate
+	// (message_crud.go:54): history stays visible, but a member or moderator
+	// must not be able to mutate it by deleting a message out of the archive.
+	if !isDM && ch.Archived {
+		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	}
 
 	var isMod bool
 	if isDM {
@@ -385,7 +426,10 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	}
 
 	if isDM {
-		participantIDs, pErr := s.st.GetDMParticipantIDs(ctx, msg.ChannelID)
+		// Detached from ctx for the same reason as the send/edit paths: the
+		// soft-delete already committed, so a deleter whose connection drops
+		// right after must not silently drop the chat_deleted fan-out.
+		participantIDs, pErr := s.st.GetDMParticipantIDs(context.WithoutCancel(ctx), msg.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
 		} else {

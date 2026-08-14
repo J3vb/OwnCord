@@ -462,6 +462,35 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("does not cancel an incoming ring when a fellow group-DM callee declines, only when the actual ringer does (OC-0114)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    // Alice (10) rings a group DM; this client is a third participant.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Bob (11), a different callee in the same group DM, declines. The
+    // server addresses call_declined to every other participant (not just
+    // the caller — it holds no call state to target with), so this client
+    // receives it too, but it must not silence a ring it is still deciding
+    // on: Bob declining is not Alice hanging up.
+    ws.emit("call_declined", { channel_id: 50, from_user: 11, username: "bob" });
+
+    expect(banner.style.display).not.toBe("none");
+
+    // The actual ringer's own call_declined (e.g. a glare decline) still
+    // cancels it.
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "alice" });
+
+    expect(banner.style.display).toBe("none");
+  });
+
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);

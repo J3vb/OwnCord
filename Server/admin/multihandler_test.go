@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/owncord/server/config"
 )
 
 // The multiHandler tees every server log record into the admin panel's live
@@ -313,6 +317,96 @@ func TestCategorizeSource_AttributesAdminPackage(t *testing.T) {
 	}
 	if entries[0].Source != "admin" {
 		t.Errorf("Source = %q, want %q", entries[0].Source, "admin")
+	}
+}
+
+// ─── error attrs (OC-0110) ──────────────────────────────────────────────────
+//
+// Go error values (*errors.errorString, *fmt.wrapError) have only unexported
+// fields, so a bare json.Marshal of one produces "{}". slog's own JSONHandler
+// special-cases error attrs and emits err.Error() instead (see appendJSONValue
+// in log/slog/json_handler.go); the ring handler must match, or the admin log
+// viewer shows every error as an empty object while stdout shows the real
+// message.
+
+func TestMultiHandler_ErrorAttr_RecordLevel(t *testing.T) {
+	logger, buf, _ := newTeeLogger(t, slog.LevelDebug)
+
+	logger.Error("failed to issue log stream ticket",
+		"err", fmt.Errorf("generating ticket: %w", errors.New("boom")))
+
+	entries := buf.Snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
+	}
+
+	var attrs map[string]any
+	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
+		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
+	}
+	got, _ := attrs["err"].(string)
+	if got != "generating ticket: boom" {
+		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %q)",
+			attrs["err"], "generating ticket: boom", entries[0].Attrs)
+	}
+}
+
+func TestMultiHandler_ErrorAttr_WithAttrsLevel(t *testing.T) {
+	logger, buf, _ := newTeeLogger(t, slog.LevelDebug)
+
+	logger.With("err", errors.New("boom")).Error("failed")
+
+	entries := buf.Snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
+	}
+
+	var attrs map[string]any
+	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
+		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
+	}
+	got, _ := attrs["err"].(string)
+	if got != "boom" {
+		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %q)",
+			attrs["err"], "boom", entries[0].Attrs)
+	}
+}
+
+// TestMultiHandler_LogValuerResolved pins the sibling half of OC-0110's fix:
+// Record.Attrs (and a bare a.Value.Any()) does not call slog.Value.Resolve(),
+// so an slog.LogValuer attr — e.g. config.VoiceConfig, whose LogValue redacts
+// the LiveKit secret (Server/config/logvalue.go) — reaches the ring buffer as
+// the raw, unresolved struct instead of the redacted one. stdout's JSONHandler
+// resolves it correctly; the admin log viewer must match, or a secret redacted
+// everywhere else leaks into the searchable/exportable admin log stream.
+func TestMultiHandler_LogValuerResolved(t *testing.T) {
+	logger, buf, _ := newTeeLogger(t, slog.LevelDebug)
+
+	logger.Info("voice config", "voice", config.VoiceConfig{
+		LiveKitAPIKey:    "AKIA-plaintext-key",
+		LiveKitAPISecret: "supersecretvalue",
+		LiveKitURL:       "wss://example.invalid",
+	})
+
+	entries := buf.Snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
+	}
+
+	if strings.Contains(entries[0].Attrs, "supersecretvalue") {
+		t.Fatalf("ring buffer attrs leaked the unredacted LiveKit secret: %q", entries[0].Attrs)
+	}
+
+	var attrs map[string]any
+	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
+		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
+	}
+	voice, ok := attrs["voice"].(map[string]any)
+	if !ok {
+		t.Fatalf("attrs[voice] = %#v (%T), want a resolved LogValue group", attrs["voice"], attrs["voice"])
+	}
+	if voice["livekit_api_secret"] != "[REDACTED]" {
+		t.Errorf("voice[livekit_api_secret] = %#v, want the redacted marker", voice["livekit_api_secret"])
 	}
 }
 
