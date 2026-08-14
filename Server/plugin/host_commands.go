@@ -64,11 +64,12 @@ func (r *Registry) DispatchCommand(ctx context.Context, userID int64, channelID 
 	cmd = strings.ToLower(strings.TrimPrefix(cmd, "/"))
 	r.mu.RLock()
 	inst, ok := r.commands[cmd]
+	platform := r.runtimePlatform
 	r.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
-	if r.runtimePlatform == nil {
+	if platform == nil {
 		return &CommandResult{
 			Reply: fmt.Sprintf("plugin %q owns /%s but the wazero runtime is not built (run with -tags wazero)", inst.Manifest.Name, cmd),
 		}, true
