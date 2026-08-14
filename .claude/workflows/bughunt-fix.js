@@ -5,8 +5,8 @@ export const meta = {
   phases: [
     { title: 'Plan', detail: 'cluster open findings by file' },
     { title: 'Fix', detail: 'sonnet/xhigh: one agent per file, test-first, no git' },
-    { title: 'Prove', detail: 'sonnet: serial revert-proof then commit per cluster' },
-    { title: 'Gate', detail: 'sonnet: ci-check for the touched stacks, once' },
+    { title: 'Prove', detail: 'opus/high: serial revert-proof then commit per cluster' },
+    { title: 'Gate', detail: 'sonnet/xhigh: ci-check for the touched stacks, once' },
   ],
 }
 
