@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -103,6 +102,27 @@ func isUnsafeInlineMIME(mimeType string) bool {
 	return false
 }
 
+// safeStorageErrorMessage maps a storage.Save error to a client-safe
+// "upload rejected" body. Full detail always goes to slog.Warn at the call
+// site — this only decides what crosses the HTTP boundary. storage.Save's
+// failure messages are built with fmt.Errorf("... %s", dst) / %w around
+// path-bearing OS errors (creating the file, syncing it, or the destination
+// resolving outside the storage dir), so echoing them verbatim hands any
+// authenticated user the server's absolute storage layout the moment a save
+// fails (disk full, permission change, read-only mount). The two validation
+// failures below are the only ones that never embed a path, so they're the
+// only ones whose detail is forwarded.
+func safeStorageErrorMessage(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "blocked file type:"),
+		strings.HasPrefix(msg, "file exceeds maximum size"):
+		return "upload rejected: " + msg
+	default:
+		return "upload rejected"
+	}
+}
+
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
 //
@@ -190,7 +210,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 			slog.Warn("file upload rejected", "error", saveErr)
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("upload rejected: %s", saveErr),
+				Message: safeStorageErrorMessage(saveErr),
 			})
 			return
 		}
