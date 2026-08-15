@@ -21,10 +21,21 @@ import {
 import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import { fetchImageAsDataUrl, resolveServerUrl } from "@components/message-list/attachments";
 import type { WsClient } from "@lib/ws";
+import type { PresenceSender } from "@lib/presence";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
   readonly ws?: WsClient | null;
+  /**
+   * The session's single shared presence sender (MainPage owns the instance
+   * and threads it to every producer — auto-idle, the settings Account tab,
+   * and this picker). Sending straight through `ws` instead would bypass the
+   * presence rate limiter's client-side token *and* its retry, so a frame
+   * the server drops (1 update / 10s, keyed by user id — service/
+   * channel.go) is lost for the rest of the session instead of retried
+   * (OC-0210). Required, alongside `ws`, for the picker to be enabled.
+   */
+  readonly presenceSender?: PresenceSender | null;
 }
 
 /** Status labels for the line under the username. */
@@ -135,11 +146,21 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     });
 
     // The picker is usable only when the socket is live (store-backed status,
-    // docs/architecture/ux §3) AND a ws client was provided to send through —
-    // without a send path, selecting a status would be a silent no-op.
+    // docs/architecture/ux §3) AND a presence sender was provided to send
+    // through — without one, selecting a status would either be a silent
+    // no-op or (worse) bypass the shared presence rate limiter and its retry
+    // (OC-0210). `ws` is checked too since a sender without a live socket
+    // behind it is not meaningfully usable either.
     const canSetStatus = (): boolean => {
       const ws = options?.ws;
-      return ws !== undefined && ws !== null && uiStore.getState().connectionStatus === "connected";
+      const sender = options?.presenceSender;
+      return (
+        ws !== undefined &&
+        ws !== null &&
+        sender !== undefined &&
+        sender !== null &&
+        uiStore.getState().connectionStatus === "connected"
+      );
     };
 
     statusPicker = createStatusPicker({
@@ -150,21 +171,20 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       onStatusChange: (status: UserStatus) => {
         saveUserStatus(status);
         updateFromState();
-        const ws = options?.ws;
-        if (ws !== null && ws !== undefined && canSetStatus()) {
+        const sender = options?.presenceSender;
+        if (sender !== null && sender !== undefined && canSetStatus()) {
           // No custom_status field: a plain status change must leave whatever
-          // text the user set standing.
-          ws.send({ type: "presence_update", payload: { status } } as never);
+          // text the user set standing. Routed through the shared sender
+          // (not ws.send directly) so a frame the presence limiter's window
+          // rejects is retried instead of lost — see @lib/presence.
+          sender.send(status);
         }
       },
       onCustomStatusChange: (text: string) => {
         saveCustomStatus(text);
-        const ws = options?.ws;
-        if (ws !== null && ws !== undefined && canSetStatus()) {
-          ws.send({
-            type: "presence_update",
-            payload: { status: loadUserStatus(), custom_status: text },
-          } as never);
+        const sender = options?.presenceSender;
+        if (sender !== null && sender !== undefined && canSetStatus()) {
+          sender.send(loadUserStatus(), text);
         }
       },
     });

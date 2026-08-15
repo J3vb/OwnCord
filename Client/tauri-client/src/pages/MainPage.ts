@@ -19,8 +19,8 @@ import { initToast, teardownToast, showToast } from "@lib/toast";
 import { logout } from "@lib/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
-import { updatePresence } from "@stores/members.store";
 import { loadUserStatus } from "@lib/userStatus";
+import { createPresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -122,6 +122,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   const limiters = createRateLimiterSet();
 
+  // The one presence_update sender for this session — owns the limiter
+  // token, the drop-window retry, and the local optimistic update, so
+  // every producer (auto-idle, the settings Account tab via applyPresence
+  // below, and the UserBar status picker it's threaded to through
+  // SidebarArea) shares the exact same budget the server enforces (1
+  // update / 10s, keyed by user id — service/channel.go). A limiter created
+  // per producer instead cannot predict that shared, cross-surface budget
+  // (OC-0210).
+  const presenceSender = createPresenceSender(ws, limiters.presence);
+
   let container: Element | null = null;
   let root: HTMLDivElement | null = null;
 
@@ -146,11 +156,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
-
-  // Pending retry for a presence_update the 1-per-10s limiter dropped (see
-  // applyPresence below). Module-scoped so a second dropped frame can
-  // supersede the first instead of stacking retries.
-  let presenceRetry: ReturnType<typeof setTimeout> | null = null;
 
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
@@ -196,26 +201,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  online fires unthrottled milliseconds after its own idle transition
    *  (autoIdle.ts) — routinely losing the token race. Dropping that frame
    *  silently would leave the server, and everyone else's member list,
-   *  stuck on "idle" with nothing left to correct it. Retry once the window
-   *  reopens instead, re-reading the status at that time so a burst of
-   *  calls in between coalesces onto one retry carrying the latest value. */
+   *  stuck on "idle" with nothing left to correct it. `presenceSender`
+   *  retries once the window reopens instead, re-reading the status at that
+   *  time so a burst of calls in between coalesces onto one retry carrying
+   *  the latest value — see @lib/presence. */
   function applyPresence(status: UserStatus): void {
-    const userId = getCurrentUserId();
-    if (userId !== 0) {
-      updatePresence(userId, status);
-    }
-    if (presenceRetry !== null) {
-      clearTimeout(presenceRetry);
-      presenceRetry = null;
-    }
-    if (limiters.presence.tryConsume()) {
-      ws.send({ type: "presence_update", payload: { status } });
-    } else {
-      presenceRetry = setTimeout(() => {
-        presenceRetry = null;
-        applyPresence(loadUserStatus());
-      }, limiters.presence.getRemainingMs());
-    }
+    presenceSender.send(status);
   }
 
   /**
@@ -385,6 +376,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ws,
       api,
       limiters,
+      presenceSender,
       getRoot: () => root,
       getToast: () => toast,
       onWatchStream: (userId) => {
@@ -809,10 +801,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       closeActiveLightbox();
       autoIdle?.destroy();
       autoIdle = null;
-      if (presenceRetry !== null) {
-        clearTimeout(presenceRetry);
-        presenceRetry = null;
-      }
+      presenceSender.destroy();
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 
