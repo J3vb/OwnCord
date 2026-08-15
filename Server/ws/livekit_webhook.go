@@ -99,6 +99,17 @@ func parseRoomChannelID(roomName string) (int64, error) {
 }
 
 func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit.WebhookEvent) {
+	// Detach from the triggering HTTP request before doing any cleanup work,
+	// mirroring every sibling teardown path (readPump's defer and
+	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
+	// serve_pumps.go, rollbackVoiceJoin uses it in voice_join.go, the hub
+	// sweeps use context.Background in hub_sweep.go). Without this, a webhook
+	// sender (LiveKit) that hangs up mid-request cancels r.Context(), and the
+	// rogue-participant GetVoiceState/RemoveParticipant calls below would
+	// either wrongly skip (treating a cancelled read as a transient error, ok)
+	// or fail outright instead of completing the eviction.
+	ctx = context.WithoutCancel(ctx)
+
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
@@ -168,6 +179,21 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 }
 
 func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.WebhookEvent) {
+	// Detach from the triggering HTTP request before doing any cleanup work
+	// (OC-0018), mirroring every sibling teardown path (readPump's defer and
+	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
+	// serve_pumps.go, rollbackVoiceJoin uses it in voice_join.go, the hub
+	// sweeps use context.Background in hub_sweep.go). Without this, a webhook
+	// sender (LiveKit) that hangs up mid-request cancels r.Context(), which
+	// makes channelReadAudience's GetChannel call fail and fail closed to an
+	// empty audience (hub_broadcast.go) — silently dropping the voice_leave
+	// for anyone who has READ_MESSAGES on the channel but is not currently in
+	// the room. Unlike the DB row, no sweep ever re-emits that missed
+	// broadcast. The same cancellation would also make both
+	// LeaveVoiceChannelIfMatch branches below fail on their synchronous first
+	// attempt.
+	ctx = context.WithoutCancel(ctx)
+
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
