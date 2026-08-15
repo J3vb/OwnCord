@@ -99,9 +99,10 @@ func (q *Queries) CountActiveCameras(ctx context.Context, channelID int64) (int6
 }
 
 const enableCameraIfUnderLimit = `-- name: EnableCameraIfUnderLimit :execresult
+
 UPDATE voice_states SET camera = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND vs2.camera = 1) < ?
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?
 `
 
 type EnableCameraIfUnderLimitParams struct {
@@ -111,8 +112,34 @@ type EnableCameraIfUnderLimitParams struct {
 	ChannelID_3 int64 `json:"channelId3"`
 }
 
+// Camera and screenshare share one voice_max_video budget: a channel capped
+// at N simultaneous video streams must not let a camera publish ignore
+// screenshare occupants (or vice versa), so both gates count the same
+// `camera = 1 OR screenshare = 1` slot usage (OC-0023).
 func (q *Queries) EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, enableCameraIfUnderLimit,
+		arg.UserID,
+		arg.ChannelID,
+		arg.ChannelID_2,
+		arg.ChannelID_3,
+	)
+}
+
+const enableScreenshareIfUnderLimit = `-- name: EnableScreenshareIfUnderLimit :execresult
+UPDATE voice_states SET screenshare = 1
+WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?
+`
+
+type EnableScreenshareIfUnderLimitParams struct {
+	UserID      int64 `json:"userId"`
+	ChannelID   int64 `json:"channelId"`
+	ChannelID_2 int64 `json:"channelId2"`
+	ChannelID_3 int64 `json:"channelId3"`
+}
+
+func (q *Queries) EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, enableScreenshareIfUnderLimit,
 		arg.UserID,
 		arg.ChannelID,
 		arg.ChannelID_2,

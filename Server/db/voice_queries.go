@@ -301,6 +301,28 @@ func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screensha
 	return nil
 }
 
+// EnableScreenshareIfUnderLimit atomically enables a user's screenshare only
+// if the channel has not yet reached maxVideo active video streams — camera
+// and screenshare draw from the same voice_max_video budget (OC-0023).
+// Returns true if the screenshare was enabled, false if the limit was
+// already reached.
+func (d *DB) EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
+	res, err := d.q.EnableScreenshareIfUnderLimit(ctx, dbgen.EnableScreenshareIfUnderLimitParams{
+		UserID:      userID,
+		ChannelID:   channelID,
+		ChannelID_2: channelID,
+		ChannelID_3: int64(maxVideo),
+	})
+	if err != nil {
+		return false, fmt.Errorf("EnableScreenshareIfUnderLimit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("EnableScreenshareIfUnderLimit RowsAffected: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // CountChannelVoiceUsers returns the number of users currently in the given
 // voice channel.
 func (d *DB) CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error) {

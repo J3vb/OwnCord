@@ -66,8 +66,13 @@ type Querier interface {
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
+	// Camera and screenshare share one voice_max_video budget: a channel capped
+	// at N simultaneous video streams must not let a camera publish ignore
+	// screenshare occupants (or vice versa), so both gates count the same
+	// `camera = 1 OR screenshare = 1` slot usage (OC-0023).
 	EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error)
 	EnablePlugin(ctx context.Context, id int64) error
+	EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error)
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,

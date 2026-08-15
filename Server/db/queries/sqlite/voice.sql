@@ -93,10 +93,20 @@ UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND 
 -- name: ClearVoiceServerDeafen :execresult
 UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?;
 
+-- Camera and screenshare share one voice_max_video budget: a channel capped
+-- at N simultaneous video streams must not let a camera publish ignore
+-- screenshare occupants (or vice versa), so both gates count the same
+-- `camera = 1 OR screenshare = 1` slot usage (OC-0023).
+
 -- name: EnableCameraIfUnderLimit :execresult
 UPDATE voice_states SET camera = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND vs2.camera = 1) < ?;
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?;
+
+-- name: EnableScreenshareIfUnderLimit :execresult
+UPDATE voice_states SET screenshare = 1
+WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?;
 
 -- name: ClearVoiceState :exec
 DELETE FROM voice_states WHERE user_id = ?;
