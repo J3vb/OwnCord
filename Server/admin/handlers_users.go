@@ -123,11 +123,34 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
+		// Authorize the role change before applying anything else. Without
+		// this pre-flight, a PATCH combining banned + role_id would commit
+		// and broadcast the ban first and only then attempt the role change:
+		// if that role change was then refused (missing MANAGE_ROLES, or the
+		// new role outranks the actor), the handler reported the whole
+		// request as failed while the target was in fact banned, audited,
+		// and already dropped from every connected client's member list
+		// (OC-0215). Running every ChangeUserRole precondition up front,
+		// before either mutation lands, keeps the PATCH all-or-nothing from
+		// the caller's perspective.
+		if req.RoleID != nil {
+			if mod == nil {
+				// Fail closed rather than fall back to an unchecked UPDATE.
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+				return
+			}
+			if _, _, _, err := mod.AuthorizeRoleChange(r.Context(), actor, id, *req.RoleID); err != nil {
+				writeModerationErr(w, err)
+				return
+			}
+		}
+
 		// Ban/unban first: it routes through ModerationService, which enforces
 		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
 		// not — any admin-panel actor could previously ban the owner). The
-		// service also audits and refuses before the role change runs, so a
-		// rejected ban never leaves a half-applied PATCH behind.
+		// role change, if requested, was already authorized above, so a ban
+		// committing here cannot be followed by a refused role change leaving
+		// a half-applied PATCH behind.
 		if req.Banned != nil {
 			if mod == nil {
 				// Fail closed rather than fall back to an unchecked UPDATE.
@@ -173,10 +196,12 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		}
 
 		if req.RoleID != nil {
-			// Routed through ModerationService, which enforces MANAGE_ROLES,
-			// the actor-outranks-target rule, and the assign-below-own-rank
-			// rule (without it any admin could promote anyone to Owner), and
-			// writes the audit row.
+			// Routed through ModerationService, which re-runs the same
+			// MANAGE_ROLES, actor-outranks-target, and assign-below-own-rank
+			// checks the AuthorizeRoleChange pre-flight above already passed
+			// (a second pass, not a redundant one: it catches anything that
+			// changed in the window between the pre-flight and here, e.g. a
+			// concurrent role delete), then commits and writes the audit row.
 			if mod == nil {
 				// Fail closed rather than fall back to an unchecked UPDATE.
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
