@@ -3658,6 +3658,24 @@ describe("WS Dispatcher", () => {
       expect(mockDisableScreenshare).toHaveBeenCalled();
       expect(mockDisableCamera).not.toHaveBeenCalled();
     });
+
+    // OC-0035: a screenshare enable can be superseded (disable, re-enable)
+    // before its VIDEO_LIMIT refusal arrives — registerPendingVideoEnable
+    // deletes the prior entry for that kind, so rollbackPendingVideo(id)
+    // returns undefined for the now-stale id. undefined means "roll back
+    // nothing" (the refusal no longer correlates to anything pending), never
+    // "it was the camera" — falling through to disableCamera() would tear
+    // down a working camera the user never touched.
+    it("does nothing when VIDEO_LIMIT correlates to a superseded id (kind undefined)", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
+
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-superseded-1");
+      await vi.runAllTimersAsync();
+
+      expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-superseded-1");
+      expect(mockDisableCamera).not.toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
+    });
   });
 });
 

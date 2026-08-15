@@ -1097,6 +1097,11 @@ export function wireDispatcher(
         if (id !== undefined) {
           void import("@lib/screenShare").then(({ rollbackPendingVideo }) => {
             const kind = rollbackPendingVideo(id);
+            // undefined means this id no longer correlates to anything
+            // pending (superseded by a later enable of the same kind) — the
+            // refusal is stale and there is nothing to roll back. It must
+            // never be treated as "it was the camera".
+            if (kind === undefined) return;
             void livekitSession().then(({ disableCamera, disableScreenshare }) =>
               kind === "screen" ? disableScreenshare() : disableCamera(),
             );
