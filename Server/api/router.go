@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -16,11 +17,13 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/diskutil"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/stackutil"
 	"github.com/owncord/server/storage"
+	"github.com/owncord/server/syncutil"
 	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
@@ -57,14 +60,36 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 
 	// Health check — unauthenticated, no versioning prefix.
-	// The online user count callback is set after hub creation below.
+	// The hub-backed callbacks are set after hub creation below (late-bound
+	// closures, same pattern the old online-user counter used). One shared
+	// handler instance backs both /health mounts so they share the check cache.
 	var getOnlineUsers func() int
-	r.Get("/health", handleHealth(func() int {
-		if getOnlineUsers != nil {
-			return getOnlineUsers()
-		}
-		return 0
-	}))
+	var hubAlive func() bool
+	healthHandler := handleHealth(healthDeps{
+		onlineUsers: func() int {
+			if getOnlineUsers != nil {
+				return getOnlineUsers()
+			}
+			return 0
+		},
+		dbPing: func(ctx context.Context) error {
+			if database == nil {
+				return nil
+			}
+			var one int
+			return database.SQLDb().QueryRowContext(ctx, "SELECT 1").Scan(&one)
+		},
+		dispatchAlive: func() bool {
+			if hubAlive != nil {
+				return hubAlive()
+			}
+			return true
+		},
+		freeDiskBytes: func() (uint64, error) {
+			return diskutil.FreeBytes(cfg.Server.DataDir)
+		},
+	})
+	r.Get("/health", healthHandler)
 
 	// Shared rate limiter for auth endpoints. Lockouts are persisted to the
 	// database so they survive server restarts (M2 security hardening).
@@ -77,12 +102,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", handleHealth(func() int {
-			if getOnlineUsers != nil {
-				return getOnlineUsers()
-			}
-			return 0
-		}))
+		r.Get("/health", healthHandler)
 		r.Get("/info", handleInfo(cfg))
 	})
 
@@ -137,6 +157,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
+	hubAlive = func() bool { return hub.DispatchAlive() }
 
 	// Auth routes: register, login, logout, me. Mounted with the hub as the
 	// AuthBroadcaster so DELETE /api/v1/auth/account (self-service account
@@ -258,13 +279,19 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
 	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
+	// The shape is documented in docs/deployment.md — keep the two in sync.
 	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
-		Get("/api/v1/metrics", handleMetrics(
-			func() int { return hub.ClientCount() },
-			func() int { return hub.VoiceSessionCount() },
-			func() uint64 { return hub.BroadcastDropCount() },
-			func(ctx context.Context) (bool, error) { return hub.LiveKitHealthCheck(ctx) },
-		))
+		Get("/api/v1/metrics", handleMetrics(MetricsSources{
+			ConnectedUsers: hub.ClientCount,
+			VoiceSessions:  hub.VoiceSessionCount,
+			BroadcastDrops: hub.BroadcastDropCount,
+			LiveKitHealth:  hub.LiveKitHealthCheck,
+			ReconnectTiers: hub.ReconnectTierStats,
+			Backpressure:   hub.BackpressureStats,
+			PersisterStats: hub.EventPersisterStats,
+			DBStats:        func() sql.DBStats { return database.SQLDb().Stats() },
+			PermCache:      svc.Permissions.CacheStats,
+		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
 	// the legacy JSON endpoint when a Prometheus exporter is wired (otel
@@ -325,27 +352,97 @@ var serverStartTime = time.Now()
 
 // healthResponse is the JSON shape returned by GET /health.
 type healthResponse struct {
-	Status      string `json:"status"`
+	Status      string `json:"status"` // "ok" | "degraded"
 	Uptime      int64  `json:"uptime"`
 	OnlineUsers int    `json:"online_users"`
+	// Reason names the degraded subsystem ("hub", "database", "disk") and
+	// nothing more — this endpoint is unauthenticated, so no error details.
+	Reason string `json:"reason,omitempty"`
 }
+
+// healthDeps are the liveness probes behind GET /health. Any nil field is
+// skipped (treated as healthy) so partial wirings and tests stay simple.
+type healthDeps struct {
+	onlineUsers   func() int
+	dbPing        func(context.Context) error
+	dispatchAlive func() bool
+	freeDiskBytes func() (uint64, error)
+}
+
+const (
+	// healthCacheTTL bounds how often the real checks run: the endpoint is
+	// unauthenticated AND rate-limit-exempt, so an uncached DB ping per
+	// request would be a free amplification lever.
+	healthCacheTTL = 5 * time.Second
+	// healthDBPingTimeout bounds the SELECT 1 so a wedged writer degrades the
+	// health report instead of hanging it.
+	healthDBPingTimeout = 1 * time.Second
+	// healthMinFreeDiskBytes is the free-space floor under which health
+	// reports degraded. SQLite WAL growth, uploads, and backups all share the
+	// data volume, so running dry corrupts more than one thing at once.
+	healthMinFreeDiskBytes = 256 << 20 // 256 MiB
+)
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
 type infoResponse struct {
 	Name string `json:"name"`
 }
 
-func handleHealth(getOnlineUsers func() int) http.HandlerFunc {
+func handleHealth(deps healthDeps) http.HandlerFunc {
+	// C-2: Version removed from unauthenticated health endpoint to prevent
+	// server fingerprinting. Version is available on the authenticated
+	// diagnostics endpoint instead.
+	var mu syncutil.Mutex
+	var cachedAt time.Time
+	var cachedStatus, cachedReason string
 	return func(w http.ResponseWriter, r *http.Request) {
-		// C-2: Version removed from unauthenticated health endpoint to prevent
-		// server fingerprinting. Version is available on the authenticated
-		// diagnostics endpoint instead.
-		writeJSON(w, http.StatusOK, healthResponse{
-			Status:      "ok",
+		mu.Lock()
+		if time.Since(cachedAt) >= healthCacheTTL {
+			cachedStatus, cachedReason = runHealthChecks(r.Context(), deps)
+			cachedAt = time.Now()
+		}
+		status, reason := cachedStatus, cachedReason
+		mu.Unlock()
+
+		online := 0
+		if deps.onlineUsers != nil {
+			online = deps.onlineUsers()
+		}
+		code := http.StatusOK
+		if status != "ok" {
+			code = http.StatusServiceUnavailable
+		}
+		writeJSON(w, code, healthResponse{
+			Status:      status,
 			Uptime:      int64(time.Since(serverStartTime).Seconds()),
-			OnlineUsers: getOnlineUsers(),
+			OnlineUsers: online,
+			Reason:      reason,
 		})
 	}
+}
+
+// runHealthChecks probes the hub dispatch loop, the database, and free disk,
+// returning ("ok", "") or ("degraded", <subsystem>). First failure wins, in
+// blast-radius order. Probe errors that mean "unknown" (unsupported platform,
+// missing dir in tests) count as healthy — only a positive negative degrades.
+func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason string) {
+	if deps.dispatchAlive != nil && !deps.dispatchAlive() {
+		return "degraded", "hub"
+	}
+	if deps.dbPing != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, healthDBPingTimeout)
+		err := deps.dbPing(pingCtx)
+		cancel()
+		if err != nil {
+			return "degraded", "database"
+		}
+	}
+	if deps.freeDiskBytes != nil {
+		if free, err := deps.freeDiskBytes(); err == nil && free < healthMinFreeDiskBytes {
+			return "degraded", "disk"
+		}
+	}
+	return "ok", ""
 }
 
 func handleInfo(cfg *config.Config) http.HandlerFunc {

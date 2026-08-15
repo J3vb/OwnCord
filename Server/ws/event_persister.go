@@ -115,6 +115,9 @@ func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, p
 	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: payload}:
 	default:
 		p.dropped.Add(1)
+		// The WSEventsDropped OTel counter is synced from this atomic by
+		// run()'s ticker (which has a real context) — an instrumentation call
+		// here would sit under the caller's seqMu and trip contextcheck.
 	}
 }
 
@@ -162,6 +165,16 @@ func (p *EventPersister) run(ctx context.Context) {
 
 	// Cache the AppMetrics bundle once instead of looking it up per event.
 	metrics := telemetry.NewAppMetrics()
+
+	// Enqueue only bumps the p.dropped atomic (it runs under the hub's seqMu
+	// with no context); this loop owns syncing the OTel counter from it.
+	var droppedReported uint64
+	syncDropped := func() {
+		if d := p.dropped.Load(); d > droppedReported {
+			metrics.WSEventsDropped.Add(ctx, int64(d-droppedReported)) //nolint:gosec // monotonic counter delta
+			droppedReported = d
+		}
+	}
 
 	batch := make([]pendingEvent, 0, p.batchSize)
 	// Scratch slice reused across flushes for the store's batch shape.
@@ -232,6 +245,7 @@ func (p *EventPersister) run(ctx context.Context) {
 			}
 		case <-tick.C:
 			flush()
+			syncDropped()
 		}
 	}
 }

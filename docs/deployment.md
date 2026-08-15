@@ -255,6 +255,16 @@ Restoring replaces the live database file. A pre-restore safety backup is create
 }
 ```
 
+`status` is a real verdict, not a constant: the server probes its own
+WebSocket dispatch loop, runs a bounded `SELECT 1` against the database, and
+checks free disk space on the data volume. When any of those fail, the
+endpoint returns HTTP 503 with `"status": "degraded"` and a `reason` field
+naming the subsystem (`hub`, `database`, or `disk` — no further detail, since
+the endpoint is unauthenticated). Checks are cached for a few seconds, so
+polling it aggressively does not multiply database load. Point your uptime
+monitor or container healthcheck at this endpoint and treat any 503 as
+actionable.
+
 The server version is deliberately not exposed on this unauthenticated
 endpoint (anti-fingerprinting hardening).
 
@@ -273,9 +283,32 @@ endpoint (anti-fingerprinting hardening).
   "connected_users": 12,
   "voice_sessions": 3,
   "broadcast_drops": 0,
-  "livekit_healthy": true
+  "livekit_healthy": true,
+  "reconnect_tier_buffer": 120,
+  "reconnect_tier_db": 4,
+  "reconnect_tier_full": 1,
+  "backpressure_queue_disconnects": 0,
+  "backpressure_high_fallbacks": 0,
+  "backpressure_low_drops": 17,
+  "db_writer_wait_count": 3,
+  "db_writer_wait_seconds": 0.021,
+  "perm_cache_hits": 5120,
+  "perm_cache_misses": 84,
+  "event_persister": { "persisted": 4021, "dropped": 0, "flushes": 311, "errors": 0 }
 }
 ```
+
+Signals worth watching as a community grows (see `docs/api.md` for full field
+descriptions):
+
+- `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
+  and sequenced events were lost; alert on any growth.
+- `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
+  on SQLite's single write connection; the write path is saturating.
+- `reconnect_tier_full` becoming a noticeable share of reconnects → the replay
+  budget is too small for real disconnect gaps.
+- `backpressure_queue_disconnects` growing → clients are being force-cycled
+  because they drain too slowly (slow links or an overloaded server).
 
 ### LiveKit Health
 

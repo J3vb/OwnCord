@@ -2,10 +2,12 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/api"
@@ -15,12 +17,17 @@ import (
 func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 	r := chi.NewRouter()
 	r.With(api.AdminIPRestrict(allowedCIDRs, nil)).
-		Get("/api/v1/metrics", api.HandleMetricsForTest(
-			func() int { return 5 },
-			func() int { return 2 },
-			func() uint64 { return 0 },
-			func(_ context.Context) (bool, error) { return true, nil },
-		))
+		Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
+			ConnectedUsers: func() int { return 5 },
+			VoiceSessions:  func() int { return 2 },
+			BroadcastDrops: func() uint64 { return 0 },
+			LiveKitHealth:  func(_ context.Context) (bool, error) { return true, nil },
+			ReconnectTiers: func() (uint64, uint64, uint64) { return 7, 3, 1 },
+			Backpressure:   func() (uint64, uint64, uint64) { return 4, 9, 11 },
+			PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
+			DBStats:        func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
+			PermCache:      func() (uint64, uint64) { return 42, 8 },
+		}))
 	return r
 }
 
@@ -45,6 +52,11 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"uptime", "uptime_seconds", "goroutines",
 		"heap_alloc_mb", "heap_sys_mb", "num_gc",
 		"connected_users", "voice_sessions", "broadcast_drops", "livekit_healthy",
+		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
+		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
+		"db_writer_wait_count", "db_writer_wait_seconds",
+		"perm_cache_hits", "perm_cache_misses",
+		"event_persister",
 	}
 	for _, f := range requiredFields {
 		if _, ok := resp[f]; !ok {
@@ -61,6 +73,25 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if resp["livekit_healthy"] != true {
 		t.Errorf("livekit_healthy = %v, want true", resp["livekit_healthy"])
+	}
+	if int(resp["reconnect_tier_buffer"].(float64)) != 7 {
+		t.Errorf("reconnect_tier_buffer = %v, want 7", resp["reconnect_tier_buffer"])
+	}
+	if int(resp["backpressure_low_drops"].(float64)) != 11 {
+		t.Errorf("backpressure_low_drops = %v, want 11", resp["backpressure_low_drops"])
+	}
+	if got := resp["db_writer_wait_seconds"].(float64); got != 1.5 {
+		t.Errorf("db_writer_wait_seconds = %v, want 1.5", got)
+	}
+	if int(resp["perm_cache_hits"].(float64)) != 42 {
+		t.Errorf("perm_cache_hits = %v, want 42", resp["perm_cache_hits"])
+	}
+	ep, ok := resp["event_persister"].(map[string]any)
+	if !ok {
+		t.Fatalf("event_persister = %v, want object", resp["event_persister"])
+	}
+	if int(ep["persisted"].(float64)) != 100 {
+		t.Errorf("event_persister.persisted = %v, want 100", ep["persisted"])
 	}
 }
 
@@ -92,12 +123,14 @@ func TestHandleMetrics_AdminIPRestrict_AllowsAdmin(t *testing.T) {
 
 func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 	r := chi.NewRouter()
-	r.Get("/api/v1/metrics", api.HandleMetricsForTest(
-		func() int { return 0 },
-		func() int { return 0 },
-		func() uint64 { return 0 },
-		nil, // no livekit
-	))
+	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
+		ConnectedUsers: func() int { return 0 },
+		VoiceSessions:  func() int { return 0 },
+		BroadcastDrops: func() uint64 { return 0 },
+		// LiveKitHealth nil — no livekit wired.
+		// PersisterStats returning ok=false must omit event_persister.
+		PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 0, 0, 0, 0, false },
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -114,5 +147,9 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 	// livekit_healthy should be absent when no health check is provided.
 	if _, ok := resp["livekit_healthy"]; ok {
 		t.Errorf("livekit_healthy should be omitted when health check is nil, got %v", resp["livekit_healthy"])
+	}
+	// event_persister should be absent when the persister reports ok=false.
+	if _, ok := resp["event_persister"]; ok {
+		t.Errorf("event_persister should be omitted when persistence is disabled, got %v", resp["event_persister"])
 	}
 }

@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,6 +73,25 @@ type Hub struct {
 	// call fails loudly instead of racing the dispatch loop.
 	running atomic.Bool
 
+	// dispatchExited flips when Run returns for good — normal Stop or the
+	// panic breaker. /health reads it (via DispatchAlive) because clients keep
+	// registering and appearing online through registerNow even with the
+	// dispatch loop dead, so nothing else makes the outage observable.
+	dispatchExited atomic.Bool
+
+	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
+	// panicked three times in a minute has unknown state, so production exits
+	// the process and lets the supervisor restart it rather than serving
+	// connections that can never receive a broadcast. Tests replace it.
+	fatalFn func()
+
+	// Aggregate per-client backpressure counters. The per-client msgsDropped
+	// field is read once at disconnect and lost; these survive as process
+	// totals for the metrics endpoint.
+	bpQueueDisconnects atomic.Uint64 // clients disconnected because send (or high+send) overflowed
+	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
+	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
+
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
@@ -124,6 +144,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		settingsName:    "OwnCord Server",
 		settingsMotd:    "Welcome!",
 		voiceKeyHolders: make(map[int64]int64),
+		fatalFn:         func() { os.Exit(1) },
 	}
 
 	// V2 handler registrations (need Hub fields for deps).
@@ -219,6 +240,7 @@ func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	h.running.Store(true)
+	defer h.dispatchExited.Store(true)
 	var panicCount int
 	var lastPanicReset time.Time
 
@@ -246,8 +268,19 @@ func (h *Hub) Run() {
 						"stack", stackutil.Capture())
 
 					if panicCount >= 3 {
-						slog.Error("hub: too many panics in 60s, stopping")
+						// The hub's state after three panics in a minute is
+						// unknown, and a stopped dispatch loop is invisible from
+						// the outside: registerNow keeps admitting clients that
+						// can never receive a broadcast. Exit and let the
+						// process supervisor restart us (fatalFn is os.Exit(1)
+						// in production; tests substitute a no-op and rely on
+						// the Stop below).
+						slog.Error("hub: too many panics in 60s, stopping and exiting for supervisor restart")
 						h.Stop()
+						h.dispatchExited.Store(true)
+						if h.fatalFn != nil {
+							h.fatalFn()
+						}
 						return
 					}
 				}
@@ -574,6 +607,33 @@ func (h *Hub) ClientCount() int {
 // full broadcast channel. Safe to call from any goroutine.
 func (h *Hub) BroadcastDropCount() uint64 {
 	return h.broadcastDrops.Load()
+}
+
+// DispatchAlive reports whether the hub's dispatch loop is still running.
+// It is true before Run starts (so a health probe racing startup does not
+// flap) and false once Run has returned — normal shutdown or the panic
+// breaker. Safe to call from any goroutine.
+func (h *Hub) DispatchAlive() bool {
+	return !h.dispatchExited.Load()
+}
+
+// BackpressureStats returns the process-lifetime per-client backpressure
+// counters: connections closed due to send-buffer overflow, high-priority
+// sends that fell back to the normal buffer, and low-priority messages
+// silently dropped. Safe to call from any goroutine.
+func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
+	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
+}
+
+// EventPersisterStats returns the attached persister's lifetime counters.
+// ok is false when event persistence is disabled (no persister attached).
+func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, ok bool) {
+	p := h.eventPersister.Load()
+	if p == nil {
+		return 0, 0, 0, 0, false
+	}
+	persisted, dropped, flushes, errs = p.Stats()
+	return persisted, dropped, flushes, errs, true
 }
 
 // VoiceSessionCount returns the number of clients currently in a voice channel.

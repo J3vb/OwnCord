@@ -3,9 +3,11 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/telemetry"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -18,6 +20,9 @@ type broadcastMsg struct {
 	// recipient's role may not READ, and the audience is resolved off the hub
 	// goroutine so deliverBroadcast stays free of permission queries.
 	recipients []int64
+	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
+	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
+	enqueuedAt time.Time
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -25,7 +30,7 @@ type broadcastMsg struct {
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 	select {
-	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
+	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg, enqueuedAt: time.Now()}:
 	default:
 		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping message",
@@ -37,7 +42,7 @@ func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
 	select {
-	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
+	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg, enqueuedAt: time.Now()}:
 	default:
 		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping global message",
@@ -127,6 +132,7 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 		channelID:  channelID,
 		msg:        msg,
 		recipients: recipients,
+		enqueuedAt: time.Now(),
 	}
 	select {
 	case h.broadcast <- bm:
@@ -741,6 +747,17 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		}
 		return seq, delivered, channelSend
 	}()
+
+	// Instrumentation runs after seqMu is released: a metrics provider must
+	// never extend the critical section that serializes every broadcast.
+	// seq == 0 means the topic limiter shed the frame before delivery.
+	if seq != 0 {
+		m := telemetry.NewAppMetrics()
+		m.WSMessagesTotal.Add(context.Background(), 1)
+		if !bm.enqueuedAt.IsZero() {
+			m.WSBroadcastLatency.Record(context.Background(), time.Since(bm.enqueuedAt).Seconds())
+		}
+	}
 
 	if channelSend {
 		slog.Debug("hub: channel broadcast",
