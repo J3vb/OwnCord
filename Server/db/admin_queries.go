@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -403,9 +405,55 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
+	// Whether the destination existed before the VACUUM decides the error
+	// cleanup below: a failed VACUUM INTO (disk full, killed mid-write) can
+	// leave a truncated file that the backup listing would present as
+	// restorable, so remove it — but only if we created it, never a file that
+	// was already there (VACUUM INTO refuses existing files, so that error
+	// path must not delete the operator's data).
+	_, statErr := os.Stat(absClean)
+	existedBefore := statErr == nil
+
 	_, err = d.writer.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
+		if !existedBefore {
+			if rmErr := os.Remove(absClean); rmErr != nil && !os.IsNotExist(rmErr) {
+				slog.Warn("BackupToSafe: could not remove partial backup file", "path", absClean, "error", rmErr)
+			}
+		}
 		return fmt.Errorf("BackupToSafe: %w", err)
+	}
+	return nil
+}
+
+// CheckBackupIntegrity opens the SQLite file at path read-only and runs
+// PRAGMA integrity_check against it. It returns nil only when SQLite reports
+// "ok". Use it to verify a backup right after it is written and again before
+// it is restored over the live database — a truncated or corrupt file must
+// never be presented (or accepted) as restorable.
+//
+// The path travels into a file: URI, so it is restricted with the same
+// character allowlist BackupToSafe enforces; callers always pass paths that
+// already passed that gate.
+func CheckBackupIntegrity(ctx context.Context, path string) error {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("CheckBackupIntegrity: resolving path: %w", err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return fmt.Errorf("CheckBackupIntegrity: %w", err)
+	}
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(abs)+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return fmt.Errorf("CheckBackupIntegrity: open: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+	var result string
+	if err := conn.QueryRowContext(ctx, "PRAGMA integrity_check(10)").Scan(&result); err != nil {
+		return fmt.Errorf("CheckBackupIntegrity: %w", err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("CheckBackupIntegrity: integrity_check reported %q", result)
 	}
 	return nil
 }

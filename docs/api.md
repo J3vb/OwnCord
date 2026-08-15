@@ -1836,6 +1836,10 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `registration_open`, `backup_schedule`, `backup_retention`. Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`.
 
+`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
+enforced by the server's maintenance loop — see the Backup Strategy section
+of `docs/deployment.md` for the exact semantics.
+
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
 

@@ -30,15 +30,30 @@ const (
 
 // backupBaseDir is the directory for backup files, resolved to an absolute
 // path at package init time so handlers don't depend on the process CWD (L14).
+// Overridden at startup via SetBackupDir with cfg.Backup.Dir.
 var backupBaseDir string
 
 func init() {
-	abs, err := filepath.Abs(filepath.Join("data", "backups"))
-	if err == nil {
-		backupBaseDir = abs
-	} else {
-		backupBaseDir = filepath.Join("data", "backups")
+	backupBaseDir = absOrRaw(filepath.Join("data", "backups"))
+}
+
+// SetBackupDir points every backup handler and the scheduled-backup
+// maintenance at the operator-configured directory. Call once at startup with
+// cfg.Backup.Dir (main.go, next to SetDatabasePath); tests use it to isolate
+// a temp dir. Mirrors SetDatabasePath: without it, a configured backup.dir
+// would be ignored while backups keep landing in the default location.
+func SetBackupDir(dir string) {
+	if dir == "" {
+		return
 	}
+	backupBaseDir = absOrRaw(dir)
+}
+
+func absOrRaw(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // dbFilePath is the live SQLite database file that "Restore backup"
@@ -73,9 +88,19 @@ func handleBackup(database *db.DB) http.Handler {
 
 		// Detached like the restore path's safety backup: an interrupted
 		// VACUUM INTO leaves a truncated .db that handleListBackups would
-		// present as restorable.
-		if err := database.BackupTo(context.WithoutCancel(r.Context()), backupPath); err != nil {
+		// present as restorable. BackupToSafe is rooted at the configured
+		// backup dir (SetBackupDir), not the historical hardcoded default.
+		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
+			return
+		}
+
+		// Verify before reporting success: a backup that fails integrity_check
+		// is worse than no backup, because the operator believes they have one.
+		if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), backupPath); err != nil {
+			slog.Error("backup failed integrity check — removing", "path", backupPath, "err", err)
+			_ = os.Remove(backupPath)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed verification")
 			return
 		}
 
@@ -191,6 +216,16 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
+		// Refuse to overwrite the live database with a file SQLite itself
+		// rejects — a truncated pre-crash backup, a stray non-database .db.
+		// The pre-restore safety copy would make this survivable, but "restore
+		// succeeded" followed by a broken server is still the worst UX here.
+		if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), target); err != nil {
+			slog.Error("restore refused: backup failed integrity check", "backup", name, "err", err)
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup file failed integrity verification")
+			return
+		}
+
 		dbPath := dbFilePath
 
 		actor := actorFromContext(r)
@@ -215,7 +250,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// a server started from another working directory writes it somewhere
 		// the operator will never find it.
 		preRestore := filepath.Join(backupBaseDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
-		if err := database.BackupTo(context.WithoutCancel(r.Context()), preRestore); err != nil {
+		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), preRestore, backupBaseDir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
 			// be created" before an irreversible overwrite; proceeding without
 			// one takes away the safety net the operator was shown, exactly
@@ -245,7 +280,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
-		if err := copyFile(target, dbPath); err != nil {
+		if err := copyBackupFile(target, dbPath); err != nil {
 			// copyFile truncates the destination with os.Create before it can know
 			// whether the read will succeed, so the live database file is already
 			// destroyed by the time we get here — and the DB is closed, so nothing
@@ -253,7 +288,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			// leaving the operator with a zero-byte database.
 			slog.Error("restore copy failed — rolling back to the pre-restore safety copy", "backup", name, "err", err)
 			msg := "failed to restore database file — the pre-restore safety copy was put back, server restarting"
-			if rbErr := copyFile(preRestore, dbPath); rbErr != nil {
+			if rbErr := copyBackupFile(preRestore, dbPath); rbErr != nil {
 				slog.Error("rollback from the pre-restore safety copy failed — recover manually",
 					"safety_copy", preRestore, "err", rbErr)
 				msg = "failed to restore database file AND failed to roll back — recover manually from " + filepath.Base(preRestore)
@@ -327,6 +362,11 @@ func restartProcess(reason string) {
 	}
 	os.Exit(0) //nolint:gocritic // backstop if the SIGTERM handler didn't exit
 }
+
+// copyBackupFile is the restore path's file-copy hook. It exists as a var so
+// tests can inject the hard-to-simulate mid-copy failure (truncate-then-fail)
+// the rollback branch exists for; production never swaps it.
+var copyBackupFile = copyFile
 
 // copyFile streams src to dst without loading the entire file into memory.
 func copyFile(src, dst string) error {

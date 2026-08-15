@@ -136,6 +136,9 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	// without this, it falls back to a hardcoded "data/chatserver.db" and
 	// silently no-ops on any server with a configured database.path.
 	admin.SetDatabasePath(cfg.Database.Path)
+	// Backup handlers and the scheduled-backup maintenance write to the
+	// configured backup directory (defaults to data/backups).
+	admin.SetBackupDir(cfg.Backup.Dir)
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
@@ -319,6 +322,13 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 				tickFailed := false
 				if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
+					tickFailed = true
+				}
+
+				// Scheduled backups + retention pruning, driven by the
+				// backup_schedule / backup_retention admin settings.
+				if err := admin.MaintainBackups(bgCtx, database); err != nil {
+					log.Warn("backup maintenance failed", "error", err)
 					tickFailed = true
 				}
 

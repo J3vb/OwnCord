@@ -57,6 +57,12 @@ the server automatically when a startup-only value changed. Note that
 | `database.type` | string | `"sqlite"` | Database backend. `sqlite` (or empty) is the only supported value — any other value makes the server refuse to start. |
 | `database.path` | string | `"data/chatserver.db"` | Path to SQLite database file |
 
+### Backups (`backup`)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `backup.dir` | string | `"data/backups"` | Directory where database backups are written and pruned. Point it at another disk or an off-host mount so backups don't share a single point of failure with the live database. The admin panel's Backup Schedule and Retention settings operate on this directory. |
+
 ### Uploads (`upload`)
 
 | Key | Type | Default | Description |

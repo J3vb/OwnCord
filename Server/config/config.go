@@ -22,6 +22,7 @@ import (
 type Config struct {
 	Server           ServerConfig           `koanf:"server"`
 	Database         DatabaseConfig         `koanf:"database"`
+	Backup           BackupConfig           `koanf:"backup"`
 	TLS              TLSConfig              `koanf:"tls"`
 	Upload           UploadConfig           `koanf:"upload"`
 	Voice            VoiceConfig            `koanf:"voice"`
@@ -204,6 +205,14 @@ type UploadConfig struct {
 	StorageDir string `koanf:"storage_dir"`
 }
 
+// BackupConfig controls where database backups are written. Pointing Dir at
+// another disk (or a mount that is shipped off-host) is the recommended way
+// to keep backups from sharing a single point of failure with the live
+// database and uploads.
+type BackupConfig struct {
+	Dir string `koanf:"dir"`
+}
+
 // defaults returns the default configuration.
 func defaults() Config {
 	return Config{
@@ -226,6 +235,9 @@ func defaults() Config {
 		Database: DatabaseConfig{
 			Type: "sqlite",
 			Path: "data/chatserver.db",
+		},
+		Backup: BackupConfig{
+			Dir: "data/backups",
 		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
@@ -296,6 +308,11 @@ server:
 database:
   type: "sqlite"          # "sqlite" is the only supported backend
   path: "data/chatserver.db"
+
+# backup:
+#   dir: "data/backups"   # where database backups are written; point at another
+#                         # disk or an off-host mount so backups don't share a
+#                         # single point of failure with the live database
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off

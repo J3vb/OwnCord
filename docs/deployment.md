@@ -226,11 +226,45 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups/{name}` | DELETE | Delete a backup (owner-only) |
 | `/admin/api/backups/{name}/restore` | POST | Restore from backup (owner-only; creates pre-restore safety backup first) |
 
-Backups are stored in `data/backups/` with timestamps.
+Backups are stored in the configured backup directory (default
+`data/backups/`) with timestamps. Point it somewhere safer than the data
+volume — another disk, or a mount that is shipped off-host (rsync, rclone,
+a synced folder) — so backups don't share a single point of failure with the
+live database and uploads:
+
+```yaml
+backup:
+  dir: "/mnt/backup-disk/owncord"
+```
+
+Every backup is verified with SQLite's `integrity_check` right after it is
+written (a failed backup is removed, never listed), and again before a
+restore is allowed to overwrite the live database.
+
+Note that a backup runs `VACUUM INTO` on the database's single write
+connection: writes queue for the duration (reads keep serving). On a large
+database, prefer scheduling backups at a low-traffic time of day.
 
 ### Scheduled Backups
 
-Use Windows Task Scheduler with PowerShell:
+The **Backup Schedule** (off / daily / weekly) and **Retention (days)**
+settings in the admin panel are enforced by the server's maintenance loop
+(checked every 15 minutes):
+
+- A scheduled backup is taken when the newest backup on disk is older than
+  the schedule interval — a manual backup resets the clock too.
+- Retention deletes backups older than the configured number of days, but
+  always keeps the newest one, so a stale schedule can never delete your
+  last copy.
+
+External scheduling still works if you prefer it — e.g. Linux cron:
+
+```bash
+# Nightly at 03:00 via an admin API token
+0 3 * * * curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" https://localhost:8443/admin/api/backup
+```
+
+or Windows Task Scheduler with PowerShell:
 
 ```powershell
 $headers = @{ "Cookie" = "session=<admin-session-token>" }
