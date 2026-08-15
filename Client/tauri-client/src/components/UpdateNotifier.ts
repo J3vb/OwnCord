@@ -31,6 +31,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   let container: Element | null = null;
   let banner: HTMLDivElement | null = null;
   let dismissed = false;
+  let checkTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function performCheck(): Promise<void> {
     if (dismissed) return;
@@ -123,12 +124,17 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   function mount(target: Element): void {
     container = target;
     // Delay the check slightly so the main UI renders first
-    setTimeout(() => {
+    checkTimer = setTimeout(() => {
+      checkTimer = null;
       void performCheck();
     }, 3000);
   }
 
   function destroy(): void {
+    if (checkTimer !== null) {
+      clearTimeout(checkTimer);
+      checkTimer = null;
+    }
     removeBanner();
     container = null;
   }

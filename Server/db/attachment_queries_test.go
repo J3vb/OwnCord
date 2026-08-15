@@ -167,6 +167,40 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 	}
 }
 
+// TestLinkAttachmentsToMessage_SkipsLiveAvatar locks OC-0216: an attachment
+// that is currently a user's live avatar (users.avatar points at it) must
+// never be claimable by a message. Once message_id is set, handleServeFile's
+// avatar branch becomes unreachable (it is gated on ChannelID == nil) and the
+// file falls under the message's channel ACL / soft-delete state instead, so
+// the avatar permanently disagrees with users.avatar about who may read it.
+func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
+	database := openMigratedMemory(t)
+	owner := seedUser(t, database, "avatar-owner")
+	chID := seedChannel(t, database, "avatar-owner-ch")
+	msgID, _ := database.CreateMessage(context.Background(), chID, owner, "attachment carrier", nil)
+
+	if err := database.CreateAttachment(context.Background(), "att-avatar", owner, "a.png", "s-a.png", "image/png", 1, nil, nil); err != nil {
+		t.Fatalf("CreateAttachment att-avatar: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET avatar = ? WHERE id = ?`,
+		"/api/v1/files/att-avatar", owner,
+	); err != nil {
+		t.Fatalf("setting avatar: %v", err)
+	}
+
+	n, err := database.LinkAttachmentsToMessage(context.Background(), msgID, owner, []string{"att-avatar"})
+	if err != nil {
+		t.Fatalf("LinkAttachmentsToMessage: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 rows linked (live avatar must be skipped), got %d", n)
+	}
+	if att, _ := database.GetAttachmentByID(context.Background(), "att-avatar"); att.MessageID != nil {
+		t.Error("live avatar attachment must never link to a message (OC-0216)")
+	}
+}
+
 // ─── GetAttachmentsByMessageIDs ──────────────────────────────────────────────
 
 func TestGetAttachmentsByMessageIDs_Empty(t *testing.T) {

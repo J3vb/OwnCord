@@ -9,6 +9,8 @@ import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
+import { createPresenceSender } from "@lib/presence";
+import { createPresenceLimiter } from "@lib/rate-limiter";
 import type { WsClient } from "@lib/ws";
 
 function setAuthState(user: { username: string } | null, isAuthenticated: boolean): void {
@@ -19,6 +21,15 @@ function setAuthState(user: { username: string } | null, isAuthenticated: boolea
     motd: null,
     isAuthenticated,
   }));
+}
+
+/** A ws plus a real (unconsumed) presence sender bound to it — what
+ *  SidebarArea actually threads into UserBar in production. */
+function userBarOptsWithPresence(ws: WsClient): {
+  ws: WsClient;
+  presenceSender: ReturnType<typeof createPresenceSender>;
+} {
+  return { ws, presenceSender: createPresenceSender(ws, createPresenceLimiter()) };
 }
 
 function createMockWs(state: "connected" | "disconnected" = "connected"): WsClient {
@@ -90,7 +101,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("selecting a status sends presence_update WS message", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     // Open picker
@@ -106,6 +117,50 @@ describe("StatusPicker wired to UserBar", () => {
     const sentMsg = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sentMsg.type).toBe("presence_update");
     expect(sentMsg.payload.status).toBe("idle");
+  });
+
+  // OC-0210: every other presence producer (auto-idle, the settings Account
+  // tab) shares one PresenceSender/RateLimiter through MainPage so a frame
+  // the server's 1-per-10s presence limiter (service/channel.go) drops gets
+  // retried instead of lost. The UserBar picker must go through that same
+  // shared sender, not straight to ws.send, or a token another producer just
+  // spent makes the server silently drop the picker's frame with nothing to
+  // correct it.
+  it("queues (does not drop) a status change when the shared presence limiter's window is already closed", () => {
+    setAuthState({ username: "alice" }, true);
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs("connected");
+      // The same PresenceSender instance MainPage threads to every producer
+      // — pre-spend its single token exactly as auto-idle or the settings
+      // tab would moments before the user opens the picker.
+      const presenceSender = createPresenceSender(ws, createPresenceLimiter());
+      presenceSender.send("idle");
+      expect(ws.send).toHaveBeenCalledOnce();
+      (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+      comp = createUserBar({ ws, presenceSender });
+      comp.mount(container);
+
+      const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+      dot.click();
+      const options = container.querySelectorAll(".status-picker-option");
+      (options[0] as HTMLElement).click(); // "Online"
+
+      // The server's window is still closed — the frame must be queued, not
+      // sent straight down the socket and lost if it's rejected.
+      expect(ws.send).not.toHaveBeenCalled();
+
+      // Once the window reopens, the queued change must still go out.
+      vi.advanceTimersByTime(10_000);
+
+      expect(ws.send).toHaveBeenCalledOnce();
+      const sentMsg = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(sentMsg.type).toBe("presence_update");
+      expect(sentMsg.payload.status).toBe("online");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("status picker is disabled when WS is disconnected", () => {
@@ -124,7 +179,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("status picker reacts to a connection status change through the store", async () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const wrap = container.querySelector("[data-testid='status-picker-wrap']") as HTMLElement;

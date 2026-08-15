@@ -344,6 +344,94 @@ func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
 	}
 }
 
+// TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable pins OC-0213:
+// schema_versions must not be created outside the seed transaction. If it
+// is, an interrupted/failed first-run seed (process killed, OOM, disk
+// full — anything that keeps the seed transaction from committing) leaves
+// an empty schema_versions table behind. On the next start,
+// schemaVersionsExists() reports true, the seeding branch is skipped
+// forever, and every migration in the set is replayed against the live,
+// already-populated database — including destructive ones.
+//
+// This test simulates the interruption with PRAGMA max_page_count: it caps
+// the database's page budget so MigrateFS's seed transaction runs out of
+// room partway through recording filenames, exactly like a crash mid-seed.
+// It then lifts the cap (as a real restart would have headroom again) and
+// calls MigrateFS a second time, verifying that seeding — not destructive
+// execution — is what happens.
+func TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable(t *testing.T) {
+	database := openMemory(t)
+	ctx := context.Background()
+
+	// Simulate a pre-tracking existing database: the "users" sentinel table
+	// triggers the seeding heuristic, and carries data that the destructive
+	// migration below would wipe if it were ever executed instead of seeded.
+	if _, err := database.ExecContext(ctx,
+		"CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)",
+	); err != nil {
+		t.Fatalf("setup users table: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		"INSERT INTO users (id, name) VALUES (1, 'admin')",
+	); err != nil {
+		t.Fatalf("setup admin row: %v", err)
+	}
+
+	// A large migration set: one file is destructive (drops and recreates
+	// users, losing the row above), and hundreds of harmless, idempotent
+	// files pad the seed transaction out so a tight page budget is
+	// guaranteed to run out partway through — not on the very first insert,
+	// not never.
+	pairs := make([]string, 0, 2*502)
+	pairs = append(pairs,
+		"000_destroy_users.sql",
+		"DROP TABLE IF EXISTS users; CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+	)
+	for i := 1; i <= 500; i++ {
+		pairs = append(pairs,
+			fmt.Sprintf("%04d_noop.sql", i),
+			"CREATE TABLE IF NOT EXISTS placeholder (id INTEGER PRIMARY KEY);",
+		)
+	}
+	fsys := simpleFS(pairs...)
+
+	var basePages int
+	if err := database.QueryRowContext(ctx, "PRAGMA page_count").Scan(&basePages); err != nil {
+		t.Fatalf("PRAGMA page_count: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, fmt.Sprintf("PRAGMA max_page_count = %d", basePages+3)); err != nil {
+		t.Fatalf("PRAGMA max_page_count: %v", err)
+	}
+
+	// First "startup": the seed transaction is interrupted partway through.
+	if err := db.MigrateFS(database, fsys); err == nil {
+		t.Fatal("MigrateFS() under the page-budget constraint: expected an error simulating an interrupted seed, got nil")
+	}
+
+	// Lift the constraint — the next real startup would run on a machine
+	// with headroom restored.
+	if _, err := database.ExecContext(ctx, "PRAGMA max_page_count = 4294967294"); err != nil {
+		t.Fatalf("PRAGMA max_page_count reset: %v", err)
+	}
+
+	// Second "startup" (the retry). If the interrupted seed above left an
+	// orphaned, empty schema_versions table behind, MigrateFS now believes
+	// tracking is already in place, skips seeding entirely, and applies
+	// every migration for real — including 000_destroy_users.sql.
+	if err := db.MigrateFS(database, fsys); err != nil {
+		t.Fatalf("MigrateFS() second run error: %v", err)
+	}
+
+	var name string
+	err := database.QueryRowContext(ctx, "SELECT name FROM users WHERE id = 1").Scan(&name)
+	if err != nil {
+		t.Fatalf("users row id=1 is gone: 000_destroy_users.sql was executed instead of seeded — an interrupted seed orphaned an empty schema_versions table: %v", err)
+	}
+	if name != "admin" {
+		t.Errorf("users.name = %q, want %q — users table appears to have been recreated", name, "admin")
+	}
+}
+
 // TestMigrate_SchemaVersionsAppliedAtRecorded verifies that applied_at is
 // populated for every recorded migration.
 func TestMigrate_SchemaVersionsAppliedAtRecorded(t *testing.T) {

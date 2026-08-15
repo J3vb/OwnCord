@@ -366,9 +366,25 @@ export function wireDispatcher(
         if (activeAfterReady !== null && getMessages !== undefined) {
           invalidateLoadedMessageWindows();
           getMessages(activeAfterReady, { limit: 50 })
-            .then((resp) => setMessages(activeAfterReady, resp.messages, resp.has_more))
+            .then((resp) => {
+              // OC-0203: the user can switch (or the active channel can be
+              // cleared) while this fetch is in flight. Writing the snapshot
+              // unconditionally would re-add a channel the user already left
+              // to loadedChannels with a pre-resync-era snapshot —
+              // MessageController.loadMessages then short-circuits on
+              // isChannelLoaded() forever, so the hole this whole resync
+              // block exists to close becomes permanent instead. Only the
+              // channel still on screen when the response lands may accept
+              // it.
+              if (channelsStore.select((s) => s.activeChannelId) !== activeAfterReady) return;
+              setMessages(activeAfterReady, resp.messages, resp.has_more);
+            })
             .catch((err) => {
               log.warn("Failed to reload message history after resync", { error: String(err) });
+              // Same staleness guard as the .then above — a rejection for a
+              // channel the user already left must not flag it load-errored;
+              // that channel's own mount/retry path owns its state now.
+              if (channelsStore.select((s) => s.activeChannelId) !== activeAfterReady) return;
               // The invalidate above already dropped this channel's window,
               // so a silent catch would leave a mounted MessageList showing
               // its "no messages yet" welcome state — indistinguishable from
@@ -1058,6 +1074,33 @@ export function wireDispatcher(
       if (id !== undefined && rollbackReaction(id)) {
         return;
       }
+      // OC-0224: the sidebar/widget optimistically writes currentChannelId
+      // before the server answers voice_join (VoiceCallbacks.onVoiceJoin,
+      // voiceStatus="joining"). A first-time join refusal earns no
+      // voice_leave (there was no previous channel to leave), so nothing
+      // else ever clears that optimistic state — setVoiceStatus("idle") only
+      // runs inside LiveKitSession.leaveVoice(). handleVoiceJoin can refuse
+      // for CHANNEL_FULL, VOICE_ERROR, FORBIDDEN, NOT_FOUND, BAD_REQUEST,
+      // RATE_LIMITED, ALREADY_JOINED, or INTERNAL — this used to only roll
+      // back CHANNEL_FULL, leaving the sidebar keyed on a channel with no
+      // LiveKit session for every other refusal. voice_join's error replies
+      // carry no envelope id to correlate against (Server/ws/voice_join.go
+      // always answers with buildErrorMsg, never buildErrorMsgWithID), so —
+      // unlike the pendingSends/pendingReactions correlation above — this
+      // can't be scoped to "the refusal that answered this specific join";
+      // it runs once, ahead of every code-specific branch below, for any
+      // error that lands while a join is outstanding. A channel *switch*
+      // refusal hits the same guard: the self voice_leave for the OLD
+      // channel that precedes it no longer resets voiceStatus (OC-0015 —
+      // that voice_leave's channel no longer matches the already-updated
+      // currentChannelId, so it must not tear down the NEW channel's
+      // optimistic state either), so voiceStatus is still "joining" when
+      // this error lands and the guard clears it here instead. An
+      // already-established session is never in "joining", so this never
+      // touches a live voice call.
+      if (voiceStore.getState().voiceStatus === "joining") {
+        leaveVoiceChannel();
+      }
       // Voice capacity refusals. The server owns the limits (voice_max_users /
       // voice_max_video) and refuses the join or the camera; the client never
       // pre-blocks the click, because its copy of the participant list can lag
@@ -1066,20 +1109,6 @@ export function wireDispatcher(
       // with an explanation buried in the log.
       if (payload.code === "CHANNEL_FULL") {
         showToast(payload.message || "That voice channel is full", "error");
-        // The sidebar/widget optimistically writes currentChannelId before
-        // the server answers (VoiceCallbacks.onVoiceJoin). A first-time join
-        // refusal earns no voice_leave (there was no previous channel to
-        // leave), so nothing else clears that optimistic state — the sidebar
-        // is left keyed on a channel with no LiveKit session. A channel
-        // *switch* refusal hits the same guard: the self voice_leave for the
-        // OLD channel that precedes it no longer resets voiceStatus (OC-0015
-        // — that voice_leave's channel no longer matches the already-updated
-        // currentChannelId, so it must not tear down the NEW channel's
-        // optimistic state either), so voiceStatus is still "joining" when
-        // this error lands and the guard clears it here instead.
-        if (voiceStore.getState().voiceStatus === "joining") {
-          leaveVoiceChannel();
-        }
         return;
       }
       if (payload.code === "VIDEO_LIMIT") {

@@ -168,6 +168,58 @@ func TestBroadcastPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 	}
 }
 
+// TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers pins OC-0211:
+// BroadcastPresence maps an invisible user's *status* to "offline" for the
+// public frame but used to pass customStatus through verbatim, so every
+// other connected client received {status:"offline", custom_status:"<real
+// text>"} — the surviving text is a tell that the "offline" member is
+// actually online, exactly what db.MemberSummary.ForViewer deliberately
+// blanks for the ready payload. This is the connect/reconnect path
+// (announceConnectPresence -> BroadcastPresence), reached whenever an
+// invisible user with a saved custom status connects or reconnects.
+func TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	ghost := seedOwnerUser(t, database, "bc-ghost-cs")
+	other := seedOwnerUser(t, database, "bc-other-cs")
+	ghostCh := make(chan []byte, 8)
+	otherCh := make(chan []byte, 8)
+	gc := ws.NewTestClientWithUser(hub, ghost, 0, ghostCh)
+	oc := ws.NewTestClientWithUser(hub, other, 0, otherCh)
+	hub.Register(gc)
+	hub.Register(oc)
+	waitRegistered(t, hub, gc)
+	waitRegistered(t, hub, oc)
+
+	text := "in a meeting"
+	hub.BroadcastPresence(ghost.ID, db.StatusInvisible, &text)
+
+	self := readPresence(ghostCh, 500*time.Millisecond)
+	if self == nil {
+		t.Fatal("owner received no presence message")
+	}
+	// The owner must still see their own real custom status.
+	if self["custom_status"] != text {
+		t.Errorf("owner custom_status = %v, want %q", self["custom_status"], text)
+	}
+
+	seen := readPresence(otherCh, 500*time.Millisecond)
+	if seen == nil {
+		t.Fatal("other client received no presence message")
+	}
+	if seen["status"] != db.StatusOffline {
+		t.Errorf("other sees status = %v, want offline", seen["status"])
+	}
+	// The leak: an observer must never see the real custom status text
+	// alongside a collapsed-to-offline status — that combination discloses
+	// that the member is actually online.
+	if seen["custom_status"] != nil {
+		t.Errorf("other sees custom_status = %v, want null (leaked invisible user's real status text)", seen["custom_status"])
+	}
+}
+
 func TestBroadcastPresence_NonInvisibleGoesToEveryoneUnchanged(t *testing.T) {
 	hub, database := newTestHub(t)
 	go hub.Run()

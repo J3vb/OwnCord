@@ -68,6 +68,14 @@ export const THEMES = {
 
 export type ThemeName = keyof typeof THEMES;
 
+// Union of every CSS custom property any built-in theme sets. Used by
+// applyTheme to clear a previous theme's tokens before applying a new one,
+// without touching inline properties owned by other code (e.g. --accent,
+// --font-size).
+const THEME_KEYS: ReadonlySet<string> = new Set(
+  Object.values(THEMES).flatMap((theme) => Object.keys(theme)),
+);
+
 // ---------------------------------------------------------------------------
 // Accessible toggle creation
 // ---------------------------------------------------------------------------
@@ -114,9 +122,17 @@ export function createToggle(
 // ---------------------------------------------------------------------------
 
 export function applyTheme(name: ThemeName): void {
-  // Apply CSS variables for the theme (keeps existing behavior for inline var overrides)
   const theme = THEMES[name];
   const root = document.documentElement;
+  // Clear every key any built-in theme owns first, so switching to a theme
+  // that sets fewer keys (e.g. light -> dark) doesn't leave the previous
+  // theme's tokens stuck on <html>, outranking tokens.css's :root defaults
+  // via inline-style specificity. Keys owned by other code (--accent,
+  // --font-size) are not in THEME_KEYS and are left untouched.
+  for (const key of THEME_KEYS) {
+    root.style.removeProperty(key);
+  }
+  // Apply CSS variables for the theme (keeps existing behavior for inline var overrides)
   for (const [key, value] of Object.entries(theme)) {
     root.style.setProperty(key, value);
   }

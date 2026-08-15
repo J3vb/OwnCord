@@ -394,18 +394,26 @@ export function createWsClient() {
     // "trusted" → no action
   }
 
-  async function setupEventListeners(): Promise<void> {
-    if (tauriListen === null) return;
+  // Registers this attempt's Tauri event listeners and returns the unsub
+  // handles it created, WITHOUT touching the shared `eventUnsubs` array.
+  // Ownership of those handles (splicing them into `eventUnsubs`, or tearing
+  // them down if this attempt turns out to be stale) is the caller's job —
+  // see connect(). This keeps a still-in-flight attempt's registrations from
+  // ever being visible to (and therefore clearable by) another attempt that
+  // resumes around the same time; see OC-0219.
+  async function setupEventListeners(): Promise<Array<() => void>> {
+    if (tauriListen === null) return [];
 
     // Capture generation so stale listeners from a previous connect() are no-ops.
     const gen = wsGeneration;
+    const ownUnsubs: Array<() => void> = [];
 
     // Server messages
     const unsubMsg = await tauriListen("ws-message", (e) => {
       if (gen !== wsGeneration) return;
       handleMessage(e.payload as string);
     });
-    eventUnsubs.push(unsubMsg);
+    ownUnsubs.push(unsubMsg);
 
     // Connection state changes from Rust
     const unsubState = await tauriListen("ws-state", (e) => {
@@ -454,31 +462,36 @@ export function createWsClient() {
         }
       }
     });
-    eventUnsubs.push(unsubState);
+    ownUnsubs.push(unsubState);
 
     // Errors
     const unsubErr = await tauriListen("ws-error", (e) => {
       if (gen !== wsGeneration) return;
       log.warn("WebSocket error (proxy)", { error: e.payload });
     });
-    eventUnsubs.push(unsubErr);
+    ownUnsubs.push(unsubErr);
 
     // Register the global cert-tofu listener on first connect (idempotent).
     // startCertListener() registers the same listener at app bootstrap so
     // first-use/mismatch events are also caught during the connect page's health
-    // checks, before any WS connection exists.
+    // checks, before any WS connection exists. Deliberately NOT part of
+    // ownUnsubs/eventUnsubs — it is a singleton for the app's lifetime, not
+    // scoped to any one connect() attempt.
     if (certListenerUnsub === null) {
       certListenerUnsub = await tauriListen("cert-tofu", (e) => {
         handleCertTofu(e.payload as CertTofuEvent);
       });
     }
+
+    return ownUnsubs;
   }
 
-  function cleanupEventListeners(): void {
-    for (const unsub of eventUnsubs) {
+  // Invokes each unsub handle in `unsubs`, tolerating handles that throw or
+  // return a rejected promise (the Tauri resource may already have been
+  // invalidated after disconnect).
+  function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
+    for (const unsub of unsubs) {
       try {
-        // Unsub may return a rejected promise if the Tauri resource
-        // was already invalidated after disconnect — safe to ignore.
         const result = unsub() as unknown;
         if (result instanceof Promise) {
           result.catch((err) => {
@@ -489,6 +502,10 @@ export function createWsClient() {
         // Sync errors also safe to ignore.
       }
     }
+  }
+
+  function cleanupEventListeners(): void {
+    unsubscribeAll(eventUnsubs);
     eventUnsubs.length = 0;
   }
 
@@ -527,17 +544,24 @@ export function createWsClient() {
       attempt: reconnectAttempt,
     });
 
-    // Set up event listeners before connecting
+    // Set up event listeners before connecting. setupEventListeners() hands
+    // back only the handles THIS attempt registered — they are not spliced
+    // into the shared `eventUnsubs` until the gen check below confirms this
+    // attempt is still current. That ownership split is what stops a stale
+    // attempt's cleanup (just below) from ever reaching a newer attempt's
+    // listeners, even if the newer attempt finished registering its own
+    // listeners while this one was still suspended above (OC-0219).
     cleanupEventListeners();
-    await setupEventListeners();
+    const ownUnsubs = await setupEventListeners();
     if (gen !== wsGeneration) {
       // Cancelled while awaiting the Tauri IPC round trips inside
-      // setupEventListeners(). Tear down the listeners this (now-stale)
-      // attempt just registered instead of leaving them until the next
-      // connect() happens to clean them up.
-      cleanupEventListeners();
+      // setupEventListeners(). Tear down only the listeners THIS (now-stale)
+      // attempt just registered — never the shared eventUnsubs array, which
+      // may already hold a newer attempt's live listeners by now.
+      unsubscribeAll(ownUnsubs);
       return;
     }
+    eventUnsubs.push(...ownUnsubs);
 
     try {
       await tauriInvoke("ws_connect", { url: wsUrl });

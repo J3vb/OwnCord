@@ -1378,6 +1378,71 @@ describe("WS Dispatcher", () => {
       expect(isChannelLoaded(1)).toBe(true);
     });
 
+    // OC-0203: the refetch above is fired-and-forgotten against whatever
+    // channel was active when the resync `ready` arrived — but the user can
+    // switch channels before the HTTP response lands. The continuation must
+    // re-check that the fetched channel is still the active one before
+    // writing setMessages, or it resurrects a stale pre-resync snapshot for
+    // a channel the user already left (and, worse, re-marks it "loaded" so
+    // MessageController.loadMessages never refetches it again on return).
+    it("does not write a stale resync snapshot for a channel the user switched away from mid-refetch", async () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      let resolveGetMessages:
+        ((resp: { messages: MessageResponse[]; has_more: boolean }) => void) | null = null;
+      const getMessages = vi.fn().mockImplementation(
+        () =>
+          new Promise<{ messages: MessageResponse[]; has_more: boolean }>((resolve) => {
+            resolveGetMessages = resolve;
+          }),
+      );
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+      setMessages(2, [storedMessage(20, 2)], false);
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+        { id: 2, name: "other", type: "text" as const, category: null, position: 0 },
+      ];
+
+      // First ready: initial connect.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // Second ready: a full-ready resync. The refetch for channel 1 (the
+      // active channel at the time) starts but does not resolve yet.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+      expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
+      expect(isChannelLoaded(1)).toBe(false);
+
+      // The user switches to channel 2 before that refetch resolves.
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+
+      // The stale channel-1 refetch now resolves with its pre-resync-era
+      // snapshot.
+      resolveGetMessages!({ messages: [storedMessage(900)], has_more: false });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Channel 1 must stay invalidated — writing the stale snapshot here
+      // would re-add it to loadedChannels, permanently hiding every message
+      // posted to it while the user was looking at channel 2.
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getChannelMessages(1)).toEqual([]);
+    });
+
     // BUG: invalidateLoadedMessageWindows() ran unconditionally, but the
     // refetch below it only runs when there's a resolvable active channel
     // AND api.getMessages exists (api is a Partial<...>, so it may be
@@ -3587,6 +3652,33 @@ describe("WS Dispatcher", () => {
 
       expect(voiceStore.getState().currentChannelId).toBe(5);
       expect(voiceStore.getState().voiceStatus).toBe("connected");
+    });
+
+    // OC-0224: CHANNEL_FULL is not the only refusal voice_join can get back.
+    // handleVoiceJoin also answers with VOICE_ERROR (LiveKit down/unconfigured),
+    // FORBIDDEN (blocked / revoked CONNECT_VOICE), NOT_FOUND, BAD_REQUEST
+    // (archived channel), RATE_LIMITED, ALREADY_JOINED, and INTERNAL (token
+    // mint failure) — every one of those used to fall through to the
+    // catch-all with no rollback, leaving voiceStatus stuck at "joining"
+    // forever (setVoiceStatus("idle") only ever runs inside
+    // LiveKitSession.leaveVoice(), and a refused first-time join gets no
+    // voice_leave to trigger it).
+    it("rolls back the optimistic join on a voice_join refusal other than CHANNEL_FULL", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    it("rolls back the optimistic join on FORBIDDEN (revoked CONNECT_VOICE / blocked)", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
     });
   });
 

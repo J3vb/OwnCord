@@ -849,4 +849,55 @@ describe("VoiceWidget", () => {
 
     widget.destroy?.();
   });
+
+  // OC-0225: the Grant-Microphone retry's `.finally` used to hardcode
+  // `grantMicBtn.disabled = false`, undoing updateFrozen's socket-down
+  // freeze if the WS socket dropped while the permission request was in
+  // flight.
+  it("keeps 'Grant Microphone' frozen if the WS socket drops while a mic request is in flight", async () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
+
+    let resolveMic: () => void = () => {};
+    mockRetryMicPermission.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveMic = resolve;
+        }),
+    );
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
+    grantBtn.click();
+    expect(grantBtn.disabled).toBe(true);
+
+    // WS socket drops while the permission request (OS/browser prompt) is
+    // still pending.
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+    expect(grantBtn.disabled).toBe(true);
+    expect(grantBtn.title).toBe("Reconnecting…");
+
+    // Permission request settles (retryMicPermission always resolves, even
+    // on a denied prompt, per its internal try/catch).
+    resolveMic();
+    await vi.waitFor(() => {
+      expect(grantBtn.textContent).toBe("Grant Microphone");
+    });
+
+    // The socket is still down: the button must stay frozen with the
+    // reconnecting reason, not silently re-enabled.
+    expect(grantBtn.disabled).toBe(true);
+    expect(grantBtn.title).toBe("Reconnecting…");
+
+    widget.destroy?.();
+  });
 });

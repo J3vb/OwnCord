@@ -296,6 +296,16 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
 
+// refreshChannelVisibilityRaceHook, when non-nil, runs once per connected
+// user after RefreshChannelVisibility resolves that user's visibility for ch
+// but before it re-resolves and acts on the live client. Test-only (always
+// nil in production): the window it pins spans one or two DB round trips per
+// client (the permission lookup below), too fast to land a real reconnect
+// goroutine inside reliably, so tests use this hook to reproduce a reconnect
+// racing in at exactly that point deterministically. Mirrors the established
+// voiceJoinPostTokenRaceHook / cleanupVoiceRaceClearHook pattern.
+var refreshChannelVisibilityRaceHook func(userID int64)
+
 // RefreshChannelVisibility re-evaluates which connected clients may see ch
 // after a channel_overrides change and sends targeted channel_create /
 // channel_delete messages so sidebars converge without a reconnect. Clients
@@ -310,6 +320,19 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	if ch == nil {
 		return
 	}
+
+	// Bump the watermark immediately, before the h.clients snapshot below and
+	// the (potentially slow — up to two DB round trips per connected client)
+	// fan-out loop that follows it. A reconnect handshake re-checks this
+	// watermark right before it registers (OC-0206); bumping only at the end,
+	// after the loop, left a window where that re-check could still observe
+	// the pre-change value even though this function's snapshot — taken next
+	// — will never include a client that registers mid-loop. Ratcheted
+	// upward only (see bumpVisibilityWatermark), so this is a no-op whenever
+	// a concurrent writer already pushed the watermark higher; the trailing
+	// bump below still runs and covers any change to h.seq made during the
+	// loop itself.
+	h.bumpVisibilityWatermark()
 
 	h.mu.RLock()
 	clients := make([]*Client, 0, len(h.clients))
@@ -401,21 +424,42 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			}
 			visible = userVisible(fresh.ID, fresh.RoleID)
 		}
+
+		if refreshChannelVisibilityRaceHook != nil {
+			refreshChannelVisibilityRaceHook(c.user.ID)
+		}
+
+		// Re-resolve the live client immediately before acting: the permission
+		// lookups above (a PermissionService call, or two DB round trips in the
+		// bare-hub branch) give a reconnect room to replace this user's *Client
+		// in h.clients with a new connection under the same user ID. Acting on
+		// the stale snapshot pointer c would target a dead socket, and
+		// Unsubscribe would be a no-op — unsubscribeLocked's identity guard
+		// leaves a topic alone when the current holder differs from the client
+		// passed in — stranding the replacement with a subscription (or a
+		// missing one) exactly inverted from what this fan-out just decided.
+		// A nil result means the user disconnected entirely since the
+		// snapshot; nothing to act on.
+		live := h.GetClient(c.user.ID)
+		if live == nil {
+			continue
+		}
+
 		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
 			// Addressed per client so it can carry this recipient's own
 			// can_send verdict — the whole point of this fan-out is that a
 			// permission change just made those verdicts diverge.
-			c.sendMsg(buildChannelCreateFor(ch, userCanSend(c.user.ID, c.user.RoleID)))
+			live.sendMsg(buildChannelCreateFor(ch, userCanSend(c.user.ID, c.user.RoleID)))
 			continue
 		}
-		c.sendMsg(buildChannelDelete(ch.ID))
-		h.pubsub.Unsubscribe(c, ChannelTopic(ch.ID))
-		c.mu.Lock()
-		if c.channelID == ch.ID {
-			c.channelID = 0
+		live.sendMsg(buildChannelDelete(ch.ID))
+		h.pubsub.Unsubscribe(live, ChannelTopic(ch.ID))
+		live.mu.Lock()
+		if live.channelID == ch.ID {
+			live.channelID = 0
 		}
-		c.mu.Unlock()
+		live.mu.Unlock()
 	}
 
 	// Clients not connected right now missed the targeted sends above. Move
@@ -523,7 +567,14 @@ func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *strin
 		h.BroadcastToAll(buildPresenceMsg(userID, status, customStatus))
 		return
 	}
-	h.broadcastExcludeLow(0, userID, buildPresenceMsg(userID, public, customStatus))
+	// The public frame's status already collapsed to db.BroadcastStatus, but
+	// customStatus does not: passing it through verbatim would tell every
+	// other client an "offline" member's real free-text status, which is a
+	// tell that they are actually online. Blank it explicitly (not omitted —
+	// presencePayload.CustomStatus has no omitempty) so the client clears any
+	// cached text, matching what db.MemberSummary.ForViewer already does for
+	// the ready payload's member list.
+	h.broadcastExcludeLow(0, userID, buildPresenceMsg(userID, public, nil))
 	h.SendToUser(userID, buildPresenceMsg(userID, status, customStatus))
 }
 
@@ -557,6 +608,14 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	// it must cover the early returns too: a user who is offline, or whose
 	// socket is closed below, converges via the full-ready path.
 	defer h.bumpVisibilityWatermark()
+
+	// Also bump immediately, before the h.clients lookup below and the
+	// per-topic DB loop (a GetChannel round trip per revoked topic) that
+	// follows it — see RefreshChannelVisibility's matching early bump and
+	// OC-0206. Ratcheted upward only, so this is a no-op whenever a
+	// concurrent writer already pushed the watermark higher; the deferred
+	// bump above still covers every return path, including the early ones.
+	h.bumpVisibilityWatermark()
 
 	if h.db == nil {
 		return
