@@ -117,7 +117,8 @@ phase('Fix')
 
 function fixPrompt(cluster) {
   return (
-    `You are fixing confirmed bugs in ONE file of the OwnCord repo (D:/Local-Lab/Repos/OwnCord).\n` +
+    `You are fixing confirmed bugs in ONE file of the OwnCord repo (checked out at your current working ` +
+    `directory - do not assume any absolute path; use repo-relative paths).\n` +
     `Your file: ${cluster.file}\n\n` +
     `You own this CLUSTER for this run: no other agent has this file as its cluster, so fix ALL of the ` +
     `findings below together rather than one at a time. But cluster fixes may share a file (rule 4 cuts ` +
@@ -291,7 +292,7 @@ const PROVE_RESULT = {
 function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
   return (
     `You are proving and committing ONE cluster of fixes in the OwnCord repo ` +
-    `(D:/Local-Lab/Repos/OwnCord), on branch ${BRANCH}.\n\n` +
+    `(checked out at your current working directory - do not assume any absolute path), on branch ${BRANCH}.\n\n` +
     `Source file(s): ${sourcePaths.join(', ')}\n` +
     `Findings fixed here: ${fixedIds.join(', ')}\n` +
     `Test files written: ${testPaths.join(', ') || '(none reported)'}\n\n` +

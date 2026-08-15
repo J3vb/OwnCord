@@ -86,7 +86,8 @@ const VERDICTS = {
 
 // ---------- rules ----------
 const RULES = `
-Repo: OwnCord, at D:/Local-Lab/Repos/OwnCord. Go 1.26 server in Server/, Tauri v2 client in Client/tauri-client/
+Repo: OwnCord, checked out at your current working directory (the repo root - do not assume any absolute
+path; run every command from there and use repo-relative paths). Go 1.26 server in Server/, Tauri v2 client in Client/tauri-client/
 (Rust in src-tauri/src/, TypeScript in src/lib/ and src/stores/).
 
 You are hunting REAL BUGS: wrong behavior, not style. In scope:
@@ -450,7 +451,7 @@ const recon = await parallel([
   () =>
     agent(
       `${RULES}\n\nRECON TASK (mechanical, do not hunt bugs yourself):\n` +
-        `Run: git -C D:/Local-Lab/Repos/OwnCord log --since="8 weeks ago" --name-only --pretty=format: -- Server Client\n` +
+        `Run, from the repo root: git log --since="8 weeks ago" --name-only --pretty=format: -- Server Client\n` +
         `Count how often each non-test source file changed. Return the 25 most-churned files with their counts, ` +
         `plus any file that changed in more than 6 distinct commits. High churn = where bugs concentrate.\n` +
         `Return plain text: one "path  count" per line, most-churned first. No commentary.`,
