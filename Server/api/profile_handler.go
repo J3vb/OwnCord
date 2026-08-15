@@ -560,7 +560,7 @@ func handleUploadAvatar(
 		if saveErr != nil {
 			slog.Warn("avatar upload rejected by storage", "error", saveErr)
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: fmt.Sprintf("upload rejected: %s", saveErr),
+				Error: "BAD_REQUEST", Message: safeStorageErrorMessage(saveErr),
 			})
 			return
 		}
