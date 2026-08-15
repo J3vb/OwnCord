@@ -136,3 +136,45 @@ describe("createUpdateNotifier download progress", () => {
     expect(unhandled).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Deferred check timer lifecycle
+// ---------------------------------------------------------------------------
+
+describe("createUpdateNotifier deferred check timer", () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    host.remove();
+  });
+
+  it("does not check for updates when destroyed before the delayed check fires", async () => {
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+
+    // Page swap / logout tears the component down inside the 3s window.
+    notifier.destroy?.();
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(mockCheckForUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still checks for updates when the component stays mounted", async () => {
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://s.example");
+    notifier.destroy?.();
+  });
+});
