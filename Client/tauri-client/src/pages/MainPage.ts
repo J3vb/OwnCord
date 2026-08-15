@@ -619,7 +619,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
         if (payload.user_id === ringing.fromUserId) {
-          ringCtrl?.cancel(ringing.channelId);
+          ringCtrl?.cancel(payload.channel_id);
         }
       }),
     );
