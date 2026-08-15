@@ -114,7 +114,11 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				hub.BroadcastServerRestart("update", 5)
 			}
 			time.Sleep(5 * time.Second)
-			applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash)
+			if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+				// Every deferred cleanup inside applyStagedUpdate has run by
+				// now, which is why the exit lives out here.
+				os.Exit(0) // fallback if the SIGTERM handler didn't exit
+			}
 		}()
 	})
 }
@@ -130,7 +134,12 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 // one guard instead of one broadcast per failure branch; it is cancelled by
 // setting restarting=true immediately before the process commits to
 // respawning.
-func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
+// It reports whether the process is committed to exiting for the replacement.
+// The exit itself belongs to the caller: calling os.Exit here would skip both
+// deferred cleanups below (the staged-file handle and the corrective
+// broadcast), and on Windows releasing that handle is the very thing the
+// restart is for.
+func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) bool {
 	restarting := false
 	defer func() {
 		if !restarting && hub != nil {
@@ -145,7 +154,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 	staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
 	if err != nil {
 		slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
-		return
+		return false
 	}
 	defer staged.Close() //nolint:errcheck
 
@@ -153,7 +162,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 	_ = os.Remove(oldPath) // remove any stale .old
 	if err := os.Rename(exePath, oldPath); err != nil {
 		slog.Error("update: rename current to old failed", "error", err)
-		return
+		return false
 	}
 	if err := staged.Commit(exePath); err != nil {
 		slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
@@ -164,13 +173,13 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 				"restore_error", restoreErr, "original_error", err,
 				"old_path", oldPath, "exe_path", exePath)
 		}
-		return
+		return false
 	}
 
 	// Spawn new process.
 	if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
 		slog.Error("update: spawn new process failed", "error", err)
-		return
+		return false
 	}
 
 	// The replacement process is spawned: from here on this process is
@@ -189,5 +198,5 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 		// Give graceful shutdown a few seconds before force-killing.
 		time.Sleep(10 * time.Second)
 	}
-	os.Exit(0) // fallback if SIGTERM handler didn't exit
+	return true
 }

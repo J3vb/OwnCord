@@ -149,7 +149,10 @@ describe("settings/helpers", () => {
       const lightOnlyKeys = Object.keys(THEMES.light).filter((k) => !(k in THEMES.dark));
       expect(lightOnlyKeys.length).toBeGreaterThan(0);
       for (const key of lightOnlyKeys) {
-        expect(root.style.getPropertyValue(key), `${key} must be cleared after switching to dark`).toBe("");
+        expect(
+          root.style.getPropertyValue(key),
+          `${key} must be cleared after switching to dark`,
+        ).toBe("");
       }
     });
 

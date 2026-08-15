@@ -25,9 +25,10 @@ function setAuthState(user: { username: string } | null, isAuthenticated: boolea
 
 /** A ws plus a real (unconsumed) presence sender bound to it — what
  *  SidebarArea actually threads into UserBar in production. */
-function userBarOptsWithPresence(
-  ws: WsClient,
-): { ws: WsClient; presenceSender: ReturnType<typeof createPresenceSender> } {
+function userBarOptsWithPresence(ws: WsClient): {
+  ws: WsClient;
+  presenceSender: ReturnType<typeof createPresenceSender>;
+} {
   return { ws, presenceSender: createPresenceSender(ws, createPresenceLimiter()) };
 }
 

@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -935,7 +936,7 @@ func TestBackupToSafe_CleansUpPartialFileOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	for i := 0; i < 300000; i++ {
+	for i := range 300000 {
 		if _, err := stmt.Exec(i); err != nil {
 			t.Fatalf("insert bulk row %d: %v", i, err)
 		}
@@ -1000,7 +1001,7 @@ func TestBackupToSafe_DoesNotDeleteExistingFileOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(got) != string(want) {
+	if !bytes.Equal(got, want) {
 		t.Errorf("pre-existing backup file was modified: got %q, want %q", got, want)
 	}
 }
