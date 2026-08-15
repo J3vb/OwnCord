@@ -1138,10 +1138,10 @@ func TestVoice_Join_SwitchChannel_PreservesServerMute(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
 	drainChanTimeout(send, 30*time.Millisecond)
 
-	if err := database.SetVoiceServerMute(context.Background(), user.ID, true); err != nil {
+	if _, err := database.SetVoiceServerMute(context.Background(), user.ID, chanA, true); err != nil {
 		t.Fatalf("SetVoiceServerMute: %v", err)
 	}
-	if err := database.SetVoiceServerDeafen(context.Background(), user.ID, true); err != nil {
+	if _, err := database.SetVoiceServerDeafen(context.Background(), user.ID, chanA, true); err != nil {
 		t.Fatalf("SetVoiceServerDeafen: %v", err)
 	}
 

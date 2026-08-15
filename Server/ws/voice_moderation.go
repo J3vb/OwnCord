@@ -178,9 +178,17 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return *r
 	}
 
-	if err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), c.Muted()); err != nil {
+	matched, err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
+	if err != nil {
 		slog.Error("ws handleVoiceModMuteV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server mute"}}
+	}
+	if !matched {
+		// The target's row moved off state.ChannelID between requireTargetInChannel's
+		// snapshot and this write (OC-0005) -- same refusal requireTargetInChannel
+		// itself gives for the non-racing case, so the write never follows the
+		// target onto a channel (including a DM call) nobody authorized it against.
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 	if d.Mod != nil {
 		if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, c.Muted()); err != nil {
@@ -216,9 +224,17 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return *r
 	}
 
-	if err := d.DB.SetVoiceServerDeafen(ctx, c.TargetID(), c.Deafened()); err != nil {
+	deafenMatched, err := d.DB.SetVoiceServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	if err != nil {
 		slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen", "err", err, "target_id", c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
+	}
+	if !deafenMatched {
+		// The target's row moved off state.ChannelID between requireTargetInChannel's
+		// snapshot and this write (OC-0005) -- refuse exactly as requireTargetInChannel
+		// itself does for the non-racing case, before the implied mute below can
+		// touch a channel nobody authorized it against.
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 	// A server deafen implies a server mute at the SFU: a deafened user must
 	// not keep talking into a room they cannot hear. Lifting the deafen must
@@ -227,8 +243,11 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	// single bool with no way to tell "explicit" from "deafen-implied" apart,
 	// so an explicit-mute-then-deafen sequence has both lifted together by an
 	// undeafen — accepted as the simplest correct behavior given the schema.
-	if err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), c.Deafened()); err != nil {
-		slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+	muteMatched, err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	if err != nil || !muteMatched {
+		if err != nil {
+			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+		}
 		// The deafen write above already committed as its own statement (no
 		// transaction spans the two — a single UPDATE covering both columns
 		// needs a db-change; see cross_batch). Best-effort undo it rather
@@ -236,13 +255,17 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		// is not SFU-muted yet still refuses the target's own undeafen
 		// (refuseIfServerSilenced), for a deafen nobody was ever told about.
 		// Detached from ctx — the cancellation that most likely caused the
-		// failure above (the moderator's socket dropping mid-request) must
-		// not also abort the rollback.
-		if compErr := d.DB.SetVoiceServerDeafen(context.WithoutCancel(ctx), c.TargetID(), !c.Deafened()); compErr != nil {
+		// failure above (the moderator's socket dropping mid-request, or the
+		// target moving off state.ChannelID between the two writes) must not
+		// also abort the rollback.
+		if _, compErr := d.DB.SetVoiceServerDeafen(context.WithoutCancel(ctx), c.TargetID(), state.ChannelID, !c.Deafened()); compErr != nil {
 			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
 				"err", compErr, "target_id", c.TargetID())
 		}
-		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
+		if err != nil {
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
+		}
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 	if d.Mod != nil {
 		if err := d.Mod.MuteParticipant(ctx, state.ChannelID, c.TargetID(), state.JoinedAt, c.Deafened()); err != nil {

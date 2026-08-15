@@ -10,22 +10,37 @@ import (
 	"database/sql"
 )
 
-const applyVoiceServerDeafen = `-- name: ApplyVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ?
+const applyVoiceServerDeafen = `-- name: ApplyVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?
 `
 
-func (q *Queries) ApplyVoiceServerDeafen(ctx context.Context, userID int64) error {
-	_, err := q.db.ExecContext(ctx, applyVoiceServerDeafen, userID)
-	return err
+type ApplyVoiceServerDeafenParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
 }
 
-const applyVoiceServerMute = `-- name: ApplyVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ?
+func (q *Queries) ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, applyVoiceServerDeafen, arg.UserID, arg.ChannelID)
+}
+
+const applyVoiceServerMute = `-- name: ApplyVoiceServerMute :execresult
+
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?
 `
 
-func (q *Queries) ApplyVoiceServerMute(ctx context.Context, userID int64) error {
-	_, err := q.db.ExecContext(ctx, applyVoiceServerMute, userID)
-	return err
+type ApplyVoiceServerMuteParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+// Scoped to channel_id as well as user_id: the moderator's authorization is
+// checked against a channel snapshot several round trips before this write
+// lands, so an unscoped `WHERE user_id = ?` would follow the target onto
+// whatever channel their row points at by then -- including a DM call the
+// moderator was never authorized against (OC-0005). :execresult so the
+// caller can tell a real no-op (target moved) from a normal apply.
+func (q *Queries) ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, applyVoiceServerMute, arg.UserID, arg.ChannelID)
 }
 
 const clearAllVoiceStates = `-- name: ClearAllVoiceStates :exec
@@ -37,22 +52,30 @@ func (q *Queries) ClearAllVoiceStates(ctx context.Context) error {
 	return err
 }
 
-const clearVoiceServerDeafen = `-- name: ClearVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 0 WHERE user_id = ?
+const clearVoiceServerDeafen = `-- name: ClearVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?
 `
 
-func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, userID int64) error {
-	_, err := q.db.ExecContext(ctx, clearVoiceServerDeafen, userID)
-	return err
+type ClearVoiceServerDeafenParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
 }
 
-const clearVoiceServerMute = `-- name: ClearVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ?
+func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, clearVoiceServerDeafen, arg.UserID, arg.ChannelID)
+}
+
+const clearVoiceServerMute = `-- name: ClearVoiceServerMute :execresult
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?
 `
 
-func (q *Queries) ClearVoiceServerMute(ctx context.Context, userID int64) error {
-	_, err := q.db.ExecContext(ctx, clearVoiceServerMute, userID)
-	return err
+type ClearVoiceServerMuteParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+func (q *Queries) ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, clearVoiceServerMute, arg.UserID, arg.ChannelID)
 }
 
 const clearVoiceState = `-- name: ClearVoiceState :exec

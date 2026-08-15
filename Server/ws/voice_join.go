@@ -247,12 +247,12 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// fail the join, matching every other SetVoiceServerMute/Deafen call site.
 	if wasServerMuted || wasServerDeafened {
 		if wasServerMuted {
-			if err := h.db.SetVoiceServerMute(ctx, c.userID, true); err != nil {
+			if _, err := h.db.SetVoiceServerMute(ctx, c.userID, channelID, true); err != nil {
 				slog.Error("ws handleVoiceJoin SetVoiceServerMute (restore)", "err", err, "user_id", c.userID)
 			}
 		}
 		if wasServerDeafened {
-			if err := h.db.SetVoiceServerDeafen(ctx, c.userID, true); err != nil {
+			if _, err := h.db.SetVoiceServerDeafen(ctx, c.userID, channelID, true); err != nil {
 				slog.Error("ws handleVoiceJoin SetVoiceServerDeafen (restore)", "err", err, "user_id", c.userID)
 			}
 		}

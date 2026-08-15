@@ -13,14 +13,20 @@ import (
 type Querier interface {
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
-	ApplyVoiceServerDeafen(ctx context.Context, userID int64) error
-	ApplyVoiceServerMute(ctx context.Context, userID int64) error
+	ApplyVoiceServerDeafen(ctx context.Context, arg ApplyVoiceServerDeafenParams) (sql.Result, error)
+	// Scoped to channel_id as well as user_id: the moderator's authorization is
+	// checked against a channel snapshot several round trips before this write
+	// lands, so an unscoped `WHERE user_id = ?` would follow the target onto
+	// whatever channel their row points at by then -- including a DM call the
+	// moderator was never authorized against (OC-0005). :execresult so the
+	// caller can tell a real no-op (target moved) from a normal apply.
+	ApplyVoiceServerMute(ctx context.Context, arg ApplyVoiceServerMuteParams) (sql.Result, error)
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
 	ClearAllVoiceStates(ctx context.Context) error
-	ClearVoiceServerDeafen(ctx context.Context, userID int64) error
-	ClearVoiceServerMute(ctx context.Context, userID int64) error
+	ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error)
+	ClearVoiceServerMute(ctx context.Context, arg ClearVoiceServerMuteParams) (sql.Result, error)
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
 	CountActiveCameras(ctx context.Context, channelID int64) (int64, error)

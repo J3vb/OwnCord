@@ -74,17 +74,24 @@ UPDATE voice_states SET camera = ? WHERE user_id = ?;
 -- name: UpdateVoiceScreenshare :exec
 UPDATE voice_states SET screenshare = ? WHERE user_id = ?;
 
--- name: ApplyVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ?;
+-- Scoped to channel_id as well as user_id: the moderator's authorization is
+-- checked against a channel snapshot several round trips before this write
+-- lands, so an unscoped `WHERE user_id = ?` would follow the target onto
+-- whatever channel their row points at by then -- including a DM call the
+-- moderator was never authorized against (OC-0005). :execresult so the
+-- caller can tell a real no-op (target moved) from a normal apply.
 
--- name: ClearVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ?;
+-- name: ApplyVoiceServerMute :execresult
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?;
 
--- name: ApplyVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ?;
+-- name: ClearVoiceServerMute :execresult
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?;
 
--- name: ClearVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 0 WHERE user_id = ?;
+-- name: ApplyVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?;
+
+-- name: ClearVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?;
 
 -- name: EnableCameraIfUnderLimit :execresult
 UPDATE voice_states SET camera = 1
