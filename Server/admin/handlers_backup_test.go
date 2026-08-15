@@ -464,9 +464,13 @@ func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
 	if err := os.WriteFile(dbPath, []byte("original live contents"), 0o600); err != nil {
 		t.Fatalf("WriteFile live db: %v", err)
 	}
+	// A real SQLite backup — the restore handler verifies backups with
+	// integrity_check before touching the live database, so a text fixture
+	// would be (correctly) refused with 400 before the Close-failure branch
+	// under test is ever reached.
 	backupName := "chatserver_20240103_120000.db"
-	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte("replacement contents"), 0o644); err != nil {
-		t.Fatalf("WriteFile backup: %v", err)
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
 	}
 
 	restarted, restoreRestartHook := admin.StubRestart()
