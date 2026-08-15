@@ -1,7 +1,7 @@
 {
   "name": "owncord-client",
   "private": true,
-  "version": "1.2.0-alpha.2",
+  "version": "1.2.0-alpha.3",
   "type": "module",
   "scripts": {
     "dev": "vite",

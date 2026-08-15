@@ -5,6 +5,235 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## v1.2.0-alpha.3
+
+- **fix:** eight bug-hunt batches closed **199 verified defects** since
+  `v1.2.0-alpha.2` — 30 in #1366/#1367, 110 in #1369–#1372, 34 in #1374 and
+  25 in #1375 — each fixed test-first with the failing assertion watched red
+  against the unpatched code. The behavioural consequences worth knowing
+  about are listed below; the rest are one-line correctness fixes with no
+  operator-visible change.
+- **security(client): voice E2EE was never actually enabled** (#1370). The
+  full ECDH/HKDF/AES-GCM key exchange completed, the room key was set, and
+  the UI showed 🔒 Secured — but `createRoom` never called
+  `room.setE2EEEnabled(true)`, so every audio and video frame reached the
+  SFU in plaintext. It is enabled now, and a dead E2EE worker is no longer
+  invisible to the Secured badge. Related voice-crypto fixes: a joining key
+  holder sent its room-key offers *before* its own announce, so existing
+  participants dropped them as "unknown peer" (#1370, #1374); rotation
+  offers exceeded the server rate limit in large channels and permanently
+  starved the same peers; both rotation paths and the reconnect-to-Secured
+  path now carry session-generation guards; a departing peer's ephemeral
+  key is retired on leave so a replayed pre-leave announce cannot overwrite
+  the fresh key they rejoined with (#1372, #1374). The client also refreshed
+  its LiveKit token every 23 hours while the server mints it with a 5-minute
+  TTL, so auto-reconnect failed for any voice session older than five
+  minutes (#1370).
+- **security(server):** access-control holes (#1369–#1372, #1374, #1375) —
+  `voice_join` into a 1:1 DM had no block gate, so a blocked user could
+  enter the blocker's DM voice room; the attachment-serve admin bypass let
+  an ADMINISTRATOR download files from private DMs they were not in; the
+  archived-channel read-only gate covered `SendMessage` only, so edit,
+  reaction, pin, purge, delete and `channel_focus` still mutated or
+  subscribed to archived channels (every write sink now routes through one
+  `requireChannelWritable` gate); `EditMessage` and `handleReaction` DM
+  detection failed *open* on a `GetChannel` error, skipping the block gate;
+  group-DM creation only block-checked the creator, letting a third party
+  force two users who blocked each other into a shared room; an invisible
+  user's real custom status leaked on both presence emitters; `PATCH
+  /users/{id}` with `banned` + `role_id` committed and broadcast the ban
+  before authorizing the role change; admin API-token creation accepted a
+  negative `expires_hours` and minted a token that never expires; upload
+  rejections echoed raw storage errors (absolute server paths) to any
+  authenticated user; the GIF proxy's log redaction missed the
+  percent-encoded API key; `chat_command` was the only client message type
+  without a rate limiter while each frame ran a WASM plugin invocation; and
+  the login and typing rate limiters built their keys from *unvalidated*
+  input, letting an unauthenticated caller pin unbounded heap for six hours.
+- **fix(auth):** accounts whose username contains `'`, `"` or `&` were
+  permanently unloggable — registration HTML-escaped the name but login did
+  not — and a profile rename to such a name locked the user out (#1370). If
+  you had users hit this, they can log in again with no action on your side.
+  Also: message search returned 500 for any query containing a hyphen (the
+  one FTS5 operator the sanitizer allowlisted); usernames with an uppercase
+  non-ASCII letter could never be @mentioned; registration recorded the
+  reverse-proxy address as the session IP.
+- **server:** WS hub, reconnect and replay (#1369, #1371, #1372, #1374,
+  #1375) — REST DM events never bumped the visibility watermark, while
+  *every* ordinary DM message re-emitted `dm_channel_open` and bumped the
+  global watermark, forcing every other client's next reconnect into a full
+  resync; the client's `lastSeq` was never reset by a full-ready resync and
+  desynced permanently; cold-tier replay had no interior-gap detection, so
+  events the persister dropped were skipped and presented as a complete
+  resume; `buildReady` swallowed three DB errors and shipped an
+  authoritative-looking empty snapshot (the client wiped its DM list, member
+  list and unread badges) and dropped the user's own live voice room when
+  not READ-visible; `channel_focus` could re-subscribe after a concurrent
+  visibility revoke, and role demotion's live-subscription revocation was
+  gated on a cosmetic role re-read; a failed reconnect handshake ran the
+  full disconnect teardown twice; presence events from every source now
+  share one ordered per-client FIFO.
+- **server:** voice lifecycle (#1369, #1371, #1374) — a stale join's
+  rollback deleted `voice_states` by user id alone, destroying a concurrent
+  newer membership; deleting a voice channel raced a concurrent `voice_join`
+  into a permanent hub/SFU ghost no sweep could heal; the stale-state sweep
+  could delete a just-committed join's row, leaving the client in voice with
+  no DB row; `handleVoiceJoin` handed out a live 5-minute LiveKit credential
+  *after* a concurrent kick/move/revocation had already torn the membership
+  down (the token is now withheld); the `participant_left` webhook never
+  told the leaver, and a transient DB read error on `participant_joined`
+  ejected a legitimate participant mid-call; `voice_mod_move` lacked the
+  archived-channel gate; `CleanupVoiceForChannel` resolved an empty
+  `voice_leave` audience because both callers archive first. Camera and
+  screenshare now draw from the same per-channel `voice_max_video` budget —
+  screenshare had no cap check at all, and the camera gate did not count
+  screensharing occupants.
+- **server:** DM and message fan-out (#1369, #1371, #1372, #1375) — a DM
+  send, edit, delete or reaction survived a transient participant lookup
+  failure by silently dropping live fan-out to everyone including the
+  sender; emoji create/delete and group-DM creation tied their broadcasts to
+  the request context, so an aborted request committed the mutation and
+  skipped the event; slow mode consumed its cooldown token before content
+  validation, so a rejected send locked the composer for the full window; an
+  attachment-metadata read failure broadcast the message with no
+  attachments; `GET /channels/{id}/pins` had no LIMIT and failed permanently
+  past ~32k pins; pinning a soft-deleted message returned 500;
+  `LinkAttachmentsToMessage` no longer claims a user's live avatar as a
+  message attachment; `PATCH /channels/{id}` now rejects a blank name.
+- **server:** admin and plugins (#1369, #1370, #1372, #1375) — "Restore
+  backup" wrote to a hardcoded `data/chatserver.db`, so it silently no-oped
+  on any server with a configured `database.path`; the WAF inline engine
+  rejected every request body ≥ 1 MiB, breaking plugin install and large
+  avatar uploads when `waf_enabled` was on; self-account-deletion emitted no
+  `member_ban`, so every other client kept the deleted user; the admin live
+  log stream blanked every error attribute to `{}`; `CheckForUpdate` had no
+  in-flight dedupe and stampeded GitHub on cache expiry; a failed self-update
+  swap left every client counting down to a restart that never came (a
+  corrective `update_aborted` is now broadcast, and deferred cleanup runs
+  before the restart exits — on Windows that file-handle release is the
+  reason the restart exists). Plugin enable/re-install left
+  `plugins.enabled = 1` while the runtime instance was deactivated, and
+  uninstall reported success while the on-disk directory survived and
+  resurrected the plugin on the next start.
+- **fix(client):** voice reliability (#1366, #1367, #1370–#1372, #1374,
+  #1375) — a failed voice channel-switch left the user live in the call
+  (mic hot, audio flowing) with the voice UI hidden and no way to leave;
+  selecting the "Default" microphone (or losing the pinned one to a hot
+  unplug) never changed the capture device; a camera or screenshare disable
+  that completed while the enable's `publishTrack` was in flight left the
+  server and every peer believing it was on (`leaveVoice` and reconnect
+  teardown now bump the same generation guard); a `VIDEO_LIMIT` rollback
+  assumed the camera and tore down a working camera while leaving refused
+  screen tracks published — it now correlates by envelope id; auto-idle's
+  return-to-online `presence_update` was always swallowed by the 1-per-10s
+  limiter, so every user showed Idle to everyone else after their first idle
+  period; connection-quality degradation was never reported; a group-DM
+  decline silenced every other participant's ring and never reached the
+  caller.
+- **fix(client):** messaging and stores (#1366, #1367, #1369, #1372) —
+  re-opening a channel visited earlier in the session rendered a permanently
+  stale window (live broadcasts only cover the focused channel; the tail is
+  now refetched); the virtual scroll window never followed the scroll
+  position, so rows past the initial overscan rendered as blank space; a
+  scroll-up page past the 500-row cap deleted the user's pending/failed
+  rows, the only copy of their composed text; the scroll-to-bottom button
+  and "Jump to Present" pill scrolled out of view exactly when they became
+  visible; a user named exactly "System" had every message rendered as a
+  server notice with no moderation controls; DM permalinks failed until the
+  DM had been opened once; the reaction picker dropped the server's custom
+  emoji; Ctrl+K was dead with CapsLock on; the composer's slow-mode cooldown
+  was applied to whichever channel was mounted, not the one that sent.
+- **fix(client):** settings, session and platform (#1367, #1370–#1372,
+  #1375) — the built-in light theme overrode only 4 of ~45 tokens (composer
+  and inputs near-invisible), the Font Size slider and High Contrast toggle
+  were no-ops, and the tray Status menu bypassed the client's own status
+  state so a tray-set Do Not Disturb silenced nothing; a failed TOTP verify
+  tore down the overlay so the code could not be re-entered; channel
+  create/edit/delete modals locked up permanently on an API failure; login
+  to an IPv6-literal host was impossible; a host stored with an explicit
+  `:443` lost its bearer token and cert-pinned proxy on attachment fetches;
+  one malformed stored server profile discarded *all* saved profiles; a
+  banned/revoked token reconnected forever if the session ended before
+  MainPage mounted; a previous server's block list, collapsed categories and
+  DM notes bled into the next server; the Rust HTTP proxy tunnel's data
+  phase had no deadline, so a remote that completed TLS then went silent
+  parked the connection forever (bounded at 600s — loose on purpose, this
+  path carries uploads); the autostart toggle raced its own write.
+- **infra:** observability, backups, guardrails and deployment hardening
+  (#1376). **`/health` now returns a real verdict** — hub dispatch-loop
+  liveness, a bounded DB ping and a free-disk check, answering **503 with a
+  subsystem reason** (`hub`, `database`, `disk`) when degraded; results are
+  cached so the unauthenticated endpoint cannot amplify load. Point uptime
+  monitors at it and treat any 503 as actionable. **The hub's panic breaker
+  now exits the process** so a supervisor can restart it, instead of leaving
+  broadcast delivery silently dead while clients still appear online — if
+  you run the bare binary without a supervisor, use the new hardened
+  `deploy/owncord.service` systemd unit (see "Running as a Linux Service").
+  **Backups now actually run:** `backup_schedule` and `backup_retention`
+  had existed in the admin panel since the initial schema but were never
+  read by any code; the 15-minute maintenance loop now enforces them,
+  verifies each backup with `PRAGMA integrity_check` (and again before a
+  restore may overwrite the live DB), and prunes by age keeping the newest.
+  Expect backup files to start appearing and pruning for the first time.
+  `/api/v1/metrics` gains reconnect-tier, backpressure, DB-writer-wait,
+  permission-cache, `ws_conn_rejects` and `disk_free_mb` signals, and the
+  declared-but-never-recorded OTel instruments are wired. Upload storage
+  failures return **507** instead of blaming the client with a 400. A
+  single-process lock beside the SQLite file makes a second server process
+  fail fast instead of silently fighting the first. **Unknown config keys
+  now warn at startup** (a typo previously kept the default silently), and
+  startup warns when `admin_allowed_cidrs` is customized while
+  `trusted_proxies` is empty. Shutdown now joins the pruner and maintenance
+  loop before the DB closes, drains HTTP handlers into a live hub, and skips
+  the 5s client-notice window when nobody is connected. Write-path work:
+  no-op read-state UPSERTs are skipped, boot-time `ANALYZE` runs only when a
+  migration applied, role-scoped override changes evict only that role's
+  members from the permission cache, and connect/disconnect presence passes
+  through a 300ms latest-wins coalescer (wire format and seq ordering
+  unchanged).
+- **config:** new keys, all defaulting to current behaviour (#1376) —
+  `server.max_ws_connections` (0 = unlimited; over the cap answers 503 +
+  Retry-After), `server.metrics_allowed_cidrs` and
+  `server.livekit_webhook_allowed_cidrs` (both fall back to
+  `admin_allowed_cidrs`, so a central Prometheus scraper or an
+  externally-hosted LiveKit no longer requires widening the admin
+  perimeter), `database.max_readers` (0 = auto), `backup.dir`
+  (`data/backups`), `security.auth_rate_limit_multiplier` (1.0; raise for
+  shared-NAT communities), `event_persistence.replay_ring_size` (1000) and
+  `event_persistence.replay_cold_limit` (5000 — watch `reconnect_tier_full`
+  before raising). Three stored-but-inert admin settings (`server_icon`,
+  `max_upload_bytes`, `voice_quality`) are now shown read-only with a
+  pointer at the real `config.yaml` keys instead of pretending to apply.
+  Documented in `docs/server-configuration.md`.
+- **deploy:** new `chatserver healthcheck` subcommand probes `/health`
+  pinning the server's own certificate from disk (WebPKI when none exists,
+  i.e. ACME) and is now the docker-compose healthcheck — the distroless
+  image has no shell; plain `docker compose` only *surfaces* unhealthy, pair
+  it with a watchdog for auto-restart. Compose gains json-file log rotation
+  (`10m` × 3) on both services. `release.yml` now cold-boots the freshly
+  built server binaries and Docker image and probes them healthy **before
+  anything is signed or pushed** — the release feed drives signed
+  self-updates, so a binary that compiled but died on boot would previously
+  have shipped itself to every auto-updating instance. New "Reverse Proxy
+  Topology" docs section (nginx snippet; only WebRTC media ports need to be
+  directly reachable, `/livekit/*` is already proxied). Release binaries
+  are built with Go 1.26.6 (stdlib CVE fixes flagged by govulncheck).
+- **migrations:** **031** normalizes legacy `sessions.expires_at` values to
+  RFC3339-UTC and adds `idx_sessions_expires_at`, so the 15-minute expired-
+  session sweep is an index lookup instead of a full-table scan on the
+  writer. Applies automatically on first start; no operator action needed.
+- **protocol:** no wire changes — `docs/protocol-schema.json`,
+  `message_types.go` and `protocolTypes.ts` are byte-identical to
+  `v1.2.0-alpha.2`. Older clients and servers interoperate unchanged.
+- **fix(ws):** the LiveKit health check shared the process-wide
+  `http.DefaultTransport` pool with every other user in the server; it now
+  owns a private transport (#1356).
+- **chore:** bug-hunt tooling under `.claude/` (fix pipeline, findings
+  ledger, circuit breaker, single-finder hunt with graph-fed targeting —
+  #1361–#1365, #1373); dependency bumps (OTel 1.45.0, koanf, sqlite,
+  eslint/oxlint/knip/typescript-eslint, tauri-plugin-updater, GitHub
+  Actions; #1353–#1360). No runtime impact.
+
 ## v1.2.0-alpha.2
 
 - **feat(client):** the login form has an **Auto connect** checkbox under
