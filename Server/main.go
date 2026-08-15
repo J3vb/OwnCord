@@ -70,8 +70,13 @@ func main() {
 func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) error {
 	// bgCtx is a cancellable context shared by all background goroutines
 	// (event persister, event pruner, plugin loader, maintenance loop).
-	// It is cancelled early in the shutdown sequence so in-flight DB
-	// operations do not block after the database is being torn down.
+	//
+	// This first deferred bgCancel is only the LIFO backstop — because it is
+	// registered before `defer database.Close()`, it would otherwise run
+	// AFTER the database is closed, leaving background goroutines running
+	// through teardown. The persistence and maintenance blocks below register
+	// their own later (= earlier-running) defers that cancel bgCtx and JOIN
+	// their goroutines before the database closes.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
@@ -250,11 +255,21 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 
 		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
 		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
-		ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
+		prunerDone := ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
 		defer func() {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stopCancel()
 			persister.Stop(stopCtx)
+			// Cancel the shared background context and JOIN the pruner before
+			// the (LIFO-later) database.Close defer runs, so no prune is still
+			// mid-query against a closing pool. Bounded: a stuck prune delays
+			// shutdown by at most the timeout, then Close proceeds anyway.
+			bgCancel()
+			select {
+			case <-prunerDone:
+			case <-stopCtx.Done():
+				log.Warn("event pruner did not exit before shutdown timeout")
+			}
 		}()
 	}
 
@@ -313,8 +328,21 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 
 	stopMaintenance := make(chan struct{})
-	defer close(stopMaintenance) // backstop for early returns below; see hub.GracefulStop defer above
+	maintenanceDone := make(chan struct{})
+	defer func() {
+		// Backstop for early returns below (see hub.GracefulStop defer above),
+		// and a bounded join so an in-flight tick (which can hold the writer —
+		// scheduled backups run VACUUM INTO) isn't still using the database
+		// while the LIFO-later Close defer tears it down.
+		close(stopMaintenance)
+		select {
+		case <-maintenanceDone:
+		case <-time.After(5 * time.Second):
+			log.Warn("maintenance loop did not exit before shutdown timeout")
+		}
+	}()
 	go func() {
+		defer close(maintenanceDone)
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 		consecutiveFailures := 0
@@ -430,12 +458,22 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		}
 	}
 
-	// Stop the WebSocket hub: close all PeerConnections, voice rooms, and
-	// notify connected clients before draining HTTP connections.
-	hub.GracefulStop()
+	// Drain in-flight HTTP handlers FIRST: their broadcasts must still reach
+	// a live hub (and the event persister) or the frames vanish from the
+	// replay/event store across the restart. Shutdown does not wait on
+	// hijacked WebSocket connections, so the hub's own stop below is not
+	// delayed by connected clients — they get the restart notice right after
+	// the drain instead of right before it.
+	shutdownErr := srv.Shutdown(shutdownCtx)
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	// Stop the WebSocket hub: notify clients, stop LiveKit, close all client
+	// connections. Threaded with the same 30s budget the operator was told
+	// about — the notice sleep and LiveKit stop count against it rather than
+	// extending it.
+	hub.GracefulStopContext(shutdownCtx)
+
+	if shutdownErr != nil {
+		return fmt.Errorf("graceful shutdown: %w", shutdownErr)
 	}
 
 	log.Info("server stopped cleanly")

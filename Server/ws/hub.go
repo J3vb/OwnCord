@@ -341,19 +341,40 @@ func (h *Hub) Stop() {
 }
 
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
-// Safe to call multiple times concurrently.
+// Safe to call multiple times concurrently. Prefer GracefulStopContext where a
+// shutdown budget exists — this variant waits the full client-notice window.
 func (h *Hub) GracefulStop() {
+	h.GracefulStopContext(context.Background())
+}
+
+// GracefulStopContext is GracefulStop bounded by ctx: the client-notice wait
+// ends early when ctx expires, so the hub's drain counts against the caller's
+// shutdown budget instead of extending it. Safe to call multiple times
+// concurrently (only the first call's ctx is used).
+func (h *Hub) GracefulStopContext(ctx context.Context) {
 	h.gracefulOnce.Do(func() {
-		// Broadcast restart notice to all connected clients.
-		h.BroadcastServerRestart("shutdown", 5)
+		// The notice window matters only when someone is connected to hear
+		// it — an idle server (and every early-return startup path) skips
+		// straight to teardown.
+		hasClients := h.ClientCount() > 0
+		if hasClients {
+			// Broadcast restart notice to all connected clients.
+			h.BroadcastServerRestart("shutdown", 5)
+		}
 
 		// Stop LiveKit process.
 		if h.lkProcess != nil {
 			h.lkProcess.Stop()
 		}
 
-		// Give clients 5 seconds to disconnect gracefully.
-		time.Sleep(5 * time.Second)
+		// Give clients the promised notice window to disconnect gracefully —
+		// the 5s matches the countdown BroadcastServerRestart told them.
+		if hasClients {
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+			}
+		}
 
 		// Close all remaining client connections.
 		h.mu.Lock()
