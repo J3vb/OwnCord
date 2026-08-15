@@ -10,6 +10,13 @@ const mockVoiceState = vi.hoisted(() => ({
   localCamera: false,
   localScreenshare: false,
   pttGated: false,
+  // OC-0009: the real store's currentChannelId is set by joinVoiceChannel()
+  // before the voice_join/voice_token round trip that produces the token a
+  // test then hands to handleVoiceToken — default it to the channel id used
+  // by the overwhelming majority of existing calls (1) so those tests don't
+  // each need to restate it; tests that exercise a different channel (or the
+  // "already left" guard itself) set this explicitly.
+  currentChannelId: 1 as number | null,
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -318,6 +325,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localCamera = false;
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
+    mockVoiceState.currentChannelId = 1;
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -1013,7 +1021,9 @@ describe("LiveKitSession", () => {
 
       // The user switches to channel 2, which already has a lower-uid
       // participant — the server elects someone else and sends
-      // is_key_holder=false.
+      // is_key_holder=false. joinVoiceChannel(2) always runs before this
+      // token's round trip in the real app (OC-0009's guard reads it back).
+      mockVoiceState.currentChannelId = 2;
       const joinPromise = session.handleVoiceToken(
         "token-2",
         "/livekit",
@@ -1574,6 +1584,7 @@ describe("LiveKitSession", () => {
     it("sets currentChannelId to null after leave", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
+      mockVoiceState.currentChannelId = 5;
       await session.handleVoiceToken("tok", "/lk", 5, "ws://localhost:7880", true);
 
       expect((session as any)._state.channelId).toBe(5);
@@ -1947,6 +1958,7 @@ describe("LiveKitSession", () => {
       session.setOnError(errorCb);
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
+      mockVoiceState.currentChannelId = 7;
 
       await session.handleVoiceToken("tok", "/lk", 7, "ws://localhost:7880", true);
       vi.clearAllMocks();
@@ -3497,6 +3509,276 @@ describe("LiveKitSession", () => {
       // Drain ran through the verifying path → substituted key rejected.
       expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
       expect(offerSends(ws)).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // bughunt-fix wave 2: OC-0001, OC-0006, OC-0009, OC-0010, OC-0015, OC-0029
+  // -----------------------------------------------------------------------
+
+  describe("[OC-0001] pending-join drain re-enters connectAndSetup without E2EE teardown", () => {
+    it("does not carry a stale key-holder promotion into a join drained while still 'connecting'", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      // Channel A: connect() stalls so we can queue a join for channel B
+      // before A's attempt reaches its own supersession checkpoint.
+      const connectA = createDeferred<void>();
+      mockRoom.connect
+        .mockImplementationOnce(() => connectA.promise)
+        .mockResolvedValueOnce(undefined);
+
+      const joinPromise = session.handleVoiceToken(
+        "token-a",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        true, // key holder for channel A
+      );
+      // Let E2EE key-exchange (key-holder path — no wait) and room.connect()
+      // start; A's attempt is now stalled inside room.connect().
+      await vi.advanceTimersByTimeAsync(0);
+      expect((session as any)._e2ee["_isKeyHolder"]).toBe(true);
+
+      // The user switches to channel B before A's connect() resolves. The
+      // server elects a different key holder for B.
+      mockVoiceState.currentChannelId = 2;
+      await session.handleVoiceToken("token-b", "/livekit", 2, "ws://localhost:7880", false);
+      expect((session as any)._state.type).toBe("connecting");
+      expect((session as any)._state.pendingJoin?.channelId).toBe(2);
+
+      // Observe _isKeyHolder at the exact moment channel B's own key exchange
+      // begins — before any later leaveVoice()/timeout path could mask a
+      // residual value left over from A by resetting it via a different route.
+      let isKeyHolderAtBStart: boolean | undefined;
+      const keyExchangeSpy = vi
+        .spyOn((session as any)._e2ee, "setupKeyExchange")
+        .mockImplementation(async () => {
+          isKeyHolderAtBStart = (session as any)._e2ee["_isKeyHolder"];
+          return true; // fast-path: pretend the room key is already available
+        });
+
+      // A's connect() now resolves — connectAndSetup(A) discards its own
+      // room in favor of the queued B join (the queuedJoin branch) and
+      // returns false, leaving state "connecting" with pendingJoin=B intact
+      // so handleVoiceToken's drain loop runs it next.
+      connectA.resolve(undefined);
+      await joinPromise;
+
+      // The residual key-holder promotion from channel A must not have
+      // leaked into channel B's own (correctly non-holder) election.
+      expect(isKeyHolderAtBStart).toBe(false);
+
+      keyExchangeSpy.mockRestore();
+    });
+  });
+
+  describe("[OC-0006] connectAndSetup supersession checkpoints re-sync module room wiring", () => {
+    it("unwires DeviceManager/AudioPipeline/AudioElements when checkpoint 1 fires after a concurrent leaveVoice that landed during room creation", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      // Stall createRoom()'s own `await newRoom.setE2EEEnabled(true)` — this
+      // is BEFORE connectAndSetup's module-wiring lines (which run right
+      // after createRoom() resolves) have executed at all.
+      const e2eeDeferred = createDeferred<void>();
+      mockRoom.setE2EEEnabled.mockImplementationOnce(() => e2eeDeferred.promise);
+
+      const resultPromise = (session as any).connectAndSetup(
+        "token-1",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        true,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      // A concurrent Disconnect click runs leaveVoice() here. `_room` reads
+      // null (state is "connecting", no room installed yet), so there is
+      // nothing to unwire — this only proves the leave itself ran cleanly.
+      session.leaveVoice(false);
+      expect((session as any)._deviceManager.room).toBeNull();
+
+      // createRoom() now resolves. connectAndSetup's module-wiring lines run
+      // UNCONDITIONALLY right after, re-wiring the modules to a room that
+      // state ("idle", from the leave above) says nobody wants any more.
+      // resolveLiveKitUrl resolves synchronously for a local host, so
+      // checkpoint 1 fires immediately after — it must detect the leave and
+      // leave the modules unwired rather than stranding them on a room that
+      // will never connect.
+      e2eeDeferred.resolve(undefined);
+      const result = await resultPromise;
+
+      expect(result).toBe("superseded");
+      expect((session as any)._deviceManager.room).toBeNull();
+    });
+  });
+
+  describe("[OC-0009] handleVoiceToken ignores a voice_token for a channel already left", () => {
+    it("does not connect when the token arrives after the user left before connectAndSetup ever started", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      // The user clicked Disconnect (leaveVoiceChannel nulls this) before the
+      // voice_join/voice_token round trip for the earlier join returned.
+      mockVoiceState.currentChannelId = null;
+
+      await session.handleVoiceToken("stale-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("does not connect when the token is for a channel the user has since switched away from", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockVoiceState.currentChannelId = 2;
+
+      await session.handleVoiceToken("stale-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("still connects when the token matches the channel the user currently wants", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockVoiceState.currentChannelId = 1;
+
+      await session.handleVoiceToken("fresh-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "fresh-token");
+      expect((session as any)._state.type).toBe("connected");
+    });
+  });
+
+  describe("[OC-0010] e2ee-timeout cleanup honors a queued pendingJoin", () => {
+    it("does not send voice_leave / leaveVoiceChannel and preserves the queued join when the key exchange times out with a join queued", async () => {
+      const ws = { send: vi.fn() };
+      session.setServerHost("localhost:7880");
+      session.setWsClient(ws as any);
+
+      // Force setupKeyExchange to report a genuine timeout while a newer
+      // join has ALREADY been queued — mirrors handleVoiceToken's queuing
+      // branch, which preserves this attempt's type/joinGeneration.
+      const keyExchangeSpy = vi
+        .spyOn((session as any)._e2ee, "setupKeyExchange")
+        .mockImplementation(async () => {
+          (session as any)._state = {
+            ...(session as any)._state,
+            pendingJoin: {
+              token: "token-b",
+              url: "/livekit-b",
+              channelId: 2,
+              directUrl: undefined,
+            },
+          };
+          return false;
+        });
+
+      const result = await (session as any).connectAndSetup(
+        "token-a",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+        false,
+      );
+
+      expect(result).toBe(false);
+      // Must NOT run the give-up cleanup — that would send a voice_leave
+      // that carries no channel id (acting on whichever channel the queued
+      // join is about to occupy) and would discard the queued join entirely.
+      expect(ws.send).not.toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      // The queued join must survive so handleVoiceToken's drain loop can run it.
+      expect((session as any)._state.type).toBe("connecting");
+      expect((session as any)._state.pendingJoin?.channelId).toBe(2);
+
+      keyExchangeSpy.mockRestore();
+    });
+  });
+
+  describe("[OC-0015] token refresh survives livekit-client's own internal reconnect", () => {
+    it("takes the refresh fast path when Room.state is mid-internal-reconnect instead of tearing down the session", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token-1", "/livekit", 1, "ws://localhost:7880", true);
+      expect((session as any)._state.type).toBe("connected");
+
+      // livekit-client's own internal reconnect (a signal-socket blip) —
+      // RoomEvent.Disconnected is NOT emitted for this, so `_state` stays
+      // "connected", but Room.state moves off "connected".
+      mockRoom.state = "signalReconnecting";
+      mockRoom.connect.mockClear();
+
+      const refreshSpy = vi.spyOn(session, "handleVoiceTokenRefresh");
+      await session.handleVoiceToken("token-2", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(refreshSpy).toHaveBeenCalledWith("token-2");
+      // Must NOT re-run the full teardown+rejoin — that would drop the E2EE
+      // session and could eject the user if no offer arrives in time.
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+
+      refreshSpy.mockRestore();
+    });
+  });
+
+  describe("[OC-0029] requestTokenRefresh throttles to the server's 1-per-60s budget", () => {
+    it("does not resend voice_token_refresh within 60s of the previous one", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      mockWs.send.mockClear();
+      (session as any).requestTokenRefresh();
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+
+      mockWs.send.mockClear();
+      // Mirrors OC-0029's repro: auto-reconnect's unconditional post-recovery
+      // refresh landing ~13s after the 4-minute timer's own refresh.
+      await vi.advanceTimersByTimeAsync(13_000);
+      (session as any).requestTokenRefresh();
+
+      expect(mockWs.send).not.toHaveBeenCalled();
+    });
+
+    it("allows a refresh again once the 60s budget window has passed", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      mockWs.send.mockClear();
+      (session as any).requestTokenRefresh();
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+
+      mockWs.send.mockClear();
+      await vi.advanceTimersByTimeAsync(60_100);
+      (session as any).requestTokenRefresh();
+
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+    });
+
+    it("does not throttle a fresh join shortly after leaveVoice resets the budget", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      session.setServerHost("localhost:7880");
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      (session as any).requestTokenRefresh();
+      session.leaveVoice(false);
+
+      mockVoiceState.currentChannelId = 1;
+      await session.handleVoiceToken("token-2", "/livekit", 1, "ws://localhost:7880", true);
+      mockWs.send.mockClear();
+
+      (session as any).requestTokenRefresh();
+
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
     });
   });
 });

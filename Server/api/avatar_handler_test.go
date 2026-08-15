@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -167,6 +168,47 @@ func TestUploadAvatar_RequiresAuthAndAFile(t *testing.T) {
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("wrong field status = %d, want 400", rr.Code)
+	}
+}
+
+// TestUploadAvatar_StorageErrorDoesNotLeakPath pins the same contract
+// upload_handler.go's safeStorageErrorMessage enforces for the plain-file
+// upload route: a storage.Save failure (disk full, permission change,
+// read-only mount) must never hand the client the server's absolute
+// storage path. handleUploadAvatar currently forwards saveErr verbatim.
+func TestUploadAvatar_StorageErrorDoesNotLeakPath(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildAvatarRouter(database, store)
+	token := uploadCreateToken(t, database, "avatar_leakuser", 4)
+
+	// Remove the storage directory out from under the already-constructed
+	// Storage so Save's os.Create fails — this is what a disk-full,
+	// permission-change, or read-only-mount failure looks like from the
+	// handler's point of view: a storage-layer error surfaces at Save time.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	rr := doAvatarUpload(t, router, token, "me.png", makePNGBytes(t, 32, 32))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	message, _ := resp["message"].(string)
+	if strings.Contains(message, dir) {
+		t.Fatalf("response message leaks the absolute storage path: %q", message)
+	}
+	if strings.ContainsAny(message, `/\`) {
+		t.Fatalf("response message looks like it contains a filesystem path: %q", message)
 	}
 }
 

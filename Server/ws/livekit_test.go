@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
@@ -177,6 +179,61 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 	if token == "" {
 		t.Fatal("expected non-empty token for subscribe-only")
+	}
+}
+
+// TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice locks OC-0016:
+// SPEAK_VOICE, USE_VIDEO and SHARE_SCREEN are independent permission bits
+// (EffectiveChannelPerms resolves each per-bit), so a channel override can
+// deny SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN — e.g. a
+// presentation channel where only video is wanted. handleVoiceCameraV2 and
+// handleVoiceScreenshareV2 gate only on USE_VIDEO/SHARE_SCREEN respectively,
+// so the LiveKit token must carry a matching per-source grant instead of a
+// blanket CanPublish=false that blocks every source, camera and screen share
+// included, once SPEAK_VOICE is denied.
+func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "test-key",
+		LiveKitAPISecret: "test-secret-that-is-long-enough-for-hmac",
+		LiveKitURL:       "ws://localhost:7880",
+	}
+
+	client, err := ws.NewLiveKitClient(cfg)
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+
+	// canPublish=false (SPEAK_VOICE denied), canVideo=true, canScreenShare=true.
+	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true, true)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	verifier, err := auth.ParseAPIToken(token)
+	if err != nil {
+		t.Fatalf("ParseAPIToken: %v", err)
+	}
+	_, grants, err := verifier.Verify(cfg.LiveKitAPISecret)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if grants.Video == nil {
+		t.Fatal("expected a video grant in the token")
+	}
+
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_CAMERA) {
+		t.Error("expected camera to be publishable when USE_VIDEO is granted, even though SPEAK_VOICE is denied")
+	}
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE) {
+		t.Error("expected screen_share to be publishable when SHARE_SCREEN is granted, even though SPEAK_VOICE is denied")
+	}
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE_AUDIO) {
+		t.Error("expected screen_share_audio to be publishable when SHARE_SCREEN is granted, even though SPEAK_VOICE is denied")
+	}
+	if grants.Video.GetCanPublishSource(livekit.TrackSource_MICROPHONE) {
+		t.Error("expected microphone NOT to be publishable when SPEAK_VOICE is denied")
 	}
 }
 
@@ -612,6 +669,63 @@ func TestWebhook_ParticipantLeft_LeaverWithoutReadStillNotified(t *testing.T) {
 
 	if got := countVoiceLeaves(leaverSend, 200*time.Millisecond); got == 0 {
 		t.Error("the leaver's own client, denied READ_MESSAGES on the voice channel, received no voice_leave after the LiveKit webhook tore down its own session")
+	}
+}
+
+// TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext locks OC-0018:
+// the webhook handler must not tie its teardown broadcast to the triggering
+// HTTP request's context. Every sibling teardown path detaches before doing
+// cleanup work (readPump's defer and unregisterFailedHandshake use
+// context.WithoutCancel in serve_pumps.go/serve.go, rollbackVoiceJoin uses it
+// in voice_join.go, the hub sweeps use context.Background in hub_sweep.go) —
+// the webhook handler alone passed r.Context() straight through. If the
+// webhook sender (LiveKit) hangs up mid-request, net/http cancels that
+// context; channelReadAudience's GetChannel call then fails and
+// channelReadAudience fails closed to []int64{} (hub_broadcast.go), silently
+// dropping any observer who has READ_MESSAGES on the channel but is not
+// currently in the room from the voice_leave audience. Unlike the DB row,
+// nothing ever re-emits that missed broadcast, so the observer's UI shows the
+// departed participant forever.
+func TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext(t *testing.T) {
+	t.Parallel()
+	hub, database := newVoiceHub(t)
+
+	chanID := seedVoiceChan(t, database, "webhook-ctxcancel-ch")
+
+	leaver := seedVoiceOwner(t, database, "webhook-ctxcancel-leaver")
+	observer := seedVoiceOwner(t, database, "webhook-ctxcancel-observer")
+
+	if err := database.JoinVoiceChannel(context.Background(), leaver.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vs, err := database.GetVoiceState(context.Background(), leaver.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
+	}
+
+	leaverSend := make(chan []byte, 16)
+	leaverClient := ws.NewTestClient(hub, leaver.ID, leaverSend)
+	ws.SetClientVoiceStateForTest(leaverClient, chanID, vs.JoinedAt)
+	hub.RegisterNowForTest(leaverClient)
+
+	// The observer has READ_MESSAGES on the channel (Owner role bypasses
+	// channel_overrides) but is not in the room — exactly the audience member
+	// channelReadAudience's role scan exists to reach, and the only one an
+	// empty-audience fail-close silently drops.
+	observerSend := make(chan []byte, 16)
+	observerClient := ws.NewTestClient(hub, observer.ID, observerSend)
+	hub.RegisterNowForTest(observerClient)
+
+	// Simulate net/http cancelling the request context because the webhook
+	// sender (LiveKit) hung up before the handler finished — exactly what
+	// r.Context() looks like by the time a slow cleanup path reads it.
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	hub.HandleWebhookParticipantLeftWithContextForTest(cancelledCtx, leaver.ID, chanID, vs.JoinedAt)
+
+	if got := countVoiceLeaves(observerSend, 200*time.Millisecond); got == 0 {
+		t.Error("observer with READ_MESSAGES but outside the room received no voice_leave when the webhook's request context was already cancelled — the teardown broadcast must detach from the triggering request context")
 	}
 }
 

@@ -542,6 +542,15 @@ export function createWsClient() {
     try {
       await tauriInvoke("ws_connect", { url: wsUrl });
     } catch (err) {
+      if (gen !== wsGeneration) {
+        // A disconnect() (or a newer connect()) landed while we were
+        // suspended on the Tauri IPC round trip — this rejection belongs to
+        // a superseded attempt (the Rust proxy deliberately rejects a
+        // handshake it displaced with "superseded by a newer connection").
+        // The newer attempt may already be connected; do not act on it.
+        log.debug("ws_connect rejection from superseded attempt, ignoring", err);
+        return;
+      }
       log.error("ws_connect failed", err);
       proxyOpen = false;
 

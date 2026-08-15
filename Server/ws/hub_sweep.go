@@ -218,6 +218,28 @@ func (h *Hub) sweepStaleVoiceStates() {
 	h.mu.RUnlock()
 
 	for _, s := range stale {
+		if sweepStaleVoiceJoinRaceHook != nil {
+			sweepStaleVoiceJoinRaceHook(s.userID, s.channelID, s.joinedAt)
+		}
+
+		// Re-check the live client immediately before deleting (OC-0017).
+		// voice_join.go commits the row before it calls c.setVoiceState
+		// (BUG-088's ordering), so a join can commit and get snapshotted as a
+		// ghost above — with c.setVoiceState landing after that snapshot but
+		// before this delete runs. If the client's current voice state now
+		// agrees with the row we are about to delete, the join has caught up
+		// and this is no longer stale: deleting it would leave the client
+		// "in voice" in memory with no DB row, the one ghost state nothing
+		// else heals.
+		h.mu.RLock()
+		liveClient, liveOK := h.clients[s.userID]
+		h.mu.RUnlock()
+		if liveOK {
+			if liveChID, liveJoinedAt := liveClient.getVoiceState(); liveChID == s.channelID && liveJoinedAt == s.joinedAt {
+				continue
+			}
+		}
+
 		// Channel-conditional delete: only removes the row if it still points
 		// at the channel we snapshotted. If the user rejoined or moved between
 		// the snapshot and now, the delete is a no-op and we skip the broadcast.
@@ -248,6 +270,18 @@ func (h *Hub) sweepStaleVoiceStates() {
 		}
 	}
 }
+
+// sweepStaleVoiceJoinRaceHook, when non-nil, runs once per stale entry,
+// immediately before sweepStaleVoiceStates acts on it. Test-only (always nil
+// in production): it pins the BUG-088 follow-on window (OC-0017) where a
+// voice_join's DB commit (voice_join.go's JoinVoiceChannelIfCapacity) and its
+// c.setVoiceState call are not atomic — a join can commit its row, get
+// snapshotted as a ghost by the h.clients scan above (the joiner's client
+// still shows voiceChID 0 at that instant), and only call c.setVoiceState
+// after the snapshot but before this loop deletes the row it just committed.
+// Too narrow a window to land reliably by staggering real goroutines, so
+// tests use this hook to reproduce it deterministically.
+var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 
 // hasChannelPermChecked is hasChannelPerm's error-aware counterpart: it
 // distinguishes a genuine permission denial (role missing, or the effective
@@ -350,7 +384,15 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// state is already cleared, so broadcastVoiceEvent's participant union
 	// cannot see them): the voice_leave is what drives their own E2EE
 	// teardown, and voice membership never required READ_MESSAGES.
-	audience := h.channelReadAudience(ctx, channelID)
+	//
+	// Both callers of CleanupVoiceForChannel commit archived=1 to this
+	// channel before evicting (OC-0022) — deliberately, so a concurrent
+	// voice_join sees the archived gate — which means plain
+	// channelReadAudience always finds the channel already archived and
+	// always returns nobody here. Use the ignoring-archived resolver so the
+	// bystanders who could see this channel and its voice roster a moment
+	// ago still learn the call ended, not just the evicted participants.
+	audience := h.channelReadAudienceIgnoringArchived(ctx, channelID)
 	seen := make(map[int64]struct{}, len(audience))
 	for _, uid := range audience {
 		seen[uid] = struct{}{}

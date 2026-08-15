@@ -74,22 +74,39 @@ UPDATE voice_states SET camera = ? WHERE user_id = ?;
 -- name: UpdateVoiceScreenshare :exec
 UPDATE voice_states SET screenshare = ? WHERE user_id = ?;
 
--- name: ApplyVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ?;
+-- Scoped to channel_id as well as user_id: the moderator's authorization is
+-- checked against a channel snapshot several round trips before this write
+-- lands, so an unscoped `WHERE user_id = ?` would follow the target onto
+-- whatever channel their row points at by then -- including a DM call the
+-- moderator was never authorized against (OC-0005). :execresult so the
+-- caller can tell a real no-op (target moved) from a normal apply.
 
--- name: ClearVoiceServerMute :exec
-UPDATE voice_states SET server_muted = 0 WHERE user_id = ?;
+-- name: ApplyVoiceServerMute :execresult
+UPDATE voice_states SET server_muted = 1, muted = 1 WHERE user_id = ? AND channel_id = ?;
 
--- name: ApplyVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ?;
+-- name: ClearVoiceServerMute :execresult
+UPDATE voice_states SET server_muted = 0 WHERE user_id = ? AND channel_id = ?;
 
--- name: ClearVoiceServerDeafen :exec
-UPDATE voice_states SET server_deafened = 0 WHERE user_id = ?;
+-- name: ApplyVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?;
+
+-- name: ClearVoiceServerDeafen :execresult
+UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?;
+
+-- Camera and screenshare share one voice_max_video budget: a channel capped
+-- at N simultaneous video streams must not let a camera publish ignore
+-- screenshare occupants (or vice versa), so both gates count the same
+-- `camera = 1 OR screenshare = 1` slot usage (OC-0023).
 
 -- name: EnableCameraIfUnderLimit :execresult
 UPDATE voice_states SET camera = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND vs2.camera = 1) < ?;
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?;
+
+-- name: EnableScreenshareIfUnderLimit :execresult
+UPDATE voice_states SET screenshare = 1
+WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
+  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?;
 
 -- name: ClearVoiceState :exec
 DELETE FROM voice_states WHERE user_id = ?;

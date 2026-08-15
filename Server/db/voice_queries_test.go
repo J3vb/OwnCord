@@ -768,3 +768,116 @@ func TestVoice_LeaveVoiceChannelIfMatch_DoesNotDeleteSameChannelRejoin(t *testin
 		t.Fatalf("replacement join token = %q, want %q", current.JoinedAt, second.JoinedAt)
 	}
 }
+
+// ─── SetVoiceServerMute / SetVoiceServerDeafen scoping (OC-0005) ────────────
+//
+// ApplyVoiceServerMute/ClearVoiceServerMute and their deafen equivalents
+// match on `WHERE user_id = ?` alone. A moderator's mute/deafen command is
+// authorized against a channel snapshot (voiceModTarget + requireTargetInChannel
+// in ws/voice_moderation.go), but the DB write that follows several round
+// trips later is not scoped to that channel: if the target's voice_states row
+// has since moved to a different channel — including a DM call the moderator
+// was never authorized against — the unscoped write still lands on it.
+
+func TestVoice_SetVoiceServerMute_ScopedToChannel(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "scope-mute-user")
+	chanA := seedVoiceChannel(t, database, "vc-scope-mute-a")
+	chanB := seedVoiceChannel(t, database, "vc-scope-mute-b")
+
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel A: %v", err)
+	}
+	// Simulate the race: the user's row moves to channel B — a channel nobody's
+	// mute command was authorized against — before the write below lands.
+	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
+		t.Fatalf("JoinVoiceChannel B: %v", err)
+	}
+
+	// A mute authorized against chanA (the channel a stale requireTargetInChannel
+	// snapshot showed) must not land on the row now in chanB.
+	matched, err := database.SetVoiceServerMute(ctx, userID, chanA, true)
+	if err != nil {
+		t.Fatalf("SetVoiceServerMute: %v", err)
+	}
+	if matched {
+		t.Error("SetVoiceServerMute matched=true against channel A after the user moved to channel B")
+	}
+
+	state, err := database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ChannelID != chanB {
+		t.Fatalf("test setup broken: want user in channel B, got %d", state.ChannelID)
+	}
+	if state.ServerMuted {
+		t.Error("ServerMuted = true, want false: an unscoped write must not follow the user to a channel nobody authorized the mute against")
+	}
+
+	// The scoped write must still succeed when the channel does match.
+	matched, err = database.SetVoiceServerMute(ctx, userID, chanB, true)
+	if err != nil {
+		t.Fatalf("SetVoiceServerMute (matching channel): %v", err)
+	}
+	if !matched {
+		t.Error("SetVoiceServerMute matched=false for the channel the user is actually in")
+	}
+	state, err = database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if !state.ServerMuted {
+		t.Error("ServerMuted = false, want true: a scoped write against the correct channel must still apply")
+	}
+}
+
+func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
+	database := newVoiceTestDB(t)
+	ctx := context.Background()
+	userID := seedVoiceUser(t, database, "scope-deafen-user")
+	chanA := seedVoiceChannel(t, database, "vc-scope-deafen-a")
+	chanB := seedVoiceChannel(t, database, "vc-scope-deafen-b")
+
+	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
+		t.Fatalf("JoinVoiceChannel A: %v", err)
+	}
+	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
+		t.Fatalf("JoinVoiceChannel B: %v", err)
+	}
+
+	matched, err := database.SetVoiceServerDeafen(ctx, userID, chanA, true)
+	if err != nil {
+		t.Fatalf("SetVoiceServerDeafen: %v", err)
+	}
+	if matched {
+		t.Error("SetVoiceServerDeafen matched=true against channel A after the user moved to channel B")
+	}
+
+	state, err := database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state.ChannelID != chanB {
+		t.Fatalf("test setup broken: want user in channel B, got %d", state.ChannelID)
+	}
+	if state.ServerDeafened {
+		t.Error("ServerDeafened = true, want false: an unscoped write must not follow the user to a channel nobody authorized the deafen against")
+	}
+
+	matched, err = database.SetVoiceServerDeafen(ctx, userID, chanB, true)
+	if err != nil {
+		t.Fatalf("SetVoiceServerDeafen (matching channel): %v", err)
+	}
+	if !matched {
+		t.Error("SetVoiceServerDeafen matched=false for the channel the user is actually in")
+	}
+	state, err = database.GetVoiceState(ctx, userID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if !state.ServerDeafened {
+		t.Error("ServerDeafened = false, want true: a scoped write against the correct channel must still apply")
+	}
+}

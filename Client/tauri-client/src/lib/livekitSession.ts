@@ -139,6 +139,13 @@ export class LiveKitSession {
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** BUG-146: Guard timer — fires if the server never responds to voice_token_refresh. */
   private tokenRefreshTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  /** OC-0029: epoch ms of the last voice_token_refresh actually sent. The
+   *  server budgets this request to 1 per 60s per user (Server/ws/voice_join.go);
+   *  requestTokenRefresh() has multiple independent callers (the 4-minute
+   *  timer AND attemptAutoReconnect's post-recovery refresh) that can land
+   *  within seconds of each other, so this shared entry point — not each
+   *  caller — is what enforces the budget. 0 (never sent) never blocks. */
+  private _lastTokenRefreshSentAt = 0;
   /** Max auto-reconnect attempts before giving up and showing error. */
   private static readonly MAX_RECONNECT_ATTEMPTS = 2;
   private static readonly RECONNECT_DELAY_MS = 3000;
@@ -800,7 +807,19 @@ export class LiveKitSession {
       log.debug("Skipping token refresh — no active session");
       return;
     }
+    // OC-0029: the server refuses more than 1 voice_token_refresh per 60s
+    // per user (ErrCodeRateLimited). requestTokenRefresh() is called both by
+    // the routine 4-minute timer and by attemptAutoReconnect's unconditional
+    // post-recovery refresh, which can land only seconds after the timer's
+    // own refresh — without this guard the second request is rejected and
+    // surfaces as a bare "token refresh rate limited" error toast right as
+    // the user's call recovers.
+    if (Date.now() - this._lastTokenRefreshSentAt < 60_000) {
+      log.debug("Skipping token refresh — one was already sent within the last 60s");
+      return;
+    }
     log.info("Requesting voice token refresh");
+    this._lastTokenRefreshSentAt = Date.now();
     this.ws.send({ type: "voice_token_refresh", payload: {} });
     // NOTE: startTokenRefreshTimer is called from handleVoiceTokenRefresh
     // (the server response handler), not here, to avoid scheduling two
@@ -978,18 +997,31 @@ export class LiveKitSession {
     this.onRemoteVideoRemovedCallback = null;
   }
 
-  /** Post-connect-checkpoint cleanup for a superseded connectAndSetup attempt
-   *  (checkpoints 3-5, after this attempt already installed its room into the
-   *  shared "connected" state). By the time one of these fires, a NEWER
-   *  attempt may have already claimed `_state` (and torn down THIS attempt's
-   *  room via its own entry-point leaveVoice(false)) — so this must disconnect
-   *  only the passed-in localRoom, mirroring checkpoint 2, and must never call
+  /** Checkpoint cleanup for a superseded connectAndSetup attempt, used at
+   *  every "return \"superseded\"" site in that function. By the time one of
+   *  these fires, a NEWER attempt may have already claimed `_state` (and torn
+   *  down THIS attempt's room via its own entry-point leaveVoice(false)) — so
+   *  this must disconnect only the passed-in localRoom and must never call
    *  the global leaveVoice()/touch `_state`, or it tears down whichever
    *  session currently occupies `_state`, which now belongs to the newer
-   *  attempt. */
+   *  attempt.
+   *
+   *  OC-0006: also re-syncs the extracted modules (DeviceManager/AudioPipeline
+   *  /AudioElements) when nobody newer owns `_state`. Earlier checkpoints
+   *  (1/2, the key-exchange failure, and the retry-backoff check) fire before
+   *  this attempt ever reaches "connected" — if the supersession was a plain
+   *  leaveVoice() (state now "idle") that landed while this attempt's own
+   *  lines above had already wired the modules to `localRoom`, that leave's
+   *  own syncModuleRooms() ran too early and got undone by the later wiring,
+   *  leaving DeviceManager's devicechange listener armed on a Room that will
+   *  never connect. The condition is required — an unconditional sync would
+   *  null the modules out from under a newer attempt that already ran its own
+   *  wiring but has not yet reached "connected" (it never re-wires after that
+   *  point). */
   private disconnectSupersededLocalRoom(localRoom: Room): void {
     localRoom.removeAllListeners();
     localRoom.disconnect().catch((err) => log.debug("Failed to disconnect superseded room", err));
+    if (this._state.type === "idle") this.syncModuleRooms();
   }
 
   /** Shared connect-with-retry + post-connect setup used by both the primary
@@ -1011,7 +1043,19 @@ export class LiveKitSession {
     // below inherits the PREVIOUS channel's residual _isKeyHolder via its
     // OR-with-server-value guard, joining the new channel as a phantom key
     // holder the server never elected (OC-0020).
-    if (this._room !== null || this._state.type === "reconnecting") this.leaveVoice(false);
+    if (this._room !== null || this._state.type === "reconnecting") {
+      this.leaveVoice(false);
+    } else if (this._state.type === "connecting") {
+      // OC-0001: the pending-join drain loop (handleVoiceToken) re-enters
+      // this function while `_state` is still "connecting" — there is no
+      // room to disconnect and no reconnect AC to abort, so the branch above
+      // never fires, but a discarded prior attempt (e.g. the e2ee_timeout /
+      // checkpoint-2 queued-join paths below) can still leave residual E2EE
+      // state (_isKeyHolder, keypair, peer keys) behind for THIS attempt to
+      // inherit via setupKeyExchange's OR-with-server-value guard. Clear it
+      // explicitly since leaveVoice() itself never runs on this path.
+      this._e2ee.clearState();
+    }
     // Draw the next generation from the monotonic instance counter (never
     // re-derived from `_state`) and embed it into the "connecting" state.
     // Any newer call to connectAndSetup() will produce a strictly larger
@@ -1044,6 +1088,7 @@ export class LiveKitSession {
           myGeneration,
           currentGeneration: this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
         });
+        this.disconnectSupersededLocalRoom(localRoom);
         return "superseded";
       }
 
@@ -1070,17 +1115,35 @@ export class LiveKitSession {
             channelId,
             myGeneration,
           });
+          this.disconnectSupersededLocalRoom(localRoom);
           return "superseded";
         }
-        this.onErrorCallback?.("e2ee_timeout");
-        // The exchange timed out BEFORE room.connect(): no SFU participant
-        // exists, so no LiveKit webhook will ever clean up, and the server
-        // registered the join when it sent voice_token. Send voice_leave and
-        // leave the store's voice channel (like the reconnect-exhausted give-up
-        // path) or the stale row ghosts forever and can wedge the channel's
-        // key-holder election.
-        this.leaveVoice(true);
-        leaveVoiceChannel();
+        // OC-0010: a channel switch queued during the wait (handleVoiceToken's
+        // pendingJoin branch) preserves this attempt's type/joinGeneration, so
+        // the ownership check above cannot distinguish it from "no newer join
+        // is coming". Treating it as a genuine failure here would send
+        // voice_leave with no channel id — deleting the QUEUED join's
+        // voice_states row, not this timed-out attempt's — and would drop the
+        // pendingJoin itself by transitioning to idle before the drain loop
+        // ever reads it. Only run the give-up cleanup when nothing is queued.
+        if (this._state.pendingJoin === null) {
+          this.onErrorCallback?.("e2ee_timeout");
+          // The exchange timed out BEFORE room.connect(): no SFU participant
+          // exists, so no LiveKit webhook will ever clean up, and the server
+          // registered the join when it sent voice_token. Send voice_leave and
+          // leave the store's voice channel (like the reconnect-exhausted give-up
+          // path) or the stale row ghosts forever and can wedge the channel's
+          // key-holder election.
+          this.leaveVoice(true);
+          leaveVoiceChannel();
+        } else {
+          // Leave state as "connecting" with pendingJoin intact so the finally
+          // block and handleVoiceToken's drain loop can run the queued join.
+          // Clear this attempt's own E2EE residue (keypair/_isKeyHolder/etc.)
+          // so the queued join does not inherit it — entry-point leaveVoice(false)
+          // never runs for that next call since `_room` is null here (OC-0001).
+          this._e2ee.clearState();
+        }
         return false;
       }
 
@@ -1097,10 +1160,7 @@ export class LiveKitSession {
               currentGeneration:
                 this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
             });
-            localRoom.removeAllListeners();
-            localRoom
-              .disconnect()
-              .catch((err) => log.debug("Failed to disconnect superseded room", err));
+            this.disconnectSupersededLocalRoom(localRoom);
             return "superseded";
           }
 
@@ -1147,6 +1207,7 @@ export class LiveKitSession {
                 channelId,
                 attempt,
               });
+              if (localRoom !== null) this.disconnectSupersededLocalRoom(localRoom);
               return "superseded";
             }
             if (localRoom === null) throw connectErr;
@@ -1301,7 +1362,16 @@ export class LiveKitSession {
     isKeyHolder?: boolean,
   ): Promise<void> {
     const s = this._state;
-    if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
+    // OC-0015: livekit-client's own internal reconnect (network blip on the
+    // SFU signal socket) moves Room.state through "signalReconnecting" /
+    // "reconnecting" without ever emitting RoomEvent.Disconnected — the only
+    // event this session listens for — so `_state` stays "connected" the
+    // whole time. A routine 4-minute refresh token landing in that window
+    // must still take the lightweight refresh path instead of falling
+    // through to a full teardown+rejoin of a session that is about to
+    // recover on its own; only a room the SDK has fully given up on
+    // ("disconnected") should be treated as needing a real reconnect here.
+    if (s.type === "connected" && s.channelId === channelId && s.room.state !== "disconnected") {
       this.handleVoiceTokenRefresh(token);
       return;
     }
@@ -1315,6 +1385,22 @@ export class LiveKitSession {
         });
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
+      return;
+    }
+    // OC-0009: a voice_token can arrive after the user already left this
+    // channel (e.g. Disconnect fired before the voice_join/voice_token round
+    // trip returned) — `_state` alone cannot tell, since a leave that landed
+    // before any connectAndSetup() ever started leaves `_state` at "idle"
+    // either way. voiceStore.currentChannelId is the one place the leave is
+    // recorded independent of this session's own lifecycle: joinVoiceChannel()
+    // always sets it before the request that produced this token was sent,
+    // and leaveVoiceChannel() nulls it, so a mismatch here means the token is
+    // stale. Connecting anyway would silently rejoin the SFU and republish
+    // the mic for a call the UI, store, and server all consider ended.
+    if (voiceStore.getState().currentChannelId !== channelId) {
+      log.info("handleVoiceToken: voice_token for a channel we already left — ignoring", {
+        channelId,
+      });
       return;
     }
     await this.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
@@ -1338,7 +1424,7 @@ export class LiveKitSession {
       if (
         cur.type === "connected" &&
         cur.channelId === pChannelId &&
-        cur.room.state === "connected"
+        cur.room.state !== "disconnected"
       ) {
         this.handleVoiceTokenRefresh(pToken);
       } else {
@@ -1437,6 +1523,10 @@ export class LiveKitSession {
     }
     this._pendingReconnectFields = null;
     this.clearTokenRefreshTimer();
+    // OC-0029: a fresh join must never inherit the outgoing session's refresh
+    // budget — otherwise a rejoin shortly after a leave could get silently
+    // throttled for up to 60s with no refresh sent at all.
+    this._lastTokenRefreshSentAt = 0;
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
     // OC-0042: bump first, mirroring doDisableCamera/doDisableScreenshare —

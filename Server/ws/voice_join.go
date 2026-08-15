@@ -33,6 +33,16 @@ func validVoiceQuality(q string) bool {
 	return ok
 }
 
+// voiceJoinPostTokenRaceHook, when non-nil, runs immediately after
+// GenerateToken succeeds and before the minted token is checked for
+// supersession / handed to the client. Test-only (always nil in production):
+// GenerateToken is a local JWT mint with no I/O, so the window it pins (a
+// concurrent eviction landing between token generation and delivery, OC-0008)
+// is too narrow to land reliably by staggering real goroutines. Mirrors
+// cleanupVoiceRaceClearHook (hub_sweep.go), used the same way for the
+// analogous CleanupVoiceForChannel race.
+var voiceJoinPostTokenRaceHook func(*Client)
+
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
 // 2. Checks CONNECT_VOICE permission.
@@ -247,12 +257,12 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// fail the join, matching every other SetVoiceServerMute/Deafen call site.
 	if wasServerMuted || wasServerDeafened {
 		if wasServerMuted {
-			if err := h.db.SetVoiceServerMute(ctx, c.userID, true); err != nil {
+			if _, err := h.db.SetVoiceServerMute(ctx, c.userID, channelID, true); err != nil {
 				slog.Error("ws handleVoiceJoin SetVoiceServerMute (restore)", "err", err, "user_id", c.userID)
 			}
 		}
 		if wasServerDeafened {
-			if err := h.db.SetVoiceServerDeafen(ctx, c.userID, true); err != nil {
+			if _, err := h.db.SetVoiceServerDeafen(ctx, c.userID, channelID, true); err != nil {
 				slog.Error("ws handleVoiceJoin SetVoiceServerDeafen (restore)", "err", err, "user_id", c.userID)
 			}
 		}
@@ -322,6 +332,37 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
 			return
 		}
+		if voiceJoinPostTokenRaceHook != nil {
+			voiceJoinPostTokenRaceHook(c)
+		}
+
+		// OC-0008: a concurrent eviction (voice_mod_kick/move via
+		// DisconnectFromVoiceInChannel, the CONNECT_VOICE revocation sweep, or
+		// CleanupVoiceForChannel) can land anywhere between c.setVoiceState
+		// (BUG-088, above) and here — all of them delete the voice_states row
+		// and clear the client's in-memory state, then call RemoveParticipant,
+		// which no-ops because this join has never reached the SFU yet
+		// (GenerateToken is a local JWT mint, no LiveKit round trip). The tail
+		// guard below used to be the only check, but by then the token had
+		// already been queued for delivery — the client ends up with a live
+		// 5-minute RoomJoin credential for a membership the server just decided
+		// does not exist, and connects to the SFU with it regardless of what
+		// happens after. Re-check here, immediately before the credential
+		// leaves the process, and withhold it if superseded.
+		if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
+			slog.Info("ws handleVoiceJoin: join superseded before token delivery",
+				"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
+			// Best-effort defense in depth: this join has not reached the SFU
+			// (see above), so this is normally a no-op, but it closes the
+			// sliver of time between this check and c.sendMsg below the same
+			// way every other eviction path's RemoveParticipant call does.
+			rbCtx := context.WithoutCancel(ctx)
+			if err := h.livekit.RemoveParticipant(rbCtx, channelID, c.userID, state.JoinedAt); err != nil {
+				slog.Warn("ws handleVoiceJoin: RemoveParticipant after supersession failed (may already be gone)",
+					"err", err, "user_id", c.userID, "channel_id", channelID)
+			}
+			return
+		}
 		// Send both proxy path and direct URL. The client uses direct_url
 		// when on localhost (avoids self-signed TLS issues with WebView
 		// fetch) and falls back to the /livekit proxy for remote clients.
@@ -337,11 +378,17 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// after the DB row committed — which also means a concurrent eviction (the
 	// revocation sweep, a participant_left webhook, a moderator kick/move) can
 	// now land on THIS join instance while the token round trip above is in
-	// flight. Those all clear the client's voice state and delete the row after
-	// deciding against it, so completing the join here would resurrect a
-	// membership that was deliberately torn down: subscribed to the voice
-	// topic and broadcast as present, with no row behind it. Their decision
-	// wins; a same-instance state is the only thing this join may finish.
+	// flight. The check inside the h.livekit block above (OC-0008) already
+	// withholds the token itself in that case; this is the tail guard for
+	// everything downstream of it (voice topic subscription, the joiner's own
+	// voice_state broadcast) when no token round trip ran at all (h.livekit ==
+	// nil is unreachable in practice — handleVoiceJoin returns earlier — but
+	// kept here as the single completion gate for both paths). Those evictors
+	// all clear the client's voice state and delete the row after deciding
+	// against it, so completing the join here would resurrect a membership
+	// that was deliberately torn down: subscribed to the voice topic and
+	// broadcast as present, with no row behind it. Their decision wins; a
+	// same-instance state is the only thing this join may finish.
 	if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)

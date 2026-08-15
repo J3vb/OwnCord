@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -474,6 +475,24 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
+		// This handler streams through the ordinary ResponseWriter (no
+		// Hijack), so it is otherwise subject to http.Server.WriteTimeout:
+		// net/http sets the connection's write deadline exactly once, when
+		// request headers are read, and nothing about writing more data
+		// later extends it. Without clearing it here, every write past that
+		// deadline (including the keepalive ticks below) silently times out
+		// — the caller discards write errors, per SSE convention, since a
+		// client that vanishes is detected via ctx.Done() instead — so the
+		// stream goes silently dead and the client eventually sees the
+		// connection close, then reconnects and replays the full backfill.
+		// SetWriteDeadline(zero) clears the deadline on HTTP/1 and cancels
+		// the per-stream deadline timer on HTTP/2; ErrNotSupported means the
+		// ResponseWriter doesn't sit over a real connection (e.g. in tests),
+		// which is fine to ignore.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			slog.Warn("log stream: failed to clear write deadline; stream may be cut by WriteTimeout", "err", err)
+		}
+
 		// Snapshot the backfill and subscribe to new entries atomically: the
 		// per-entry principalStillAuthorized() check below is a DB round-trip,
 		// so the backfill loop is slow enough that a Snapshot()-then-Subscribe()
@@ -492,7 +511,8 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		}
 		flusher.Flush()
 
-		// Keepalive ticker to avoid WriteTimeout (30s).
+		// Keepalive ticker against intermediary/proxy idle timeouts (the
+		// connection's own WriteTimeout was already neutralized above).
 		keepalive := time.NewTicker(15 * time.Second)
 		defer keepalive.Stop()
 

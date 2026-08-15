@@ -595,6 +595,88 @@ describe("wsGeneration stale listener guard", () => {
   });
 });
 
+describe("connect() catch guards against a superseded ws_connect rejection", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  // OC-0026: connect()'s two earlier await points (ensureTauriApis,
+  // setupEventListeners) both guard with `if (gen !== wsGeneration) return;`
+  // before acting on their resumption, but the `await tauriInvoke("ws_connect")`
+  // catch did not. The Rust proxy deliberately rejects a superseded handshake
+  // with "superseded by a newer connection" (ws_proxy.rs install_sender), so a
+  // stale attempt A's rejection — arriving after a newer attempt B already
+  // reached "connected" — must not tear B's live connection back down.
+  it("does not flip a live connection back to reconnecting when a stale attempt's ws_connect rejects with 'superseded'", async () => {
+    let rejectStaleWsConnect: ((err: Error) => void) | null = null;
+    let staleCallSeen = false;
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ws_connect" && !staleCallSeen) {
+        staleCallSeen = true;
+        return new Promise((_resolve, reject) => {
+          rejectStaleWsConnect = reject;
+        });
+      }
+      return undefined;
+    });
+
+    // Attempt A: connect() suspends on the Rust handshake (ws_connect pends
+    // up to CONNECT_TIMEOUT in the real proxy).
+    client.connect({ host: "localhost:8443", token: "tA" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rejectStaleWsConnect).not.toBeNull();
+
+    // Attempt B supersedes A before A's handshake settles — e.g. a
+    // cert-accept retry, or logout immediately followed by re-login.
+    client.connect({ host: "localhost:8443", token: "tB" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    // B completes its handshake and reaches "connected".
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+    expect(client.getState()).toBe("connected");
+
+    // A's stale ws_connect now rejects with the real error the Rust proxy
+    // sends for a superseded handshake.
+    rejectStaleWsConnect!(new Error("superseded by a newer connection"));
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The live connection must not be knocked back into "reconnecting" by
+    // the superseded attempt's rejection.
+    expect(client.getState()).toBe("connected");
+
+    // No reconnect timer should have been armed by the stale catch —
+    // advancing well past any backoff must not trigger a redial of the
+    // still-healthy connection.
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls).toHaveLength(0);
+  });
+});
+
 describe("disconnect() cancelling an in-flight connect()", () => {
   let client: ReturnType<typeof createWsClient>;
   let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R

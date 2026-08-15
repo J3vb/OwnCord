@@ -984,6 +984,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderedStart = -1;
     renderWindow();
 
+    // renderWindow's own rapid-rebuild breaker can return before reassigning
+    // renderedStart (it stays -1, the value forced above) when too many
+    // rebuilds have fired in the last 2s. When that happens the DOM was never
+    // rebuilt for this target — report a failed jump rather than computing a
+    // localIdx against a sentinel and flashing/reporting success for a row
+    // that never rendered. This lets callers (e.g. MessageJump) fall back to
+    // fetching the around-window instead of treating this as a landed jump.
+    if (renderedStart < 0) return false;
+
     // Briefly highlight the target message element
     if (contentContainer !== null) {
       const localIdx = idx - renderedStart;

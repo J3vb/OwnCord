@@ -380,6 +380,15 @@ func BuildCallSignalForTest(msgType string, channelID, fromUserID int64, usernam
 // HandleWebhookParticipantLeftForTest exposes handleWebhookParticipantLeft for
 // external tests so they can simulate LiveKit webhook events without HTTP.
 func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64, joinToken string) {
+	h.HandleWebhookParticipantLeftWithContextForTest(context.Background(), userID, channelID, joinToken)
+}
+
+// HandleWebhookParticipantLeftWithContextForTest is
+// HandleWebhookParticipantLeftForTest with a caller-supplied context, so
+// external tests can simulate the webhook HTTP handler's request context
+// (e.g. already-cancelled, as it would be after the webhook sender hangs up)
+// instead of always running with context.Background().
+func (h *Hub) HandleWebhookParticipantLeftWithContextForTest(ctx context.Context, userID int64, channelID int64, joinToken string) {
 	identity := fmt.Sprintf("user-%d:%s", userID, joinToken)
 	roomName := fmt.Sprintf("channel-%d", channelID)
 	event := &livekit.WebhookEvent{
@@ -391,7 +400,7 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 			Name: roomName,
 		},
 	}
-	h.handleWebhookParticipantLeft(context.Background(), event)
+	h.handleWebhookParticipantLeft(ctx, event)
 }
 
 // HandleWebhookParticipantJoinedForTest exposes handleWebhookParticipantJoined

@@ -107,22 +107,32 @@ func (c *LiveKitClient) GenerateToken(
 		CanSubscribe: &canSubscribe,
 	}
 
+	// Use CanPublishSources to restrict which track types the user may
+	// publish. This supersedes CanPublish and prevents SFU-level bypass.
+	//
+	// SPEAK_VOICE (microphone), USE_VIDEO (camera) and SHARE_SCREEN (screen
+	// share) are independent permission bits — a channel override can deny
+	// SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN (OC-0016). The
+	// source list is therefore built from all three independently; CanPublish
+	// is only used as a hard deny when none of them grant anything, since
+	// LiveKit's GetCanPublishSource treats CanPublish=false as an override
+	// that blocks every source regardless of CanPublishSources.
+	var sources []string
 	if canPublish {
-		// Use CanPublishSources to restrict which track types the user may
-		// publish. This supersedes CanPublish and prevents SFU-level bypass.
-		sources := []string{"microphone"}
-		if canVideo {
-			sources = append(sources, "camera")
-		}
-		if canScreenShare {
-			sources = append(sources, "screen_share", "screen_share_audio")
-		}
+		sources = append(sources, "microphone")
+	}
+	if canVideo {
+		sources = append(sources, "camera")
+	}
+	if canScreenShare {
+		sources = append(sources, "screen_share", "screen_share_audio")
+	}
+	if len(sources) > 0 {
 		grant.CanPublishSources = sources
-		grant.CanPublishData = &canPublish
 	} else {
 		grant.CanPublish = &canPublish
-		grant.CanPublishData = &canPublish
 	}
+	grant.CanPublishData = &canPublish
 
 	at.SetVideoGrant(grant).
 		SetIdentity(identity).

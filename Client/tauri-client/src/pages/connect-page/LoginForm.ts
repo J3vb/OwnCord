@@ -672,6 +672,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     try {
       await onTotpSubmit(code);
+      // Verify succeeded — the challenge is resolved, so drop the latch.
+      // Otherwise any later, unrelated error (e.g. the post-auth WS connect
+      // failing) would hit the `formState === "error" && totpPending` branch
+      // in updateTotpOverlay() and re-open this now-dead overlay, whose
+      // partial token has already been consumed by main.ts.
+      totpPending = false;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Verification failed.";
       transitionTo("error", message);

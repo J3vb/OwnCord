@@ -20,7 +20,7 @@
  *    run the dispatcher's own auth_ok handler (which is what actually writes
  *    authStore).
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
@@ -76,12 +76,18 @@ vi.mock("@lib/profiles", () => ({
 }));
 
 // api.ts — only login() is exercised (it drives wirePostAuth); nothing else
-// in this flow touches the REST client.
+// in this flow touches the REST client. getConfig()/setConfig() track a real
+// host so OC-0028's test can reproduce the isAuthenticated subscriber's
+// `api.getConfig().host` read (main.ts:776) after a login sets it via
+// `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
+const mockApiState = { host: "" };
 vi.mock("@lib/api", () => ({
   createApiClient: vi.fn(() => ({
-    setConfig: vi.fn(),
-    getConfig: vi.fn(() => ({ host: "" })),
+    setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
+      if (cfg.host !== undefined) mockApiState.host = cfg.host;
+    }),
+    getConfig: vi.fn(() => ({ host: mockApiState.host })),
     login: (...args: unknown[]) => mockLogin(...args),
     getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
   })),
@@ -113,6 +119,15 @@ vi.mock("@pages/ConnectPage", () => ({
       applyInviteLink: vi.fn(),
     };
   }),
+}));
+
+// MainPage.ts pulls in the whole chat/voice UI stack. OC-0028 needs a real
+// "main" -> "connect" round trip through the router (main.ts only navigates
+// away from "connect" via the connected overlay's onReady -> router.navigate
+// ("main") callback), but doesn't care what MainPage renders, so stand in
+// with the same lightweight shape main-page.test.ts's own mocks return.
+vi.mock("@pages/MainPage", () => ({
+  createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 
 // dispatcher.ts pulls in nearly every store/service in the app. Stand in
@@ -219,5 +234,55 @@ describe("main.ts connected overlay (OC-0063)", () => {
 
     const iconEl = overlay?.querySelector(".connected-srv-icon");
     expect(iconEl?.textContent).toBe("M"); // first letter of "My Guild", not "1" (host) or "" (blank auth)
+  });
+});
+
+describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    mockApiState.host = "";
+  });
+
+  it("consumes owncord:skip-auto-login on a quick-switch mount, not just on a plain logout", async () => {
+    // Reach "main" for host A via an ordinary login — the quick-switch
+    // overlay (SidebarArea.ts) can only fire from a live session.
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    // ConnectedOverlay.markReady() fires onReady after READY_DELAY_MS (800ms),
+    // which calls router.navigate("main") — main.ts's only route away from
+    // "connect", needed so a later navigate("connect") is a real transition
+    // and not a same-page no-op.
+    await vi.advanceTimersByTimeAsync(800);
+
+    // Quick-switch overlay's flow (SidebarArea.ts:756-760): stash the target
+    // host, then log out via a bare clearAuth() (reason defaults to "user").
+    // The isAuthenticated subscriber below (main.ts:750-788) turns that into
+    // a stored "owncord:skip-auto-login" flag, since host is set and
+    // logoutReason !== "server_shutdown".
+    sessionStorage.setItem("owncord:quick-switch-target", "server-b.example:8443");
+    clearAuth();
+
+    // authStore notifications are microtask-deferred (see store.ts), and the
+    // connect page's own load-profiles IIFE awaits a mocked (but still
+    // native-Promise) loadProfiles() before reaching the quick-switch check —
+    // flush both hops.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Quick-switch consumed its own key...
+    expect(sessionStorage.getItem("owncord:quick-switch-target")).toBeNull();
+    // ...and per OC-0028 must ALSO consume skip-auto-login on this same
+    // mount. Before the fix, the quick-switch branch returns early (line 669)
+    // without ever reaching the skip-auto-login read/remove at line 680-683,
+    // so the flag set by the clearAuth() above survives indefinitely — and
+    // would go on to suppress the auto-login that a later, unrelated
+    // clearAuth("server_shutdown") deliberately relies on.
+    expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
   });
 });

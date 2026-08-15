@@ -281,6 +281,49 @@ describe("WS Dispatcher", () => {
     expect(voiceStore.getState().voiceUsers.size).toBe(1);
   });
 
+  // OC-0014: a moderator deafen/mute has no SFU equivalent — the client is
+  // the only place it takes effect (via setDeafened/setMuted, which gate
+  // remote-audio subscription). The VOICE_STATE handler enforces this, but a
+  // full-ready resync (a WS drop that outlives the LiveKit session, followed
+  // by a mustFullResync reconnect) only ever delivers the mute/deafen via
+  // `ready`'s voice_states, never a voice_state the client can miss. Without
+  // enforcement on this path too, the widget shows the user as deafened while
+  // every remote publication stays subscribed and audible.
+  it("enforces a moderator server-deafen/mute from the ready (full-resync) payload", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // The LiveKit session survived the WS drop (nothing tears voice down on a
+    // socket drop alone) — voiceStatus is NOT idle, so the "stale voice
+    // state" defense-in-depth branch below must not fire and swallow this.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "connected",
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
+      voice_states: [
+        {
+          channel_id: 3,
+          user_id: 5,
+          muted: true,
+          deafened: true,
+          server_muted: true,
+          server_deafened: true,
+        },
+      ],
+      roles: [],
+    });
+    await vi.runAllTimersAsync();
+
+    expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(true);
+    expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(true);
+  });
+
   it("wires chat_message to messages store", () => {
     mock.dispatch("chat_message", {
       id: 100,
@@ -478,6 +521,56 @@ describe("WS Dispatcher", () => {
       expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
       expect(mockNotifyIncomingMessage).toHaveBeenCalledWith(
         expect.objectContaining({ content: "live after reconnect, server clock still lagging" }),
+      );
+    });
+
+    // OC-0024: serverClockSkewMs starts at 0 and is only ever sampled inside
+    // the "accepted as live" branch it itself gates — so if the channel is
+    // quiet between login and the first reconnect, nothing ever seeds it. A
+    // few seconds later a genuinely live message shows up with a lagging
+    // server timestamp and gets misclassified as a replay forever (the
+    // classification that misfires is the same one that would have fixed
+    // it). This must not depend on the reconnect having happened recently —
+    // a real fix bounds exposure by wall-clock distance from the handshake,
+    // not by ever successfully sampling the skew on this connection.
+    it("does not permanently blackhole live messages after a reconnect when the skew was never sampled (cold start)", () => {
+      const driftMs = 30 * 60 * 1000; // server clock reads 30 minutes behind
+      const t0 = Date.now();
+
+      // First connect — the channel is quiet, so no chat_message arrives and
+      // serverClockSkewMs is never sampled.
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      // Wi-Fi blips a few seconds later; ws.ts reconnects.
+      vi.setSystemTime(t0 + 5000);
+      const handshakeAt = Date.now();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "admin" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      // A genuinely live message arrives well after the reconnect burst
+      // would have finished — its server timestamp is 30 minutes behind
+      // because the self-hosted server has no NTP.
+      vi.setSystemTime(handshakeAt + 10_000);
+      mock.dispatch("chat_message", {
+        id: 1,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "live well after reconnect, skew was never sampled",
+        reply_to: null,
+        attachments: [],
+        timestamp: new Date(Date.now() - driftMs).toISOString(),
+      });
+
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+      expect(mockNotifyIncomingMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "live well after reconnect, skew was never sampled" }),
       );
     });
   });
@@ -2175,6 +2268,53 @@ describe("WS Dispatcher", () => {
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
+  // OC-0031: voice_disconnected can arrive from behind a backed-up outbound
+  // queue well after the kick already tore the LiveKit session down at the
+  // SFU — by the time it's finally delivered, the user may have already
+  // rejoined (this channel or another). Its sibling VOICE_LEAVE handler
+  // guards on channel match for exactly this staleness; voice_disconnected
+  // must too, or the stale frame kills the freshly established session.
+  it("does not tear down a fresher voice session for a stale queued voice_disconnected", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    mockShowToast.mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // A newer session is live in channel 9; the queued voice_disconnected is
+    // for the old channel 3 the kick already evicted us from.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+
+    mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(9);
+    expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
+  // OC-0033: on the ordinary kick path, the server's finishVoiceLeave
+  // broadcasts voice_leave to the leaver BEFORE handleVoiceModKickV2 ever
+  // sends voice_disconnected, so the sibling VOICE_LEAVE handler above has
+  // already nulled currentChannelId by the time this event lands. A cleared
+  // store is not the same staleness OC-0031 guards against (a rejoin into a
+  // *different* channel) and must not swallow the kick toast — it's the only
+  // explanation the user gets for being dropped from the call.
+  it("still surfaces the kick toast after the sibling voice_leave already cleared the store", async () => {
+    mockShowToast.mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // voice_leave for this same kick already cleared the store.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+
+    mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked by a moderator" });
+    await vi.runAllTimersAsync();
+
+    expect(mockShowToast).toHaveBeenCalledWith("kicked by a moderator", "error");
+  });
+
   it("wires voice_config to voice store", () => {
     mock.dispatch("voice_config", {
       channel_id: 3,
@@ -3501,6 +3641,40 @@ describe("WS Dispatcher", () => {
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
       expect(mockShowToast).toHaveBeenCalledWith("nope", "error");
       expect(uiStore.getState().transientError).toBeNull();
+    });
+
+    // OC-0032: voice_controls.go now routes a refused voice_screenshare
+    // enable through the same enableVideoSlot cap check as the camera, so
+    // VIDEO_LIMIT can correlate to a "screen" pending enable, not just
+    // "camera". Rolling back the camera unconditionally would tear down a
+    // working camera and leave the refused screen tracks published.
+    it("rolls back the screenshare publish, not the camera, when VIDEO_LIMIT refuses a screenshare enable", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
+
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-screen-1");
+      await vi.runAllTimersAsync();
+
+      expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-screen-1");
+      expect(mockDisableScreenshare).toHaveBeenCalled();
+      expect(mockDisableCamera).not.toHaveBeenCalled();
+    });
+
+    // OC-0035: a screenshare enable can be superseded (disable, re-enable)
+    // before its VIDEO_LIMIT refusal arrives — registerPendingVideoEnable
+    // deletes the prior entry for that kind, so rollbackPendingVideo(id)
+    // returns undefined for the now-stale id. undefined means "roll back
+    // nothing" (the refusal no longer correlates to anything pending), never
+    // "it was the camera" — falling through to disableCamera() would tear
+    // down a working camera the user never touched.
+    it("does nothing when VIDEO_LIMIT correlates to a superseded id (kind undefined)", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue(undefined);
+
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-superseded-1");
+      await vi.runAllTimersAsync();
+
+      expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-superseded-1");
+      expect(mockDisableCamera).not.toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
     });
   });
 });

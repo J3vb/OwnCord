@@ -166,10 +166,20 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// download happens in the background inside Start).
 		if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
 			proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
+			// Register the process with the hub BEFORE calling Start(), and
+			// keep it registered even if Start() fails (OC-0019). The only
+			// consumer of h.lkProcess is the voice_join guard
+			// (`h.lkProcess != nil && !h.lkProcess.IsRunning()`), which reads
+			// a nil process as "LiveKit is externally managed, don't check".
+			// That is the wrong reading here: OwnCord was told to manage
+			// LiveKit and failed to launch it, so joins must fail closed via
+			// IsRunning() == false, not be waved through with no SFU
+			// running. IsRunning() is false for a proc whose Start() never
+			// got as far as spawning cmd, and Hub.Stop's lkProcess.Stop() is
+			// safe to call on a never-started proc.
+			hub.SetLiveKitProcess(proc)
 			if startErr := proc.Start(); startErr != nil {
 				slog.Error("failed to start LiveKit process", "error", startErr)
-			} else {
-				hub.SetLiveKitProcess(proc)
 			}
 		}
 	}

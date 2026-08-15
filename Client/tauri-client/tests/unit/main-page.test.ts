@@ -501,6 +501,33 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
+  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    // Alice (10) rings this client's DM (channel 50).
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Alice also happens to be sitting in an unrelated server voice channel
+    // (99) and leaves it. Same user, wrong channel: this must not silence
+    // the DM ring — only a voice_leave for the ring's own channel (50) may.
+    ws.emit("voice_leave", { channel_id: 99, user_id: 10 });
+
+    expect(banner.style.display).not.toBe("none");
+
+    // Alice leaving the ring's own channel (the DM she was calling from)
+    // still cancels it.
+    ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
+
+    expect(banner.style.display).toBe("none");
+  });
+
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);

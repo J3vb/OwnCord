@@ -188,36 +188,46 @@ func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool)
 	return nil
 }
 
-// SetVoiceServerMute applies or clears the moderator-imposed mute. Applying it
-// also sets muted so the client state matches immediately; clearing it leaves
-// muted alone, so a user who was muted before the moderator acted stays muted
-// until they unmute themselves.
-func (d *DB) SetVoiceServerMute(ctx context.Context, userID int64, serverMuted bool) error {
-	var err error
+// SetVoiceServerMute applies or clears the moderator-imposed mute, scoped to
+// channelID -- the channel the caller's authorization check passed for.
+// Applying it also sets muted so the client state matches immediately;
+// clearing it leaves muted alone, so a user who was muted before the
+// moderator acted stays muted until they unmute themselves.
+//
+// Reports matched=false when the target's voice_states row is no longer in
+// channelID (OC-0005): a channel switch racing the moderator's DB round
+// trips must not let this write land on whatever channel the target moved
+// to, including a DM call nobody was authorized against. The row is left
+// untouched in that case, same as if the write had never happened.
+func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error) {
+	var res sql.Result
 	if serverMuted {
-		err = d.q.ApplyVoiceServerMute(ctx, userID)
+		res, err = d.q.ApplyVoiceServerMute(ctx, dbgen.ApplyVoiceServerMuteParams{UserID: userID, ChannelID: channelID})
 	} else {
-		err = d.q.ClearVoiceServerMute(ctx, userID)
+		res, err = d.q.ClearVoiceServerMute(ctx, dbgen.ClearVoiceServerMuteParams{UserID: userID, ChannelID: channelID})
 	}
 	if err != nil {
-		return fmt.Errorf("SetVoiceServerMute: %w", err)
+		return false, fmt.Errorf("SetVoiceServerMute: %w", err)
 	}
-	return nil
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
-// SetVoiceServerDeafen applies or clears the moderator-imposed deafen.
-// Mirrors SetVoiceServerMute, including the asymmetric handling of deafened.
-func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID int64, serverDeafened bool) error {
-	var err error
+// SetVoiceServerDeafen applies or clears the moderator-imposed deafen, scoped
+// to channelID. Mirrors SetVoiceServerMute, including the asymmetric handling
+// of deafened and the channel-scoped matched result.
+func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error) {
+	var res sql.Result
 	if serverDeafened {
-		err = d.q.ApplyVoiceServerDeafen(ctx, userID)
+		res, err = d.q.ApplyVoiceServerDeafen(ctx, dbgen.ApplyVoiceServerDeafenParams{UserID: userID, ChannelID: channelID})
 	} else {
-		err = d.q.ClearVoiceServerDeafen(ctx, userID)
+		res, err = d.q.ClearVoiceServerDeafen(ctx, dbgen.ClearVoiceServerDeafenParams{UserID: userID, ChannelID: channelID})
 	}
 	if err != nil {
-		return fmt.Errorf("SetVoiceServerDeafen: %w", err)
+		return false, fmt.Errorf("SetVoiceServerDeafen: %w", err)
 	}
-	return nil
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // ClearVoiceState removes a user's voice state on disconnect.
@@ -289,6 +299,28 @@ func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screensha
 		return fmt.Errorf("UpdateVoiceScreenshare: %w", err)
 	}
 	return nil
+}
+
+// EnableScreenshareIfUnderLimit atomically enables a user's screenshare only
+// if the channel has not yet reached maxVideo active video streams — camera
+// and screenshare draw from the same voice_max_video budget (OC-0023).
+// Returns true if the screenshare was enabled, false if the limit was
+// already reached.
+func (d *DB) EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
+	res, err := d.q.EnableScreenshareIfUnderLimit(ctx, dbgen.EnableScreenshareIfUnderLimitParams{
+		UserID:      userID,
+		ChannelID:   channelID,
+		ChannelID_2: channelID,
+		ChannelID_3: int64(maxVideo),
+	})
+	if err != nil {
+		return false, fmt.Errorf("EnableScreenshareIfUnderLimit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("EnableScreenshareIfUnderLimit RowsAffected: %w", err)
+	}
+	return rows > 0, nil
 }
 
 // CountChannelVoiceUsers returns the number of users currently in the given

@@ -360,6 +360,42 @@ describe("enableCamera", () => {
     expect(state.manualCameraTrack).toBeNull();
     expect(voiceStore.getState().localCamera).toBe(false);
   });
+
+  it("does not clear a newer attempt's track when a superseded enable's device acquisition rejects (OC-0007)", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const trackB = fakeVideoTrack();
+    let rejectA!: (err: unknown) => void;
+    const promiseA = new Promise<LocalVideoTrack>((_, reject) => {
+      rejectA = reject;
+    });
+    createLocalVideoTrack.mockReturnValueOnce(promiseA).mockResolvedValueOnce(trackB);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    // Attempt A starts (generation 0) and is stuck awaiting device acquisition.
+    const enablingA = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(createLocalVideoTrack).toHaveBeenCalledTimes(1);
+    });
+
+    // The user cycles the camera off and back on while A is still pending:
+    // disable bumps the generation, then a fresh enable (B) captures the new
+    // generation, resolves immediately, and goes fully live.
+    await disableCamera(state, deps);
+    await enableCamera(state, deps);
+    expect(state.manualCameraTrack).toBe(trackB);
+    expect(voiceStore.getState().localCamera).toBe(true);
+
+    // Now A's stale createLocalVideoTrack call finally rejects (e.g. device
+    // contention). A's catch block must recognise it was superseded and
+    // leave B's live track and state alone.
+    rejectA(new DOMException("busy", "NotReadableError"));
+    await enablingA;
+
+    expect(trackB.stop).not.toHaveBeenCalled();
+    expect(state.manualCameraTrack).toBe(trackB);
+    expect(voiceStore.getState().localCamera).toBe(true);
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────
@@ -668,6 +704,42 @@ describe("enableScreenshare", () => {
     expect(audio.stop).toHaveBeenCalled();
     expect(state.manualScreenTracks).toEqual([]);
     expect(voiceStore.getState().localScreenshare).toBe(false);
+  });
+
+  it("does not tear down a newer share when a superseded enable's capture rejects (OC-0007)", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const videoB = fakeVideoTrack();
+    let rejectA!: (err: unknown) => void;
+    const promiseA = new Promise<LocalTrack[]>((_, reject) => {
+      rejectA = reject;
+    });
+    createLocalScreenTracks.mockReturnValueOnce(promiseA).mockResolvedValueOnce([videoB]);
+    const state = { manualScreenTracks: [] as LocalTrack[] };
+
+    // Attempt A starts (generation 0) and is stuck awaiting the OS picker.
+    const enablingA = enableScreenshare(state, deps);
+    await vi.waitFor(() => {
+      expect(createLocalScreenTracks).toHaveBeenCalledTimes(1);
+    });
+
+    // The user cycles the share off and back on while A is still pending:
+    // disable bumps the generation, then a fresh enable (B) captures the new
+    // generation, resolves immediately, and goes fully live.
+    await disableScreenshare(state, deps);
+    await enableScreenshare(state, deps);
+    expect(state.manualScreenTracks).toEqual([videoB]);
+    expect(voiceStore.getState().localScreenshare).toBe(true);
+
+    // Now A's stale createLocalScreenTracks call finally rejects. A's catch
+    // block must recognise it was superseded and leave B's live tracks and
+    // state alone.
+    rejectA(new Error("capture failed"));
+    await enablingA;
+
+    expect(videoB.stop).not.toHaveBeenCalled();
+    expect(state.manualScreenTracks).toEqual([videoB]);
+    expect(voiceStore.getState().localScreenshare).toBe(true);
   });
 });
 
