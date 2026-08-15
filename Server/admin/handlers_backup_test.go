@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -267,12 +268,13 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 		t.Fatalf("MkdirAll data: %v", err)
 	}
 
-	// Write content as the "backup" to restore from.
+	// A real SQLite backup to restore from — the handler now verifies backups
+	// with integrity_check before touching the live database, so a text
+	// fixture would be (correctly) refused.
 	backupName := "chatserver_20240101_120000.db"
 	backupPath := filepath.Join(backupDir, backupName)
-	fakeContent := []byte("fake sqlite db content")
-	if err := os.WriteFile(backupPath, fakeContent, 0o644); err != nil {
-		t.Fatalf("WriteFile backup: %v", err)
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
 	}
 
 	restarted, restoreHook := admin.StubRestart()
@@ -369,10 +371,30 @@ func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
 		t.Fatalf("WriteFile live db: %v", err)
 	}
 
+	// A valid backup (it must pass the pre-copy integrity gate); the mid-copy
+	// failure is injected through the copy hook below, reproducing the exact
+	// failure mode the rollback exists for: os.Create truncates the live DB,
+	// then the copy dies.
 	backupName := "chatserver_20240102_120000.db"
-	if err := os.MkdirAll(filepath.Join(backupDir, backupName), 0o750); err != nil {
-		t.Fatalf("MkdirAll fake backup: %v", err)
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
 	}
+
+	failedOnce := false
+	restoreCopy := admin.StubCopyBackup(func(src, dst string) error {
+		if !failedOnce {
+			failedOnce = true
+			// Truncate the destination the way the real copy's os.Create
+			// does, then fail — the state the rollback must repair.
+			f, createErr := os.Create(dst)
+			if createErr == nil {
+				_ = f.Close()
+			}
+			return fmt.Errorf("injected copy failure")
+		}
+		return admin.CopyBackupForTest(src, dst)
+	})
+	defer restoreCopy()
 
 	restarted, restoreHook := admin.StubRestart()
 	defer restoreHook()
@@ -442,9 +464,13 @@ func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
 	if err := os.WriteFile(dbPath, []byte("original live contents"), 0o600); err != nil {
 		t.Fatalf("WriteFile live db: %v", err)
 	}
+	// A real SQLite backup — the restore handler verifies backups with
+	// integrity_check before touching the live database, so a text fixture
+	// would be (correctly) refused with 400 before the Close-failure branch
+	// under test is ever reached.
 	backupName := "chatserver_20240103_120000.db"
-	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte("replacement contents"), 0o644); err != nil {
-		t.Fatalf("WriteFile backup: %v", err)
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
 	}
 
 	restarted, restoreRestartHook := admin.StubRestart()
@@ -483,8 +509,8 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	}
 	backupName := "chatserver_20240101_120000.db"
 	dbFile := filepath.Join(tmpDir, "data", "chatserver.db")
-	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte("replacement"), 0o644); err != nil {
-		t.Fatalf("WriteFile backup: %v", err)
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
 	}
 	if err := os.WriteFile(dbFile, []byte("original"), 0o644); err != nil {
 		t.Fatalf("WriteFile db: %v", err)
@@ -551,9 +577,13 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
 	backupName := "chatserver_20240101_120000.db"
-	backupContent := []byte("restored contents")
-	if err := os.WriteFile(filepath.Join(backupDir, backupName), backupContent, 0o644); err != nil {
-		t.Fatalf("WriteFile backup: %v", err)
+	backupPath := filepath.Join(backupDir, backupName)
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
+	}
+	backupContent, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile fixture: %v", err)
 	}
 
 	restarted, restoreHook := admin.StubRestart()

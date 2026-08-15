@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -22,6 +23,8 @@ import (
 type Config struct {
 	Server           ServerConfig           `koanf:"server"`
 	Database         DatabaseConfig         `koanf:"database"`
+	Backup           BackupConfig           `koanf:"backup"`
+	Security         SecurityConfig         `koanf:"security"`
 	TLS              TLSConfig              `koanf:"tls"`
 	Upload           UploadConfig           `koanf:"upload"`
 	Voice            VoiceConfig            `koanf:"voice"`
@@ -86,6 +89,13 @@ type EventPersistenceConfig struct {
 	BatchFlushMs int `koanf:"batch_flush_ms"`
 	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
 	PrunerIntervalMinutes int `koanf:"pruner_interval_minutes"`
+	// ReplayRingSize is the capacity of the in-memory reconnect replay ring.
+	// Reconnects whose gap exceeds it fall to the persisted event log.
+	ReplayRingSize int `koanf:"replay_ring_size"`
+	// ReplayColdLimit caps how many persisted events a single reconnect may
+	// replay; beyond it the client gets a full resync. This is the budget
+	// that decides how long a disconnect can be bridged by replay.
+	ReplayColdLimit int `koanf:"replay_cold_limit"`
 }
 
 // TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
@@ -172,6 +182,41 @@ type ServerConfig struct {
 	// text the CRS false-positives on, so blocking needs tuning against real
 	// traffic first. Unknown values fall back to "detect".
 	WAFCRSMode string `koanf:"waf_crs_mode"`
+	// MaxWSConnections caps concurrently connected WebSocket clients; new
+	// upgrade requests beyond the cap are refused with 503 before the
+	// upgrade. 0 (the default) means unlimited — every connection costs
+	// goroutines and buffered send queues, so set a ceiling that matches the
+	// host's memory before pointing a large community at it.
+	MaxWSConnections int `koanf:"max_ws_connections"`
+	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
+	// exporter separately from the human admin surface, so a central
+	// Prometheus scraper can be allowlisted without widening /admin to its
+	// network. Empty (default) falls back to AdminAllowedCIDRs.
+	MetricsAllowedCIDRs []string `koanf:"metrics_allowed_cidrs"`
+	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
+	// endpoints. The webhook already authenticates cryptographically (LiveKit
+	// JWT signature over the body hash) — this perimeter is defence-in-depth,
+	// and giving it its own key means an externally-hosted LiveKit's IP no
+	// longer has to be added to the ADMIN allowlist. Empty (default) falls
+	// back to AdminAllowedCIDRs.
+	LiveKitWebhookAllowedCIDRs []string `koanf:"livekit_webhook_allowed_cidrs"`
+}
+
+// MetricsCIDRs returns the effective allowlist for the metrics surfaces.
+func (s *ServerConfig) MetricsCIDRs() []string {
+	if len(s.MetricsAllowedCIDRs) > 0 {
+		return s.MetricsAllowedCIDRs
+	}
+	return s.AdminAllowedCIDRs
+}
+
+// LiveKitWebhookCIDRs returns the effective allowlist for the LiveKit
+// webhook/health endpoints.
+func (s *ServerConfig) LiveKitWebhookCIDRs() []string {
+	if len(s.LiveKitWebhookAllowedCIDRs) > 0 {
+		return s.LiveKitWebhookAllowedCIDRs
+	}
+	return s.AdminAllowedCIDRs
 }
 
 // DatabaseConfig holds database settings.
@@ -187,6 +232,11 @@ type DatabaseConfig struct {
 
 	// Path is the SQLite database file path.
 	Path string `koanf:"path"`
+
+	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
+	// automatic sizing of max(4, NumCPU). Values are clamped to [1, 64] —
+	// readers beyond the CPU count mostly buy queueing, not throughput.
+	MaxReaders int `koanf:"max_readers"`
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -202,6 +252,25 @@ type TLSConfig struct {
 type UploadConfig struct {
 	MaxSizeMB  int    `koanf:"max_size_mb"`
 	StorageDir string `koanf:"storage_dir"`
+}
+
+// BackupConfig controls where database backups are written. Pointing Dir at
+// another disk (or a mount that is shipped off-host) is the recommended way
+// to keep backups from sharing a single point of failure with the live
+// database and uploads.
+type BackupConfig struct {
+	Dir string `koanf:"dir"`
+}
+
+// SecurityConfig tunes security-adjacent behavior that has safe compiled-in
+// defaults.
+type SecurityConfig struct {
+	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
+	// thresholds (registration, login, TOTP, sensitive endpoints). The
+	// defaults assume roughly one person per IP address; a community behind a
+	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
+	// clamped to [0.1, 100].
+	AuthRateLimitMultiplier float64 `koanf:"auth_rate_limit_multiplier"`
 }
 
 // defaults returns the default configuration.
@@ -227,6 +296,9 @@ func defaults() Config {
 			Type: "sqlite",
 			Path: "data/chatserver.db",
 		},
+		Backup: BackupConfig{
+			Dir: "data/backups",
+		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
 			CertFile:     "data/cert.pem",
@@ -251,6 +323,11 @@ func defaults() Config {
 			BatchSize:             50,
 			BatchFlushMs:          100,
 			PrunerIntervalMinutes: 60,
+			ReplayRingSize:        1000,
+			ReplayColdLimit:       5000,
+		},
+		Security: SecurityConfig{
+			AuthRateLimitMultiplier: 1.0,
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:     false,
@@ -296,6 +373,11 @@ server:
 database:
   type: "sqlite"          # "sqlite" is the only supported backend
   path: "data/chatserver.db"
+
+# backup:
+#   dir: "data/backups"   # where database backups are written; point at another
+#                         # disk or an off-host mount so backups don't share a
+#                         # single point of failure with the live database
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off
@@ -380,6 +462,14 @@ func Load(cfgPath string) (*Config, error) {
 	if err := k.Load(structs.Provider(def, "koanf"), nil); err != nil {
 		return nil, fmt.Errorf("loading defaults: %w", err)
 	}
+	// The defaults layer's key set is the complete set of keys the config
+	// struct can absorb — captured NOW, before the file merges in, so it can
+	// serve as the allowlist for the unknown-key warning below. (Capturing
+	// after the file load would let the file's own typos into the allowlist.)
+	knownKeys := make(map[string]struct{}, len(k.Keys()))
+	for _, key := range k.Keys() {
+		knownKeys[key] = struct{}{}
+	}
 
 	// Layer 2: YAML file (create default if missing). The freshly written
 	// default file is loaded like any other so the first boot runs with
@@ -401,6 +491,15 @@ func Load(cfgPath string) (*Config, error) {
 	}
 	if err := k.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+	}
+
+	// Warn (never fail — a newer server must tolerate an older config, and a
+	// warning must not brick a working install) about file keys the config
+	// struct cannot absorb. Without this, a typo like `admin_alowed_cidrs`
+	// silently keeps the default and the operator believes they changed it.
+	for _, key := range unknownFileKeys(cfgPath, knownKeys) {
+		slog.Warn("config: unknown key ignored — value has NO effect (typo?)",
+			"key", key, "file", cfgPath)
 	}
 
 	// Layer 3: environment variable overrides.
@@ -446,8 +545,41 @@ func Load(cfgPath string) (*Config, error) {
 	// at startup instead. Common mistake: a bare IP without the /32 mask.
 	warnInvalidCIDRs("server.trusted_proxies", cfg.Server.TrustedProxies)
 	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
+	warnInvalidCIDRs("server.metrics_allowed_cidrs", cfg.Server.MetricsAllowedCIDRs)
+	warnInvalidCIDRs("server.livekit_webhook_allowed_cidrs", cfg.Server.LiveKitWebhookAllowedCIDRs)
+
+	// A customized admin allowlist with no trusted_proxies is a footgun
+	// behind any reverse proxy or container network: the check then compares
+	// the PROXY'S (or bridge's) address — by construction a private one —
+	// instead of the real client's, so the customization silently doesn't do
+	// what the operator believes. Warn, don't fail: direct-exposure setups
+	// are exactly this shape and are fine.
+	if len(cfg.Server.TrustedProxies) == 0 &&
+		!slices.Equal(cfg.Server.AdminAllowedCIDRs, defaults().Server.AdminAllowedCIDRs) {
+		slog.Warn("config: admin_allowed_cidrs is customized but trusted_proxies is empty — " +
+			"behind a reverse proxy or Docker network the allowlist checks the proxy's private " +
+			"address, not the real client; set server.trusted_proxies to the proxy hop(s)")
+	}
 
 	return &cfg, nil
+}
+
+// unknownFileKeys parses the config file into its own koanf instance and
+// returns every leaf key that the defaults layer (= the full set of keys the
+// Config struct defines) does not contain. knownKeys must be captured from
+// the defaults layer BEFORE the file merges into it.
+func unknownFileKeys(cfgPath string, knownKeys map[string]struct{}) []string {
+	fileK := koanf.New(".")
+	if err := fileK.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
+		return nil // the main load already surfaced any parse problem
+	}
+	var unknown []string
+	for _, key := range fileK.Keys() {
+		if _, ok := knownKeys[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	return unknown
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not

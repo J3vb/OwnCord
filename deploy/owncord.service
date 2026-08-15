@@ -1,0 +1,47 @@
+# OwnCord server — systemd unit template.
+#
+# Install:
+#   1. Create a service user and install directory:
+#        sudo useradd --system --home /opt/owncord --shell /usr/sbin/nologin owncord
+#        sudo mkdir -p /opt/owncord && sudo chown owncord:owncord /opt/owncord
+#   2. Place the chatserver binary (from GitHub Releases) in /opt/owncord/.
+#   3. sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now owncord
+#
+# Logs: journalctl -u owncord -f
+
+[Unit]
+Description=OwnCord chat server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=owncord
+Group=owncord
+WorkingDirectory=/opt/owncord
+ExecStart=/opt/owncord/chatserver
+Restart=on-failure
+RestartSec=3
+
+# The server drains gracefully on SIGTERM with a 30s budget; give it a little
+# headroom before systemd escalates to SIGKILL.
+TimeoutStopSec=35
+
+# ── Hardening ───────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The install directory must stay WRITABLE: the admin panel's self-update
+# renames the new binary into place (chatserver -> chatserver.old swap), and
+# the data dir (SQLite, uploads, certs, backups) lives beneath it by default.
+# If you disable self-update and move data_dir elsewhere, narrow this.
+ReadWritePaths=/opt/owncord
+
+# Only needed for tls.mode: acme (binds :80 for HTTP-01 challenges) as a
+# non-root user. Harmless otherwise; remove if you prefer.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

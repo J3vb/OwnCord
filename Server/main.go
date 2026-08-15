@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -13,16 +16,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/diskutil"
 	"github.com/owncord/server/logctx"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
@@ -34,6 +42,12 @@ import (
 var version = "dev"
 
 func main() {
+	// `server healthcheck` probes the running instance's /health and exits
+	// 0/1. It exists for container healthchecks: the distroless image has no
+	// shell or curl, so the binary is its own probe.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(runHealthcheckCLI())
+	}
 	// `server token ...` is a direct-to-DB CLI (mint/list/revoke API tokens) —
 	// handled before any server/logging setup so it stays quiet and standalone.
 	if len(os.Args) > 1 && os.Args[1] == "token" {
@@ -68,8 +82,13 @@ func main() {
 func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) error {
 	// bgCtx is a cancellable context shared by all background goroutines
 	// (event persister, event pruner, plugin loader, maintenance loop).
-	// It is cancelled early in the shutdown sequence so in-flight DB
-	// operations do not block after the database is being torn down.
+	//
+	// This first deferred bgCancel is only the LIFO backstop — because it is
+	// registered before `defer database.Close()`, it would otherwise run
+	// AFTER the database is closed, leaving background goroutines running
+	// through teardown. The persistence and maintenance blocks below register
+	// their own later (= earlier-running) defers that cancel bgCtx and JOIN
+	// their goroutines before the database closes.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
@@ -108,6 +127,15 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}
 
+	// Disk-space awareness: the database (WAL growth included), uploads,
+	// certs, and by default backups all live on this volume, and running it
+	// dry breaks several of them at once. Probe errors are ignored — unknown
+	// is not "full". /health repeats this check continuously at 256 MiB.
+	warnLowDisk(log, "data dir", cfg.Server.DataDir)
+	if cfg.Backup.Dir != "" && cfg.Backup.Dir != filepath.Join(cfg.Server.DataDir, "backups") {
+		warnLowDisk(log, "backup dir", cfg.Backup.Dir)
+	}
+
 	// ── 3. TLS ────────────────────────────────────────────────────────────
 	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
 	if err != nil {
@@ -126,7 +154,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		return fmt.Errorf("database.type=%q is not supported; set \"sqlite\" or omit it", t)
 	}
 
-	database, err := db.Open(cfg.Database.Path)
+	database, err := db.OpenWithMaxReaders(cfg.Database.Path, cfg.Database.MaxReaders)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
@@ -136,6 +164,9 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	// without this, it falls back to a hardcoded "data/chatserver.db" and
 	// silently no-ops on any server with a configured database.path.
 	admin.SetDatabasePath(cfg.Database.Path)
+	// Backup handlers and the scheduled-backup maintenance write to the
+	// configured backup directory (defaults to data/backups).
+	admin.SetBackupDir(cfg.Backup.Dir)
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
@@ -226,11 +257,21 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 
 		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
 		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
-		ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
+		prunerDone := ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
 		defer func() {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stopCancel()
 			persister.Stop(stopCtx)
+			// Cancel the shared background context and JOIN the pruner before
+			// the (LIFO-later) database.Close defer runs, so no prune is still
+			// mid-query against a closing pool. Bounded: a stuck prune delays
+			// shutdown by at most the timeout, then Close proceeds anyway.
+			bgCancel()
+			select {
+			case <-prunerDone:
+			case <-stopCtx.Done():
+				log.Warn("event pruner did not exit before shutdown timeout")
+			}
 		}()
 	}
 
@@ -289,8 +330,21 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 
 	stopMaintenance := make(chan struct{})
-	defer close(stopMaintenance) // backstop for early returns below; see hub.GracefulStop defer above
+	maintenanceDone := make(chan struct{})
+	defer func() {
+		// Backstop for early returns below (see hub.GracefulStop defer above),
+		// and a bounded join so an in-flight tick (which can hold the writer —
+		// scheduled backups run VACUUM INTO) isn't still using the database
+		// while the LIFO-later Close defer tears it down.
+		close(stopMaintenance)
+		select {
+		case <-maintenanceDone:
+		case <-time.After(5 * time.Second):
+			log.Warn("maintenance loop did not exit before shutdown timeout")
+		}
+	}()
 	go func() {
+		defer close(maintenanceDone)
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 		consecutiveFailures := 0
@@ -309,6 +363,13 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 				tickFailed := false
 				if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
+					tickFailed = true
+				}
+
+				// Scheduled backups + retention pruning, driven by the
+				// backup_schedule / backup_retention admin settings.
+				if err := admin.MaintainBackups(bgCtx, database); err != nil {
+					log.Warn("backup maintenance failed", "error", err)
 					tickFailed = true
 				}
 
@@ -399,16 +460,156 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		}
 	}
 
-	// Stop the WebSocket hub: close all PeerConnections, voice rooms, and
-	// notify connected clients before draining HTTP connections.
-	hub.GracefulStop()
+	// Drain in-flight HTTP handlers FIRST: their broadcasts must still reach
+	// a live hub (and the event persister) or the frames vanish from the
+	// replay/event store across the restart. Shutdown does not wait on
+	// hijacked WebSocket connections, so the hub's own stop below is not
+	// delayed by connected clients — they get the restart notice right after
+	// the drain instead of right before it.
+	shutdownErr := srv.Shutdown(shutdownCtx)
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	// Stop the WebSocket hub: notify clients, stop LiveKit, close all client
+	// connections. Threaded with the same 30s budget the operator was told
+	// about — the notice sleep and LiveKit stop count against it rather than
+	// extending it.
+	hub.GracefulStopContext(shutdownCtx)
+
+	if shutdownErr != nil {
+		return fmt.Errorf("graceful shutdown: %w", shutdownErr)
 	}
 
 	log.Info("server stopped cleanly")
 	return nil
+}
+
+// runHealthcheckCLI probes the local server's /health endpoint and returns a
+// process exit code: 0 healthy, 1 degraded or unreachable. /health answers
+// 503 with a subsystem reason when the hub, database, or disk is unhealthy,
+// so a container orchestrator's healthcheck surfaces those too.
+func runHealthcheckCLI() int {
+	// Deliberately NOT config.Load: that writes a default config.yaml when
+	// none exists, and a probe must have no side effects. Peek at the file
+	// (and the env overrides) for just the values that shape the URL and the
+	// certificate pin.
+	port := 8443
+	scheme := "https"
+	certFile := "data/cert.pem"
+	tlsMode := ""
+	acmeDomain := ""
+	if raw, err := os.ReadFile(config.DefaultPath); err == nil {
+		var partial struct {
+			Server struct {
+				Port int `yaml:"port"`
+			} `yaml:"server"`
+			TLS struct {
+				Mode     string `yaml:"mode"`
+				CertFile string `yaml:"cert_file"`
+				Domain   string `yaml:"domain"`
+			} `yaml:"tls"`
+		}
+		if yaml.Unmarshal(raw, &partial) == nil {
+			if partial.Server.Port > 0 {
+				port = partial.Server.Port
+			}
+			tlsMode = partial.TLS.Mode
+			if partial.TLS.Mode == "off" {
+				scheme = "http"
+			}
+			if partial.TLS.CertFile != "" {
+				certFile = partial.TLS.CertFile
+			}
+			acmeDomain = partial.TLS.Domain
+		}
+	}
+	if env := os.Getenv("OWNCORD_SERVER_PORT"); env != "" {
+		if p, err := strconv.Atoi(env); err == nil && p > 0 {
+			port = p
+		}
+	}
+	if env := os.Getenv("OWNCORD_TLS_MODE"); env != "" {
+		tlsMode = env
+		if env == "off" {
+			scheme = "http"
+		}
+	}
+	if env := os.Getenv("OWNCORD_TLS_DOMAIN"); env != "" {
+		acmeDomain = env
+	}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: healthcheckTLSConfig(tlsMode, certFile, acmeDomain),
+		},
+	}
+	if port < 1 || port > 65535 {
+		port = 8443
+	}
+	resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%d/health", scheme, port)) //nolint:gosec // G704: host is hardcoded loopback; only the port comes from the operator's own config
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck: unreachable:", err)
+		return 1
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		fmt.Fprintf(os.Stderr, "healthcheck: status %d: %s\n", resp.StatusCode, body)
+		return 1
+	}
+	return 0
+}
+
+// healthcheckTLSConfig builds the probe's TLS config, per TLS mode:
+//
+//   - acme: the served cert is CA-issued for the configured domain, so
+//     standard WebPKI verification works — but the probe dials 127.0.0.1, so
+//     ServerName must be overridden to the domain or hostname verification
+//     fails unconditionally and the probe reports a healthy server as down.
+//     A stale pre-ACME data/cert.pem must NOT be pinned in this mode either;
+//     the pin would mismatch the served ACME leaf forever.
+//   - self_signed / manual: the cert can never pass WebPKI (the generated one
+//     has no SANs and IsCA=false), so hostname/chain checks are replaced (not
+//     skipped) by pinning: the presented leaf must be byte-identical to the
+//     local cert file.
+//   - anything else with no readable local cert: plain WebPKI.
+func healthcheckTLSConfig(tlsMode, certFile, acmeDomain string) *tls.Config {
+	if tlsMode == "acme" && acmeDomain != "" {
+		return &tls.Config{MinVersion: tls.VersionTLS12, ServerName: acmeDomain}
+	}
+	pinned := loadPinnedCert(certFile)
+	if pinned == nil {
+		return &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		// Chain/hostname verification is replaced by the exact-match pin
+		// below, which is strictly stronger for a cert we hold on disk.
+		// VerifyConnection (not VerifyPeerCertificate) so the pin also runs
+		// on resumed sessions (gosec G123).
+		InsecureSkipVerify: true, //nolint:gosec // G402: VerifyConnection below pins the exact local certificate
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("healthcheck: server presented no certificate")
+			}
+			if !bytes.Equal(cs.PeerCertificates[0].Raw, pinned) {
+				return errors.New("healthcheck: server certificate does not match " + certFile)
+			}
+			return nil
+		},
+	}
+}
+
+// loadPinnedCert reads the first PEM certificate block from path, returning
+// its DER bytes, or nil when unavailable.
+func loadPinnedCert(path string) []byte {
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the operator's own configured cert file
+	if err != nil {
+		return nil
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil
+	}
+	return block.Bytes
 }
 
 // seedHubReplayState restores the hub's monotonic seq counter from the
@@ -501,6 +702,29 @@ func wsURL(httpScheme, ip string, port int) string {
 		ws = "wss"
 	}
 	return fmt.Sprintf("%s://%s:%d", ws, ip, port)
+}
+
+// Free-space thresholds for the boot-time disk warning. /health uses its own
+// (lower) continuous threshold; these only shape startup log noise.
+const (
+	diskWarnBytes     = 1 << 30   // 1 GiB — warn
+	diskCriticalBytes = 256 << 20 // 256 MiB — error
+)
+
+// warnLowDisk logs when the volume holding path is low on space. Probe
+// failures (unsupported platform, missing dir) are silent — unknown ≠ full.
+func warnLowDisk(log *slog.Logger, label, path string) {
+	free, err := diskutil.FreeBytes(path)
+	if err != nil {
+		return
+	}
+	switch {
+	case free < diskCriticalBytes:
+		log.Error("disk space critically low — writes will start failing soon",
+			"volume", label, "path", path, "free_mb", free>>20)
+	case free < diskWarnBytes:
+		log.Warn("disk space low", "volume", label, "path", path, "free_mb", free>>20)
+	}
 }
 
 // getOutboundIP returns the preferred outbound IP of this machine by dialing

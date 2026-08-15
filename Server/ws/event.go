@@ -235,7 +235,10 @@ func (e TypingDMEvent) TargetUserID() int64 { return e.targetUserID }
 func (e TypingDMEvent) Payload() []byte     { return e.payload }
 
 // PresenceEvent is a presence update broadcast to all connected clients.
+// userID identifies whose presence this is, so EmitEvents can invalidate any
+// stale entry the connect/disconnect coalescer still holds for that user.
 type PresenceEvent struct {
+	userID  int64
 	payload []byte
 }
 
@@ -279,7 +282,7 @@ func (e PresenceSelfEvent) Payload() []byte     { return e.payload }
 func presenceEvents(userID int64, status string, customStatus *string) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
-		return []Event{PresenceEvent{payload: buildPresenceMsg(userID, status, customStatus)}}
+		return []Event{PresenceEvent{userID: userID, payload: buildPresenceMsg(userID, status, customStatus)}}
 	}
 	return []Event{
 		PresenceOthersEvent{

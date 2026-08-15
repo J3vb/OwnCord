@@ -18,7 +18,6 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/storage"
 	"github.com/owncord/server/ws"
 )
 
@@ -73,7 +72,7 @@ type ProfileBroadcaster interface {
 // store may be nil, in which case the avatar-upload route is not registered —
 // a server with no storage backend has nowhere to put the bytes, and a route
 // that 500s on every call is worse than one that 404s.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store *storage.Storage, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
@@ -469,7 +468,7 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 func handleUploadAvatar(
 	database *db.DB,
 	svc *service.Services,
-	store *storage.Storage,
+	store FileStore,
 	limiter *auth.RateLimiter,
 	broadcaster ProfileBroadcaster,
 ) http.HandlerFunc {
@@ -558,10 +557,7 @@ func handleUploadAvatar(
 		fileID := uuid.New().String()
 		written, saveErr := store.Save(fileID, bytes.NewReader(raw))
 		if saveErr != nil {
-			slog.Warn("avatar upload rejected by storage", "error", saveErr)
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: safeStorageErrorMessage(saveErr),
-			})
+			writeStorageSaveError(w, saveErr, "avatar upload")
 			return
 		}
 

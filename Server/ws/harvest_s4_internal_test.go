@@ -263,7 +263,10 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 		t.Error("user stuck online after a failed handshake with no surviving connection")
 	}
 
-	// The other clients must hear about it too.
+	// The other clients must hear about it too. Presence goes through the
+	// QueuePresence coalescer now — force the flush instead of waiting out
+	// the window.
+	h.flushPresenceQueue()
 	select {
 	case bm := <-h.broadcast:
 		if !bytes.Contains(bm.msg, []byte("presence")) {

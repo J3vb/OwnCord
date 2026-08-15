@@ -29,7 +29,11 @@ func runTokenCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
 	}
-	database, err := db.Open(cfg.Database.Path)
+	// OpenShared: the CLI must work while the server is running (the docs'
+	// cron-backup recipe mints tokens against a live server). SQLite WAL makes
+	// the concurrent access safe; the single-process lock protects only the
+	// server's process-local state, which this CLI never touches.
+	database, err := db.OpenShared(cfg.Database.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: open database: %v\n", err)
 		return 1

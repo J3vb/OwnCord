@@ -38,6 +38,13 @@ ON CONFLICT(user_id, channel_id) DO UPDATE SET
     last_message_id = excluded.last_message_id,
     mention_count = 0;
 
+-- name: GetReadState :one
+-- Reader-pool lookup that lets the channel-focus path skip the UpdateReadState
+-- UPSERT when the row is already correct, keeping no-op focus events off the
+-- single writer connection.
+SELECT last_message_id, mention_count FROM read_states
+ WHERE user_id = ? AND channel_id = ?;
+
 -- name: GetChannelUnreadCounts :many
 SELECT c.id,
        (SELECT COALESCE(MAX(m.id), 0) FROM messages m

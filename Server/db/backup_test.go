@@ -135,6 +135,61 @@ func TestBackupToSafe_RejectsNullByte(t *testing.T) {
 	}
 }
 
+// TestBackupToSafe_ErrorKeepsPreexistingFile locks the cleanup guard: a
+// failed VACUUM INTO removes a partial file it created, but an error caused
+// by the destination already existing must never delete the operator's file.
+func TestBackupToSafe_ErrorKeepsPreexistingFile(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	existing := filepath.Join(backupDir, "keep_me.db")
+	if err := os.WriteFile(existing, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// VACUUM INTO refuses an existing destination.
+	if err := database.BackupToSafe(context.Background(), existing, backupDir); err == nil {
+		t.Fatal("BackupToSafe over an existing file should error")
+	}
+	content, err := os.ReadFile(existing)
+	if err != nil || string(content) != "precious" {
+		t.Fatalf("pre-existing file was modified or removed (content=%q, err=%v)", content, err)
+	}
+}
+
+// TestCheckBackupIntegrity_ValidAndCorrupt verifies the integrity gate both
+// accepts a real backup and rejects a non-database file.
+func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	good := filepath.Join(backupDir, "good.db")
+	if err := database.BackupToSafe(context.Background(), good, backupDir); err != nil {
+		t.Fatalf("BackupToSafe: %v", err)
+	}
+	if err := db.CheckBackupIntegrity(context.Background(), good); err != nil {
+		t.Fatalf("CheckBackupIntegrity on a fresh backup: %v", err)
+	}
+
+	bad := filepath.Join(backupDir, "bad.db")
+	if err := os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckBackupIntegrity(context.Background(), bad); err == nil {
+		t.Fatal("CheckBackupIntegrity accepted a garbage file")
+	}
+
+	if err := db.CheckBackupIntegrity(context.Background(), filepath.Join(backupDir, "missing.db")); err == nil {
+		t.Fatal("CheckBackupIntegrity accepted a missing file")
+	}
+}
+
 // TestBackupToSafe_RejectsDoubleQuote ensures a path containing a double-quote
 // is rejected.
 func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {

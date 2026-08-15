@@ -27,8 +27,12 @@ Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`
 or `runtime.(*unwinder).next` is a Go 1.26.5 runtime GC fault, not your change.
-Rerun the job (`gh run rerun --job <id>`); a job cannot be rerun while its
-parent run is still in progress.
+The Go 1.26.6 toolchain shows a variant signature: `unexpected fault address
+0xffffffffffffffff` / `fatal error: fault` (signal 0xc0000005) inside ordinary
+stdlib frames such as `log/slog.(*Logger).Enabled` — same spurious runtime
+fault, same verdict, especially when the diff touches no Go code. Rerun the
+job (`gh run rerun --job <id>`); a job cannot be rerun while its parent run is
+still in progress.
 
 ## Client (from `Client/tauri-client/`)
 

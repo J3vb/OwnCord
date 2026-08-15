@@ -1480,14 +1480,48 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
   "connected_users": 8,
   "voice_sessions": 2,
   "broadcast_drops": 0,
-  "livekit_healthy": true
+  "livekit_healthy": true,
+  "reconnect_tier_buffer": 120,
+  "reconnect_tier_db": 4,
+  "reconnect_tier_full": 1,
+  "backpressure_queue_disconnects": 0,
+  "backpressure_high_fallbacks": 0,
+  "backpressure_low_drops": 17,
+  "ws_conn_rejects": 0,
+  "disk_free_mb": 51200.5,
+  "db_writer_wait_count": 3,
+  "db_writer_wait_seconds": 0.021,
+  "perm_cache_hits": 5120,
+  "perm_cache_misses": 84,
+  "event_persister": {
+    "persisted": 4021,
+    "dropped": 0,
+    "flushes": 311,
+    "errors": 0
+  }
 }
 ```
 
-`voice_sessions` is the number of active voice connections; `broadcast_drops`
-is the cumulative count of WebSocket events dropped because a client send
-queue was full. `livekit_healthy` is omitted when no LiveKit health check is
-wired.
+`voice_sessions` is the number of active voice connections. `broadcast_drops`
+is the cumulative count of events dropped because the **hub-wide broadcast
+queue** was full — sequenced events lost before delivery, worth alerting on
+if it ever grows. Per-client send-queue pressure is reported separately:
+`backpressure_queue_disconnects` (clients disconnected to force a
+replay-recovering reconnect), `backpressure_high_fallbacks` (high-priority
+sends that fell back to the normal queue), and `backpressure_low_drops`
+(typing/presence messages silently dropped — safe to lose, but a growth trend
+means clients are draining too slowly). `reconnect_tier_*` counts resume
+attempts served from the in-memory ring buffer, the persisted event log, and
+full-resync fallback; a rising `full` share means the replay budget is too
+small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
+accumulate time requests spent queueing for SQLite's single write connection —
+the most direct saturation signal for the write path. `perm_cache_*` report
+permission-cache effectiveness (a miss is any lookup that repopulated from the
+database). `ws_conn_rejects` counts upgrades refused by the
+`server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
+volume (omitted when the platform can't report it). `livekit_healthy` is
+omitted when no LiveKit health check is wired; `event_persister` is omitted
+when event persistence is disabled.
 
 ### GET /metrics (Prometheus)
 
@@ -1806,6 +1840,16 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
 `registration_open`, `backup_schedule`, `backup_retention`. Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`.
+
+`backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
+enforced by the server's maintenance loop — see the Backup Strategy section
+of `docs/deployment.md` for the exact semantics.
+
+Three keys are accepted and stored but have **no runtime effect**:
+`server_icon` (reserved for a future release), `max_upload_bytes` (the real
+limit is `upload.max_size_mb` in config.yaml, applied at startup), and
+`voice_quality` (the real setting is `voice.quality` in config.yaml). The
+admin panel shows them read-only for this reason.
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.

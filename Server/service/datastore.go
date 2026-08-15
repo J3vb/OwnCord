@@ -37,6 +37,7 @@ type Store interface {
 	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
 	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
+	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
 	// ── Mentions ──

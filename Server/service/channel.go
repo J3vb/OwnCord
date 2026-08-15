@@ -266,8 +266,22 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
 	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
 	// correct then — any future message id is larger, so unread counts hold.
+	//
+	// Skip the UPSERT when the stored row already says exactly this (same
+	// last_message_id, no mentions to clear): channel_focus/mark_read fire on
+	// every refocus at up to 10/s/user, and even a no-op write occupies the
+	// single writer connection and opens a transaction. The extra read runs on
+	// the reader pool, which doesn't serialize. Same problem-shape as the
+	// session-touch throttle (api/middleware.go). A read failure falls through
+	// to the write — the write is the load-bearing half.
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err == nil {
+		lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)
+		if rsErr == nil && found && lastRead == latestID && mentions == 0 {
+			slog.Debug("channel_focus: read state already current, skipping write",
+				"user_id", userID, "channel_id", channelID)
+			return ch, nil
+		}
 		_ = s.st.UpdateReadState(ctx, userID, channelID, latestID)
 	}
 

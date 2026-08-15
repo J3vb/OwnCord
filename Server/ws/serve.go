@@ -39,9 +39,21 @@ const (
 // allowedOrigins controls which HTTP origins may open a WebSocket connection.
 // Pass nil or []string{"*"} to allow all origins (insecure, for development).
 // Pass explicit origins such as []string{"https://example.com"} to restrict access.
-func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFunc {
+//
+// maxConns, when > 0, refuses new connections with 503 once that many clients
+// are registered — a static capacity guardrail (server.max_ws_connections).
+// The check runs before the upgrade so a refused connection costs one HTTP
+// request, not a socket plus goroutines. Registered count trails pre-auth
+// connections by design; the 10s auth deadline bounds that gap.
+func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
 	return func(w http.ResponseWriter, r *http.Request) {
+		if maxConns > 0 && hub.ClientCount() >= maxConns {
+			hub.connRejects.Add(1)
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
+			return
+		}
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			slog.Warn("ws upgrade failed", "err", err)
@@ -195,12 +207,13 @@ func (h *Hub) handleReconnect(
 			for cid := range allowedChannelIDs {
 				channelIDs = append(channelIDs, cid)
 			}
-			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
+			coldCap := h.maxColdReplayLimit()
+			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, coldCap) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
 			switch {
 			case dbErr != nil:
 				slog.Warn("ws handleReconnect: cold-tier replay query failed",
 					"user_id", c.userID, "err", dbErr)
-			case len(persisted) >= maxColdReplay:
+			case len(persisted) >= coldCap:
 				// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
 				// result means the gap exceeds the cap and the NEWEST events were
 				// dropped. Replaying it would look like a complete resume to the
@@ -208,7 +221,7 @@ func (h *Hub) handleReconnect(
 				// silently losing state events that REST history never repairs.
 				// Leave events nil so the fall-through forces a full ready.
 				slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
-					"user_id", c.userID, "last_seq", lastSeq, "cap", maxColdReplay)
+					"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
 			case len(persisted) > 0:
 				// Retention pruning (PruneEventsOlderThan) deletes purely by
 				// created_at with no seq-floor coordination, so this
@@ -462,7 +475,7 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 		raw = buf
 	} else if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
-		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, maxColdReplay) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, h.maxColdReplayLimit()) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 		if err != nil {
 			return nil
 		}
@@ -522,7 +535,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// note in serve_pumps.go's readPump defer — that field is an
 		// auth-time snapshot, never updated, so broadcasting it here can
 		// resurrect a status the user already changed or cleared.
-		h.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, nil))
+		h.QueuePresence(c.userID, db.StatusOffline, nil)
 	}
 }
 
@@ -550,7 +563,7 @@ func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
 // announceConnectPresence fans out the status applyConnectStatus settled on,
 // with the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
-	h.BroadcastPresence(c.userID, c.user.Status, c.user.CustomStatus)
+	h.QueuePresence(c.userID, c.user.Status, c.user.CustomStatus)
 }
 
 // computeAllowedChannels returns the set of channel IDs a user may access,

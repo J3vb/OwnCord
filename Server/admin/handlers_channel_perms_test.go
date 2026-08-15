@@ -107,6 +107,13 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
+	// A member of the targeted role, so the narrowed invalidation has someone
+	// to evict. Users of other roles must NOT be evicted.
+	memberID, err := database.CreateUser(context.Background(), "role3member", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
 	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
 	body := map[string]any{"allow": 0, "deny": denyPrivate}
 	w := doRequest(t, handler, http.MethodPut,
@@ -123,8 +130,14 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 		t.Errorf("persisted override = (%#x, %#x), want (0, %#x)", allow, deny, denyPrivate)
 	}
 
-	if inv.invalidateAllN != 1 {
-		t.Errorf("InvalidateAll calls = %d, want 1", inv.invalidateAllN)
+	// The eviction is narrowed to the targeted role's members — a role-scoped
+	// override cannot change any other user's verdict, so the whole-cache
+	// flush (and its repopulate stampede) is reserved for the fail-safe path.
+	if inv.invalidateAllN != 0 {
+		t.Errorf("InvalidateAll calls = %d, want 0 (narrowed invalidation)", inv.invalidateAllN)
+	}
+	if len(inv.invalidateUserIDs) != 1 || inv.invalidateUserIDs[0] != memberID {
+		t.Errorf("InvalidateUser calls = %v, want exactly [%d]", inv.invalidateUserIDs, memberID)
 	}
 	if len(hub.visibilityRefreshes) != 1 || hub.visibilityRefreshes[0].ID != chID {
 		t.Errorf("RefreshChannelVisibility not called for channel %d", chID)
@@ -317,6 +330,10 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	if err := database.UpsertChannelOverride(context.Background(), chID, 3, 0, permissions.ReadMessages); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
+	memberID, err := database.CreateUser(context.Background(), "role3clear", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
 
 	w := doRequest(t, handler, http.MethodDelete,
 		"/channels/"+itoa(chID)+"/permissions/3", token, nil)
@@ -331,8 +348,12 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	if allow != 0 || deny != 0 {
 		t.Errorf("override still present: (%#x, %#x)", allow, deny)
 	}
-	if inv.invalidateAllN != 1 {
-		t.Errorf("InvalidateAll calls = %d, want 1", inv.invalidateAllN)
+	// Narrowed invalidation: only the targeted role's members are evicted.
+	if inv.invalidateAllN != 0 {
+		t.Errorf("InvalidateAll calls = %d, want 0 (narrowed invalidation)", inv.invalidateAllN)
+	}
+	if len(inv.invalidateUserIDs) != 1 || inv.invalidateUserIDs[0] != memberID {
+		t.Errorf("InvalidateUser calls = %v, want exactly [%d]", inv.invalidateUserIDs, memberID)
 	}
 	if len(hub.visibilityRefreshes) != 1 {
 		t.Errorf("RefreshChannelVisibility calls = %d, want 1", len(hub.visibilityRefreshes))

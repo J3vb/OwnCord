@@ -121,7 +121,7 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 	seedHubReplayState(ctx, hub, database, log)
 	hub.SetEventStore(database)
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

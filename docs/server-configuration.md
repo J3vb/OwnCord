@@ -33,6 +33,9 @@ the server automatically when a startup-only value changed. Note that
 | `server.port` | int | `8443` | HTTP(S) listen port |
 | `server.name` | string | `"OwnCord Server"` | Server display name (shown in `/api/v1/info` and admin panel) |
 | `server.data_dir` | string | `"data"` | Directory for database, certs, uploads, backups |
+| `server.max_ws_connections` | int | `0` | Cap on concurrently connected WebSocket clients; further upgrades get 503 until connections free up. `0` = unlimited. Every connection costs goroutines and buffered send queues — set a ceiling that matches the host's memory before opening the server to a large community. |
+| `server.metrics_allowed_cidrs` | []string | `[]` | Separate allowlist for `/api/v1/metrics` and the Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`. |
+| `server.livekit_webhook_allowed_cidrs` | []string | `[]` | Separate allowlist for the LiveKit webhook/health endpoints (which also authenticate cryptographically) — an externally-hosted LiveKit's IP goes here, not in the admin allowlist. Empty = falls back to `admin_allowed_cidrs`. |
 | `server.allowed_origins` | string[] | `[]` | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted. |
 | `server.trusted_proxies` | string[] | `[]` | CIDRs of trusted reverse proxies (for X-Forwarded-For) |
 | `server.admin_allowed_cidrs` | string[] | private networks | CIDRs allowed to access `/admin` routes. Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
@@ -56,6 +59,19 @@ the server automatically when a startup-only value changed. Note that
 |-----|------|---------|-------------|
 | `database.type` | string | `"sqlite"` | Database backend. `sqlite` (or empty) is the only supported value — any other value makes the server refuse to start. |
 | `database.path` | string | `"data/chatserver.db"` | Path to SQLite database file |
+| `database.max_readers` | int | `0` | Bound on the read-only connection pool. `0` = automatic (`max(4, CPU count)`); clamped to 1–64. Readers beyond the CPU count mostly buy queueing, not throughput. |
+
+### Backups (`backup`)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `backup.dir` | string | `"data/backups"` | Directory where database backups are written and pruned. Point it at another disk or an off-host mount so backups don't share a single point of failure with the live database. The admin panel's Backup Schedule and Retention settings operate on this directory. |
+
+### Security (`security`)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `security.auth_rate_limit_multiplier` | float | `1.0` | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100. |
 
 ### Uploads (`upload`)
 
@@ -96,7 +112,7 @@ For LiveKit options OwnCord does not model, you can take ownership of the auto-s
 
 ### Event Persistence (`event_persistence`)
 
-Controls the tiered event log used for WebSocket reconnection replay. When enabled, missed events are stored in the database so clients that reconnect after the in-memory ring buffer window (1 000 events) can still replay missed events from the DB tier.
+Controls the tiered event log used for WebSocket reconnection replay. When enabled, missed events are stored in the database so clients that reconnect after the in-memory ring buffer window (`replay_ring_size` events) can still replay missed events from the DB tier.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -105,6 +121,8 @@ Controls the tiered event log used for WebSocket reconnection replay. When enabl
 | `event_persistence.batch_size` | int | `50` | Maximum events per database flush |
 | `event_persistence.batch_flush_ms` | int | `100` | Maximum delay between flushes (milliseconds) |
 | `event_persistence.pruner_interval_minutes` | int | `60` | How often the pruner goroutine wakes up to delete expired events |
+| `event_persistence.replay_ring_size` | int | `1000` | Capacity of the in-memory reconnect replay ring. Larger rings bridge longer disconnects without touching the database, at ~1 message payload of memory per slot. |
+| `event_persistence.replay_cold_limit` | int | `5000` | Maximum persisted events a single reconnect may replay; a larger gap falls back to a full resync. Watch the `reconnect_tier_full` metric before raising it. |
 
 ### Telemetry / OpenTelemetry (`telemetry`)
 

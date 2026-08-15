@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/db"
@@ -36,6 +37,11 @@ type PermissionService struct {
 	// its DB read and refuses to cache if it changed, so an invalidation that
 	// races a populate can't be lost (F6).
 	gen uint64
+
+	// hits/misses are atomics, not mu-guarded ints: the hit path holds mu only
+	// as an RLock, so a plain increment there would race.
+	hits   atomic.Uint64
+	misses atomic.Uint64
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
@@ -130,6 +136,15 @@ func (s *PermissionService) Checker() *permissions.Checker {
 	return s.checker
 }
 
+// CacheStats returns the lifetime hit/miss counters of the permission cache.
+// A miss is any lookup that had to repopulate from the store — including
+// TTL-expired entries and post-invalidation lookups — so a burst of misses
+// right after a role or override change is the cache-wide invalidation cost
+// showing up, not a bug. Safe to call from any goroutine.
+func (s *PermissionService) CacheStats() (hits, misses uint64) {
+	return s.hits.Load(), s.misses.Load()
+}
+
 // getOrPopulate returns cached perms for the user, populating the cache
 // on miss or staleness. Returns nil if the user's role can't be loaded.
 func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *cachedPerms {
@@ -137,10 +152,12 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *ca
 	cp, ok := s.cache[userID]
 	if ok && time.Since(cp.populatedAt) < permCacheTTL {
 		s.mu.RUnlock()
+		s.hits.Add(1)
 		return cp
 	}
 	startGen := s.gen
 	s.mu.RUnlock()
+	s.misses.Add(1)
 
 	// Populate.
 	role, err := s.st.GetRoleForUser(ctx, userID)

@@ -36,6 +36,18 @@ func SetSetupLimiterReapTiming(interval, maxWindow time.Duration) (restore func(
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
 
+// StubCopyBackup swaps the restore path's file-copy hook so tests can inject
+// mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest
+// is the real implementation, for stubs that only want to fail once.
+func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
+	prev := copyBackupFile
+	copyBackupFile = fn
+	return func() { copyBackupFile = prev }
+}
+
+// CopyBackupForTest exposes the real copyFile for StubCopyBackup delegates.
+var CopyBackupForTest = copyFile
+
 // StubCloseError makes the next handleRestoreBackup call's database.Close()
 // return err instead of actually closing the pools, so tests can exercise the
 // Close-failure branch without a genuine driver-level close error (see

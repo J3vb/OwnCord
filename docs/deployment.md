@@ -140,6 +140,30 @@ their own LiveKit can turn the toggle off or set `voice.livekit_binary`.
 
 The server listens on `https://0.0.0.0:8443` by default. See [Server Configuration](server-configuration.md) for all options.
 
+## Running as a Linux Service (systemd)
+
+A crash — a panic under load, the OOM killer, a failed self-update — leaves a
+bare-metal server down until someone notices, so run the binary under a
+supervisor. A ready-made unit template ships in the repo at
+[`deploy/owncord.service`](../deploy/owncord.service); installation steps are
+in its header comments. The important choices it encodes:
+
+- `Restart=on-failure` — the server deliberately exits (rather than limping
+  along) when its WebSocket dispatch loop dies; the supervisor is what turns
+  that into a recovery.
+- `TimeoutStopSec=35` — the server drains gracefully on SIGTERM with a 30s
+  budget; systemd waits it out before escalating.
+- `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
+  directory must stay writable or the admin panel's self-update (which
+  renames the new binary into place) breaks.
+- `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
+  `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
+  user.
+
+Pair it with the scheduled backups in the admin panel — or an external cron
+line (see Backup Strategy below) if you prefer driving backups outside the
+server.
+
 ## Running as a Windows Service
 
 ### Option 1: NSSM (Non-Sucking Service Manager)
@@ -211,6 +235,48 @@ tls:
   mode: "off"
 ```
 
+## Reverse Proxy Topology
+
+OwnCord terminates its own TLS by default and does not require a reverse
+proxy. If you front it with one anyway (shared host, existing nginx, central
+cert management), three things matter:
+
+1. **What the proxy can front.** Everything on port 8443 — the REST API, the
+   WebSocket at `/api/v1/ws`, the admin panel, uploads, **and LiveKit
+   signaling**, which the server already proxies at `/livekit/*`. You do NOT
+   need to expose LiveKit's port 7880 through your proxy.
+2. **What the proxy cannot front.** WebRTC media: UDP 50000–60000 (and the
+   TCP 7881 fallback) must remain directly reachable on the host running
+   LiveKit. An HTTP reverse proxy never carries this traffic.
+3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
+   proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
+   `X-Forwarded-For` for rate limiting and the admin IP allowlist. List only
+   the proxy hops, never client networks.
+
+Working nginx snippet:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name chat.example.com;
+    # ssl_certificate / ssl_certificate_key ...
+
+    location / {
+        proxy_pass https://127.0.0.1:8443;   # or http:// with tls.mode: off
+        proxy_http_version 1.1;              # required for WebSocket upgrade
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Idle chat WebSockets outlive nginx's 60s default read timeout;
+        # the client pings every 30s, so 300s has comfortable margin.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 100m;           # match upload.max_size_mb
+    }
+}
+```
+
 ## Backup Strategy
 
 ### SQLite WAL Considerations
@@ -226,11 +292,45 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups/{name}` | DELETE | Delete a backup (owner-only) |
 | `/admin/api/backups/{name}/restore` | POST | Restore from backup (owner-only; creates pre-restore safety backup first) |
 
-Backups are stored in `data/backups/` with timestamps.
+Backups are stored in the configured backup directory (default
+`data/backups/`) with timestamps. Point it somewhere safer than the data
+volume — another disk, or a mount that is shipped off-host (rsync, rclone,
+a synced folder) — so backups don't share a single point of failure with the
+live database and uploads:
+
+```yaml
+backup:
+  dir: "/mnt/backup-disk/owncord"
+```
+
+Every backup is verified with SQLite's `integrity_check` right after it is
+written (a failed backup is removed, never listed), and again before a
+restore is allowed to overwrite the live database.
+
+Note that a backup runs `VACUUM INTO` on the database's single write
+connection: writes queue for the duration (reads keep serving). On a large
+database, prefer scheduling backups at a low-traffic time of day.
 
 ### Scheduled Backups
 
-Use Windows Task Scheduler with PowerShell:
+The **Backup Schedule** (off / daily / weekly) and **Retention (days)**
+settings in the admin panel are enforced by the server's maintenance loop
+(checked every 15 minutes):
+
+- A scheduled backup is taken when the newest backup on disk is older than
+  the schedule interval — a manual backup resets the clock too.
+- Retention deletes backups older than the configured number of days, but
+  always keeps the newest one, so a stale schedule can never delete your
+  last copy.
+
+External scheduling still works if you prefer it — e.g. Linux cron:
+
+```bash
+# Nightly at 03:00 via an admin API token
+0 3 * * * curl -sk -X POST -H "Authorization: Bearer $OWNCORD_TOKEN" https://localhost:8443/admin/api/backup
+```
+
+or Windows Task Scheduler with PowerShell:
 
 ```powershell
 $headers = @{ "Cookie" = "session=<admin-session-token>" }
@@ -255,6 +355,16 @@ Restoring replaces the live database file. A pre-restore safety backup is create
 }
 ```
 
+`status` is a real verdict, not a constant: the server probes its own
+WebSocket dispatch loop, runs a bounded `SELECT 1` against the database, and
+checks free disk space on the data volume. When any of those fail, the
+endpoint returns HTTP 503 with `"status": "degraded"` and a `reason` field
+naming the subsystem (`hub`, `database`, or `disk` — no further detail, since
+the endpoint is unauthenticated). Checks are cached for a few seconds, so
+polling it aggressively does not multiply database load. Point your uptime
+monitor or container healthcheck at this endpoint and treat any 503 as
+actionable.
+
 The server version is deliberately not exposed on this unauthenticated
 endpoint (anti-fingerprinting hardening).
 
@@ -273,9 +383,34 @@ endpoint (anti-fingerprinting hardening).
   "connected_users": 12,
   "voice_sessions": 3,
   "broadcast_drops": 0,
-  "livekit_healthy": true
+  "livekit_healthy": true,
+  "reconnect_tier_buffer": 120,
+  "reconnect_tier_db": 4,
+  "reconnect_tier_full": 1,
+  "backpressure_queue_disconnects": 0,
+  "backpressure_high_fallbacks": 0,
+  "backpressure_low_drops": 17,
+  "ws_conn_rejects": 0,
+  "disk_free_mb": 51200.5,
+  "db_writer_wait_count": 3,
+  "db_writer_wait_seconds": 0.021,
+  "perm_cache_hits": 5120,
+  "perm_cache_misses": 84,
+  "event_persister": { "persisted": 4021, "dropped": 0, "flushes": 311, "errors": 0 }
 }
 ```
+
+Signals worth watching as a community grows (see `docs/api.md` for full field
+descriptions):
+
+- `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
+  and sequenced events were lost; alert on any growth.
+- `db_writer_wait_seconds` climbing faster than uptime → requests are queueing
+  on SQLite's single write connection; the write path is saturating.
+- `reconnect_tier_full` becoming a noticeable share of reconnects → the replay
+  budget is too small for real disconnect gaps.
+- `backpressure_queue_disconnects` growing → clients are being force-cycled
+  because they drain too slowly (slow links or an overloaded server).
 
 ### LiveKit Health
 

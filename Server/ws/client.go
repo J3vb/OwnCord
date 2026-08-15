@@ -205,6 +205,9 @@ func (c *Client) sendMsg(msg []byte) {
 		c.msgsSent++
 	default:
 		c.msgsDropped++
+		if c.hub != nil { // hub-less clients exist only in unit tests
+			c.hub.bpQueueDisconnects.Add(1)
+		}
 		slog.Warn("ws: client send buffer full, closing connection to force reconnect",
 			"user_id", c.userID)
 		c.closeAllSendLocked()
@@ -226,11 +229,17 @@ func (c *Client) sendHighMsg(msg []byte) {
 		c.msgsSent++
 	default:
 		// Fall back to normal priority channel.
+		if c.hub != nil {
+			c.hub.bpHighFallbacks.Add(1)
+		}
 		select {
 		case c.send <- msg:
 			c.msgsSent++
 		default:
 			c.msgsDropped++
+			if c.hub != nil {
+				c.hub.bpQueueDisconnects.Add(1)
+			}
 			slog.Warn("ws: client high+normal buffers full, closing connection",
 				"user_id", c.userID)
 			c.closeAllSendLocked()
@@ -252,7 +261,12 @@ func (c *Client) sendLowMsg(msg []byte) {
 		c.msgsSent++
 	default:
 		c.msgsDropped++
-		// Do NOT disconnect — low-priority messages are safely droppable.
+		// Do NOT disconnect — low-priority messages are safely droppable. No
+		// per-drop log either (typing/presence bursts would flood it); the
+		// aggregate counter is the only place these drops are visible.
+		if c.hub != nil {
+			c.hub.bpLowDrops.Add(1)
+		}
 	}
 }
 
@@ -271,6 +285,9 @@ func (c *Client) trySendMsg(msg []byte) bool {
 		return true
 	default:
 		c.msgsDropped++
+		if c.hub != nil {
+			c.hub.bpQueueDisconnects.Add(1)
+		}
 		slog.Warn("ws: client send buffer full (trySend), closing connection to force reconnect",
 			"user_id", c.userID)
 		c.closeAllSendLocked()

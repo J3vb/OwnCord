@@ -15,6 +15,20 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
 4. Keep OwnCord on port `8443`.
 5. Connect clients to `https://<tailscale-ip>:8443`.
 
+> **Admin panel over Tailscale:** chat works out of the box, but `/admin`,
+> `/api/v1/metrics`, and the LiveKit health/webhook routes are gated by
+> `server.admin_allowed_cidrs`, whose default covers only loopback and
+> RFC1918 private ranges — Tailscale's `100.x.y.z` addresses (CGNAT range
+> `100.64.0.0/10`) are **not** included and will get a 403. To administer
+> over the tailnet, add it to your `config.yaml`:
+>
+> ```yaml
+> server:
+>   admin_allowed_cidrs:
+>     - "127.0.0.0/8"
+>     - "100.64.0.0/10"   # Tailscale tailnet
+> ```
+
 ## TLS Recommendation
 
 - Recommended: keep `tls.mode: self_signed` (default).

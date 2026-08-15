@@ -29,6 +29,13 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 		case VoiceChannelEvent:
 			h.sendToVoiceChannelExcept(e.VoiceChannelID(), e.ExcludeUserID(), e.Payload())
 		case ExcludeSenderEvent:
+			// An invisible user's public presence half rides this branch;
+			// like the visible case below, it must invalidate any queued
+			// coalescer entry so a stale connect-time presence can't flush
+			// after (and overwrite) this fresher user-chosen status.
+			if po, isPresence := ev.(PresenceOthersEvent); isPresence {
+				h.dropQueuedPresence(po.excludeUserID)
+			}
 			// Low priority: typing indicators are ephemeral.
 			h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 		case UserTargetedEvent:
@@ -65,7 +72,14 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// still sitting in the low queue — leaving the observer's final
 			// view of that user's status stale. Routing everything through
 			// BroadcastToAll keeps every source of one user's presence in a
-			// single ordered, seq-stamped, replayable stream.
+			// single ordered, seq-stamped, replayable stream (OC-0214).
+			if pe, isPresence := ev.(PresenceEvent); isPresence {
+				// A user-chosen presence also bypasses the connect/disconnect
+				// coalescer; drop any entry still queued for this user or the
+				// pending flush (up to 300ms later) would overwrite this
+				// fresher status with the stale connect-time one.
+				h.dropQueuedPresence(pe.userID)
+			}
 			h.BroadcastToAll(e.Payload())
 		default:
 			slog.Warn("EmitEvents: unknown event type", "type", fmt.Sprintf("%T", ev))

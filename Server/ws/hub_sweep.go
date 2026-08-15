@@ -9,6 +9,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/telemetry"
 )
 
 // staleClientTimeout is the maximum duration a client can go without sending
@@ -22,6 +23,32 @@ func (h *Hub) onStaleTick() {
 	// Per-channel token buckets are created on first broadcast; prune idle
 	// ones here or the bucket map grows for the process lifetime.
 	h.topicLimiter.Cleanup(10 * time.Minute)
+	h.refreshTelemetryGauges()
+}
+
+// refreshTelemetryGauges recomputes the connection and voice gauges from live
+// client state. Periodic (30s tick, driven by the ctx-less Run loop) rather
+// than event-driven: join/leave and register/unregister paths are spread
+// across handlers, sweeps, and webhooks — many of them request-scoped, where
+// a context.Background() instrumentation call would trip contextcheck — and a
+// gauge only needs to be right at scrape time.
+func (h *Hub) refreshTelemetryGauges() {
+	participants := 0
+	rooms := make(map[int64]struct{})
+	h.mu.RLock()
+	connected := len(h.clients)
+	for _, c := range h.clients {
+		if chID := c.getVoiceChID(); chID != 0 {
+			participants++
+			rooms[chID] = struct{}{}
+		}
+	}
+	h.mu.RUnlock()
+	m := telemetry.NewAppMetrics()
+	ctx := context.Background()
+	m.WSActiveConnections.Set(ctx, float64(connected))
+	m.VoiceParticipants.Set(ctx, float64(participants))
+	m.VoiceActiveSessions.Set(ctx, float64(len(rooms)))
 }
 
 // kickClient forcibly removes a client from the hub and closes its send channel,

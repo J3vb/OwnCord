@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,6 +73,33 @@ type Hub struct {
 	// call fails loudly instead of racing the dispatch loop.
 	running atomic.Bool
 
+	// dispatchExited flips when Run returns for good — normal Stop or the
+	// panic breaker. /health reads it (via DispatchAlive) because clients keep
+	// registering and appearing online through registerNow even with the
+	// dispatch loop dead, so nothing else makes the outage observable.
+	dispatchExited atomic.Bool
+
+	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
+	// panicked three times in a minute has unknown state, so production exits
+	// the process and lets the supervisor restart it rather than serving
+	// connections that can never receive a broadcast. Tests replace it.
+	fatalFn func()
+
+	// Aggregate per-client backpressure counters. The per-client msgsDropped
+	// field is read once at disconnect and lost; these survive as process
+	// totals for the metrics endpoint.
+	bpQueueDisconnects atomic.Uint64 // clients disconnected because send (or high+send) overflowed
+	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
+	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
+
+	// connRejects counts upgrade requests refused by the max_ws_connections
+	// capacity guardrail (ServeWS).
+	connRejects atomic.Uint64
+
+	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
+	// compiled-in default (maxColdReplay). Set via ConfigureReplay before Run.
+	coldReplayLimit int
+
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
@@ -101,6 +129,12 @@ type Hub struct {
 	// Protected by keyHolderMu.
 	keyHolderMu     sync.RWMutex
 	voiceKeyHolders map[int64]int64
+
+	// Presence coalescer (QueuePresence): latest queued presence per user and
+	// whether a flush timer is armed. Guarded by presenceMu.
+	presenceMu         syncutil.Mutex
+	presenceQueue      map[int64]pendingPresence
+	presenceFlushArmed bool
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -124,6 +158,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		settingsName:    "OwnCord Server",
 		settingsMotd:    "Welcome!",
 		voiceKeyHolders: make(map[int64]int64),
+		fatalFn:         func() { os.Exit(1) },
 	}
 
 	// V2 handler registrations (need Hub fields for deps).
@@ -219,6 +254,7 @@ func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	h.running.Store(true)
+	defer h.dispatchExited.Store(true)
 	var panicCount int
 	var lastPanicReset time.Time
 
@@ -246,8 +282,19 @@ func (h *Hub) Run() {
 						"stack", stackutil.Capture())
 
 					if panicCount >= 3 {
-						slog.Error("hub: too many panics in 60s, stopping")
+						// The hub's state after three panics in a minute is
+						// unknown, and a stopped dispatch loop is invisible from
+						// the outside: registerNow keeps admitting clients that
+						// can never receive a broadcast. Exit and let the
+						// process supervisor restart us (fatalFn is os.Exit(1)
+						// in production; tests substitute a no-op and rely on
+						// the Stop below).
+						slog.Error("hub: too many panics in 60s, stopping and exiting for supervisor restart")
 						h.Stop()
+						h.dispatchExited.Store(true)
+						if h.fatalFn != nil {
+							h.fatalFn()
+						}
 						return
 					}
 				}
@@ -300,19 +347,40 @@ func (h *Hub) Stop() {
 }
 
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
-// Safe to call multiple times concurrently.
+// Safe to call multiple times concurrently. Prefer GracefulStopContext where a
+// shutdown budget exists — this variant waits the full client-notice window.
 func (h *Hub) GracefulStop() {
+	h.GracefulStopContext(context.Background())
+}
+
+// GracefulStopContext is GracefulStop bounded by ctx: the client-notice wait
+// ends early when ctx expires, so the hub's drain counts against the caller's
+// shutdown budget instead of extending it. Safe to call multiple times
+// concurrently (only the first call's ctx is used).
+func (h *Hub) GracefulStopContext(ctx context.Context) {
 	h.gracefulOnce.Do(func() {
-		// Broadcast restart notice to all connected clients.
-		h.BroadcastServerRestart("shutdown", 5)
+		// The notice window matters only when someone is connected to hear
+		// it — an idle server (and every early-return startup path) skips
+		// straight to teardown.
+		hasClients := h.ClientCount() > 0
+		if hasClients {
+			// Broadcast restart notice to all connected clients.
+			h.BroadcastServerRestart("shutdown", 5)
+		}
 
 		// Stop LiveKit process.
 		if h.lkProcess != nil {
 			h.lkProcess.Stop()
 		}
 
-		// Give clients 5 seconds to disconnect gracefully.
-		time.Sleep(5 * time.Second)
+		// Give clients the promised notice window to disconnect gracefully —
+		// the 5s matches the countdown BroadcastServerRestart told them.
+		if hasClients {
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+			}
+		}
 
 		// Close all remaining client connections.
 		h.mu.Lock()
@@ -574,6 +642,63 @@ func (h *Hub) ClientCount() int {
 // full broadcast channel. Safe to call from any goroutine.
 func (h *Hub) BroadcastDropCount() uint64 {
 	return h.broadcastDrops.Load()
+}
+
+// DispatchAlive reports whether the hub's dispatch loop is still running.
+// It is true before Run starts (so a health probe racing startup does not
+// flap) and false once Run has returned — normal shutdown or the panic
+// breaker. Safe to call from any goroutine.
+func (h *Hub) DispatchAlive() bool {
+	return !h.dispatchExited.Load()
+}
+
+// BackpressureStats returns the process-lifetime per-client backpressure
+// counters: connections closed due to send-buffer overflow, high-priority
+// sends that fell back to the normal buffer, and low-priority messages
+// silently dropped. Safe to call from any goroutine.
+func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
+	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
+}
+
+// ConnRejectCount returns how many WebSocket upgrade requests were refused by
+// the max_ws_connections capacity guardrail. Safe to call from any goroutine.
+func (h *Hub) ConnRejectCount() uint64 {
+	return h.connRejects.Load()
+}
+
+// ConfigureReplay resizes the reconnect replay budget: the in-memory ring and
+// the persisted-event cap per reconnect (event_persistence.replay_ring_size /
+// replay_cold_limit). Zero or negative values keep the compiled-in defaults.
+// Must be called before Run — the dispatch loop reads replayBuf unlocked.
+func (h *Hub) ConfigureReplay(ringSize, coldLimit int) {
+	if h.rejectIfRunning("ConfigureReplay") {
+		return
+	}
+	if ringSize > 0 {
+		h.replayBuf = NewEventRingBuffer(ringSize)
+	}
+	if coldLimit > 0 {
+		h.coldReplayLimit = coldLimit
+	}
+}
+
+// maxColdReplayLimit returns the effective persisted-replay cap.
+func (h *Hub) maxColdReplayLimit() int {
+	if h.coldReplayLimit > 0 {
+		return h.coldReplayLimit
+	}
+	return maxColdReplay
+}
+
+// EventPersisterStats returns the attached persister's lifetime counters.
+// ok is false when event persistence is disabled (no persister attached).
+func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, ok bool) {
+	p := h.eventPersister.Load()
+	if p == nil {
+		return 0, 0, 0, 0, false
+	}
+	persisted, dropped, flushes, errs = p.Stats()
+	return persisted, dropped, flushes, errs, true
 }
 
 // VoiceSessionCount returns the number of clients currently in a voice channel.

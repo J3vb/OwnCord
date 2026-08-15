@@ -5,6 +5,15 @@ on:
     tags:
       - "v*"
 
+# A deleted-and-re-pushed tag (it has happened — see the checksum note in the
+# publish job) must not race two publish runs: `gh release create` fails
+# loudly on the second run, but the ghcr :latest push does not, and which run
+# wins it would be arbitrary. Queue, never cancel — a half-cancelled release
+# is worse than a slow one.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
   # because the client manifests weren't bumped before tagging — deployed
@@ -223,6 +232,40 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -o chatserver -ldflags "-s -w -X main.version=$VERSION" .
 
+      # Boot-smoke the EXACT artifact that ships: this feed drives the signed
+      # self-update, so a binary that compiles but dies on boot would deploy
+      # itself to every auto-updating instance. CI's tests exercise the same
+      # commit but never this build (release ldflags, CGO_ENABLED=0) and never
+      # execute the produced binary. First run writes config.yaml, generates a
+      # self-signed cert, migrates a fresh SQLite DB — a real cold boot.
+      - name: Boot-smoke server binary
+        shell: bash
+        working-directory: Server
+        run: |
+          SMOKE_DIR="$RUNNER_TEMP/owncord-smoke"
+          mkdir -p "$SMOKE_DIR"
+          cd "$SMOKE_DIR"
+          BIN="$GITHUB_WORKSPACE/Server/chatserver"
+          [ -f "$GITHUB_WORKSPACE/Server/chatserver.exe" ] && BIN="$GITHUB_WORKSPACE/Server/chatserver.exe"
+          "$BIN" &
+          SERVER_PID=$!
+          ok=0
+          for _ in $(seq 1 30); do
+            sleep 1
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::server process exited during boot smoke"
+              exit 1
+            fi
+            if "$BIN" healthcheck; then ok=1; break; fi
+          done
+          kill "$SERVER_PID" 2>/dev/null || true
+          wait "$SERVER_PID" 2>/dev/null || true
+          if [ "$ok" != "1" ]; then
+            echo "::error::server never reported healthy within 30s"
+            exit 1
+          fi
+          echo "boot smoke passed"
+
       - name: Create tar.gz (Linux)
         if: matrix.os == 'ubuntu-latest'
         working-directory: Server
@@ -377,6 +420,39 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
+
+      # Build locally first so the image can be boot-smoked BEFORE anything
+      # is pushed — a pushed :latest that dies on boot deploys itself to every
+      # `docker compose pull` upgrade.
+      - name: Build image (local, for smoke test)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: Server/
+          load: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: owncord-smoke:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Boot-smoke Docker image
+        run: |
+          docker run -d --name owncord-smoke owncord-smoke:candidate
+          ok=0
+          for _ in $(seq 1 30); do
+            sleep 1
+            if [ "$(docker inspect -f '{{.State.Running}}' owncord-smoke)" != "true" ]; then
+              echo "::error::container exited during boot smoke"
+              docker logs owncord-smoke
+              exit 1
+            fi
+            if docker exec owncord-smoke /chatserver healthcheck; then ok=1; break; fi
+          done
+          docker logs owncord-smoke
+          docker rm -f owncord-smoke
+          if [ "$ok" != "1" ]; then
+            echo "::error::container never reported healthy within 30s"
+            exit 1
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2

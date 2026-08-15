@@ -3,9 +3,11 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/telemetry"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -18,6 +20,9 @@ type broadcastMsg struct {
 	// recipient's role may not READ, and the audience is resolved off the hub
 	// goroutine so deliverBroadcast stays free of permission queries.
 	recipients []int64
+	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
+	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
+	enqueuedAt time.Time
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -25,7 +30,7 @@ type broadcastMsg struct {
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 	select {
-	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
+	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg, enqueuedAt: time.Now()}:
 	default:
 		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping message",
@@ -37,7 +42,7 @@ func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 // Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
 	select {
-	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
+	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg, enqueuedAt: time.Now()}:
 	default:
 		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping global message",
@@ -127,6 +132,7 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 		channelID:  channelID,
 		msg:        msg,
 		recipients: recipients,
+		enqueuedAt: time.Now(),
 	}
 	select {
 	case h.broadcast <- bm:
@@ -557,10 +563,73 @@ func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
 	h.BroadcastToAll(buildUserUpdate(u))
 }
 
+// presenceCoalesceWindow is how long QueuePresence buffers connect/disconnect
+// presence before flushing. Long enough to collapse a socket flap
+// (disconnect+reconnect through a proxy blip) into one frame, short enough
+// that a genuine arrival still looks immediate to humans.
+const presenceCoalesceWindow = 300 * time.Millisecond
+
+// pendingPresence is the coalescer's latest-wins entry for one user.
+type pendingPresence struct {
+	status       string
+	customStatus *string
+}
+
+// QueuePresence coalesces connect/disconnect presence broadcasts: the latest
+// state per user is buffered for presenceCoalesceWindow and then flushed via
+// BroadcastPresence. Each un-coalesced presence change is a sequenced global
+// broadcast — an O(connected clients) fan-out under seqMu — so a reconnect
+// storm (proxy blip, deploy, network hiccup) used to fire O(users) of them
+// from the connect critical path all at once. Latest-wins is exactly
+// presence's semantics: a flap inside the window collapses to its final
+// state, and the flushed frames are ordinary sequenced presence messages, so
+// the wire format and replay behaviour are unchanged. User-chosen status
+// changes (presence_update handler) do not pass through here.
+func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
+	h.presenceMu.Lock()
+	if h.presenceQueue == nil {
+		h.presenceQueue = make(map[int64]pendingPresence)
+	}
+	h.presenceQueue[userID] = pendingPresence{status: status, customStatus: customStatus}
+	armed := h.presenceFlushArmed
+	h.presenceFlushArmed = true
+	h.presenceMu.Unlock()
+	if !armed {
+		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
+	}
+}
+
+// dropQueuedPresence removes a user's pending coalesced presence, if any.
+// Called when a fresher presence for that user is broadcast directly (the
+// presence_update handler path), so the coalescer's later flush cannot
+// resurrect the stale connect-time state over it. Ordering holds because a
+// user's connect (which queues) and their presence_update (which drops) run
+// serially on the same connection's readPump.
+func (h *Hub) dropQueuedPresence(userID int64) {
+	h.presenceMu.Lock()
+	delete(h.presenceQueue, userID)
+	h.presenceMu.Unlock()
+}
+
+// flushPresenceQueue drains the coalescer and broadcasts each user's latest
+// presence. Runs on the AfterFunc timer goroutine, never under presenceMu
+// during the fan-out.
+func (h *Hub) flushPresenceQueue() {
+	h.presenceMu.Lock()
+	queued := h.presenceQueue
+	h.presenceQueue = nil
+	h.presenceFlushArmed = false
+	h.presenceMu.Unlock()
+	for uid, p := range queued {
+		h.BroadcastPresence(uid, p.status, p.customStatus)
+	}
+}
+
 // BroadcastPresence fans a presence change out with the invisible mapping
 // applied: everyone else sees db.BroadcastStatus(status), the user themselves
 // sees the truth. It is the non-handler counterpart of presenceEvents, used by
-// the connect and disconnect paths which write to the hub directly.
+// the connect and disconnect paths (via the QueuePresence coalescer, which
+// delivers through here).
 func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *string) {
 	public := db.BroadcastStatus(status)
 	if public == status {
@@ -800,6 +869,17 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		}
 		return seq, delivered, channelSend
 	}()
+
+	// Instrumentation runs after seqMu is released: a metrics provider must
+	// never extend the critical section that serializes every broadcast.
+	// seq == 0 means the topic limiter shed the frame before delivery.
+	if seq != 0 {
+		m := telemetry.NewAppMetrics()
+		m.WSMessagesTotal.Add(context.Background(), 1)
+		if !bm.enqueuedAt.IsZero() {
+			m.WSBroadcastLatency.Record(context.Background(), time.Since(bm.enqueuedAt).Seconds())
+		}
+	}
 
 	if channelSend {
 		slog.Debug("hub: channel broadcast",

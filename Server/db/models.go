@@ -302,3 +302,9 @@ type Emoji struct {
 
 // sessionTTL is the duration a session remains valid after creation.
 const sessionTTL = 30 * 24 * time.Hour
+
+// sessionTimeLayout is the storage format for sessions.expires_at (and the
+// other RFC3339-UTC expiry columns). DeleteExpiredSessions compares these as
+// plain text against an index, so every writer and the sweep's cutoff must
+// use exactly this layout.
+const sessionTimeLayout = "2006-01-02T15:04:05Z"

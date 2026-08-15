@@ -16,7 +16,6 @@ import (
 const (
 	scopeWS      = "github.com/owncord/server/ws"
 	scopeService = "github.com/owncord/server/service"
-	scopeDB      = "github.com/owncord/server/db"
 	scopeVoice   = "github.com/owncord/server/voice"
 )
 
@@ -31,7 +30,6 @@ type AppMetrics struct {
 	WSEventsPersisted      Counter
 	WSEventsDropped        Counter
 	WSEventsPersistErrors  Counter
-	DBQueryDurationSec     Histogram
 	VoiceActiveSessions    Gauge
 	VoiceParticipants      Gauge
 	ServiceCallDurationSec Histogram
@@ -63,7 +61,6 @@ func NewAppMetrics() *AppMetrics {
 	}
 	ws := GlobalMeter(scopeWS)
 	svc := GlobalMeter(scopeService)
-	db := GlobalMeter(scopeDB)
 	voice := GlobalMeter(scopeVoice)
 	m := &AppMetrics{
 		WSMessagesTotal:        ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
@@ -73,7 +70,6 @@ func NewAppMetrics() *AppMetrics {
 		WSEventsPersisted:      ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
 		WSEventsDropped:        ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
 		WSEventsPersistErrors:  ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
-		DBQueryDurationSec:     db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
 		VoiceActiveSessions:    voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
 		VoiceParticipants:      voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
 		ServiceCallDurationSec: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),

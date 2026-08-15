@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -46,6 +47,10 @@ type DB struct {
 	// non-blocking enqueues. Nil (the default) keeps audit writes
 	// synchronous — the token CLI and tests rely on that.
 	auditWriter atomic.Pointer[AuditWriter]
+
+	// lockRelease drops the single-process advisory lock taken by openFile.
+	// Nil for in-memory databases and when the lock mechanism is unavailable.
+	lockRelease func()
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed
@@ -97,10 +102,31 @@ func isMemoryPath(path string) bool {
 // path is embedded in a file: URI without escaping. cfg.Database.Path is a
 // plain path (default "data/chatserver.db"), which satisfies this.
 func Open(path string) (*DB, error) {
+	return OpenWithMaxReaders(path, 0)
+}
+
+// OpenWithMaxReaders is Open with an explicit reader-pool bound
+// (database.max_readers). maxReaders <= 0 keeps the automatic
+// max(4, NumCPU) sizing; values are clamped to [1, 64]. Ignored for
+// in-memory databases, which use a single shared connection.
+func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
 	}
-	return openFile(path)
+	return openFile(path, maxReaders, true)
+}
+
+// OpenShared opens the database WITHOUT taking the single-process lock. It
+// exists for short-lived tooling — the `server token` CLI — that must work
+// while the server is running. SQLite's own WAL locking makes the concurrent
+// access safe at the file level; the process lock only protects the SERVER's
+// process-local state (presence, replay ring, rate-limit windows), which a
+// CLI does not touch. Long-lived processes must use Open.
+func OpenShared(path string) (*DB, error) {
+	if isMemoryPath(path) {
+		return openMemory(path)
+	}
+	return openFile(path, 0, false)
 }
 
 // openMemory preserves the pre-split behavior exactly: a single connection
@@ -143,7 +169,41 @@ func openMemory(path string) (*DB, error) {
 }
 
 // openFile opens the writer and reader pools for a file-backed database.
-func openFile(path string) (*DB, error) {
+// takeLock is false only for OpenShared (short-lived CLI tooling).
+func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
+	// Single-process guard: SQLite's own locking prevents file corruption,
+	// but everything built above it — presence derived from hub membership,
+	// the replay ring, rate-limit windows, the boot-time status reset — is
+	// process-local and assumes exactly one server owns this database file.
+	// A second process starting is almost always an accident (double systemd
+	// unit, container + binary); fail fast with a clear message rather than
+	// letting two instances silently fight over shared state.
+	var release func()
+	if takeLock {
+		var lockErr error
+		release, lockErr = acquireProcessLock(path)
+		if lockErr != nil {
+			if errors.Is(lockErr, errAlreadyLocked) {
+				return nil, fmt.Errorf(
+					"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
+					path)
+			}
+			// The lock mechanism itself failed (e.g. a network filesystem that
+			// rejects advisory locks). Warn and continue — refusing to start on
+			// an NFS data dir would be a regression, and SQLite still protects
+			// the file itself.
+			slog.Warn("db: could not take the single-process lock; continuing unprotected",
+				"path", lockFilePath(path), "error", lockErr)
+			release = nil
+		}
+	}
+	ok := false
+	defer func() {
+		if !ok && release != nil {
+			release()
+		}
+	}()
+
 	base := path
 	if !strings.HasPrefix(base, "file:") {
 		base = "file:" + base
@@ -177,6 +237,9 @@ func openFile(path string) (*DB, error) {
 		return nil, fmt.Errorf("opening sqlite reader pool: %w", err)
 	}
 	readConns := max(4, runtime.NumCPU())
+	if maxReaders > 0 {
+		readConns = min(max(maxReaders, 1), 64)
+	}
 	reader.SetMaxOpenConns(readConns)
 	reader.SetMaxIdleConns(readConns)
 	if err := reader.Ping(); err != nil {
@@ -185,7 +248,10 @@ func openFile(path string) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite reader pool: %w", err)
 	}
 
-	return newDB(writer, reader), nil
+	d := newDB(writer, reader)
+	d.lockRelease = release
+	ok = true
+	return d, nil
 }
 
 // newDB assembles a DB whose sqlc query layer routes through dbtx.
@@ -287,15 +353,24 @@ func hasKeywordPrefix(s, keyword string) bool {
 // MigrateFS (defined in migrate.go) which maintains the schema_versions
 // tracking table.
 func Migrate(database *DB) error {
-	if err := MigrateFS(database, migrations.FS); err != nil {
+	applied, err := migrateFSCount(database, migrations.FS)
+	if err != nil {
 		return err
 	}
-	// Refresh the query planner's statistics once per startup so newly created
-	// indexes (e.g. migration 019) are actually chosen. Close() keeps them
-	// current afterwards via PRAGMA optimize. ANALYZE writes sqlite_stat rows,
-	// so it runs on the writer.
-	if _, err := database.writer.Exec("ANALYZE;"); err != nil {
-		return fmt.Errorf("running ANALYZE after migrations: %w", err)
+	// Refresh the query planner's statistics when the schema changed, so newly
+	// created indexes (e.g. migration 019) are actually chosen. A full ANALYZE
+	// grows with row count and blocks startup, so unchanged schemas get the
+	// cheap PRAGMA optimize instead — which also covers crash-restarts that
+	// never reached Close()'s optimize. Both write sqlite_stat rows, so they
+	// run on the writer.
+	if applied > 0 {
+		if _, err := database.writer.Exec("ANALYZE;"); err != nil {
+			return fmt.Errorf("running ANALYZE after migrations: %w", err)
+		}
+		return nil
+	}
+	if _, err := database.writer.Exec("PRAGMA optimize;"); err != nil {
+		return fmt.Errorf("running PRAGMA optimize at startup: %w", err)
 	}
 	return nil
 }
@@ -309,7 +384,14 @@ func (d *DB) Close() error {
 	if d.reader != d.writer {
 		readerErr = d.reader.Close()
 	}
-	return errors.Join(d.writer.Close(), readerErr)
+	err := errors.Join(d.writer.Close(), readerErr)
+	// Release the single-process lock only after the pools are closed, so a
+	// successor process acquiring it can rely on this one being done writing.
+	if d.lockRelease != nil {
+		d.lockRelease()
+		d.lockRelease = nil
+	}
+	return err
 }
 
 // QueryRowContext executes a query that returns at most one row, with context.
@@ -351,4 +433,16 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 // must run on the writer to checkpoint the WAL it just stopped appending to.
 func (d *DB) SQLDb() *sql.DB {
 	return d.writer
+}
+
+// PingRead answers whether the database can serve reads, via a bounded
+// SELECT 1 on the READER pool. The health endpoint uses it deliberately:
+// pinging the single-connection writer would queue behind any long write —
+// most notably a scheduled backup's VACUUM INTO — and report a healthy,
+// read-serving server as degraded for the backup's whole duration. Writer
+// saturation is reported separately (SQLDb().Stats() in /api/v1/metrics),
+// where it is a capacity signal rather than a liveness verdict.
+func (d *DB) PingRead(ctx context.Context) error {
+	var one int
+	return d.reader.QueryRowContext(ctx, "SELECT 1").Scan(&one)
 }

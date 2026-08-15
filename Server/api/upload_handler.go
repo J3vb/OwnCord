@@ -123,6 +123,28 @@ func safeStorageErrorMessage(err error) string {
 	}
 }
 
+// writeStorageSaveError maps a storage.Save failure onto the right HTTP
+// class: server-side filesystem failures (storage.ErrIO — disk full,
+// permissions, read-only mount) become 507 so they are distinguishable from
+// bad uploads in any status dashboard; everything else stays the client's
+// 400. Detail never crosses the HTTP boundary either way (path leakage —
+// see safeStorageErrorMessage).
+func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
+	if errors.Is(saveErr, storage.ErrIO) {
+		slog.Error(what+" failed: server storage error", "error", saveErr)
+		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
+			Error:   "STORAGE_ERROR",
+			Message: "upload failed: server storage error",
+		})
+		return
+	}
+	slog.Warn(what+" rejected", "error", saveErr)
+	writeJSON(w, http.StatusBadRequest, errorResponse{
+		Error:   "BAD_REQUEST",
+		Message: safeStorageErrorMessage(saveErr),
+	})
+}
+
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
 //
@@ -130,7 +152,7 @@ func safeStorageErrorMessage(err error) string {
 // per-channel ACLs on every file download. A nil permSvc would panic for
 // any authenticated file request, so we fail fast at mount time rather
 // than let the first user hit a 500.
-func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
+func MountUploadRoutes(r chi.Router, database *db.DB, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
 	if permSvc == nil {
 		panic("api: MountUploadRoutes requires a non-nil PermissionService")
 	}
@@ -143,7 +165,7 @@ func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, li
 	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins, permSvc))
 }
 
-func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleUpload(database *db.DB, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		user, ok := r.Context().Value(UserKey).(*db.User)
@@ -207,11 +229,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		// Store file on disk (validates file type via magic bytes).
 		writtenBytes, saveErr := store.Save(fileID, file)
 		if saveErr != nil {
-			slog.Warn("file upload rejected", "error", saveErr)
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: safeStorageErrorMessage(saveErr),
-			})
+			writeStorageSaveError(w, saveErr, "file upload")
 			return
 		}
 
@@ -260,7 +278,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 	}
 }
 
-func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
+func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID := chi.URLParam(r, "id")
 		if fileID == "" {

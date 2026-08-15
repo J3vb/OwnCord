@@ -229,6 +229,31 @@ func (q *Queries) GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIPa
 	return items, nil
 }
 
+const getReadState = `-- name: GetReadState :one
+SELECT last_message_id, mention_count FROM read_states
+ WHERE user_id = ? AND channel_id = ?
+`
+
+type GetReadStateParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+type GetReadStateRow struct {
+	LastMessageID int64 `json:"lastMessageId"`
+	MentionCount  int64 `json:"mentionCount"`
+}
+
+// Reader-pool lookup that lets the channel-focus path skip the UpdateReadState
+// UPSERT when the row is already correct, keeping no-op focus events off the
+// single writer connection.
+func (q *Queries) GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error) {
+	row := q.db.QueryRowContext(ctx, getReadState, arg.UserID, arg.ChannelID)
+	var i GetReadStateRow
+	err := row.Scan(&i.LastMessageID, &i.MentionCount)
+	return i, err
+}
+
 const setMessagePinned = `-- name: SetMessagePinned :execresult
 UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0
 `

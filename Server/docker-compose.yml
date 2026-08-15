@@ -10,6 +10,14 @@
 # Browser clients reach LiveKit directly via the ports published below,
 # so your firewall must allow TCP 7880-7881 and UDP 50000-60000.
 
+# Log rotation shared by both services: without a cap the default json-file
+# driver grows unbounded on the host disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   owncord:
@@ -27,6 +35,21 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Persistent data (SQLite DB + uploaded files)
       - owncord-data:/app/data
+    # The binary is its own probe (`healthcheck` subcommand) — the distroless
+    # image has no shell or curl. Plain docker compose only SURFACES unhealthy
+    # (docker ps, events); pair with an external watchdog (or an autoheal
+    # container) if you want automatic restarts on hang.
+    healthcheck:
+      test: ["CMD", "/chatserver", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+    # Uncomment and size to your host to keep a runaway process from starving
+    # the machine (values are a starting point for a small community):
+    # mem_limit: 1g
+    # cpus: "2.0"
     depends_on:
       - livekit
     networks:
@@ -43,6 +66,7 @@ services:
       - "50000-60000:50000-60000/udp"  # WebRTC UDP media streams
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    logging: *default-logging
     networks:
       - owncord-net
 

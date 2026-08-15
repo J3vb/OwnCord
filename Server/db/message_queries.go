@@ -567,6 +567,21 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	return result, nil
 }
 
+// GetReadState returns the stored read-state row for (userID, channelID).
+// found is false when the user has never focused the channel. Runs on the
+// reader pool — it exists so HandleChannelFocus can skip the UpdateReadState
+// write when the row is already correct.
+func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error) {
+	row, err := d.q.GetReadState(ctx, dbgen.GetReadStateParams{UserID: userID, ChannelID: channelID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("GetReadState: %w", err)
+	}
+	return row.LastMessageID, row.MentionCount, true, nil
+}
+
 // UpdateReadState upserts the read state for a user in a channel and clears
 // its mention badge — marking a channel read consumes its mentions.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
