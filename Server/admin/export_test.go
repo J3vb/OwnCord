@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 )
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
@@ -33,6 +35,22 @@ func SetSetupLimiterReapTiming(interval, maxWindow time.Duration) (restore func(
 // SetBackupBaseDir overrides backupBaseDir so tests can point backup handlers
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
+
+// StubCloseError makes the next handleRestoreBackup call's database.Close()
+// return err instead of actually closing the pools, so tests can exercise the
+// Close-failure branch without a genuine driver-level close error (see
+// dbCloser's doc comment for why that's not otherwise reachable in a test).
+func StubCloseError(msg string) (restore func()) {
+	closeMu.Lock()
+	prev := dbCloser
+	dbCloser = func(*db.DB) error { return errors.New(msg) }
+	closeMu.Unlock()
+	return func() {
+		closeMu.Lock()
+		dbCloser = prev
+		closeMu.Unlock()
+	}
+}
 
 // StubRestart replaces the process-restart hook for the duration of a test and
 // returns a func reporting whether a restart was requested. Without this the

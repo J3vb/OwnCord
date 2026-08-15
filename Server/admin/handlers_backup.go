@@ -237,9 +237,18 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
 
-		if err := database.Close(); err != nil {
-			slog.Error("failed to close database before restore", "err", err)
+		if err := closeDatabase(database); err != nil {
+			// database.Close() closes the writer and reader pools regardless of
+			// the error it returns (Server/db/db.go), so this process cannot
+			// serve anything more either way — every other failure path below
+			// (copyFile failing, and the success path itself) respawns for
+			// exactly that reason. The live database file is still intact here
+			// (copyFile hasn't run yet), so the respawned process comes back on
+			// the pre-restore data rather than leaving clients pinned on
+			// "Reconnecting..." against a process that never actually restarts.
+			slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to close database")
+			go requestRestart("backup_restore_close_failed")
 			return
 		}
 
@@ -289,6 +298,25 @@ var (
 	restartMu   sync.Mutex
 	restartSelf = restartProcess
 )
+
+// dbCloser is swappable in tests to simulate database.Close() returning an
+// error. modernc.org/sqlite's sqlite3_close_v2 essentially never fails on a
+// normally-open connection, so there is no portable way to provoke a genuine
+// Close() error from a real driver in a unit test; this seam lets tests
+// exercise that branch directly. Guarded like restartSelf, for the same
+// reason (swap happens on the test goroutine, read on the handler's).
+var (
+	closeMu  sync.Mutex
+	dbCloser = func(database *db.DB) error { return database.Close() }
+)
+
+// closeDatabase invokes the current close hook.
+func closeDatabase(database *db.DB) error {
+	closeMu.Lock()
+	fn := dbCloser
+	closeMu.Unlock()
+	return fn(database)
+}
 
 // requestRestart invokes the current restart hook.
 func requestRestart(reason string) {

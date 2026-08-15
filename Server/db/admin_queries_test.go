@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/owncord/server/db"
 )
@@ -900,5 +901,106 @@ func TestBackupToSafe_RejectsTraversal(t *testing.T) {
 	err = database.BackupToSafe(context.Background(), unsafePath, safeRoot)
 	if err == nil {
 		t.Error("BackupToSafe should reject path outside safe root")
+	}
+}
+
+// TestBackupToSafe_CleansUpPartialFileOnFailure verifies that a failed
+// VACUUM INTO does not leave a truncated .db file behind (OC-0212). A real
+// ENOSPC/EIO failure is hard to trigger portably in a unit test, so this
+// forces the same outcome — VACUUM INTO fails after it has already created
+// the destination file — with a context deadline so tight that the vacuum of
+// a non-trivial database is interrupted mid-copy. handleListBackups would
+// otherwise offer this leftover file as a restorable backup.
+func TestBackupToSafe_CleansUpPartialFileOnFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "src.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	// Enough rows that VACUUM INTO takes long enough to still be running
+	// when the 1ms deadline below fires, so the destination file exists
+	// (created, then abandoned mid-copy) at the moment ExecContext returns.
+	if _, err := database.SQLDb().Exec("CREATE TABLE bulk(x TEXT)"); err != nil {
+		t.Fatalf("CREATE TABLE bulk: %v", err)
+	}
+	tx, err := database.SQLDb().Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	stmt, err := tx.Prepare("INSERT INTO bulk(x) VALUES (?)")
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	for i := 0; i < 300000; i++ {
+		if _, err := stmt.Exec(i); err != nil {
+			t.Fatalf("insert bulk row %d: %v", i, err)
+		}
+	}
+	_ = stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	backupPath := filepath.Join(backupDir, "partial.db")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	if err := database.BackupToSafe(ctx, backupPath, backupDir); err == nil {
+		t.Fatal("BackupToSafe() under a 1ms deadline unexpectedly succeeded")
+	}
+
+	if _, statErr := os.Stat(backupPath); statErr == nil {
+		t.Error("BackupToSafe left a truncated backup file behind after failing — " +
+			"handleListBackups would offer it as restorable")
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected error statting backup path: %v", statErr)
+	}
+}
+
+// TestBackupToSafe_DoesNotDeleteExistingFileOnCollision guards the corollary
+// of the fix for OC-0212: cleanup on failure must remove only a file this
+// call itself created. VACUUM INTO refuses to write over a destination that
+// already exists, and a same-second timestamp collision (or an operator
+// re-running a backup to a name they chose) must not let failure-cleanup
+// destroy the file that was already sitting there.
+func TestBackupToSafe_DoesNotDeleteExistingFileOnCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "src.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	backupPath := filepath.Join(backupDir, "collide.db")
+	want := []byte("pre-existing backup contents")
+	if err := os.WriteFile(backupPath, want, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err == nil {
+		t.Fatal("BackupToSafe() should refuse to overwrite an existing destination")
+	}
+
+	got, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("pre-existing backup file was modified: got %q, want %q", got, want)
 	}
 }
