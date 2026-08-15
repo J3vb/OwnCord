@@ -141,6 +141,12 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 
 	created, err := s.st.CreateEmoji(ctx, shortcode, storedAs, mimeType, actorID)
 	if err != nil {
+		if db.IsUniqueConstraintError(err) {
+			// Lost a race with another Create between the check above and this
+			// INSERT -- report the conflict the check would have caught, not a
+			// server fault.
+			return nil, fmt.Errorf("%w: an emoji named :%s: already exists", ErrConflict, shortcode)
+		}
 		return nil, fmt.Errorf("%w: failed to create emoji: %v", ErrInternal, err)
 	}
 

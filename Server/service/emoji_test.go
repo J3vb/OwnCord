@@ -192,6 +192,49 @@ func TestEmojiCreate_DuplicateShortcodeIsConflict(t *testing.T) {
 	}
 }
 
+// raceEmojiStore wraps a real *db.DB but always reports no existing emoji for
+// the pre-insert shortcode check, so a concurrent CreateEmoji that already
+// committed the same shortcode is only caught by the table's UNIQUE
+// constraint at INSERT time -- exactly what happens when two CreateEmoji
+// calls race past GetEmojiByShortcode before either INSERT commits.
+type raceEmojiStore struct {
+	*db.DB
+}
+
+func (f *raceEmojiStore) GetEmojiByShortcode(_ context.Context, _ string) (*db.Emoji, error) {
+	return nil, nil
+}
+
+// TestEmojiCreate_RaceOnInsertIsConflict pins OC-0217: when the shortcode
+// check races another Create and the row already exists by the time the
+// INSERT runs, the resulting UNIQUE-constraint error from CreateEmoji must
+// still surface as ErrConflict (matching the sequential duplicate-shortcode
+// path), not ErrInternal.
+func TestEmojiCreate_RaceOnInsertIsConflict(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{ID: permissions.OwnerRoleID, Name: "Owner",
+		Permissions: permissions.Administrator, Position: permissions.OwnerRolePosition})
+	seedUser(t, database, &db.User{ID: 1})
+	seedUserRole(t, database, 1, permissions.OwnerRoleID)
+
+	checker := permissions.NewChecker(database)
+	svc := NewEmojiService(&raceEmojiStore{DB: database}, NewPermissionService(database, checker))
+
+	// Commit the shortcode directly, bypassing the service's own check, so the
+	// table already holds :wave: when Create runs its (stubbed) check.
+	if _, err := database.CreateEmoji(context.Background(), "wave", "stored-1", "image/png", 1); err != nil {
+		t.Fatalf("seed CreateEmoji: %v", err)
+	}
+
+	_, err := svc.Create(context.Background(), 1, "wave", "stored-2", "image/gif")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("raced Create error = %v, want ErrConflict", err)
+	}
+	if errors.Is(err, ErrInternal) {
+		t.Fatalf("raced Create error = %v, must not be ErrInternal", err)
+	}
+}
+
 func TestEmojiCreate_RejectsBadShortcodeBeforeInsert(t *testing.T) {
 	svc, _ := newEmojiService(t)
 	if _, err := svc.Create(context.Background(), 1, "no spaces", "stored-1", "image/png"); !errors.Is(err, ErrBadRequest) {
