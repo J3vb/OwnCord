@@ -127,6 +127,44 @@ describe("settings/helpers", () => {
       expect(root.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
     });
 
+    it("switching away from light clears the light-only tokens instead of leaving them stuck on <html>", () => {
+      // OC-0201: applyTheme only ever *sets* the keys present in the new
+      // theme and never clears keys the previous theme set. THEMES.light
+      // defines ~24 custom properties while dark/midnight/neon-glow define
+      // only 4, so switching light -> dark must leave zero light-only
+      // tokens behind on document.documentElement.
+      applyTheme("light");
+      const root = document.documentElement;
+      expect(root.style.getPropertyValue("--bg-input")).toBe("#ebedef");
+
+      applyTheme("dark");
+
+      // The 4 keys dark actually owns must reflect dark's values.
+      expect(root.style.getPropertyValue("--bg-primary")).toBe("#313338");
+      expect(root.style.getPropertyValue("--text-normal")).toBe("#dbdee1");
+
+      // Every light-only token must be cleared, not left stuck at its
+      // light-mode value (which would outrank the :root CSS default via
+      // inline-style specificity).
+      const lightOnlyKeys = Object.keys(THEMES.light).filter((k) => !(k in THEMES.dark));
+      expect(lightOnlyKeys.length).toBeGreaterThan(0);
+      for (const key of lightOnlyKeys) {
+        expect(root.style.getPropertyValue(key), `${key} must be cleared after switching to dark`).toBe("");
+      }
+    });
+
+    it("does not clear unrelated inline custom properties like --accent or --font-size", () => {
+      const root = document.documentElement;
+      root.style.setProperty("--accent", "#00c8ff");
+      root.style.setProperty("--font-size", "18px");
+
+      applyTheme("light");
+      applyTheme("dark");
+
+      expect(root.style.getPropertyValue("--accent")).toBe("#00c8ff");
+      expect(root.style.getPropertyValue("--font-size")).toBe("18px");
+    });
+
     it("light theme overrides the dark-mode input/border/interactive tokens so composer and form fields aren't dark-on-dark", () => {
       // OC-0043: the light theme only overrode 4 of ~45 tokens. --bg-input
       // (used by .message-input-box, .msg-textarea, .form-input, .reply-bar-inner)
