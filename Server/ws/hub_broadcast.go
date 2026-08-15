@@ -321,6 +321,19 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		return
 	}
 
+	// Bump the watermark immediately, before the h.clients snapshot below and
+	// the (potentially slow — up to two DB round trips per connected client)
+	// fan-out loop that follows it. A reconnect handshake re-checks this
+	// watermark right before it registers (OC-0206); bumping only at the end,
+	// after the loop, left a window where that re-check could still observe
+	// the pre-change value even though this function's snapshot — taken next
+	// — will never include a client that registers mid-loop. Ratcheted
+	// upward only (see bumpVisibilityWatermark), so this is a no-op whenever
+	// a concurrent writer already pushed the watermark higher; the trailing
+	// bump below still runs and covers any change to h.seq made during the
+	// loop itself.
+	h.bumpVisibilityWatermark()
+
 	h.mu.RLock()
 	clients := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
@@ -595,6 +608,14 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	// it must cover the early returns too: a user who is offline, or whose
 	// socket is closed below, converges via the full-ready path.
 	defer h.bumpVisibilityWatermark()
+
+	// Also bump immediately, before the h.clients lookup below and the
+	// per-topic DB loop (a GetChannel round trip per revoked topic) that
+	// follows it — see RefreshChannelVisibility's matching early bump and
+	// OC-0206. Ratcheted upward only, so this is a no-op whenever a
+	// concurrent writer already pushed the watermark higher; the deferred
+	// bump above still covers every return path, including the early ones.
+	h.bumpVisibilityWatermark()
 
 	if h.db == nil {
 		return
