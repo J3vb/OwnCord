@@ -114,12 +114,6 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		return nil, nil
 	}
 
-	// Per-user-per-channel rate limit.
-	ratKey := auth.Key(auth.Key("typing", userID), channelID)
-	if limiter != nil && !limiter.Allow(ratKey, 1, 3*time.Second) {
-		return nil, nil
-	}
-
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
@@ -138,6 +132,18 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
 		return nil, nil // silent drop
+	}
+
+	// Per-user-per-channel rate limit. Built only now that the channel is
+	// known to exist and the caller is authorized to read it (OC-0202): doing
+	// this before resolution let any caller-supplied channel id — including
+	// ids that don't exist or aren't readable — pin a new entry in the
+	// shared, process-wide RateLimiter. RateLimiter.Cleanup only evicts a key
+	// once every timestamp on it is stale, so a stream of forged channel ids
+	// could retain an unbounded number of dead map entries for hours.
+	ratKey := auth.Key(auth.Key("typing", userID), channelID)
+	if limiter != nil && !limiter.Allow(ratKey, 1, 3*time.Second) {
+		return nil, nil
 	}
 
 	return ch, nil
