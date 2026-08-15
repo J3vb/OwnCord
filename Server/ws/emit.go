@@ -29,6 +29,13 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 		case VoiceChannelEvent:
 			h.sendToVoiceChannelExcept(e.VoiceChannelID(), e.ExcludeUserID(), e.Payload())
 		case ExcludeSenderEvent:
+			// An invisible user's public presence half rides this branch;
+			// like the visible case below, it must invalidate any queued
+			// coalescer entry so a stale connect-time presence can't flush
+			// after (and overwrite) this fresher user-chosen status.
+			if po, isPresence := ev.(PresenceOthersEvent); isPresence {
+				h.dropQueuedPresence(po.excludeUserID)
+			}
 			// Low priority: typing indicators are ephemeral.
 			h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 		case UserTargetedEvent:
@@ -56,7 +63,12 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			h.broadcastVoiceEvent(ctx, e.VisibleChannelID(), e.Payload())
 		case BroadcastAllEvent:
 			// Check concrete type: presence is low-priority, others are normal.
-			if _, isPresence := ev.(PresenceEvent); isPresence {
+			if pe, isPresence := ev.(PresenceEvent); isPresence {
+				// A user-chosen presence bypasses the connect/disconnect
+				// coalescer; drop any entry still queued for this user or the
+				// pending flush (up to 300ms later) would overwrite this
+				// fresher status with the stale connect-time one.
+				h.dropQueuedPresence(pe.userID)
 				h.BroadcastToAllLow(e.Payload())
 			} else {
 				h.BroadcastToAll(e.Payload())

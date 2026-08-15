@@ -83,6 +83,22 @@ func TestHandleHealth_DegradedReturns503WithReason(t *testing.T) {
 	}
 }
 
+// TestHandleHealth_CanceledRequestDoesNotPoisonCache locks the WithoutCancel
+// guard: a probe that disconnects mid-request must not stamp a false
+// "degraded/database" verdict into the shared 5s cache.
+func TestHandleHealth_CanceledRequestDoesNotPoisonCache(t *testing.T) {
+	h := handleHealth(healthDeps{
+		dbPing: func(ctx context.Context) error { return ctx.Err() },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // client already gone
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/health", nil).WithContext(ctx))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("canceled request produced %d; its cancellation leaked into the cached checks", rec.Code)
+	}
+}
+
 // TestHandleHealth_ChecksAreCached locks the amplification guard: the endpoint
 // is unauthenticated and rate-limit-exempt, so the real checks must run at
 // most once per healthCacheTTL, not per request.

@@ -504,6 +504,8 @@ func runHealthcheckCLI() int {
 	port := 8443
 	scheme := "https"
 	certFile := "data/cert.pem"
+	tlsMode := ""
+	acmeDomain := ""
 	if raw, err := os.ReadFile(config.DefaultPath); err == nil {
 		var partial struct {
 			Server struct {
@@ -512,18 +514,21 @@ func runHealthcheckCLI() int {
 			TLS struct {
 				Mode     string `yaml:"mode"`
 				CertFile string `yaml:"cert_file"`
+				Domain   string `yaml:"domain"`
 			} `yaml:"tls"`
 		}
 		if yaml.Unmarshal(raw, &partial) == nil {
 			if partial.Server.Port > 0 {
 				port = partial.Server.Port
 			}
+			tlsMode = partial.TLS.Mode
 			if partial.TLS.Mode == "off" {
 				scheme = "http"
 			}
 			if partial.TLS.CertFile != "" {
 				certFile = partial.TLS.CertFile
 			}
+			acmeDomain = partial.TLS.Domain
 		}
 	}
 	if env := os.Getenv("OWNCORD_SERVER_PORT"); env != "" {
@@ -531,13 +536,19 @@ func runHealthcheckCLI() int {
 			port = p
 		}
 	}
-	if os.Getenv("OWNCORD_TLS_MODE") == "off" {
-		scheme = "http"
+	if env := os.Getenv("OWNCORD_TLS_MODE"); env != "" {
+		tlsMode = env
+		if env == "off" {
+			scheme = "http"
+		}
+	}
+	if env := os.Getenv("OWNCORD_TLS_DOMAIN"); env != "" {
+		acmeDomain = env
 	}
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: healthcheckTLSConfig(certFile),
+			TLSClientConfig: healthcheckTLSConfig(tlsMode, certFile, acmeDomain),
 		},
 	}
 	if port < 1 || port > 65535 {
@@ -557,14 +568,23 @@ func runHealthcheckCLI() int {
 	return 0
 }
 
-// healthcheckTLSConfig builds the probe's TLS config. The default server cert
-// is self-signed, so WebPKI verification can never pass — instead the probe
-// PINS the server's own certificate from disk: hostname/chain checks are
-// replaced (not skipped) by VerifyPeerCertificate requiring the presented
-// leaf to be byte-identical to the local cert file. When no local cert is
-// readable (e.g. ACME mode, where the cert is CA-issued and lives in the ACME
-// cache), standard WebPKI verification is used instead.
-func healthcheckTLSConfig(certFile string) *tls.Config {
+// healthcheckTLSConfig builds the probe's TLS config, per TLS mode:
+//
+//   - acme: the served cert is CA-issued for the configured domain, so
+//     standard WebPKI verification works — but the probe dials 127.0.0.1, so
+//     ServerName must be overridden to the domain or hostname verification
+//     fails unconditionally and the probe reports a healthy server as down.
+//     A stale pre-ACME data/cert.pem must NOT be pinned in this mode either;
+//     the pin would mismatch the served ACME leaf forever.
+//   - self_signed / manual: the cert can never pass WebPKI (the generated one
+//     has no SANs and IsCA=false), so hostname/chain checks are replaced (not
+//     skipped) by pinning: the presented leaf must be byte-identical to the
+//     local cert file.
+//   - anything else with no readable local cert: plain WebPKI.
+func healthcheckTLSConfig(tlsMode, certFile, acmeDomain string) *tls.Config {
+	if tlsMode == "acme" && acmeDomain != "" {
+		return &tls.Config{MinVersion: tls.VersionTLS12, ServerName: acmeDomain}
+	}
 	pinned := loadPinnedCert(certFile)
 	if pinned == nil {
 		return &tls.Config{MinVersion: tls.VersionTLS12}

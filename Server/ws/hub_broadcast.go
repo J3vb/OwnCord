@@ -555,6 +555,18 @@ func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
 	}
 }
 
+// dropQueuedPresence removes a user's pending coalesced presence, if any.
+// Called when a fresher presence for that user is broadcast directly (the
+// presence_update handler path), so the coalescer's later flush cannot
+// resurrect the stale connect-time state over it. Ordering holds because a
+// user's connect (which queues) and their presence_update (which drops) run
+// serially on the same connection's readPump.
+func (h *Hub) dropQueuedPresence(userID int64) {
+	h.presenceMu.Lock()
+	delete(h.presenceQueue, userID)
+	h.presenceMu.Unlock()
+}
+
 // flushPresenceQueue drains the coalescer and broadcasts each user's latest
 // presence. Runs on the AfterFunc timer goroutine, never under presenceMu
 // during the fan-out.

@@ -89,8 +89,15 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 	name := base + ".db"
 	path := filepath.Join(backupBaseDir, name)
 	for i := 2; ; i++ {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(path); err != nil {
+			// ENOENT is the free-slot case. Any OTHER stat error (EACCES on
+			// the dir, an unreadable mount) cannot be fixed by trying more
+			// suffixes — stop probing and let VACUUM INTO surface the real
+			// failure with a legible error instead of spinning this loop.
 			break
+		}
+		if i > 100 {
+			return fmt.Errorf("scheduled backup: no free filename after %s (tried 100 suffixes)", base)
 		}
 		name = fmt.Sprintf("%s_%d.db", base, i)
 		path = filepath.Join(backupBaseDir, name)

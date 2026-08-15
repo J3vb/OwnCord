@@ -113,7 +113,20 @@ func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
 	}
-	return openFile(path, maxReaders)
+	return openFile(path, maxReaders, true)
+}
+
+// OpenShared opens the database WITHOUT taking the single-process lock. It
+// exists for short-lived tooling — the `server token` CLI — that must work
+// while the server is running. SQLite's own WAL locking makes the concurrent
+// access safe at the file level; the process lock only protects the SERVER's
+// process-local state (presence, replay ring, rate-limit windows), which a
+// CLI does not touch. Long-lived processes must use Open.
+func OpenShared(path string) (*DB, error) {
+	if isMemoryPath(path) {
+		return openMemory(path)
+	}
+	return openFile(path, 0, false)
 }
 
 // openMemory preserves the pre-split behavior exactly: a single connection
@@ -156,7 +169,8 @@ func openMemory(path string) (*DB, error) {
 }
 
 // openFile opens the writer and reader pools for a file-backed database.
-func openFile(path string, maxReaders int) (*DB, error) {
+// takeLock is false only for OpenShared (short-lived CLI tooling).
+func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	// Single-process guard: SQLite's own locking prevents file corruption,
 	// but everything built above it — presence derived from hub membership,
 	// the replay ring, rate-limit windows, the boot-time status reset — is
@@ -164,20 +178,24 @@ func openFile(path string, maxReaders int) (*DB, error) {
 	// A second process starting is almost always an accident (double systemd
 	// unit, container + binary); fail fast with a clear message rather than
 	// letting two instances silently fight over shared state.
-	release, lockErr := acquireProcessLock(path)
-	if lockErr != nil {
-		if errors.Is(lockErr, errAlreadyLocked) {
-			return nil, fmt.Errorf(
-				"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
-				path)
+	var release func()
+	if takeLock {
+		var lockErr error
+		release, lockErr = acquireProcessLock(path)
+		if lockErr != nil {
+			if errors.Is(lockErr, errAlreadyLocked) {
+				return nil, fmt.Errorf(
+					"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
+					path)
+			}
+			// The lock mechanism itself failed (e.g. a network filesystem that
+			// rejects advisory locks). Warn and continue — refusing to start on
+			// an NFS data dir would be a regression, and SQLite still protects
+			// the file itself.
+			slog.Warn("db: could not take the single-process lock; continuing unprotected",
+				"path", lockFilePath(path), "error", lockErr)
+			release = nil
 		}
-		// The lock mechanism itself failed (e.g. a network filesystem that
-		// rejects advisory locks). Warn and continue — refusing to start on
-		// an NFS data dir would be a regression, and SQLite still protects
-		// the file itself.
-		slog.Warn("db: could not take the single-process lock; continuing unprotected",
-			"path", lockFilePath(path), "error", lockErr)
-		release = nil
 	}
 	ok := false
 	defer func() {
@@ -415,4 +433,16 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 // must run on the writer to checkpoint the WAL it just stopped appending to.
 func (d *DB) SQLDb() *sql.DB {
 	return d.writer
+}
+
+// PingRead answers whether the database can serve reads, via a bounded
+// SELECT 1 on the READER pool. The health endpoint uses it deliberately:
+// pinging the single-connection writer would queue behind any long write —
+// most notably a scheduled backup's VACUUM INTO — and report a healthy,
+// read-serving server as degraded for the backup's whole duration. Writer
+// saturation is reported separately (SQLDb().Stats() in /api/v1/metrics),
+// where it is a capacity signal rather than a liveness verdict.
+func (d *DB) PingRead(ctx context.Context) error {
+	var one int
+	return d.reader.QueryRowContext(ctx, "SELECT 1").Scan(&one)
 }

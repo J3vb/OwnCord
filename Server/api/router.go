@@ -79,8 +79,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 			if database == nil {
 				return nil
 			}
-			var one int
-			return database.SQLDb().QueryRowContext(ctx, "SELECT 1").Scan(&one)
+			// Reader pool, not the writer: a scheduled backup's VACUUM INTO
+			// holds the sole writer connection for its whole duration, and
+			// the server keeps serving reads throughout — /health must not
+			// call that outage (see db.PingRead).
+			return database.PingRead(ctx)
 		},
 		dispatchAlive: func() bool {
 			if hubAlive != nil {
@@ -416,7 +419,13 @@ func handleHealth(deps healthDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		if time.Since(cachedAt) >= healthCacheTTL {
-			cachedStatus, cachedReason = runHealthChecks(r.Context(), deps)
+			// WithoutCancel: the result is cached and served to every caller
+			// for the next healthCacheTTL, so it must not inherit THIS
+			// request's cancellation — a probe that disconnects mid-check
+			// would otherwise poison the shared cache with a false
+			// "degraded/database" verdict. The DB ping carries its own 1s
+			// timeout, so the checks stay bounded regardless.
+			cachedStatus, cachedReason = runHealthChecks(context.WithoutCancel(r.Context()), deps)
 			cachedAt = time.Now()
 		}
 		status, reason := cachedStatus, cachedReason
