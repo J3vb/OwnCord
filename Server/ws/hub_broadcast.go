@@ -153,6 +153,29 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 // duration of the call. Mirrors RefreshChannelVisibility, which resolves
 // visibility the same way.
 func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 {
+	return h.channelReadAudienceImpl(ctx, channelID, false)
+}
+
+// channelReadAudienceIgnoringArchived is channelReadAudience without the
+// Archived short-circuit (OC-0022). CleanupVoiceForChannel's only two
+// callers (admin/handlers_channels.go's archive and delete paths) always
+// commit archived=1 to the channel before evicting its voice participants —
+// deliberately, per admin/api_test.go's
+// TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup, so a concurrent
+// voice_join sees the archived gate. That means channelReadAudience's own
+// Archived check, evaluated from CleanupVoiceForChannel, always sees the
+// channel already archived and always returns nobody: the voice_leave that
+// should tell every bystander who could see the room a moment ago that the
+// call ended never reaches them, only the evicted participants themselves
+// (added back by CleanupVoiceForChannel's own loop). This resolves that same
+// pre-archival READ audience for exactly that one broadcast, leaving every
+// other channelReadAudience call site (and its archived-channel behavior)
+// untouched.
+func (h *Hub) channelReadAudienceIgnoringArchived(ctx context.Context, channelID int64) []int64 {
+	return h.channelReadAudienceImpl(ctx, channelID, true)
+}
+
+func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, ignoreArchived bool) []int64 {
 	h.mu.RLock()
 	userIDs := make([]int64, 0, len(h.clients))
 	for uid := range h.clients {
@@ -180,8 +203,9 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 		// Without this, an admin edit to an archived channel (or a voice
 		// teardown inside one) fans out straight to every connected user whose
 		// base role holds READ_MESSAGES, none of whom have the channel in their
-		// ready payload or sidebar.
-		if ch != nil && ch.Archived {
+		// ready payload or sidebar. ignoreArchived opts a caller out of this
+		// specific check only — see channelReadAudienceIgnoringArchived.
+		if ch != nil && ch.Archived && !ignoreArchived {
 			return []int64{}
 		}
 		if ch != nil && ch.Type == "dm" {
