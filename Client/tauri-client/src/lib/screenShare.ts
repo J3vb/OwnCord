@@ -271,6 +271,15 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
   } catch (err) {
+    if ((state.generation ?? 0) !== generation) {
+      // A disableCamera (and possibly a newer enableCamera) already ran to
+      // completion while this attempt's device acquisition/publish was in
+      // flight. This attempt's own track, if any, was already released by
+      // that disable — touching shared state now would stop/clear a live
+      // track that belongs to a newer, successful enable.
+      log.warn("Superseded camera enable failed — leaving newer attempt's state alone", err);
+      return;
+    }
     // BUG-100: Stop the created track to release the camera if publish failed.
     if (state.manualCameraTrack !== null) {
       state.manualCameraTrack.stop();
@@ -410,6 +419,15 @@ export async function enableScreenshare(
     deps.reapplyAudioPipeline();
     log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
   } catch (err) {
+    if ((state.generation ?? 0) !== generation) {
+      // A disableScreenshare (and possibly a newer enableScreenshare) already
+      // ran to completion while this attempt's capture/publish was in
+      // flight. This attempt's own tracks, if any, were already released by
+      // that disable — calling stopManualScreenTracks now would unpublish
+      // and stop tracks that belong to a newer, successful enable.
+      log.warn("Superseded screenshare enable failed — leaving newer attempt's state alone", err);
+      return;
+    }
     // BUG-100 (+ partial-publish-failure hardening): release every created
     // track, not just stop() it — a track already published before a later
     // one in the batch fails (all quality presets request audio alongside
