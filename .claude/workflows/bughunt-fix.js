@@ -117,10 +117,15 @@ phase('Fix')
 
 function fixPrompt(cluster) {
   return (
-    `You are fixing confirmed bugs in ONE file of the OwnCord repo (D:/Local-Lab/Repos/OwnCord).\n` +
+    `You are fixing confirmed bugs in ONE file of the OwnCord repo (checked out at your current working ` +
+    `directory - do not assume any absolute path; use repo-relative paths).\n` +
     `Your file: ${cluster.file}\n\n` +
-    `You own this file for this run. No other agent will touch it, so fix ALL of the findings below ` +
-    `together rather than one at a time.\n\n` +
+    `You own this CLUSTER for this run: no other agent has this file as its cluster, so fix ALL of the ` +
+    `findings below together rather than one at a time. But cluster fixes may share a file (rule 4 cuts ` +
+    `both ways), so another cluster's root-cause edit can still land in this file while you work. ` +
+    `Re-read the exact region you are about to edit immediately before each edit rather than trusting a ` +
+    `full-file read from the start of your turn, and treat any editor warning that the file changed ` +
+    `since you last read it as a signal to re-read and re-target, never to force the edit through.\n\n` +
     `RULES\n` +
     `  1. Test first. For each finding, write a test that FAILS against the current code before you ` +
     `change anything, and run it to watch it fail. A test that passes before the fix does not pin the ` +
@@ -287,7 +292,7 @@ const PROVE_RESULT = {
 function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
   return (
     `You are proving and committing ONE cluster of fixes in the OwnCord repo ` +
-    `(D:/Local-Lab/Repos/OwnCord), on branch ${BRANCH}.\n\n` +
+    `(checked out at your current working directory - do not assume any absolute path), on branch ${BRANCH}.\n\n` +
     `Source file(s): ${sourcePaths.join(', ')}\n` +
     `Findings fixed here: ${fixedIds.join(', ')}\n` +
     `Test files written: ${testPaths.join(', ') || '(none reported)'}\n\n` +
@@ -320,8 +325,13 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `regenerated output can carry their hunks. A test function or comment citing a finding id not ` +
     `listed above, or a hunk in a generated/shared file unrelated to your findings, must NOT be ` +
     `committed - set committed=false, name the foreign content in note, and STOP.\n` +
-    `  8. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files, ` +
-    `then commit with subject:\n` +
+    `  8. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files. ` +
+    `Then check git status --porcelain for OTHER modified tracked test files in the same package(s)/` +
+    `directory(ies) as your source files: a fix in this cluster may have rewritten a pre-existing test ` +
+    `that locked the old behavior, or widened an interface that a fake/mock in a sibling test file must ` +
+    `now implement - leaving such a companion uncommitted makes the committed branch fail or not compile ` +
+    `on its own. If the modification's content belongs to THIS cluster's fix (per the step-7 check), ` +
+    `stage it too; if it cites another cluster's findings, leave it. Commit with subject:\n` +
     `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
     `Co-Authored-By trailer.\n` +

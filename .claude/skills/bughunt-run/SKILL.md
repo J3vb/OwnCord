@@ -115,6 +115,37 @@ Workflow({
 Create and check out the branch first — the workflow commits to whatever branch
 is current and does not create one.
 
+### Composing the batch
+
+The workflow clusters findings by the file the BUG is in, but its same-run
+overlap guard fires on the files the FIX touches. Compose the batch so the two
+can never disagree:
+
+- **Close over the file relation.** Pull in every open finding that shares a
+  file with anything already selected, regardless of severity — a same-file
+  finding left behind is a future cross-cluster block.
+- **Re-check coordinates against the working tree** (file exists, line within
+  length) before launching. render-run-stats checked them at hunt time only;
+  merges since then can stale them.
+- **Scan fix-touchpoints, then read only the hits.** Token-scan each finding's
+  `suggestedFix`/`why` for path-like tokens owned by another cluster, then read
+  just the flagged records to separate evidence citations from actual fix
+  edits — the scan over-predicts (a measured run: 6 flagged, 1 real). True
+  collisions go into **sequential waves**: launch the later wave after the
+  earlier wave's commits land, and the same-run guard never fires. Batch 4
+  skipped this and self-blocked 20/27 findings; batch 6 ran it and blocked
+  zero.
+
+### Security findings
+
+Fixed security findings ship in normal PRs at this project's stage (alpha,
+~zero external deployments): the fix and its disclosure land atomically.
+Commit subjects and PR text describe the fix, never the exploit — no
+severity labels, repro steps, or attack narratives in public text — and a
+release should follow soon after merge. The GHSA advisory route is reserved
+for coordinated disclosure once there is a real deployed user base. Never
+decline a finding merely for routing.
+
 ## When a run trips the breaker
 
 The run stops early if more than `threshold` of attempted findings fail, once at
@@ -156,6 +187,16 @@ assertion caught it).
 Check `result.gate`. A failed gate leaves the commits in place on the branch —
 fix it yourself, do not re-run the workflow over it.
 
+A fix that tightens a guard and fails ONLY e2e/CI while unit tests and local
+gates stay green is usually a test-infrastructure defect, not a bad fix:
+triage the mock/harness first. Check that mock echoes carry the same fields
+the real server sends (real channel ids, not sentinels), and never assert
+broadcast delivery on a socket the same operation force-closes. Mocks
+calibrated against lenient code silently decay into lies — every
+guard-tightening fix is also a fidelity audit of the mocks that exercise it.
+The Playwright trace's console stream (grep the .trace file for the app's log
+lines) locates the mechanism in minutes.
+
 ## 4. Verify the fixes independently — REQUIRED
 
 The workflow's prove agent *self-reports* that each test went RED with the fix
@@ -167,9 +208,16 @@ workflow made:
 node .superpowers/verify-fixes.mjs <sha> <sha> ...
 ```
 
-It reverts each commit's source files to the parent, runs that stack's tests,
-and requires them to FAIL — then restores and requires them to PASS. This is the
-only check in the pipeline no agent can fabricate.
+It reverse-applies each commit's own source diff onto the current tree, runs
+that commit's tests, and requires them to FAIL — then restores to HEAD and
+requires them to PASS. This is the only check in the pipeline no agent can
+fabricate. The reverse-apply/restore-to-HEAD shape is load-bearing for
+**stacked waves**: sequential waves pile commits onto shared files, and an
+older per-commit-snapshot restore silently corrupts every later verification
+(a mid-branch snapshot left in the tree once made a whole package
+uncompilable for five subsequent runs). Rust commits with in-file
+`#[cfg(test)]` tests fail the file-level source/test split entirely — prove
+those by hand at hunk level, splitting at the `mod tests` boundary.
 
 While it runs it checkouts and restores source files, so the working tree is
 not a stable read surface: anything reading concurrently — review agents,
@@ -181,11 +229,19 @@ Any `FAIL ... VACUOUS TEST` means the fix was committed behind a test that
 proves nothing. Revert that commit and set its findings back to `open`; do not
 talk yourself into keeping it because the code change looks right.
 
-One class is exempt from the insta-revert: a race/deadlock-class fix whose
-test only fails under its detector. verify-fixes escalates to `-race` before
-declaring vacuity; if an older copy of the script reports VACUOUS on such a
-fix, re-prove red/green by hand under the class's detector
-(`go test -race ./<pkg>/`) before reverting anything.
+Two classes are exempt from the insta-revert, both artifacts of the verifier
+choosing the wrong detector rather than of a vacuous test:
+
+- **Race/deadlock-class fixes** whose test only fails under its detector.
+  verify-fixes escalates to `-race` before declaring vacuity; if an older copy
+  reports VACUOUS on such a fix, re-prove red/green by hand under the class's
+  detector (`go test -race ./<pkg>/`) before reverting anything.
+- **Cross-stack commits** whose test files belong to a different stack than
+  their source files (e.g. a vitest file pinning a `src-tauri/` config). The
+  script now keys the runner off the TEST files; an older copy keyed it off
+  the sources and ran the wrong stack's suite, which never executes the proof.
+  On any VACUOUS verdict for a cross-stack commit, re-prove by hand with the
+  test file's own runner before reverting.
 
 For every commit `verify-fixes.mjs` reports `PASS`, upgrade that commit's
 findings' `fix.revertProof` from `"self-reported"` to `"pass"` — this
@@ -195,9 +251,30 @@ was already reverted and its findings set back to `open` above.
 
 Re-render. Before you review the branch and open the PR, inspect the working
 tree: a blocked or declined cluster can leave its edits and any new failing
-test it wrote sitting uncommitted. Discard what you don't want — a reflexive
-`git add -A` would commit tests that describe unfixed defects into a public
-repo. Audit what got COMMITTED, too: parallel fix agents share the tree, so a
+test it wrote sitting uncommitted. The gate's "N uncommitted modifications at
+gate time" note is the trigger list. **Classify before discarding** — an
+uncommitted modification to a TRACKED test file may be a required companion to
+a committed fix, not debris. Two known mechanisms: the old test locked the old
+buggy behavior, and the fix widened an interface that a fake/mock in a test
+file the cluster never named must now implement (without it the committed
+package does not even compile). The decisive test: `git stash push -- <file>`,
+then compile/test the committed state alone — if it fails, the modification is
+a companion; fold it into the causing commit (fixup + autosquash keeps the
+history coherent for verify-fixes) or commit it with attribution. Only then
+discard true debris — a reflexive `git add -A` would commit tests that
+describe unfixed defects into a public repo.
+
+**Capture before destroying, as separate verified steps.** Preserve blocked or
+declined edits by copying the files aside (or `git stash push -u` after
+confirming it actually saved something) BEFORE any rm/checkout, and never
+chain the capture and the destructive step into one command — a capture
+failure then becomes data loss (`git diff /dev/null <file>` fails outright on
+Windows git and has deleted debris before it was saved). Never blind
+`git stash pop`: a paired push on a clean tree saves nothing, and the pop then
+grabs whatever foreign stash sits on top (a preserved debris stash, in the
+measured case — ~40 conflicted paths). Pop only a ref you verified your own
+push created; for temporary file comparisons, skip stash entirely and read old
+versions from the object store (`git show <ref>:<path>`). Audit what got COMMITTED, too: parallel fix agents share the tree, so a
 prove agent can commit a sibling cluster's content that happened to sit in a
 shared test file or in regenerated output. Grep the committed tests for
 finding ids outside the run's fixed set, and re-run the generated-code
