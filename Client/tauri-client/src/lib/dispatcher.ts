@@ -83,11 +83,53 @@ import { addDmToChannelsStore } from "@pages/main-page/SidebarDmHelpers";
 
 const log = createLogger("dispatcher");
 
+/**
+ * OC-0024: serverClockSkewMs (see wireDispatcher) starts at 0 and is only
+ * ever sampled from a frame the replay check itself already accepted as
+ * live — so if the channel is quiet between login and the first reconnect,
+ * the skew is never sampled, and a lagging/skewed server clock then makes
+ * every genuinely live message look like a replay for as long as real
+ * elapsed time takes to exceed the drift (which can be unbounded). A
+ * replayed burst is delivered as a burst immediately after auth_ok, so cap
+ * how long a frame can be classified as a replay by wall-clock distance from
+ * the handshake as well as by timestamp — that bounds a cold (unsampled)
+ * skew's worst case to this window instead of the whole drift, while still
+ * covering the burst's actual delivery window with room to spare.
+ */
+const REPLAY_GATE_WINDOW_MS = 5_000;
+
 /** Lazily import the LiveKit session module. livekit-client (~1.3 MB) is kept
  *  out of the entry chunk; voice handlers load it on first use. Once a voice
  *  flow has started the module is cached, so this resolves in a microtask. */
 function livekitSession(): Promise<typeof import("@lib/livekitSession")> {
   return import("@lib/livekitSession");
+}
+
+/**
+ * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
+ * but deafen governs what WE play back, so the client is the only place it
+ * can take effect (Server/ws/voice_moderation.go: "enforced by the target's
+ * client honoring server_deafened"). Both apply through one lazy import so
+ * the two effects cannot land in different ticks.
+ *
+ * Called from both the incremental VOICE_STATE path and the full-resync
+ * READY path (a WS drop that outlives the LiveKit session can mean a
+ * moderator mute/deafen issued while disconnected is only ever delivered via
+ * `ready`'s voice_states, never a voice_state the client could have missed).
+ * The `!voice.localMuted`/`!voice.localDeafened` guards make it safe to call
+ * from either path — or both, on the same session — without redundantly
+ * re-invoking the livekit calls once already applied.
+ */
+function enforceModeratorAudioState(serverMuted: boolean, serverDeafened: boolean): void {
+  const voice = voiceStore.getState();
+  const applyDeafen = serverDeafened && !voice.localDeafened;
+  const applyMute = serverMuted && !voice.localMuted;
+  if (applyDeafen || applyMute) {
+    void livekitSession().then(({ setDeafened, setMuted }) => {
+      if (applyDeafen) setDeafened(true);
+      if (applyMute) setMuted(true);
+    });
+  }
 }
 
 /** Map one DM participant from the wire shape to the store's. */
@@ -238,13 +280,26 @@ export function wireDispatcher(
       // reload always starts idle — exactly the stale case), while any other
       // status means livekitSession is driving a session right now.
       const currentUserId = authStore.getState().user?.id ?? 0;
-      const inVoicePerReady =
-        currentUserId !== 0 && payload.voice_states.some((vs) => vs.user_id === currentUserId);
+      const selfVoiceState =
+        currentUserId !== 0
+          ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
+          : undefined;
       const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
-      if (inVoicePerReady && !voiceSessionActive) {
+      if (selfVoiceState !== undefined && !voiceSessionActive) {
         log.warn("Stale voice state detected in ready payload — sending voice_leave");
         ws.send({ type: "voice_leave", payload: {} });
         leaveVoiceChannel();
+      } else if (selfVoiceState !== undefined) {
+        // A LiveKit session survived a WS drop that outlived it (nothing
+        // tears voice down on a socket drop alone) — OC-0014: this full
+        // resync is the only place a moderator mute/deafen issued while we
+        // were disconnected ever reaches us, since the mustFullResync tier
+        // that produced this `ready` never replays the voice_state that
+        // would otherwise have carried it.
+        enforceModeratorAudioState(
+          selfVoiceState.server_muted === true,
+          selfVoiceState.server_deafened === true,
+        );
       }
 
       // F3: publish our long-term identity public key so peers can pin+verify
@@ -535,8 +590,11 @@ export function wireDispatcher(
       // preceded it, unlike a genuinely new live message — compared in
       // server-clock terms (see serverClockSkewMs above) so a lagging or
       // skewed server clock cannot make a live message look like a replay.
+      // The wall-clock window additionally bounds a cold (never-sampled)
+      // skew's damage — see REPLAY_GATE_WINDOW_MS.
       const isReplayFrame =
         lastReconnectHandshakeAt !== null &&
+        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
         Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
       if (!isReplayFrame) {
         notifyIncomingMessage(payload);
@@ -752,19 +810,7 @@ export function wireDispatcher(
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (payload.user_id !== currentUserId) return;
       joinVoiceChannel(payload.channel_id);
-      // Honor a moderator's mute/deafen locally. Mute is also enforced at the
-      // SFU, but deafen governs what WE play back, so the client is the only
-      // place it can take effect. Both apply through one lazy import so the
-      // two effects cannot land in different ticks.
-      const voice = voiceStore.getState();
-      const applyDeafen = payload.server_deafened === true && !voice.localDeafened;
-      const applyMute = payload.server_muted === true && !voice.localMuted;
-      if (applyDeafen || applyMute) {
-        void livekitSession().then(({ setDeafened, setMuted }) => {
-          if (applyDeafen) setDeafened(true);
-          if (applyMute) setMuted(true);
-        });
-      }
+      enforceModeratorAudioState(payload.server_muted === true, payload.server_deafened === true);
     }),
   );
 
@@ -789,6 +835,21 @@ export function wireDispatcher(
   // cleared the store; this only surfaces the reason.
   unsubs.push(
     ws.on(S.VOICE_DISCONNECTED, (payload) => {
+      // OC-0031: this can arrive well after the kick already tore the
+      // session down at the SFU (queued behind a backed-up outbound send
+      // buffer) — by the time it's delivered the user may have already
+      // rejoined this channel or another. Guard on channel match, same as
+      // the sibling VOICE_LEAVE handler below (shouldTeardownSession) — a
+      // stale frame for a channel already left must not kill a newer join.
+      // Read the store before leaveVoiceChannel() below clears
+      // currentChannelId.
+      const stale = voiceStore.getState().currentChannelId !== payload.channel_id;
+      if (stale) {
+        log.info("Ignoring stale voice_disconnected for a channel already left", {
+          channelId: payload.channel_id,
+        });
+        return;
+      }
       log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
       void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
       leaveVoiceChannel();
