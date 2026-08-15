@@ -96,6 +96,10 @@ type Hub struct {
 	// capacity guardrail (ServeWS).
 	connRejects atomic.Uint64
 
+	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
+	// compiled-in default (maxColdReplay). Set via ConfigureReplay before Run.
+	coldReplayLimit int
+
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
@@ -633,6 +637,30 @@ func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uin
 // the max_ws_connections capacity guardrail. Safe to call from any goroutine.
 func (h *Hub) ConnRejectCount() uint64 {
 	return h.connRejects.Load()
+}
+
+// ConfigureReplay resizes the reconnect replay budget: the in-memory ring and
+// the persisted-event cap per reconnect (event_persistence.replay_ring_size /
+// replay_cold_limit). Zero or negative values keep the compiled-in defaults.
+// Must be called before Run — the dispatch loop reads replayBuf unlocked.
+func (h *Hub) ConfigureReplay(ringSize, coldLimit int) {
+	if h.rejectIfRunning("ConfigureReplay") {
+		return
+	}
+	if ringSize > 0 {
+		h.replayBuf = NewEventRingBuffer(ringSize)
+	}
+	if coldLimit > 0 {
+		h.coldReplayLimit = coldLimit
+	}
+}
+
+// maxColdReplayLimit returns the effective persisted-replay cap.
+func (h *Hub) maxColdReplayLimit() int {
+	if h.coldReplayLimit > 0 {
+		return h.coldReplayLimit
+	}
+	return maxColdReplay
 }
 
 // EventPersisterStats returns the attached persister's lifetime counters.

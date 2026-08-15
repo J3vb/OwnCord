@@ -23,6 +23,7 @@ type Config struct {
 	Server           ServerConfig           `koanf:"server"`
 	Database         DatabaseConfig         `koanf:"database"`
 	Backup           BackupConfig           `koanf:"backup"`
+	Security         SecurityConfig         `koanf:"security"`
 	TLS              TLSConfig              `koanf:"tls"`
 	Upload           UploadConfig           `koanf:"upload"`
 	Voice            VoiceConfig            `koanf:"voice"`
@@ -87,6 +88,13 @@ type EventPersistenceConfig struct {
 	BatchFlushMs int `koanf:"batch_flush_ms"`
 	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
 	PrunerIntervalMinutes int `koanf:"pruner_interval_minutes"`
+	// ReplayRingSize is the capacity of the in-memory reconnect replay ring.
+	// Reconnects whose gap exceeds it fall to the persisted event log.
+	ReplayRingSize int `koanf:"replay_ring_size"`
+	// ReplayColdLimit caps how many persisted events a single reconnect may
+	// replay; beyond it the client gets a full resync. This is the budget
+	// that decides how long a disconnect can be bridged by replay.
+	ReplayColdLimit int `koanf:"replay_cold_limit"`
 }
 
 // TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
@@ -194,6 +202,11 @@ type DatabaseConfig struct {
 
 	// Path is the SQLite database file path.
 	Path string `koanf:"path"`
+
+	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
+	// automatic sizing of max(4, NumCPU). Values are clamped to [1, 64] —
+	// readers beyond the CPU count mostly buy queueing, not throughput.
+	MaxReaders int `koanf:"max_readers"`
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -217,6 +230,17 @@ type UploadConfig struct {
 // database and uploads.
 type BackupConfig struct {
 	Dir string `koanf:"dir"`
+}
+
+// SecurityConfig tunes security-adjacent behavior that has safe compiled-in
+// defaults.
+type SecurityConfig struct {
+	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
+	// thresholds (registration, login, TOTP, sensitive endpoints). The
+	// defaults assume roughly one person per IP address; a community behind a
+	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
+	// clamped to [0.1, 100].
+	AuthRateLimitMultiplier float64 `koanf:"auth_rate_limit_multiplier"`
 }
 
 // defaults returns the default configuration.
@@ -269,6 +293,11 @@ func defaults() Config {
 			BatchSize:             50,
 			BatchFlushMs:          100,
 			PrunerIntervalMinutes: 60,
+			ReplayRingSize:        1000,
+			ReplayColdLimit:       5000,
+		},
+		Security: SecurityConfig{
+			AuthRateLimitMultiplier: 1.0,
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:     false,

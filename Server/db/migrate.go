@@ -141,21 +141,30 @@ func seedExistingDatabase(d *DB, filenames []string) error {
 //  3. For each .sql file in lexicographic order: skip if already recorded,
 //     otherwise execute the SQL and record the filename.
 func MigrateFS(database *DB, fsys fs.FS) error {
+	_, err := migrateFSCount(database, fsys)
+	return err
+}
+
+// migrateFSCount is MigrateFS reporting how many migrations actually
+// executed, so Migrate can skip the boot-time ANALYZE when the schema did not
+// change. The seeding path reports 0 — it records filenames without running
+// any SQL.
+func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 	// Determine tracking state before we create schema_versions.
 	svExists, err := schemaVersionsExists(database)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Create the tracking table (idempotent).
 	if err := ensureSchemaVersions(database); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Collect filenames first — needed for both seeding and normal application.
 	filenames, err := sqlFilenames(fsys)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Seeding path: schema_versions did not exist AND users table does, which
@@ -163,18 +172,19 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 	if !svExists {
 		existing, checkErr := isExistingDatabase(database)
 		if checkErr != nil {
-			return checkErr
+			return 0, checkErr
 		}
 		if existing {
-			return seedExistingDatabase(database, filenames)
+			return 0, seedExistingDatabase(database, filenames)
 		}
 	}
 
 	// Normal path: apply any migration not yet recorded.
+	appliedCount := 0
 	for _, name := range filenames {
 		applied, applyErr := isApplied(database, name)
 		if applyErr != nil {
-			return applyErr
+			return appliedCount, applyErr
 		}
 		if applied {
 			continue
@@ -182,15 +192,16 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 
 		raw, readErr := fs.ReadFile(fsys, name)
 		if readErr != nil {
-			return fmt.Errorf("reading migration %s: %w", name, readErr)
+			return appliedCount, fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
 		if err := applyMigration(database, name, string(raw)); err != nil {
-			return err
+			return appliedCount, err
 		}
+		appliedCount++
 	}
 
-	return nil
+	return appliedCount, nil
 }
 
 // applyMigration executes a single migration and records it. If the

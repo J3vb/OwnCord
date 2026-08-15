@@ -57,12 +57,19 @@ the server automatically when a startup-only value changed. Note that
 |-----|------|---------|-------------|
 | `database.type` | string | `"sqlite"` | Database backend. `sqlite` (or empty) is the only supported value — any other value makes the server refuse to start. |
 | `database.path` | string | `"data/chatserver.db"` | Path to SQLite database file |
+| `database.max_readers` | int | `0` | Bound on the read-only connection pool. `0` = automatic (`max(4, CPU count)`); clamped to 1–64. Readers beyond the CPU count mostly buy queueing, not throughput. |
 
 ### Backups (`backup`)
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `backup.dir` | string | `"data/backups"` | Directory where database backups are written and pruned. Point it at another disk or an off-host mount so backups don't share a single point of failure with the live database. The admin panel's Backup Schedule and Retention settings operate on this directory. |
+
+### Security (`security`)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `security.auth_rate_limit_multiplier` | float | `1.0` | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100. |
 
 ### Uploads (`upload`)
 
@@ -103,7 +110,7 @@ For LiveKit options OwnCord does not model, you can take ownership of the auto-s
 
 ### Event Persistence (`event_persistence`)
 
-Controls the tiered event log used for WebSocket reconnection replay. When enabled, missed events are stored in the database so clients that reconnect after the in-memory ring buffer window (1 000 events) can still replay missed events from the DB tier.
+Controls the tiered event log used for WebSocket reconnection replay. When enabled, missed events are stored in the database so clients that reconnect after the in-memory ring buffer window (`replay_ring_size` events) can still replay missed events from the DB tier.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -112,6 +119,8 @@ Controls the tiered event log used for WebSocket reconnection replay. When enabl
 | `event_persistence.batch_size` | int | `50` | Maximum events per database flush |
 | `event_persistence.batch_flush_ms` | int | `100` | Maximum delay between flushes (milliseconds) |
 | `event_persistence.pruner_interval_minutes` | int | `60` | How often the pruner goroutine wakes up to delete expired events |
+| `event_persistence.replay_ring_size` | int | `1000` | Capacity of the in-memory reconnect replay ring. Larger rings bridge longer disconnects without touching the database, at ~1 message payload of memory per slot. |
+| `event_persistence.replay_cold_limit` | int | `5000` | Maximum persisted events a single reconnect may replay; a larger gap falls back to a full resync. Watch the `reconnect_tier_full` metric before raising it. |
 
 ### Telemetry / OpenTelemetry (`telemetry`)
 

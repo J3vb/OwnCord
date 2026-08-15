@@ -102,10 +102,18 @@ func isMemoryPath(path string) bool {
 // path is embedded in a file: URI without escaping. cfg.Database.Path is a
 // plain path (default "data/chatserver.db"), which satisfies this.
 func Open(path string) (*DB, error) {
+	return OpenWithMaxReaders(path, 0)
+}
+
+// OpenWithMaxReaders is Open with an explicit reader-pool bound
+// (database.max_readers). maxReaders <= 0 keeps the automatic
+// max(4, NumCPU) sizing; values are clamped to [1, 64]. Ignored for
+// in-memory databases, which use a single shared connection.
+func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
 	}
-	return openFile(path)
+	return openFile(path, maxReaders)
 }
 
 // openMemory preserves the pre-split behavior exactly: a single connection
@@ -148,7 +156,7 @@ func openMemory(path string) (*DB, error) {
 }
 
 // openFile opens the writer and reader pools for a file-backed database.
-func openFile(path string) (*DB, error) {
+func openFile(path string, maxReaders int) (*DB, error) {
 	// Single-process guard: SQLite's own locking prevents file corruption,
 	// but everything built above it — presence derived from hub membership,
 	// the replay ring, rate-limit windows, the boot-time status reset — is
@@ -211,6 +219,9 @@ func openFile(path string) (*DB, error) {
 		return nil, fmt.Errorf("opening sqlite reader pool: %w", err)
 	}
 	readConns := max(4, runtime.NumCPU())
+	if maxReaders > 0 {
+		readConns = min(max(maxReaders, 1), 64)
+	}
 	reader.SetMaxOpenConns(readConns)
 	reader.SetMaxIdleConns(readConns)
 	if err := reader.Ping(); err != nil {
@@ -324,15 +335,24 @@ func hasKeywordPrefix(s, keyword string) bool {
 // MigrateFS (defined in migrate.go) which maintains the schema_versions
 // tracking table.
 func Migrate(database *DB) error {
-	if err := MigrateFS(database, migrations.FS); err != nil {
+	applied, err := migrateFSCount(database, migrations.FS)
+	if err != nil {
 		return err
 	}
-	// Refresh the query planner's statistics once per startup so newly created
-	// indexes (e.g. migration 019) are actually chosen. Close() keeps them
-	// current afterwards via PRAGMA optimize. ANALYZE writes sqlite_stat rows,
-	// so it runs on the writer.
-	if _, err := database.writer.Exec("ANALYZE;"); err != nil {
-		return fmt.Errorf("running ANALYZE after migrations: %w", err)
+	// Refresh the query planner's statistics when the schema changed, so newly
+	// created indexes (e.g. migration 019) are actually chosen. A full ANALYZE
+	// grows with row count and blocks startup, so unchanged schemas get the
+	// cheap PRAGMA optimize instead — which also covers crash-restarts that
+	// never reached Close()'s optimize. Both write sqlite_stat rows, so they
+	// run on the writer.
+	if applied > 0 {
+		if _, err := database.writer.Exec("ANALYZE;"); err != nil {
+			return fmt.Errorf("running ANALYZE after migrations: %w", err)
+		}
+		return nil
+	}
+	if _, err := database.writer.Exec("PRAGMA optimize;"); err != nil {
+		return fmt.Errorf("running PRAGMA optimize at startup: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/config"
@@ -10,6 +12,37 @@ import (
 //
 // Each constant defines either a request cap or a sliding-window duration used
 // by the per-endpoint rate limiters.
+
+// authRateScaleBits holds the security.auth_rate_limit_multiplier as float
+// bits. It scales the per-IP auth request caps and failure thresholds for
+// deployments where many users share one IP (office/school NAT) — the
+// compiled-in constants below assume roughly one person per address. Atomic
+// because tests construct multiple routers concurrently. Set via
+// setAuthRateScale in NewRouter; reads happen at mount time and on the login
+// failure-count path.
+var authRateScaleBits atomic.Uint64
+
+func init() { authRateScaleBits.Store(math.Float64bits(1.0)) }
+
+// setAuthRateScale clamps and installs the auth rate multiplier. Zero or
+// negative (unset config) means 1.0.
+func setAuthRateScale(m float64) {
+	if m <= 0 {
+		m = 1.0
+	}
+	m = math.Min(math.Max(m, 0.1), 100)
+	authRateScaleBits.Store(math.Float64bits(m))
+}
+
+// scaledAuthLimit applies the auth rate multiplier to a compiled-in limit,
+// never returning less than 1.
+func scaledAuthLimit(n int) int {
+	scaled := int(math.Round(float64(n) * math.Float64frombits(authRateScaleBits.Load())))
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
+}
 
 const (
 	// registerRateLimitPerMinute is the maximum registration attempts per IP per minute.

@@ -246,7 +246,7 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 		Offset: maxSessionsPerUser - 1,
 	})
 
-	expiresAt := time.Now().Add(sessionTTL).UTC().Format("2006-01-02T15:04:05Z")
+	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
 	deviceCopy, ipCopy := device, ip
 	res, err := d.q.InsertSession(ctx, dbgen.InsertSessionParams{
 		UserID:    userID,
@@ -398,9 +398,13 @@ func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int6
 }
 
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past.
-// Compares using strftime to handle both ISO-8601 and SQLite datetime formats.
+// The comparison is plain text against idx_sessions_expires_at, so the cutoff
+// MUST use sessionTimeLayout — the exact stored format (migration 031
+// normalized legacy rows). A space-separated cutoff would compare wrong and
+// silently delete nothing (' ' sorts before 'T').
 func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
-	if err := d.q.DeleteExpiredSessions(ctx); err != nil {
+	cutoff := time.Now().UTC().Format(sessionTimeLayout)
+	if err := d.q.DeleteExpiredSessions(ctx, cutoff); err != nil {
 		return fmt.Errorf("DeleteExpiredSessions: %w", err)
 	}
 	return nil

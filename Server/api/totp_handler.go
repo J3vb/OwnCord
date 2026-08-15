@@ -73,7 +73,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		// failure is recorded, defeating the per-user brute-force cap (the only
 		// cross-IP defence). A successful verification resets the counter below,
 		// so legitimate retries are not penalised.
-		if !limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		if !limiter.Allow(totpRateLimitKey, scaledAuthLimit(totpFailureRateLimit), totpFailureWindow) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "too many failed attempts, try again later",

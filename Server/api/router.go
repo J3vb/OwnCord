@@ -36,6 +36,9 @@ import (
 // pluginRegistry may be nil — in that case the plugin admin endpoints respond
 // with 503 on lifecycle calls and an empty list on read.
 func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry) (http.Handler, *ws.Hub, func()) {
+	// Install the auth rate multiplier before any route mounts read it.
+	setAuthRateScale(cfg.Security.AuthRateLimitMultiplier)
+
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -156,6 +159,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
+	// Replay budget knobs must land before hub.Run starts (below).
+	hub.ConfigureReplay(cfg.EventPersistence.ReplayRingSize, cfg.EventPersistence.ReplayColdLimit)
 	getOnlineUsers = func() int { return hub.ClientCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 

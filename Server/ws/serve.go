@@ -197,12 +197,13 @@ func (h *Hub) handleReconnect(
 			for cid := range allowedChannelIDs {
 				channelIDs = append(channelIDs, cid)
 			}
-			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
+			coldCap := h.maxColdReplayLimit()
+			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, coldCap) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
 			switch {
 			case dbErr != nil:
 				slog.Warn("ws handleReconnect: cold-tier replay query failed",
 					"user_id", c.userID, "err", dbErr)
-			case len(persisted) >= maxColdReplay:
+			case len(persisted) >= coldCap:
 				// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
 				// result means the gap exceeds the cap and the NEWEST events were
 				// dropped. Replaying it would look like a complete resume to the
@@ -210,7 +211,7 @@ func (h *Hub) handleReconnect(
 				// silently losing state events that REST history never repairs.
 				// Leave events nil so the fall-through forces a full ready.
 				slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
-					"user_id", c.userID, "last_seq", lastSeq, "cap", maxColdReplay)
+					"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
 			case len(persisted) > 0:
 				// Retention pruning (PruneEventsOlderThan) deletes purely by
 				// created_at with no seq-floor coordination, so this
@@ -443,7 +444,7 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 		raw = buf
 	} else if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
-		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, maxColdReplay) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, h.maxColdReplayLimit()) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 		if err != nil {
 			return nil
 		}

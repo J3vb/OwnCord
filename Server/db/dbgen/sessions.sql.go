@@ -11,11 +11,15 @@ import (
 )
 
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
-DELETE FROM sessions WHERE strftime('%s', expires_at) < strftime('%s', 'now')
+DELETE FROM sessions WHERE expires_at < ?
 `
 
-func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredSessions)
+// Sargable text comparison against idx_sessions_expires_at (migration 031).
+// expires_at is stored as RFC3339 UTC ("2006-01-02T15:04:05Z") and the
+// migration normalized legacy rows, so the caller must pass the cutoff in
+// exactly that layout -- a space-separated cutoff would compare wrong.
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt string) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredSessions, expiresAt)
 	return err
 }
 

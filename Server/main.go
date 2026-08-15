@@ -137,7 +137,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		return fmt.Errorf("database.type=%q is not supported; set \"sqlite\" or omit it", t)
 	}
 
-	database, err := db.Open(cfg.Database.Path)
+	database, err := db.OpenWithMaxReaders(cfg.Database.Path, cfg.Database.MaxReaders)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}

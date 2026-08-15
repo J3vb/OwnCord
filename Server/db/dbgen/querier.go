@@ -53,7 +53,11 @@ type Querier interface {
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
 	DeleteChannelUserPermission(ctx context.Context, arg DeleteChannelUserPermissionParams) error
 	DeleteEmoji(ctx context.Context, id int64) (sql.Result, error)
-	DeleteExpiredSessions(ctx context.Context) error
+	// Sargable text comparison against idx_sessions_expires_at (migration 031).
+	// expires_at is stored as RFC3339 UTC ("2006-01-02T15:04:05Z") and the
+	// migration normalized legacy rows, so the caller must pass the cutoff in
+	// exactly that layout -- a space-separated cutoff would compare wrong.
+	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteLockout(ctx context.Context, key string) error
 	// Avatars are attachments that are never linked to a message on purpose: the
 	// users.avatar URL is what keeps them alive and authorizes serving them
@@ -128,6 +132,10 @@ type Querier interface {
 	// Reactors for one (message, emoji) pair, oldest reaction first. The reactions
 	// table has no timestamp column, so the autoincrement id carries the order.
 	GetReactionUsers(ctx context.Context, arg GetReactionUsersParams) ([]GetReactionUsersRow, error)
+	// Reader-pool lookup that lets the channel-focus path skip the UpdateReadState
+	// UPSERT when the row is already correct, keeping no-op focus events off the
+	// single writer connection.
+	GetReadState(ctx context.Context, arg GetReadStateParams) (GetReadStateRow, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	// Case-insensitive by design: migration 023 enforces uniqueness under the same
 	// collation, so this is the lookup that agrees with the constraint.

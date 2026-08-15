@@ -108,13 +108,13 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 	usedTOTPCodes := auth.NewUsedTOTPCodeStore()
 
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.With(RateLimitMiddleware(registerLimiter, "register:", registerRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(registerLimiter, "register:", scaledAuthLimit(registerRateLimitPerMinute), time.Minute, trustedProxies)).
 			Post("/register", handleRegister(database, trustedProxies))
 
-		r.With(RateLimitMiddleware(loginLimiter, "login:", loginRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(loginLimiter, "login:", scaledAuthLimit(loginRateLimitPerMinute), time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
 
-		r.With(RateLimitMiddleware(limiter, "totp_verify:", verifyTOTPRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, "totp_verify:", scaledAuthLimit(verifyTOTPRateLimitPerMinute), time.Minute, trustedProxies)).
 			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes, totpKey))
 
 		r.With(AuthMiddleware(database)).
@@ -124,20 +124,20 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Get("/me", handleMe())
 
 		r.With(AuthMiddleware(database),
-			RateLimitMiddleware(limiter, "del_account:", sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+			RateLimitMiddleware(limiter, "del_account:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 			Delete("/account", handleDeleteAccount(database, limiter, ab))
 	})
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, "totp:", sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore, limiter))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, "totp:", sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes, limiter, totpKey))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, "totp:", sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore, limiter))
 }
 
@@ -393,7 +393,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		// password on attempt 10 still succeeds — successful logins reset
 		// both counters. The reservation sits after the DB-error return above
 		// so a transient DB outage still does not consume attempts.
-		if !limiter.Allow(failKey, loginFailureThreshold+1, loginFailureWindow) ||
+		if !limiter.Allow(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) ||
 			!limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -416,7 +416,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			// only decide the lockouts, at the same boundary as before: the
 			// 10th in-window failure locks the key. Check is read-only, so
 			// the reservation is not double-counted.
-			if !limiter.Check(failKey, loginFailureThreshold+1, loginFailureWindow) {
+			if !limiter.Check(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, loginLockoutDuration)
 			}
 			// BUG-110: per-username lockout on threshold.
