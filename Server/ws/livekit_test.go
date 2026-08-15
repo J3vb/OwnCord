@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
@@ -177,6 +179,61 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 	if token == "" {
 		t.Fatal("expected non-empty token for subscribe-only")
+	}
+}
+
+// TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice locks OC-0016:
+// SPEAK_VOICE, USE_VIDEO and SHARE_SCREEN are independent permission bits
+// (EffectiveChannelPerms resolves each per-bit), so a channel override can
+// deny SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN — e.g. a
+// presentation channel where only video is wanted. handleVoiceCameraV2 and
+// handleVoiceScreenshareV2 gate only on USE_VIDEO/SHARE_SCREEN respectively,
+// so the LiveKit token must carry a matching per-source grant instead of a
+// blanket CanPublish=false that blocks every source, camera and screen share
+// included, once SPEAK_VOICE is denied.
+func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "test-key",
+		LiveKitAPISecret: "test-secret-that-is-long-enough-for-hmac",
+		LiveKitURL:       "ws://localhost:7880",
+	}
+
+	client, err := ws.NewLiveKitClient(cfg)
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+
+	// canPublish=false (SPEAK_VOICE denied), canVideo=true, canScreenShare=true.
+	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true, true)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	verifier, err := auth.ParseAPIToken(token)
+	if err != nil {
+		t.Fatalf("ParseAPIToken: %v", err)
+	}
+	_, grants, err := verifier.Verify(cfg.LiveKitAPISecret)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if grants.Video == nil {
+		t.Fatal("expected a video grant in the token")
+	}
+
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_CAMERA) {
+		t.Error("expected camera to be publishable when USE_VIDEO is granted, even though SPEAK_VOICE is denied")
+	}
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE) {
+		t.Error("expected screen_share to be publishable when SHARE_SCREEN is granted, even though SPEAK_VOICE is denied")
+	}
+	if !grants.Video.GetCanPublishSource(livekit.TrackSource_SCREEN_SHARE_AUDIO) {
+		t.Error("expected screen_share_audio to be publishable when SHARE_SCREEN is granted, even though SPEAK_VOICE is denied")
+	}
+	if grants.Video.GetCanPublishSource(livekit.TrackSource_MICROPHONE) {
+		t.Error("expected microphone NOT to be publishable when SPEAK_VOICE is denied")
 	}
 }
 
