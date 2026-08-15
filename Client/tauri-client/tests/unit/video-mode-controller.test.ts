@@ -683,6 +683,63 @@ describe("createVideoModeController", () => {
       expect(vg.clearStreams).not.toHaveBeenCalled();
     });
 
+    it("clears videoGrid streams on a voice channel switch (A -> B) even though currentChannelId never passes through null (OC-0012)", () => {
+      // VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
+      // old channel to the new one (joinVoiceChannel is optimistic), so the
+      // channelId === null branch never runs on a switch. Remote tiles left
+      // over from channel A must still be cleared when we land in channel B.
+      const usersA = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, usersA]]) }),
+      );
+
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      expect(vg.clearStreams).not.toHaveBeenCalled();
+
+      // Switch straight to channel B — currentChannelId goes 10 -> 20, never
+      // through null.
+      const usersB = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 20, voiceUsers: new Map([[20, usersB]]) }),
+      );
+      ctrl.checkVideoMode();
+
+      expect(vg.clearStreams).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not clear videoGrid streams across repeated checkVideoMode calls for the same channel (auto-reconnect)", () => {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
+      );
+
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+
+      ctrl.checkVideoMode();
+      ctrl.checkVideoMode();
+      ctrl.checkVideoMode();
+
+      expect(vg.clearStreams).not.toHaveBeenCalled();
+    });
+
     it("closeVideoGrid clears the videoGrid's own focus state, not just the controller's", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({

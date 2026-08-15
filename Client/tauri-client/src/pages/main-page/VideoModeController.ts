@@ -53,6 +53,14 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
   let focusedTileId: number | null = null;
+  /** The channel currentChannelId was on the previous checkVideoMode() call.
+   *  A voice channel switch (A -> B) moves currentChannelId directly from A
+   *  to B without ever passing through null (joinVoiceChannel is
+   *  optimistic), so clearStreams() must key off any change of channel id,
+   *  not just the transition to null — otherwise remote tiles from the old
+   *  channel persist as dead MediaStreams and keep hasStreams() true
+   *  forever (OC-0012). */
+  let lastChannelId: number | null = null;
   /** Set when the user explicitly dismisses the grid while local video is
    *  still on (switching to a text channel). Without this, checkVideoMode()
    *  re-opens the grid the moment any remote peer's camera/screenshare
@@ -104,17 +112,23 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   function checkVideoMode(): void {
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
+    // Clear stale remote tiles on ANY change of channel — a real leave
+    // (channelId -> null) and a direct A -> B switch both need it, since
+    // VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
+    // old channel to the new one without ever passing through null.
+    // currentChannelId stays unchanged across auto-reconnect, so this does
+    // not fire on reconnect (B1-8, OC-0012).
+    if (channelId !== lastChannelId) {
+      if (lastChannelId !== null) {
+        videoGrid.clearStreams();
+      }
+      lastChannelId = channelId;
+    }
     if (channelId === null) {
       // Not a dismissal: leaving voice can clear currentChannelId before
       // localCamera/localScreenshare go false, and this early return skips
       // the reset below — showChat() here would strand userDismissedVideo
       // set and suppress auto-open for the next session.
-      //
-      // This is a real leave (not a reconnect — currentChannelId stays set
-      // during auto-reconnect), so clear any remote tiles left over from the
-      // ended session too (B1-8) — otherwise they persist as dead
-      // MediaStreams and keep hasStreams() true for the next join.
-      videoGrid.clearStreams();
       closeVideoGrid();
       return;
     }
@@ -222,6 +236,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     localTileAdded = false;
     localScreenshareTileAdded = false;
     userDismissedVideo = false;
+    lastChannelId = null;
   }
 
   return {
