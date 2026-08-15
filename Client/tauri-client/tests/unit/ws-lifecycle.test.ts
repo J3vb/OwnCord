@@ -743,6 +743,103 @@ describe("disconnect() cancelling an in-flight connect()", () => {
   });
 });
 
+describe("overlapping connect() attempts (OC-0219)", () => {
+  let client: ReturnType<typeof createWsClient>;
+  let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
+    ? R
+    : never;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    originalMockListenImpl = mockListen.getMockImplementation()!;
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    mockListen.mockImplementation(originalMockListenImpl!);
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  // OC-0219: eventUnsubs is a single client-scoped array shared by every
+  // connect() attempt. If a stale attempt A resumes inside setupEventListeners()
+  // after a newer attempt B has already registered its own listeners into that
+  // same shared array, A's stale-branch cleanup must tear down only the
+  // listeners A itself just registered — not B's. Otherwise B's connection
+  // opens with nobody listening: no auth frame is ever sent, ws-state "closed"
+  // is never observed either, and the socket wedges with no reconnect.
+  it("does not tear down a newer connect()'s listeners when a stale attempt's setupEventListeners resumes later", async () => {
+    let releaseFirstMsgListen: (() => void) | null = null;
+    let firstMsgListenSeen = false;
+
+    mockListen.mockImplementation(
+      async (event: string, handler: (e: { payload: unknown }) => void) => {
+        if (event === "ws-message" && !firstMsgListenSeen) {
+          firstMsgListenSeen = true;
+          // Pause attempt A here — mirrors A being suspended inside
+          // setupEventListeners()'s Tauri IPC round trips while a newer
+          // connect() attempt B runs all the way to completion.
+          await new Promise<void>((resolve) => {
+            releaseFirstMsgListen = resolve;
+          });
+        }
+        return originalMockListenImpl!(event, handler);
+      },
+    );
+
+    // Attempt A: suspends inside its first tauriListen("ws-message", ...) call.
+    client.connect({ host: "localhost:8443", token: "tA" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releaseFirstMsgListen).not.toBeNull();
+
+    // Attempt B supersedes A (e.g. a reconnect timer firing alongside a
+    // fresh connect()) and runs to completion — registers its own listeners
+    // and calls ws_connect — while A is still suspended.
+    client.connect({ host: "localhost:8443", token: "tB" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Resume A. It notices it is stale (gen mismatch) and tears down
+    // listeners — this must remove only the listeners it just registered,
+    // not B's live ones.
+    releaseFirstMsgListen!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // B's underlying (mock) connection now reports open. If A's stale
+    // cleanup wiped B's ws-state listener, nothing observes this and the
+    // auth frame is never sent.
+    emitTauriEvent("ws-state", "open");
+    await vi.advanceTimersByTimeAsync(10);
+
+    const authSends = mockInvoke.mock.calls.filter(
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authSends.length).toBeGreaterThanOrEqual(1);
+
+    // Complete the handshake and confirm B reaches "connected" — proof its
+    // ws-message listener also survived A's stale cleanup.
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "b", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    expect(client.getState()).toBe("connected");
+  });
+});
+
 describe("heartbeat proxyOpen guard", () => {
   let client: ReturnType<typeof createWsClient>;
 
