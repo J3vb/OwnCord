@@ -170,6 +170,8 @@ type updateChannelRequest struct {
 // caller sending -1 meant something, and silently storing 0 would hide it.
 func (r updateChannelRequest) validate() string {
 	switch {
+	case strings.TrimSpace(r.Name) == "":
+		return "name is required"
 	case r.SlowMode < 0 || r.SlowMode > maxSlowModeSeconds:
 		return fmt.Sprintf("slow_mode must be between 0 and %d seconds", maxSlowModeSeconds)
 	case r.VoiceMaxUsers < 0 || r.VoiceMaxUsers > maxVoiceLimit:

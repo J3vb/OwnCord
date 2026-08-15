@@ -48,7 +48,11 @@ func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "unarchive-voice", "voice", "", "", 0)
-	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{Archived: true}); err != nil {
+	// AdminUpdateChannel replaces the full row, so the seed must carry the
+	// name along with Archived: true — leaving it zero-valued would blank the
+	// channel's name directly at the DB layer, bypassing the handler's own
+	// validation and leaving the row in a state the HTTP surface never allows.
+	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{Name: "unarchive-voice", Archived: true}); err != nil {
 		t.Fatalf("seed archived channel: %v", err)
 	}
 

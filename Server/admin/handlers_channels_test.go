@@ -255,6 +255,48 @@ func TestPatchChannel_RejectsOutOfRangeValues(t *testing.T) {
 	}
 }
 
+// PATCH must reject a blank name the same way POST does (handleCreateChannel,
+// line 104): updateChannelRequest.validate() only bounded the numeric fields,
+// so a whitespace-only name could slip through PATCH and leave the channel
+// unidentifiable in every client's sidebar.
+func TestPatchChannel_RejectsEmptyName(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, token, database := newChannelTestAPI(t)
+			id := newChannel(t, handler, token, "general", "text")
+
+			w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), token, map[string]any{
+				"name": tc.value,
+			})
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal error body: %v", err)
+			}
+			if resp["error"] != "INVALID_INPUT" {
+				t.Errorf("error code = %q, want INVALID_INPUT", resp["error"])
+			}
+
+			ch, err := database.GetChannel(context.Background(), id)
+			if err != nil || ch == nil {
+				t.Fatalf("GetChannel after refused patch: ch=%v err=%v", ch, err)
+			}
+			if ch.Name != "general" {
+				t.Errorf("channel name after refused patch = %q, want unchanged %q", ch.Name, "general")
+			}
+		})
+	}
+}
+
 // The boundary values themselves are legal — an off-by-one in validate() that
 // refused 21600 or 99 would silently cap what the clients offer.
 func TestPatchChannel_AcceptsBoundaryValues(t *testing.T) {
