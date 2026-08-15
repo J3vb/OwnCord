@@ -52,6 +52,13 @@ func StubCloseError(msg string) (restore func()) {
 	}
 }
 
+// ApplyStagedUpdate exposes applyStagedUpdate (the on-disk swap + respawn
+// logic behind POST /updates/apply's background goroutine) so tests can drive
+// its abort paths directly with fake filesystem paths, instead of exercising
+// the full HTTP handler — which resolves exePath via os.Executable() and
+// would rename/replace the running test binary itself.
+var ApplyStagedUpdate = applyStagedUpdate
+
 // StubRestart replaces the process-restart hook for the duration of a test and
 // returns a func reporting whether a restart was requested. Without this the
 // restore handler would respawn and os.Exit the test binary.
