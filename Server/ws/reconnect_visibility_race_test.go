@@ -120,6 +120,11 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 		if overrideErr := database.UpsertChannelOverride(ctx, chID, harvestVoiceRoleID, 0, permissions.ReadMessages); overrideErr != nil {
 			t.Fatalf("UpsertChannelOverride: %v", overrideErr)
 		}
+		// nolint:contextcheck // RefreshChannelVisibility takes no context by
+		// design: it is reached through the admin HubBroadcaster interface,
+		// which carries none, so it builds its own internally. contextcheck
+		// only flags it here because this closure happens to hold a ctx for
+		// the override write above; there is nothing to propagate.
 		h.RefreshChannelVisibility(ch)
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
