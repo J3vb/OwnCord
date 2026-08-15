@@ -2,9 +2,13 @@ package admin_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/owncord/server/admin"
@@ -403,4 +407,85 @@ func TestAdminAPI_ApplyUpdate_ContainerOptOut(t *testing.T) {
 	if resp["error"] != "UPDATE_UNAVAILABLE" {
 		t.Errorf("error code = %q, want UPDATE_UNAVAILABLE (container guard must step aside)", resp["error"])
 	}
+}
+
+// ─── OC-0226: aborted apply must correct the earlier restart promise ────────
+//
+// handleApplyUpdate's background goroutine broadcasts "server restarting in
+// 5s" as its very first action, before any of the on-disk swap actually
+// happens. If the swap then fails, every connected client is left believing
+// a restart is underway (ServerBanner counts down to a permanent
+// "Reconnecting..." state) with no corrective signal ever sent. These tests
+// call the swap logic directly — admin.ApplyStagedUpdate — with inputs
+// engineered to fail at different points, and assert a corrective
+// "update_aborted" broadcast follows. They deliberately do not exercise the
+// success path: that ends in os.Exit(0), which would kill the test binary.
+
+// TestApplyStagedUpdate_VerifyFails_BroadcastsAbort covers the earliest abort
+// point: the staged binary re-verification (OpenVerifiedBinary) fails
+// because the staged file was never written.
+func TestApplyStagedUpdate_VerifyFails_BroadcastsAbort(t *testing.T) {
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "chatserver")
+	if err := os.WriteFile(exePath, []byte("old binary"), 0o755); err != nil {
+		t.Fatalf("writing fake exe: %v", err)
+	}
+	oldPath := exePath + ".old"
+	newPath := exePath + ".new" // deliberately never written
+
+	hub := &mockHub{}
+	admin.ApplyStagedUpdate(hub, exePath, oldPath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+
+	if len(hub.restartCalls) != 1 {
+		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
+	}
+	if hub.restartCalls[0].reason == "update" {
+		t.Fatalf("only broadcast was the original 'restarting' promise (%+v); no corrective broadcast was sent after the abort", hub.restartCalls[0])
+	}
+
+	// The original binary must be untouched: verification failed before any
+	// filesystem mutation.
+	got, err := os.ReadFile(exePath)
+	if err != nil || string(got) != "old binary" {
+		t.Errorf("exePath contents = %q, err=%v; want original binary untouched", got, err)
+	}
+}
+
+// TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort covers the second
+// abort point: the staged binary verifies fine, but renaming the current
+// executable to its .old backup fails (exePath does not exist).
+func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "chatserver") // deliberately never created
+	oldPath := exePath + ".old"
+	newPath := exePath + ".new"
+
+	content := []byte("verified staged bytes")
+	if err := os.WriteFile(newPath, content, 0o755); err != nil {
+		t.Fatalf("writing staged binary: %v", err)
+	}
+	sum := sha256.Sum256(content)
+	stagedHash := hex.EncodeToString(sum[:])
+
+	hub := &mockHub{}
+	admin.ApplyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash)
+
+	if len(hub.restartCalls) != 1 {
+		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
+	}
+	if hub.restartCalls[0].reason == "update" {
+		t.Fatalf("only broadcast was the original 'restarting' promise (%+v); no corrective broadcast was sent after the abort", hub.restartCalls[0])
+	}
+}
+
+// TestApplyStagedUpdate_NilHub_NoPanic verifies the corrective-broadcast
+// guard does not dereference a nil hub (update checking with no ws.Hub is a
+// supported configuration — see handleApplyUpdate's nil checks).
+func TestApplyStagedUpdate_NilHub_NoPanic(t *testing.T) {
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "chatserver")
+	oldPath := exePath + ".old"
+	newPath := exePath + ".new" // never written -> verification fails
+
+	admin.ApplyStagedUpdate(nil, exePath, oldPath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
 }

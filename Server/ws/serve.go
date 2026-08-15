@@ -130,6 +130,16 @@ func (h *Hub) upgradeAndAuth(
 	return c, lastSeq, nil
 }
 
+// handleReconnectPreRegisterRaceHook, when non-nil, runs once inside
+// handleReconnect's h.seqMu critical section immediately before the
+// mustFullResync re-check that guards registerNow. Test-only (nil in
+// production); a real visibility change lands too fast relative to the DB
+// round trips above to reliably land a concurrent goroutine in this window,
+// so tests use this hook to pin it deterministically instead — mirrors the
+// refreshChannelVisibilityRaceHook / voiceJoinPostTokenRaceHook pattern used
+// for the analogous races elsewhere in this package (OC-0206).
+var handleReconnectPreRegisterRaceHook func()
+
 // handleReconnect attempts to resume a client via replay. Its two return
 // values are independent signals for ServeWS:
 //   - handled reports whether this function owns the outcome of the
@@ -374,6 +384,27 @@ func (h *Hub) handleReconnect(
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 			return false, false
 		}
+	}
+	if handleReconnectPreRegisterRaceHook != nil {
+		handleReconnectPreRegisterRaceHook()
+	}
+	// Re-check the watermark one last time, right before registerNow makes
+	// this connection reachable. RefreshChannelVisibility and
+	// revokeUnreadableChannels both iterate h.clients to fan out a targeted,
+	// unsequenced channel_create/channel_delete — a snapshot this
+	// still-mid-handshake connection is absent from — and both only bump the
+	// watermark afterward. Without this re-check, a visibility change that
+	// lands anywhere between the entry check above and here is missed twice:
+	// the fan-out can't reach an unregistered client, and the entry check has
+	// already passed, so nothing else catches it before this resume commits
+	// to permissions computed before the change (OC-0206).
+	if h.mustFullResync(lastSeq) {
+		h.seqMu.Unlock()
+		slog.Warn("ws handleReconnect: visibility changed during handshake, forcing full ready",
+			"user_id", c.userID, "last_seq", lastSeq)
+		h.reconnectTierFull.Add(1)
+		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+		return false, false
 	}
 	h.registerNow(c, allowedChannelIDs)
 	h.seqMu.Unlock()

@@ -103,12 +103,17 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 // LinkAttachmentsToMessage sets message_id on attachments that are currently
 // unlinked (message_id IS NULL) and owned by uploaderID. Legacy rows with
 // uploader_id IS NULL are treated as unowned and may be claimed by any
-// sender. Rows that are already linked, owned by another user, or
-// nonexistent are skipped rather than errors, so a client retry of a
-// partially-completed send cannot fail the whole message. This single UPDATE
-// is the atomic attachment-IDOR guard for message sends: ownership is
-// enforced in the same statement that links, so there is no check-then-link
-// race. Returns the number of rows updated.
+// sender. Rows that are already linked, owned by another user, currently
+// serving as a live avatar (users.avatar points at them), or nonexistent are
+// skipped rather than errors, so a client retry of a partially-completed send
+// cannot fail the whole message. Excluding live avatars keeps
+// handleServeFile's avatar branch (gated on ChannelID == nil) reachable: once
+// message_id is set that branch is dead and the file falls under the
+// message's channel ACL / soft-delete state instead, permanently splitting
+// from what users.avatar still names (OC-0216). This single UPDATE is the
+// atomic attachment-IDOR guard for message sends: ownership is enforced in
+// the same statement that links, so there is no check-then-link race.
+// Returns the number of rows updated.
 func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
 	if len(attachmentIDs) == 0 {
 		return 0, nil
@@ -126,7 +131,8 @@ func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID
 	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`UPDATE attachments SET message_id = ?
 		 WHERE id IN (%s) AND message_id IS NULL
-		   AND (uploader_id = ? OR uploader_id IS NULL)`,
+		   AND (uploader_id = ? OR uploader_id IS NULL)
+		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)`,
 		strings.Join(placeholders, ","),
 	)
 	res, err := d.writer.ExecContext(ctx, query, args...)

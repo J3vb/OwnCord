@@ -447,7 +447,7 @@ async fn handle_connection<R: Runtime>(
 
     // ── 3. Forward request + bidirectional copy ──────────────────────────
     tls.write_all(modified.as_bytes()).await?;
-    match io::copy_bidirectional(&mut local, &mut tls).await {
+    match copy_with_deadline(&mut local, &mut tls, DATA_PHASE_TIMEOUT).await {
         Ok((to_remote, from_remote)) => {
             debug!(
                 "[http_proxy] connection closed: {}B sent, {}B received",
@@ -459,6 +459,40 @@ async fn handle_connection<R: Runtime>(
         }
     }
     Ok(())
+}
+
+/// Bound for the data-copy phase of a tunneled connection (step 3 above).
+/// The header read, TCP connect, and TLS handshake phases all use a tight
+/// 10s guard, but this phase carries the actual REST body — including
+/// attachment/avatar uploads — so it needs a much more generous bound. 600s
+/// only reclaims a connection that is genuinely stuck (e.g. a remote that
+/// completes the TLS handshake and then neither responds nor closes), not
+/// one that is merely slow.
+const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Run `io::copy_bidirectional` under a deadline. Without this, a remote
+/// that completes the TLS handshake and then stalls forever (neither
+/// responding nor closing) parks the spawned connection task — and both the
+/// loopback socket and the remote TLS session — indefinitely; closing the
+/// local side alone does not free it, since `copy_bidirectional` only
+/// resolves once BOTH directions finish. Generic over the stream types so it
+/// can be unit-tested without a live TLS connection.
+async fn copy_with_deadline<A, B>(
+    local: &mut A,
+    remote: &mut B,
+    dur: Duration,
+) -> io::Result<(u64, u64)>
+where
+    A: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
+    B: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
+{
+    match timeout(dur, io::copy_bidirectional(local, remote)).await {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "data phase timed out",
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -591,5 +625,36 @@ mod tests {
         assert!(out.contains("Content-Type: application/json\r\n"));
         assert!(out.contains("Content-Length: 2\r\n"));
         assert!(out.ends_with("\r\n\r\n"));
+    }
+
+    // OC-0218: the data phase of a tunneled request (step 3 in
+    // `handle_connection`) must not be able to hang forever. A remote that
+    // completes the TLS handshake and then neither responds nor closes must
+    // eventually be reclaimed, the same way the header-read/connect/handshake
+    // phases already are (10s guards above). Simulate that stall with two
+    // in-memory duplex pairs where neither peer ever writes or disconnects,
+    // so raw `io::copy_bidirectional` would block forever.
+    #[tokio::test]
+    async fn copy_with_deadline_reclaims_a_stalled_connection() {
+        // Keep both "far" ends alive (bound, not `_`) so neither duplex half
+        // observes EOF — this is what makes the connection "stalled" rather
+        // than "closed".
+        let (mut local_near, _local_far) = tokio::io::duplex(64);
+        let (mut remote_near, _remote_far) = tokio::io::duplex(64);
+
+        // An outer safety bound: if `copy_with_deadline` does not honor its
+        // own deadline, fail fast instead of hanging the test suite forever.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            copy_with_deadline(&mut local_near, &mut remote_near, Duration::from_millis(50)),
+        )
+        .await
+        .expect(
+            "copy_with_deadline must resolve on its own deadline; the data phase must not hang \
+             indefinitely on a stalled remote (OC-0218)",
+        );
+
+        let err = outcome.expect_err("a stalled remote must surface as a timeout error, not Ok");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
     }
 }

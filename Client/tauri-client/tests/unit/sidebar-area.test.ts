@@ -308,6 +308,10 @@ function defaultOpts(): SidebarAreaOptions {
       voice: { tryConsume: vi.fn().mockReturnValue(true) },
       voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
     } as unknown as SidebarAreaOptions["limiters"],
+    presenceSender: {
+      send: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as SidebarAreaOptions["presenceSender"],
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };

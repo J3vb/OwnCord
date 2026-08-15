@@ -109,13 +109,24 @@ func sqlFilenames(fsys fs.FS) ([]string, error) {
 	return names, nil
 }
 
-// seedExistingDatabase inserts all migration filenames into schema_versions
-// without executing them.  This is called once when upgrading a pre-tracking
-// database.
+// seedExistingDatabase creates schema_versions (if absent) and inserts all
+// migration filenames into it without executing them, atomically. This is
+// called once when upgrading a pre-tracking database.
+//
+// The CREATE TABLE runs inside the same transaction as the INSERTs — SQLite
+// DDL is transactional — so a failure or interruption partway through
+// leaves no schema_versions table behind at all, rather than an empty one.
+// An empty-but-present table would make the next MigrateFS call believe
+// tracking is already in place, permanently skip seeding, and replay every
+// migration against the live, already-populated database.
 func seedExistingDatabase(d *DB, filenames []string) error {
 	tx, err := d.writer.Begin()
 	if err != nil {
 		return fmt.Errorf("begin seed tx: %w", err)
+	}
+	if _, execErr := tx.Exec(createSchemaVersions); execErr != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("creating schema_versions in seed tx: %w", execErr)
 	}
 	for _, name := range filenames {
 		if _, execErr := tx.Exec(
@@ -134,12 +145,16 @@ func seedExistingDatabase(d *DB, filenames []string) error {
 // MigrateFS runs tracked migrations from the provided FS.
 //
 // Behaviour:
-//  1. Create schema_versions if absent.
-//  2. If this is the first run with tracking on an existing database (users
-//     table exists but schema_versions was just created), seed all filenames
-//     so they are not re-executed.
-//  3. For each .sql file in lexicographic order: skip if already recorded,
-//     otherwise execute the SQL and record the filename.
+//  1. If this is the first run with tracking on an existing database (no
+//     schema_versions table yet, but the "users" table already exists),
+//     atomically create schema_versions and seed it with every filename so
+//     none of them are re-executed. Creation and seeding happen in one
+//     transaction: a failure or interruption partway through leaves no
+//     schema_versions table behind, so the next run retries seeding instead
+//     of silently treating tracking as already in place.
+//  2. Otherwise, create schema_versions if absent (idempotent — the correct
+//     state for a fresh database is an empty tracking table) and apply any
+//     .sql file in lexicographic order that is not yet recorded.
 func MigrateFS(database *DB, fsys fs.FS) error {
 	_, err := migrateFSCount(database, fsys)
 	return err
@@ -150,14 +165,11 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 // change. The seeding path reports 0 — it records filenames without running
 // any SQL.
 func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
-	// Determine tracking state before we create schema_versions.
+	// Determine tracking state before touching schema_versions at all — the
+	// seeding path below must be the one to create it, atomically with the
+	// seed rows, so do not call ensureSchemaVersions before this check.
 	svExists, err := schemaVersionsExists(database)
 	if err != nil {
-		return 0, err
-	}
-
-	// Create the tracking table (idempotent).
-	if err := ensureSchemaVersions(database); err != nil {
 		return 0, err
 	}
 
@@ -177,6 +189,13 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 		if existing {
 			return 0, seedExistingDatabase(database, filenames)
 		}
+	}
+
+	// Non-seeding paths: schema_versions already exists, or this is a fresh
+	// database with no prior schema — either way, an idempotent create is
+	// the correct next step before applying migrations normally.
+	if err := ensureSchemaVersions(database); err != nil {
+		return 0, err
 	}
 
 	// Normal path: apply any migration not yet recorded.

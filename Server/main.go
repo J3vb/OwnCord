@@ -243,17 +243,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 
 	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
 	if cfg.EventPersistence.Enabled && hub != nil {
-		// Seed the hub's in-memory seq counter from the persisted MAX(seq)
-		// so wrapped-payload seqs stay monotonic across restarts. Without
-		// this, the events table accumulates rows whose payload seqs reset
-		// to 1 after every restart, breaking the reconnect "events since
-		// last_seq" contract.
-		if maxSeq, seedErr := database.GetMaxEventSeq(bgCtx); seedErr != nil {
-			log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
-		} else if maxSeq > 0 {
-			hub.SeedSeq(uint64(maxSeq))
-			log.Info("event persistence: seeded hub seq from persisted events", "seq", maxSeq)
-		}
+		seedHubReplayState(bgCtx, hub, database, log)
 
 		persister := ws.NewEventPersister(
 			database,
@@ -620,6 +610,39 @@ func loadPinnedCert(path string) []byte {
 		return nil
 	}
 	return block.Bytes
+}
+
+// seedHubReplayState restores the hub's monotonic seq counter from the
+// persisted MAX(events.seq) so wrapped-payload seqs stay monotonic across
+// restarts. Without this, the events table accumulates rows whose payload
+// seqs reset to 1 after every restart, breaking the reconnect "events since
+// last_seq" contract.
+//
+// It also forces every client resuming from at or before that restored seq
+// onto the full-ready path for this boot. h.seq is persisted and restored
+// here, but the paired watermark that tells a resuming client whether a
+// channel-visibility change happened since its last_seq
+// (visibilityChangeSeq) is in-memory only and always starts at 0 on a fresh
+// process — see ws/hub_events.go's mustFullResync. Channel-visibility
+// changes made to an offline client (RefreshChannelVisibility,
+// revokeUnreadableChannels) are sent as targeted, unsequenced messages that
+// are never written to the events table, so replay can never recover them.
+// Without the MarkVisibilityChanged call below, a client resuming with
+// last_seq at or before the pre-restart max sails straight through
+// mustFullResync's zeroed watermark and can silently miss a visibility
+// change it should have converged on.
+func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *slog.Logger) {
+	maxSeq, seedErr := database.GetMaxEventSeq(ctx)
+	if seedErr != nil {
+		log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
+		return
+	}
+	if maxSeq <= 0 {
+		return
+	}
+	hub.SeedSeq(uint64(maxSeq))
+	log.Info("event persistence: seeded hub seq from persisted events", "seq", maxSeq)
+	hub.MarkVisibilityChanged()
 }
 
 // isAddrInUse checks if an error is an "address already in use" error.

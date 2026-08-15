@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -135,5 +136,83 @@ func TestHandleTyping_BlockedInDMEmitsNothing(t *testing.T) {
 	}
 	if ch != nil {
 		t.Fatal("blocked user must not produce a typing broadcast")
+	}
+}
+
+// countingLimiter records every key passed to Allow so a test can assert
+// whether the rate-limit map was ever touched for a given call, without
+// depending on auth.RateLimiter's unexported internals. Allow always grants
+// the request — these tests only care about whether a key was built at all.
+type countingLimiter struct {
+	calls []string
+}
+
+func (c *countingLimiter) Allow(key string, limit int, window time.Duration) bool {
+	c.calls = append(c.calls, key)
+	return true
+}
+
+// TestHandleTyping_NoRateLimitKeyForNonexistentChannel locks OC-0202:
+// HandleTyping used to build the "typing:<uid>:<cid>" rate-limit key and call
+// limiter.Allow BEFORE resolving the channel at all, so any caller-supplied
+// channel id — including ids that don't exist — pinned a new entry in the
+// shared, process-wide RateLimiter. RateLimiter.Cleanup only evicts a key
+// once every timestamp on it is stale, and production runs cleanup with a
+// 6-hour window, so a client sending typing_start for a stream of forged
+// channel ids could retain millions of dead map entries for hours. The key
+// must only be built once the channel is known to exist (and, below,
+// once the caller is authorized to read it) so the key space is bounded to
+// real (user, channel) pairs.
+func TestHandleTyping_NoRateLimitKeyForNonexistentChannel(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	// Deliberately do NOT seed channel 999999 — it must not exist.
+
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	limiter := &countingLimiter{}
+
+	ch, err := svc.HandleTyping(context.Background(), 1, 999999, limiter)
+	if err != nil || ch != nil {
+		t.Fatalf("typing on a nonexistent channel must silently drop: ch=%v err=%v", ch, err)
+	}
+	if len(limiter.calls) != 0 {
+		t.Fatalf("HandleTyping built a rate-limit key for a nonexistent channel: calls=%v — "+
+			"every forged channel id pins a new entry in the shared RateLimiter for hours "+
+			"(Cleanup only evicts once every timestamp on the key is stale)", limiter.calls)
+	}
+}
+
+// TestHandleTyping_NoRateLimitKeyWithoutReadPermission extends OC-0202 to an
+// existing channel the caller cannot read: the rate-limit key must still not
+// be built, so the key space stays bounded to channels the user is actually
+// authorized to see typing indicators in.
+func TestHandleTyping_NoRateLimitKeyWithoutReadPermission(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages, // no ReadMessages
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "secret", Type: "text"})
+
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	limiter := &countingLimiter{}
+
+	ch, err := svc.HandleTyping(context.Background(), 1, 10, limiter)
+	if err != nil || ch != nil {
+		t.Fatalf("typing without ReadMessages must silently drop: ch=%v err=%v", ch, err)
+	}
+	if len(limiter.calls) != 0 {
+		t.Fatalf("HandleTyping built a rate-limit key before checking ReadMessages permission: calls=%v", limiter.calls)
 	}
 }

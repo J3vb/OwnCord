@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -38,6 +39,34 @@ import (
 func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry) (http.Handler, *ws.Hub, func()) {
 	// Install the auth rate multiplier before any route mounts read it.
 	setAuthRateScale(cfg.Security.AuthRateLimitMultiplier)
+
+	// Load (or auto-generate) the AES-256 key for TOTP secret encryption
+	// (M1). Done first, before any other setup, so a fatal failure here
+	// (below) doesn't leave background goroutines or partially-mounted
+	// routes behind.
+	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
+	if totpKeyErr != nil {
+		if cfg.Server.DataDir != "" {
+			// A configured data directory means this is a real deployment —
+			// main.go creates cfg.Server.DataDir before calling NewRouter, so
+			// by this point LoadOrGenerateTOTPKey only fails for a malformed
+			// OWNCORD_TOTP_KEY or a corrupt/truncated totp.key file, never for
+			// a missing directory. (The zero-value "" DataDir used by handler
+			// tests that never touch TOTP crypto is exempted below so the
+			// existing test suite keeps passing.)
+			//
+			// Continuing here would leave totpKey nil: every AES call in
+			// auth.EncryptTOTPSecret/DecryptTOTPSecret then hits
+			// aes.NewCipher(nil) and 500s, so every 2FA-enabled account
+			// (including the owner) would be locked out of login and unable
+			// to re-enroll, forever, while /health kept reporting OK. Refuse
+			// to start instead.
+			panic(fmt.Sprintf("api: failed to load TOTP encryption key: %v", totpKeyErr))
+		}
+		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
+		// Fall through — only reachable when DataDir is unset; TOTP handlers
+		// cannot encrypt/decrypt until a data directory is configured.
+	}
 
 	r := chi.NewRouter()
 
@@ -111,15 +140,6 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.Get("/health", healthHandler)
 		r.Get("/info", handleInfo(cfg))
 	})
-
-	// Load (or auto-generate) the AES-256 key for TOTP secret encryption (M1).
-	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
-	if totpKeyErr != nil {
-		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
-		// Fall through — handlers will still work but cannot encrypt/decrypt.
-		// This should not happen in practice since LoadOrGenerateTOTPKey
-		// auto-generates a key when none exists.
-	}
 
 	// Service layer — centralizes business logic for REST and WS handlers.
 	// *db.DB satisfies service.Store directly (the store abstraction was

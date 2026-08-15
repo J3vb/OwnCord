@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 )
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
@@ -45,6 +47,29 @@ func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
 
 // CopyBackupForTest exposes the real copyFile for StubCopyBackup delegates.
 var CopyBackupForTest = copyFile
+
+// StubCloseError makes the next handleRestoreBackup call's database.Close()
+// return err instead of actually closing the pools, so tests can exercise the
+// Close-failure branch without a genuine driver-level close error (see
+// dbCloser's doc comment for why that's not otherwise reachable in a test).
+func StubCloseError(msg string) (restore func()) {
+	closeMu.Lock()
+	prev := dbCloser
+	dbCloser = func(*db.DB) error { return errors.New(msg) }
+	closeMu.Unlock()
+	return func() {
+		closeMu.Lock()
+		dbCloser = prev
+		closeMu.Unlock()
+	}
+}
+
+// ApplyStagedUpdate exposes applyStagedUpdate (the on-disk swap + respawn
+// logic behind POST /updates/apply's background goroutine) so tests can drive
+// its abort paths directly with fake filesystem paths, instead of exercising
+// the full HTTP handler — which resolves exePath via os.Executable() and
+// would rename/replace the running test binary itself.
+var ApplyStagedUpdate = applyStagedUpdate
 
 // StubRestart replaces the process-restart hook for the duration of a test and
 // returns a func reporting whether a restart was requested. Without this the

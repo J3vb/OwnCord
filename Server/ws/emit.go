@@ -62,17 +62,25 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// lookup dies with it rather than outliving the request.
 			h.broadcastVoiceEvent(ctx, e.VisibleChannelID(), e.Payload())
 		case BroadcastAllEvent:
-			// Check concrete type: presence is low-priority, others are normal.
+			// Normal priority for everything, including presence: connect and
+			// disconnect presence for the same user already go out via
+			// hub.BroadcastToAll (serve.go, serve_pumps.go, hub_broadcast.go).
+			// Splitting handler-driven presence onto the low-priority queue
+			// put it in a different per-client FIFO than those, so writePump
+			// (which always drains normal strictly before low) could deliver
+			// a newer connect/disconnect frame before an older presence_update
+			// still sitting in the low queue — leaving the observer's final
+			// view of that user's status stale. Routing everything through
+			// BroadcastToAll keeps every source of one user's presence in a
+			// single ordered, seq-stamped, replayable stream (OC-0214).
 			if pe, isPresence := ev.(PresenceEvent); isPresence {
-				// A user-chosen presence bypasses the connect/disconnect
+				// A user-chosen presence also bypasses the connect/disconnect
 				// coalescer; drop any entry still queued for this user or the
 				// pending flush (up to 300ms later) would overwrite this
 				// fresher status with the stale connect-time one.
 				h.dropQueuedPresence(pe.userID)
-				h.BroadcastToAllLow(e.Payload())
-			} else {
-				h.BroadcastToAll(e.Payload())
 			}
+			h.BroadcastToAll(e.Payload())
 		default:
 			slog.Warn("EmitEvents: unknown event type", "type", fmt.Sprintf("%T", ev))
 		}

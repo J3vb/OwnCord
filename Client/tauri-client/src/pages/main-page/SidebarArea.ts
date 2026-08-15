@@ -10,6 +10,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
+import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
@@ -57,6 +58,11 @@ export interface SidebarAreaOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
   readonly limiters: RateLimiterSet;
+  /** MainPage's single shared presence sender — threaded to UserBar so its
+   *  status picker shares the same limiter budget and retry as auto-idle
+   *  and the settings Account tab instead of sending straight through `ws`
+   *  (OC-0210; see @lib/presence). */
+  readonly presenceSender: PresenceSender;
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly onWatchStream?: (userId: number) => void;
@@ -78,7 +84,7 @@ export interface SidebarAreaResult {
 // ---------------------------------------------------------------------------
 
 export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
-  const { ws, api, limiters, getRoot, getToast } = opts;
+  const { ws, api, limiters, presenceSender, getRoot, getToast } = opts;
 
   const children: MountableComponent[] = [];
   const unsubscribers: Array<() => void> = [];
@@ -785,7 +791,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const userBarSlot = createElement("div", {});
-  const userBar = createUserBar({ onDisconnect: openQuickSwitch, ws });
+  const userBar = createUserBar({ onDisconnect: openQuickSwitch, ws, presenceSender });
   userBar.mount(userBarSlot);
   children.push(userBar);
   sidebarWrapper.appendChild(userBarSlot);

@@ -287,7 +287,14 @@ func presenceEvents(userID int64, status string, customStatus *string) []Event {
 	return []Event{
 		PresenceOthersEvent{
 			excludeUserID: userID,
-			payload:       buildPresenceMsg(userID, public, customStatus),
+			// customStatus is blanked, not passed through: the status here
+			// already collapsed to "offline" (public != status), and the real
+			// free-text status would be a tell that this "offline" member is
+			// actually online. Mirrors hub_broadcast.go's BroadcastPresence,
+			// the connect/reconnect sibling of this same event, and
+			// db.MemberSummary.ForViewer, which blanks the same field the
+			// same way for the ready payload.
+			payload: buildPresenceMsg(userID, public, nil),
 		},
 		PresenceSelfEvent{
 			targetUserID: userID,

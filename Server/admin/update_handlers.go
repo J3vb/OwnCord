@@ -114,56 +114,89 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				hub.BroadcastServerRestart("update", 5)
 			}
 			time.Sleep(5 * time.Second)
-
-			// TOCTOU guard: open the staged binary once, verify its hash
-			// through that handle, and commit (rename) that exact file.
-			// Commit fails if the path was swapped after verification, so
-			// the bytes verified are the bytes spawned.
-			staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
-			if err != nil {
-				slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
-				return
+			if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+				// Every deferred cleanup inside applyStagedUpdate has run by
+				// now, which is why the exit lives out here.
+				os.Exit(0) // fallback if the SIGTERM handler didn't exit
 			}
-			defer staged.Close() //nolint:errcheck
-
-			// Rename: current -> .old, verified staged binary -> current
-			_ = os.Remove(oldPath) // remove any stale .old
-			if err := os.Rename(exePath, oldPath); err != nil {
-				slog.Error("update: rename current to old failed", "error", err)
-				return
-			}
-			if err := staged.Commit(exePath); err != nil {
-				slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
-				// Whatever is at exePath now (if anything) is not the verified
-				// binary; restoring .old replaces it.
-				if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
-					slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
-						"restore_error", restoreErr, "original_error", err,
-						"old_path", oldPath, "exe_path", exePath)
-					if hub != nil {
-						hub.BroadcastServerRestart("update_failed", 0)
-					}
-				}
-				return
-			}
-
-			// Spawn new process.
-			if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
-				slog.Error("update: spawn new process failed", "error", err)
-				return
-			}
-
-			// Signal the process to shut down gracefully before exiting.
-			// We use SIGTERM on Unix to trigger the graceful shutdown handler
-			// in main.go. On Windows, os.Exit is unavoidable because the
-			// process must release its file lock on the binary.
-			slog.Info("update: new process spawned, shutting down current process")
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				_ = p.Signal(syscall.SIGTERM)
-				// Give graceful shutdown a few seconds before force-killing.
-				time.Sleep(10 * time.Second)
-			}
-			os.Exit(0) // fallback if SIGTERM handler didn't exit
 		}()
 	})
+}
+
+// applyStagedUpdate performs the on-disk swap (verified staged binary ->
+// exePath) and spawns the replacement process. The caller has already
+// broadcast "restarting in 5s" to every connected client before invoking
+// this, so every return path that does NOT end in a successful respawn must
+// correct that promise — otherwise the client's restart banner counts down
+// to a permanent "Reconnecting..." over a connection that never actually
+// dropped (OC-0226). The deferred broadcast below covers all such paths
+// (verification failure, rename failure, commit failure, spawn failure) with
+// one guard instead of one broadcast per failure branch; it is cancelled by
+// setting restarting=true immediately before the process commits to
+// respawning.
+// It reports whether the process is committed to exiting for the replacement.
+// The exit itself belongs to the caller: calling os.Exit here would skip both
+// deferred cleanups below (the staged-file handle and the corrective
+// broadcast), and on Windows releasing that handle is the very thing the
+// restart is for.
+func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) bool {
+	restarting := false
+	defer func() {
+		if !restarting && hub != nil {
+			hub.BroadcastServerRestart("update_aborted", 0)
+		}
+	}()
+
+	// TOCTOU guard: open the staged binary once, verify its hash
+	// through that handle, and commit (rename) that exact file.
+	// Commit fails if the path was swapped after verification, so
+	// the bytes verified are the bytes spawned.
+	staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
+	if err != nil {
+		slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
+		return false
+	}
+	defer staged.Close() //nolint:errcheck
+
+	// Rename: current -> .old, verified staged binary -> current
+	_ = os.Remove(oldPath) // remove any stale .old
+	if err := os.Rename(exePath, oldPath); err != nil {
+		slog.Error("update: rename current to old failed", "error", err)
+		return false
+	}
+	if err := staged.Commit(exePath); err != nil {
+		slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
+		// Whatever is at exePath now (if anything) is not the verified
+		// binary; restoring .old replaces it.
+		if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
+			slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
+				"restore_error", restoreErr, "original_error", err,
+				"old_path", oldPath, "exe_path", exePath)
+		}
+		return false
+	}
+
+	// Spawn new process.
+	if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
+		slog.Error("update: spawn new process failed", "error", err)
+		return false
+	}
+
+	// The replacement process is spawned: from here on this process is
+	// committed to shutting down for it, so the "restarting" promise made at
+	// the top of handleApplyUpdate's goroutine is about to come true. Cancel
+	// the deferred corrective broadcast.
+	restarting = true
+
+	// Signal the process to shut down gracefully before exiting.
+	// We use SIGTERM on Unix to trigger the graceful shutdown handler
+	// in main.go. On Windows, os.Exit is unavoidable because the
+	// process must release its file lock on the binary.
+	slog.Info("update: new process spawned, shutting down current process")
+	if p, err := os.FindProcess(os.Getpid()); err == nil {
+		_ = p.Signal(syscall.SIGTERM)
+		// Give graceful shutdown a few seconds before force-killing.
+		time.Sleep(10 * time.Second)
+	}
+	return true
 }

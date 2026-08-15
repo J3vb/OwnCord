@@ -130,6 +130,52 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 	return nil
 }
 
+// AuthorizeRoleChange runs every ChangeUserRole precondition — MANAGE_ROLES,
+// target existence, the actor-outranks-target rule, role existence, and the
+// assign-below-own-rank rule — without mutating anything, and in the same
+// authorization-before-existence order as every other check in this file (see
+// BanUser): an actor without MANAGE_ROLES learns nothing about which user ids
+// exist. It exists so a caller that also performs another mutation in the
+// same request (the admin PATCH /users/{id} handler, which can ban and
+// role-change in one call) can authorize the role change *before* committing
+// the other mutation: checking only at ChangeUserRole time means a refused
+// role change is discovered only after the ban already landed, leaving a
+// "failed" request half-applied (OC-0215). It returns the validated actor
+// role, target user, and target role so callers that go on to commit (like
+// ChangeUserRole) don't need to re-fetch any of them.
+func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, targetID, newRoleID int64) (actorRole *db.Role, target *db.User, newRole *db.Role, err error) {
+	if targetID <= 0 {
+		return nil, nil, nil, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
+	}
+	if actorID == targetID {
+		return nil, nil, nil, fmt.Errorf("%w: cannot change your own role", ErrBadRequest)
+	}
+
+	// Authorization before existence — see BanUser.
+	actorRole, err = s.requirePerm(ctx, actorID, permissions.ManageRoles)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	target, err = s.st.GetUserByID(ctx, targetID)
+	if err != nil || target == nil {
+		return nil, nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
+		return nil, nil, nil, err
+	}
+
+	newRole, err = s.st.GetRoleByID(ctx, newRoleID)
+	if err != nil || newRole == nil {
+		return nil, nil, nil, fmt.Errorf("%w: role not found", ErrBadRequest)
+	}
+	// Administrator bypasses permission bits, never the hierarchy: the owner
+	// role is above every admin, so only the owner can grant it.
+	if newRole.Position >= actorRole.Position {
+		return nil, nil, nil, fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
+	}
+	return actorRole, target, newRole, nil
+}
+
 // ChangeUserRole assigns newRoleID to the target user. It enforces
 // MANAGE_ROLES plus two hierarchy rules the admin panel previously had none
 // of: the actor must strictly outrank the target, and may not hand out a role
@@ -142,34 +188,9 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 // delete for no reason, since this call already loaded and validated the
 // exact same row under the same request.
 func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetID, newRoleID int64) (*db.Role, error) {
-	if targetID <= 0 {
-		return nil, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
-	}
-	if actorID == targetID {
-		return nil, fmt.Errorf("%w: cannot change your own role", ErrBadRequest)
-	}
-
-	// Authorization before existence — see BanUser.
-	actorRole, err := s.requirePerm(ctx, actorID, permissions.ManageRoles)
+	_, target, newRole, err := s.AuthorizeRoleChange(ctx, actorID, targetID, newRoleID)
 	if err != nil {
 		return nil, err
-	}
-	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
-		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
-	}
-	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
-		return nil, err
-	}
-
-	newRole, err := s.st.GetRoleByID(ctx, newRoleID)
-	if err != nil || newRole == nil {
-		return nil, fmt.Errorf("%w: role not found", ErrBadRequest)
-	}
-	// Administrator bypasses permission bits, never the hierarchy: the owner
-	// role is above every admin, so only the owner can grant it.
-	if newRole.Position >= actorRole.Position {
-		return nil, fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
 	}
 
 	if err := s.st.UpdateUserRole(ctx, targetID, newRoleID); err != nil {

@@ -443,6 +443,53 @@ func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
 	}
 }
 
+// TestHandleRestoreBackup_RestartsWhenCloseFails verifies OC-0209: a failed
+// database.Close() must still schedule a process restart. database.Close()
+// closes the writer and reader pools regardless of the error it returns
+// (Server/db/db.go), and the server_restart broadcast already went out to
+// every client before Close() is even called — so a process that answers 500
+// here without respawning leaves clients pinned on "Reconnecting..." forever
+// while the process quietly keeps failing every request with a closed DB.
+func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	backupDir := filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll backups: %v", err)
+	}
+	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
+	if err := os.WriteFile(dbPath, []byte("original live contents"), 0o600); err != nil {
+		t.Fatalf("WriteFile live db: %v", err)
+	}
+	backupName := "chatserver_20240103_120000.db"
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte("replacement contents"), 0o644); err != nil {
+		t.Fatalf("WriteFile backup: %v", err)
+	}
+
+	restarted, restoreRestartHook := admin.StubRestart()
+	defer restoreRestartHook()
+	restoreCloseHook := admin.StubCloseError("simulated close failure")
+	defer restoreCloseHook()
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("a failed database.Close() did not request a process restart, " +
+			"leaving a live server answering requests against closed DB pools")
+	}
+}
+
 // TestHandleRestoreBackup_AbortsWithoutSafetyBackup verifies the restore fails
 // closed when the pre-restore backup can't be written: the panel promises that
 // safety copy, and overwriting the live database without one is unrecoverable.

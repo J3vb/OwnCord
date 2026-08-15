@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,22 +404,28 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	// Whether the destination existed before the VACUUM decides the error
-	// cleanup below: a failed VACUUM INTO (disk full, killed mid-write) can
-	// leave a truncated file that the backup listing would present as
-	// restorable, so remove it — but only if we created it, never a file that
-	// was already there (VACUUM INTO refuses existing files, so that error
-	// path must not delete the operator's data).
-	_, statErr := os.Stat(absClean)
-	existedBefore := statErr == nil
+	// VACUUM INTO refuses to write over an existing destination on its own,
+	// but only after it has already created (and, on failure below, would
+	// otherwise abandon) the file. Check explicitly and return before the
+	// exec so the failure branch below can tell "this call created the file"
+	// (safe to remove) from "the file was already there" (a same-second
+	// timestamp collision, or an operator-chosen name) without ever deleting
+	// something that predates this call.
+	if _, statErr := os.Stat(absClean); statErr == nil {
+		return fmt.Errorf("BackupToSafe: destination %q already exists", absClean)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
+	}
 
 	_, err = d.writer.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
-		if !existedBefore {
-			if rmErr := os.Remove(absClean); rmErr != nil && !os.IsNotExist(rmErr) {
-				slog.Warn("BackupToSafe: could not remove partial backup file", "path", absClean, "error", rmErr)
-			}
-		}
+		// An interrupted VACUUM INTO (ENOSPC, EIO, a canceled/expired ctx, ...)
+		// leaves a truncated file at absClean. Since the existence check above
+		// already proved nothing was there before this call, whatever exists
+		// now was created by this exec and is safe to remove — leaving it
+		// behind would let handleListBackups offer a truncated, unrestorable
+		// .db as a normal backup (OC-0212).
+		_ = os.Remove(absClean)
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}
 	return nil
