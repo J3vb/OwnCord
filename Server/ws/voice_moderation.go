@@ -205,6 +205,14 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return voiceStateBroadcast(ctx, d, c.TargetID())
 }
 
+// voiceModDeafenPreMuteRaceHook, when non-nil, runs immediately after the
+// deafen write matches and before the implied-mute write that follows it —
+// the one-statement-wide window a concurrent channel switch would need to
+// land in for OC-0034. Test-only (nil in production), mirroring the
+// voiceJoinPostTokenRaceHook / cleanupVoiceRaceClearHook pattern used to pin
+// the analogous races elsewhere.
+var voiceModDeafenPreMuteRaceHook func(ctx context.Context, d VoiceDeps, targetID int64)
+
 // handleVoiceModDeafenV2 processes a voice_mod_deafen command. Deafen has no
 // SFU equivalent (it is about what the target plays back), so it is enforced by
 // the target's client honoring server_deafened plus the server refusing their
@@ -236,6 +244,9 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		// touch a channel nobody authorized it against.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
+	if voiceModDeafenPreMuteRaceHook != nil {
+		voiceModDeafenPreMuteRaceHook(ctx, d, c.TargetID())
+	}
 	// A server deafen implies a server mute at the SFU: a deafened user must
 	// not keep talking into a room they cannot hear. Lifting the deafen must
 	// lift that implied mute too, or the target stays SFU-muted and refused
@@ -258,9 +269,25 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		// failure above (the moderator's socket dropping mid-request, or the
 		// target moving off state.ChannelID between the two writes) must not
 		// also abort the rollback.
-		if _, compErr := d.DB.SetVoiceServerDeafen(context.WithoutCancel(ctx), c.TargetID(), state.ChannelID, !c.Deafened()); compErr != nil {
-			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
-				"err", compErr, "target_id", c.TargetID())
+		//
+		// Re-read the row's CURRENT channel rather than reusing the stale
+		// state.ChannelID snapshot: when the mismatch above was caused by
+		// the target switching channels (not leaving voice), the row is no
+		// longer on state.ChannelID, so a rollback scoped to that stale
+		// channel matches zero rows and silently no-ops -- exactly the case
+		// this rollback exists to handle (OC-0034). Clearing a restriction
+		// is safe on whatever channel the row is actually on now; if the
+		// row is gone entirely (target left voice), there is nothing left
+		// to roll back.
+		compCtx := context.WithoutCancel(ctx)
+		if cur, gErr := d.DB.GetVoiceState(compCtx, c.TargetID()); gErr != nil {
+			slog.Error("ws handleVoiceModDeafenV2 GetVoiceState for rollback",
+				"err", gErr, "target_id", c.TargetID())
+		} else if cur != nil {
+			if _, compErr := d.DB.SetVoiceServerDeafen(compCtx, c.TargetID(), cur.ChannelID, !c.Deafened()); compErr != nil {
+				slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
+					"err", compErr, "target_id", c.TargetID())
+			}
 		}
 		if err != nil {
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
