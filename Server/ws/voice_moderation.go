@@ -279,12 +279,32 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		// is safe on whatever channel the row is actually on now; if the
 		// row is gone entirely (target left voice), there is nothing left
 		// to roll back.
+		//
+		// The rollback value is the OPPOSITE of the request (!c.Deafened()),
+		// so which channel it is safe to scope to depends on which
+		// direction it runs:
+		//   - request was a DEAFEN (c.Deafened()==true): rollback CLEARS.
+		//     Clearing a restriction can never authorize anything the
+		//     target wasn't already free of, so following the row to
+		//     cur.ChannelID is safe -- this is the OC-0034 case above.
+		//   - request was an UNDEAFEN (c.Deafened()==false): rollback
+		//     APPLIES a restriction. Scoping an apply to cur.ChannelID
+		//     would stamp it onto whatever channel the row now points at,
+		//     including one voiceModTarget never authorized the actor
+		//     against (OC-0036) -- the exact hazard channel-scoping exists
+		//     to prevent for the ordinary write path. Scope to
+		//     state.ChannelID (the channel that WAS authorized) instead,
+		//     so a moved/rejoined target simply matches zero rows.
 		compCtx := context.WithoutCancel(ctx)
 		if cur, gErr := d.DB.GetVoiceState(compCtx, c.TargetID()); gErr != nil {
 			slog.Error("ws handleVoiceModDeafenV2 GetVoiceState for rollback",
 				"err", gErr, "target_id", c.TargetID())
 		} else if cur != nil {
-			if _, compErr := d.DB.SetVoiceServerDeafen(compCtx, c.TargetID(), cur.ChannelID, !c.Deafened()); compErr != nil {
+			rollbackChannelID := cur.ChannelID
+			if !c.Deafened() {
+				rollbackChannelID = state.ChannelID
+			}
+			if _, compErr := d.DB.SetVoiceServerDeafen(compCtx, c.TargetID(), rollbackChannelID, !c.Deafened()); compErr != nil {
 				slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
 					"err", compErr, "target_id", c.TargetID())
 			}
