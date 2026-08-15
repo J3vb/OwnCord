@@ -456,8 +456,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
         }
         void retryMicPermission().finally(() => {
           if (grantMicBtn) {
-            grantMicBtn.disabled = false;
             setText(grantMicBtn, "Grant Microphone");
+            // Delegate the disabled/title state back to render(), which
+            // re-runs updateFrozen() — the single authority for the
+            // socket-down freeze. Hardcoding `disabled = false` here would
+            // silently re-enable this button (and drop its stale title)
+            // even while the WS socket is still down and every sibling
+            // control remains frozen.
+            render();
           }
         });
       },
