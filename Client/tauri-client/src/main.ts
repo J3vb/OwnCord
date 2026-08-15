@@ -655,6 +655,17 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         runHealthChecks(connectPage, getProfileList());
       }
 
+      // Consume any pending skip-auto-login flag on THIS mount regardless of
+      // which branch below returns early. It is the single source of truth
+      // for "an explicit logout just happened, don't auto-login" (set by the
+      // isAuthenticated subscriber further down), and every connect-page
+      // mount — quick-switch included — must clear it here or it survives in
+      // sessionStorage and goes on to suppress an unrelated, later
+      // clearAuth("server_shutdown") auto-login that deliberately does NOT
+      // re-set it (OC-0028).
+      const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
+      sessionStorage.removeItem("owncord:skip-auto-login");
+
       // Quick-switch: if the user switched servers via the overlay, auto-select
       // the target server profile so they can reconnect with one click.
       const quickSwitchTarget = sessionStorage.getItem("owncord:quick-switch-target");
@@ -677,8 +688,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // Suppressing the attempt removes the race instead of relying on the
       // delete being dispatched early enough to win it — and an auto-login
       // immediately after an explicit logout is wrong regardless of timing.
-      if (sessionStorage.getItem("owncord:skip-auto-login") !== null) {
-        sessionStorage.removeItem("owncord:skip-auto-login");
+      if (skipAutoLogin) {
         return;
       }
 
