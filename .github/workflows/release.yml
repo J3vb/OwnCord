@@ -434,25 +434,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Shared with ci.yml's docker-build job so the smoke itself is exercised
+      # on every PR to main — the first alpha.3 release run died here on a
+      # smoke-harness bug (bare `docker run`, nowhere writable for the
+      # default config) that no pre-merge check had ever run.
       - name: Boot-smoke Docker image
-        run: |
-          docker run -d --name owncord-smoke owncord-smoke:candidate
-          ok=0
-          for _ in $(seq 1 30); do
-            sleep 1
-            if [ "$(docker inspect -f '{{.State.Running}}' owncord-smoke)" != "true" ]; then
-              echo "::error::container exited during boot smoke"
-              docker logs owncord-smoke
-              exit 1
-            fi
-            if docker exec owncord-smoke /chatserver healthcheck; then ok=1; break; fi
-          done
-          docker logs owncord-smoke
-          docker rm -f owncord-smoke
-          if [ "$ok" != "1" ]; then
-            echo "::error::container never reported healthy within 30s"
-            exit 1
-          fi
+        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2

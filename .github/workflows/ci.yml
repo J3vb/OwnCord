@@ -405,9 +405,17 @@ jobs:
         with:
           context: Server/
           push: false
+          load: true
+          tags: owncord-smoke:candidate
           build-args: VERSION=ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Same script release.yml runs before it signs or pushes anything. A
+      # boot regression — or a bug in the smoke harness itself, as happened on
+      # the first v1.2.0-alpha.3 release run — must fail here, not at tag time.
+      - name: Boot-smoke Docker image
+        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
 
   # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier).
   #
