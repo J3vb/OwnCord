@@ -6,13 +6,12 @@
 # signed or pushed), so a boot regression is caught pre-merge instead of at
 # tag time. Usage: docker-smoke.sh <image>
 #
-# The image runs as uid 65532 with WORKDIR /app, and the server writes its
-# default config.yaml to the cwd and the database/cert into data/. Neither
-# path is writable in a bare `docker run` (/app is root-owned, and the
-# VOLUME /app/data anonymous volume is created root-owned too) — that is
-# what real deployments' bind mounts provide, and what v1.2.0-alpha.3's
-# first release run died on. Give the container the same thing with two
-# tmpfs mounts (Docker's tmpfs default mode is 1777).
+# Deliberately a bare `docker run` — no mounts, no env, no config. That is
+# the contract being tested: the image boots on its own, as uid 65532, and
+# writes its default config.yaml and data/ into the /app skeleton the
+# Dockerfile ships owned by that uid. The first v1.2.0-alpha.3 release run
+# died exactly here ("writing default config: permission denied") when /app
+# was still root-owned; adding mounts to the smoke would only hide a repeat.
 set -euo pipefail
 
 image="${1:?usage: docker-smoke.sh <image>}"
@@ -21,7 +20,7 @@ name="owncord-smoke-$$"
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-docker run -d --name "$name" --tmpfs /app --tmpfs /app/data "$image" >/dev/null
+docker run -d --name "$name" "$image" >/dev/null
 
 ok=0
 for _ in $(seq 1 30); do
