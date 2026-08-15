@@ -272,6 +272,51 @@ fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
     modified
 }
 
+/// Bracket-aware split of a `remote_host` string into (hostname, port).
+/// Defaults to port 443 (standard HTTPS) when none is specified.
+///
+/// A leading `[` consumes up to the matching `]` as the hostname, so a
+/// bracketed IPv6 literal parses correctly whether or not it carries an
+/// explicit port (`[::1]`, `[::1]:8443`). Without brackets, a single
+/// trailing colon is a `host:port` split — but a *bare* (unbracketed) IPv6
+/// literal contains more than one colon, and RFC 3986 gives it no way to
+/// carry a port without brackets, so that case is returned whole with the
+/// default port instead of being mis-split on its last colon.
+fn split_host_port(remote_host: &str) -> Result<(&str, &str), String> {
+    if let Some(rest) = remote_host.strip_prefix('[') {
+        let (host, tail) = rest
+            .split_once(']')
+            .ok_or_else(|| format!("unterminated '[' in remote_host '{remote_host}'"))?;
+        let port = tail.strip_prefix(':').unwrap_or("443");
+        Ok((host, port))
+    } else {
+        match remote_host.rsplit_once(':') {
+            Some((host, port)) if !host.contains(':') => Ok((host, port)),
+            _ => Ok((remote_host, "443")),
+        }
+    }
+}
+
+/// Derive the TLS `ServerName` (SNI) and the TCP dial target from a
+/// `remote_host` string. Mirrors `livekit_proxy::parse_server_name`'s
+/// bracket handling.
+fn resolve_remote_target(remote_host: &str) -> Result<(ServerName<'static>, String), String> {
+    let (hostname, port) = split_host_port(remote_host)?;
+    let server_name = if let Ok(ip) = hostname.parse::<IpAddr>() {
+        ServerName::IpAddress(ip.into())
+    } else {
+        ServerName::try_from(hostname.to_string())
+            .map_err(|e| format!("invalid server name '{hostname}': {e}"))?
+    };
+
+    let dial_target = if hostname.contains(':') {
+        format!("[{hostname}]:{port}")
+    } else {
+        format!("{hostname}:{port}")
+    };
+    Ok((server_name, dial_target))
+}
+
 /// Handle one proxied connection:
 /// 1. Read the request headers from the loopback side
 /// 2. TLS-connect to the remote and run the TOFU check (store/emit/reject)
@@ -321,20 +366,7 @@ async fn handle_connection<R: Runtime>(
         .with_no_client_auth();
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
-    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "443"));
-    let hostname = raw_hostname.trim_start_matches('[').trim_end_matches(']');
-    let server_name = if let Ok(ip) = hostname.parse::<IpAddr>() {
-        ServerName::IpAddress(ip.into())
-    } else {
-        ServerName::try_from(hostname.to_string())
-            .map_err(|e| format!("invalid server name '{hostname}': {e}"))?
-    };
-
-    let dial_target = if remote_host.contains(':') {
-        remote_host.to_string()
-    } else {
-        format!("{remote_host}:443")
-    };
+    let (server_name, dial_target) = resolve_remote_target(remote_host)?;
     let tcp = timeout(Duration::from_secs(10), TcpStream::connect(&dial_target))
         .await
         .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
@@ -494,6 +526,41 @@ mod tests {
         assert!(validate_remote_host("example.com:8443").is_ok());
         assert!(validate_remote_host("192.168.1.10:8443").is_ok());
         assert!(validate_remote_host("[::1]:8443").is_ok());
+    }
+
+    // OC-0021: IPv6 hosts that are not in the exact `[addr]:port` shape must
+    // still resolve to a valid ServerName and a dialable host:port target.
+
+    #[test]
+    fn resolve_remote_target_handles_bracketed_ipv6_without_port() {
+        let (server_name, dial_target) = resolve_remote_target("[2001:db8::1]")
+            .expect("bracketed IPv6 without a port must parse");
+        assert!(matches!(server_name, ServerName::IpAddress(_)));
+        assert_eq!(dial_target, "[2001:db8::1]:443");
+    }
+
+    #[test]
+    fn resolve_remote_target_handles_bare_ipv6_without_port() {
+        let (server_name, dial_target) =
+            resolve_remote_target("2001:db8::1").expect("bare IPv6 without a port must parse");
+        assert!(matches!(server_name, ServerName::IpAddress(_)));
+        assert_eq!(dial_target, "[2001:db8::1]:443");
+    }
+
+    #[test]
+    fn resolve_remote_target_still_handles_bracketed_ipv6_with_port() {
+        let (server_name, dial_target) = resolve_remote_target("[2001:db8::1]:8443")
+            .expect("bracketed IPv6 with a port must parse");
+        assert!(matches!(server_name, ServerName::IpAddress(_)));
+        assert_eq!(dial_target, "[2001:db8::1]:8443");
+    }
+
+    #[test]
+    fn resolve_remote_target_still_handles_plain_hostname_and_port() {
+        let (server_name, dial_target) =
+            resolve_remote_target("example.com:8443").expect("hostname:port must parse");
+        assert!(matches!(server_name, ServerName::DnsName(_)));
+        assert_eq!(dial_target, "example.com:8443");
     }
 
     #[test]
