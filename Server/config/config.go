@@ -173,6 +173,12 @@ type ServerConfig struct {
 	// text the CRS false-positives on, so blocking needs tuning against real
 	// traffic first. Unknown values fall back to "detect".
 	WAFCRSMode string `koanf:"waf_crs_mode"`
+	// MaxWSConnections caps concurrently connected WebSocket clients; new
+	// upgrade requests beyond the cap are refused with 503 before the
+	// upgrade. 0 (the default) means unlimited — every connection costs
+	// goroutines and buffered send queues, so set a ceiling that matches the
+	// host's memory before pointing a large community at it.
+	MaxWSConnections int `koanf:"max_ws_connections"`
 }
 
 // DatabaseConfig holds database settings.
@@ -397,6 +403,14 @@ func Load(cfgPath string) (*Config, error) {
 	if err := k.Load(structs.Provider(def, "koanf"), nil); err != nil {
 		return nil, fmt.Errorf("loading defaults: %w", err)
 	}
+	// The defaults layer's key set is the complete set of keys the config
+	// struct can absorb — captured NOW, before the file merges in, so it can
+	// serve as the allowlist for the unknown-key warning below. (Capturing
+	// after the file load would let the file's own typos into the allowlist.)
+	knownKeys := make(map[string]struct{}, len(k.Keys()))
+	for _, key := range k.Keys() {
+		knownKeys[key] = struct{}{}
+	}
 
 	// Layer 2: YAML file (create default if missing). The freshly written
 	// default file is loaded like any other so the first boot runs with
@@ -418,6 +432,15 @@ func Load(cfgPath string) (*Config, error) {
 	}
 	if err := k.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+	}
+
+	// Warn (never fail — a newer server must tolerate an older config, and a
+	// warning must not brick a working install) about file keys the config
+	// struct cannot absorb. Without this, a typo like `admin_alowed_cidrs`
+	// silently keeps the default and the operator believes they changed it.
+	for _, key := range unknownFileKeys(cfgPath, knownKeys) {
+		slog.Warn("config: unknown key ignored — value has NO effect (typo?)",
+			"key", key, "file", cfgPath)
 	}
 
 	// Layer 3: environment variable overrides.
@@ -465,6 +488,24 @@ func Load(cfgPath string) (*Config, error) {
 	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
 
 	return &cfg, nil
+}
+
+// unknownFileKeys parses the config file into its own koanf instance and
+// returns every leaf key that the defaults layer (= the full set of keys the
+// Config struct defines) does not contain. knownKeys must be captured from
+// the defaults layer BEFORE the file merges into it.
+func unknownFileKeys(cfgPath string, knownKeys map[string]struct{}) []string {
+	fileK := koanf.New(".")
+	if err := fileK.Load(file.Provider(cfgPath), yaml.Parser()); err != nil {
+		return nil // the main load already surfaced any parse problem
+	}
+	var unknown []string
+	for _, key := range fileK.Keys() {
+		if _, ok := knownKeys[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	return unknown
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not

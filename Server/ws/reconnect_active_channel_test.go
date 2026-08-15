@@ -82,7 +82,7 @@ func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
 	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
 	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}))
+	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -198,7 +198,7 @@ func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
 	hub.ReplayBuffer().Push(99, 0, []byte(`{"seq":99,"type":"presence","payload":{}}`))
 	hub.ReplayBuffer().Push(100, 0, []byte(`{"seq":100,"type":"presence","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}))
+	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

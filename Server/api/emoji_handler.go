@@ -197,10 +197,9 @@ func handleCreateEmoji(svc *service.Services, store *storage.Storage, limiter *a
 
 		storedAs := uuid.New().String()
 		if _, saveErr := store.Save(storedAs, bytes.NewReader(raw)); saveErr != nil {
-			slog.Warn("emoji upload rejected by storage", "error", saveErr)
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: fmt.Sprintf("upload rejected: %s", saveErr),
-			})
+			// writeStorageSaveError also stops echoing raw storage errors
+			// (which embed absolute paths) into the response body.
+			writeStorageSaveError(w, saveErr, "emoji upload")
 			return
 		}
 

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/diskutil"
 	"github.com/owncord/server/logctx"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
@@ -106,6 +108,15 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	// ── 2. Ensure data directory exists ────────────────────────────────────
 	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
+	}
+
+	// Disk-space awareness: the database (WAL growth included), uploads,
+	// certs, and by default backups all live on this volume, and running it
+	// dry breaks several of them at once. Probe errors are ignored — unknown
+	// is not "full". /health repeats this check continuously at 256 MiB.
+	warnLowDisk(log, "data dir", cfg.Server.DataDir)
+	if cfg.Backup.Dir != "" && cfg.Backup.Dir != filepath.Join(cfg.Server.DataDir, "backups") {
+		warnLowDisk(log, "backup dir", cfg.Backup.Dir)
 	}
 
 	// ── 3. TLS ────────────────────────────────────────────────────────────
@@ -488,6 +499,29 @@ func wsURL(httpScheme, ip string, port int) string {
 		ws = "wss"
 	}
 	return fmt.Sprintf("%s://%s:%d", ws, ip, port)
+}
+
+// Free-space thresholds for the boot-time disk warning. /health uses its own
+// (lower) continuous threshold; these only shape startup log noise.
+const (
+	diskWarnBytes     = 1 << 30  // 1 GiB — warn
+	diskCriticalBytes = 256 << 20 // 256 MiB — error
+)
+
+// warnLowDisk logs when the volume holding path is low on space. Probe
+// failures (unsupported platform, missing dir) are silent — unknown ≠ full.
+func warnLowDisk(log *slog.Logger, label, path string) {
+	free, err := diskutil.FreeBytes(path)
+	if err != nil {
+		return
+	}
+	switch {
+	case free < diskCriticalBytes:
+		log.Error("disk space critically low — writes will start failing soon",
+			"volume", label, "path", path, "free_mb", free>>20)
+	case free < diskWarnBytes:
+		log.Warn("disk space low", "volume", label, "path", path, "free_mb", free>>20)
+	}
 }
 
 // getOutboundIP returns the preferred outbound IP of this machine by dialing

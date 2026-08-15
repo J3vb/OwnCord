@@ -123,6 +123,28 @@ func safeStorageErrorMessage(err error) string {
 	}
 }
 
+// writeStorageSaveError maps a storage.Save failure onto the right HTTP
+// class: server-side filesystem failures (storage.ErrIO — disk full,
+// permissions, read-only mount) become 507 so they are distinguishable from
+// bad uploads in any status dashboard; everything else stays the client's
+// 400. Detail never crosses the HTTP boundary either way (path leakage —
+// see safeStorageErrorMessage).
+func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
+	if errors.Is(saveErr, storage.ErrIO) {
+		slog.Error(what+" failed: server storage error", "error", saveErr)
+		writeJSON(w, http.StatusInsufficientStorage, errorResponse{
+			Error:   "STORAGE_ERROR",
+			Message: "upload failed: server storage error",
+		})
+		return
+	}
+	slog.Warn(what+" rejected", "error", saveErr)
+	writeJSON(w, http.StatusBadRequest, errorResponse{
+		Error:   "BAD_REQUEST",
+		Message: safeStorageErrorMessage(saveErr),
+	})
+}
+
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
 //
@@ -207,11 +229,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		// Store file on disk (validates file type via magic bytes).
 		writtenBytes, saveErr := store.Save(fileID, file)
 		if saveErr != nil {
-			slog.Warn("file upload rejected", "error", saveErr)
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: safeStorageErrorMessage(saveErr),
-			})
+			writeStorageSaveError(w, saveErr, "file upload")
 			return
 		}
 

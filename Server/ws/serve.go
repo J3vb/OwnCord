@@ -39,9 +39,21 @@ const (
 // allowedOrigins controls which HTTP origins may open a WebSocket connection.
 // Pass nil or []string{"*"} to allow all origins (insecure, for development).
 // Pass explicit origins such as []string{"https://example.com"} to restrict access.
-func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFunc {
+//
+// maxConns, when > 0, refuses new connections with 503 once that many clients
+// are registered — a static capacity guardrail (server.max_ws_connections).
+// The check runs before the upgrade so a refused connection costs one HTTP
+// request, not a socket plus goroutines. Registered count trails pre-auth
+// connections by design; the 10s auth deadline bounds that gap.
+func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
 	return func(w http.ResponseWriter, r *http.Request) {
+		if maxConns > 0 && hub.ClientCount() >= maxConns {
+			hub.connRejects.Add(1)
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
+			return
+		}
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			slog.Warn("ws upgrade failed", "err", err)

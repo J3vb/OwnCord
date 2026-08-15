@@ -276,7 +276,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 
 	go hub.Run()
-	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
+	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
 	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
 	// The shape is documented in docs/deployment.md — keep the two in sync.
@@ -288,9 +288,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 			LiveKitHealth:  hub.LiveKitHealthCheck,
 			ReconnectTiers: hub.ReconnectTierStats,
 			Backpressure:   hub.BackpressureStats,
+			ConnRejects:    hub.ConnRejectCount,
 			PersisterStats: hub.EventPersisterStats,
 			DBStats:        func() sql.DBStats { return database.SQLDb().Stats() },
 			PermCache:      svc.Permissions.CacheStats,
+			DiskFree:       func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside

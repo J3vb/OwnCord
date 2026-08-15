@@ -3,13 +3,22 @@ package storage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ErrIO marks a Save failure caused by the server's own filesystem — disk
+// full, permissions, a read-only mount — as opposed to the uploaded content
+// being invalid. Handlers use it to return a 5xx instead of blaming the
+// client with a 400, so infrastructure failures are distinguishable in any
+// status-class dashboard.
+var ErrIO = errors.New("storage io failure")
 
 // blockedMagic maps format names to their magic byte signatures. Files whose
 // leading bytes match any entry are rejected by ValidateFileType.
@@ -126,7 +135,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 
 	f, err := os.Create(dst)
 	if err != nil {
-		return 0, fmt.Errorf("creating file %s: %w", dst, err)
+		return 0, fmt.Errorf("creating file %s: %w: %w", dst, ErrIO, err)
 	}
 	// Any failure after this point must remove the partial file: the orphan
 	// sweep is DB-row-driven, so a file without a DB row is never reclaimed.
@@ -147,6 +156,13 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	limited := io.LimitReader(full, maxBytes)
 	written, err := io.Copy(f, limited)
 	if err != nil {
+		// Write-side failures surface as *fs.PathError (File.Write wraps
+		// them); read-side failures (client aborted mid-upload) do not, and
+		// those stay the client's fault.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return 0, fmt.Errorf("writing file: %w: %w", ErrIO, err)
+		}
 		return 0, fmt.Errorf("writing file: %w", err)
 	}
 	// Probe for one more byte to detect if the file exceeds the limit.
@@ -157,7 +173,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 		}
 	}
 	if syncErr := f.Sync(); syncErr != nil {
-		return 0, fmt.Errorf("syncing file %s: %w", dst, syncErr)
+		return 0, fmt.Errorf("syncing file %s: %w: %w", dst, ErrIO, syncErr)
 	}
 	success = true
 	return written, nil

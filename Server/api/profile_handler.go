@@ -558,10 +558,7 @@ func handleUploadAvatar(
 		fileID := uuid.New().String()
 		written, saveErr := store.Save(fileID, bytes.NewReader(raw))
 		if saveErr != nil {
-			slog.Warn("avatar upload rejected by storage", "error", saveErr)
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: safeStorageErrorMessage(saveErr),
-			})
+			writeStorageSaveError(w, saveErr, "avatar upload")
 			return
 		}
 

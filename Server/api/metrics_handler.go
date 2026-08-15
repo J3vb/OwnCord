@@ -46,6 +46,12 @@ type ServerMetrics struct {
 	BackpressureHighFallbacks    uint64 `json:"backpressure_high_fallbacks"`
 	BackpressureLowDrops         uint64 `json:"backpressure_low_drops"`
 
+	// WSConnRejects counts upgrades refused by the max_ws_connections cap.
+	WSConnRejects uint64 `json:"ws_conn_rejects"`
+
+	// DiskFreeMB is free space on the data volume; omitted when unknown.
+	DiskFreeMB *float64 `json:"disk_free_mb,omitempty"`
+
 	// SQLite writer-pool saturation: time spent queueing for the single write
 	// connection. The most direct signal for the documented single-writer
 	// bottleneck.
@@ -69,9 +75,11 @@ type MetricsSources struct {
 	LiveKitHealth  func(context.Context) (bool, error)
 	ReconnectTiers func() (buffer, db, full uint64)
 	Backpressure   func() (queueDisconnects, highFallbacks, lowDrops uint64)
+	ConnRejects    func() uint64
 	PersisterStats func() (persisted, dropped, flushes, errs uint64, ok bool)
 	DBStats        func() sql.DBStats // writer pool
 	PermCache      func() (hits, misses uint64)
+	DiskFree       func() (uint64, error)
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
@@ -126,6 +134,15 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		}
 		if src.PermCache != nil {
 			metrics.PermCacheHits, metrics.PermCacheMisses = src.PermCache()
+		}
+		if src.ConnRejects != nil {
+			metrics.WSConnRejects = src.ConnRejects()
+		}
+		if src.DiskFree != nil {
+			if free, err := src.DiskFree(); err == nil {
+				mb := float64(free) / 1024 / 1024
+				metrics.DiskFreeMB = &mb
+			}
 		}
 
 		writeJSON(w, http.StatusOK, metrics)

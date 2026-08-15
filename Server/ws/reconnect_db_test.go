@@ -106,7 +106,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	}
 
 	// Spin up a real HTTP+WS server.
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -224,7 +224,7 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -314,7 +314,7 @@ func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
 		rb.Push(seq, 0, fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq))
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

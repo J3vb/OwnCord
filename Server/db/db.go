@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -46,6 +47,10 @@ type DB struct {
 	// non-blocking enqueues. Nil (the default) keeps audit writes
 	// synchronous — the token CLI and tests rely on that.
 	auditWriter atomic.Pointer[AuditWriter]
+
+	// lockRelease drops the single-process advisory lock taken by openFile.
+	// Nil for in-memory databases and when the lock mechanism is unavailable.
+	lockRelease func()
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed
@@ -144,6 +149,35 @@ func openMemory(path string) (*DB, error) {
 
 // openFile opens the writer and reader pools for a file-backed database.
 func openFile(path string) (*DB, error) {
+	// Single-process guard: SQLite's own locking prevents file corruption,
+	// but everything built above it — presence derived from hub membership,
+	// the replay ring, rate-limit windows, the boot-time status reset — is
+	// process-local and assumes exactly one server owns this database file.
+	// A second process starting is almost always an accident (double systemd
+	// unit, container + binary); fail fast with a clear message rather than
+	// letting two instances silently fight over shared state.
+	release, lockErr := acquireProcessLock(path)
+	if lockErr != nil {
+		if errors.Is(lockErr, errAlreadyLocked) {
+			return nil, fmt.Errorf(
+				"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
+				path)
+		}
+		// The lock mechanism itself failed (e.g. a network filesystem that
+		// rejects advisory locks). Warn and continue — refusing to start on
+		// an NFS data dir would be a regression, and SQLite still protects
+		// the file itself.
+		slog.Warn("db: could not take the single-process lock; continuing unprotected",
+			"path", lockFilePath(path), "error", lockErr)
+		release = nil
+	}
+	ok := false
+	defer func() {
+		if !ok && release != nil {
+			release()
+		}
+	}()
+
 	base := path
 	if !strings.HasPrefix(base, "file:") {
 		base = "file:" + base
@@ -185,7 +219,10 @@ func openFile(path string) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite reader pool: %w", err)
 	}
 
-	return newDB(writer, reader), nil
+	d := newDB(writer, reader)
+	d.lockRelease = release
+	ok = true
+	return d, nil
 }
 
 // newDB assembles a DB whose sqlc query layer routes through dbtx.
@@ -309,7 +346,14 @@ func (d *DB) Close() error {
 	if d.reader != d.writer {
 		readerErr = d.reader.Close()
 	}
-	return errors.Join(d.writer.Close(), readerErr)
+	err := errors.Join(d.writer.Close(), readerErr)
+	// Release the single-process lock only after the pools are closed, so a
+	// successor process acquiring it can rely on this one being done writing.
+	if d.lockRelease != nil {
+		d.lockRelease()
+		d.lockRelease = nil
+	}
+	return err
 }
 
 // QueryRowContext executes a query that returns at most one row, with context.

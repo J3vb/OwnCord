@@ -32,7 +32,7 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -60,7 +60,7 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -99,7 +99,7 @@ func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -145,7 +145,7 @@ func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -194,7 +194,7 @@ func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -242,7 +242,7 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -304,7 +304,7 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -384,7 +384,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -460,7 +460,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -548,7 +548,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -707,7 +707,7 @@ func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -839,7 +839,7 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -994,7 +994,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -1203,7 +1203,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -1316,7 +1316,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -1445,7 +1445,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -1543,7 +1543,7 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 		t.Fatalf("BanUser: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

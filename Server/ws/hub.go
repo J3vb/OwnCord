@@ -92,6 +92,10 @@ type Hub struct {
 	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
 	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
 
+	// connRejects counts upgrade requests refused by the max_ws_connections
+	// capacity guardrail (ServeWS).
+	connRejects atomic.Uint64
+
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
@@ -623,6 +627,12 @@ func (h *Hub) DispatchAlive() bool {
 // silently dropped. Safe to call from any goroutine.
 func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
+}
+
+// ConnRejectCount returns how many WebSocket upgrade requests were refused by
+// the max_ws_connections capacity guardrail. Safe to call from any goroutine.
+func (h *Hub) ConnRejectCount() uint64 {
+	return h.connRejects.Load()
 }
 
 // EventPersisterStats returns the attached persister's lifetime counters.

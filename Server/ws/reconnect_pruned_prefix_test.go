@@ -81,7 +81,7 @@ func TestReconnect_PrunedPrefix_ForcesFullReady(t *testing.T) {
 		t.Fatalf("pre-condition: expected oldestSeq=1000, got %d", oldest)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"})
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

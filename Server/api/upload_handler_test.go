@@ -594,8 +594,10 @@ func TestUpload_StorageErrorDoesNotLeakPath(t *testing.T) {
 
 	content := []byte("content that will fail to persist because the storage dir is gone")
 	rr := doUpload(t, router, token, "file", "leaktest.txt", content)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	// Server-side filesystem failures are 507 (storage.ErrIO) so they are
+	// distinguishable from bad uploads; the no-leak contract is unchanged.
+	if rr.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status = %d, want 507; body: %s", rr.Code, rr.Body.String())
 	}
 
 	var resp map[string]any

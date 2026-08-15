@@ -1487,6 +1487,8 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
+  "ws_conn_rejects": 0,
+  "disk_free_mb": 51200.5,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "perm_cache_hits": 5120,
@@ -1515,8 +1517,11 @@ small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
 the most direct saturation signal for the write path. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
-database). `livekit_healthy` is omitted when no LiveKit health check is wired;
-`event_persister` is omitted when event persistence is disabled.
+database). `ws_conn_rejects` counts upgrades refused by the
+`server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
+volume (omitted when the platform can't report it). `livekit_healthy` is
+omitted when no LiveKit health check is wired; `event_persister` is omitted
+when event persistence is disabled.
 
 ### GET /metrics (Prometheus)
 
@@ -1839,6 +1844,12 @@ accept `1/0/true/false` and are normalized to `1`/`0`.
 `backup_schedule` (`off`/`daily`/`weekly`) and `backup_retention` (days) are
 enforced by the server's maintenance loop — see the Backup Strategy section
 of `docs/deployment.md` for the exact semantics.
+
+Three keys are accepted and stored but have **no runtime effect**:
+`server_icon` (reserved for a future release), `max_upload_bytes` (the real
+limit is `upload.max_size_mb` in config.yaml, applied at startup), and
+`voice_quality` (the real setting is `voice.quality` in config.yaml). The
+admin panel shows them read-only for this reason.
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
