@@ -356,9 +356,19 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 			return
 		}
 
-		participantIDs, pErr := svc.Channels.GetDMParticipantIDs(r.Context(), channelID)
-		if pErr == nil {
-			broadcastDMOpen(r.Context(), svc, broadcaster, channelID, participantIDs)
+		// The rename has already committed at this point, so this lookup must
+		// survive the caller's request context being cancelled right after
+		// that commit (client disconnect mid-handler) — same reasoning as
+		// broadcastDMOpen's own context.WithoutCancel, and the failure must be
+		// logged rather than silently dropping the fan-out (participants would
+		// keep rendering the stale name with no compensating resync, since
+		// dm_channel_open is unsequenced/targeted and can't be replayed).
+		bgCtx := context.WithoutCancel(r.Context())
+		participantIDs, pErr := svc.Channels.GetDMParticipantIDs(bgCtx, channelID)
+		if pErr != nil {
+			slog.Error("handleRenameGroupDM: participant lookup failed", "err", pErr, "channel_id", channelID)
+		} else {
+			broadcastDMOpen(bgCtx, svc, broadcaster, channelID, participantIDs)
 		}
 
 		summary, sErr := svc.DMs.DMSummaryFor(r.Context(), user.ID, channelID)
