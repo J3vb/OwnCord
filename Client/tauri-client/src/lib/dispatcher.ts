@@ -843,7 +843,15 @@ export function wireDispatcher(
       // stale frame for a channel already left must not kill a newer join.
       // Read the store before leaveVoiceChannel() below clears
       // currentChannelId.
-      const stale = voiceStore.getState().currentChannelId !== payload.channel_id;
+      //
+      // OC-0033: on the ordinary kick path, the server sends voice_leave to
+      // the leaver (finishVoiceLeave) BEFORE handleVoiceModKickV2 sends this
+      // voice_disconnected, so the sibling VOICE_LEAVE handler has typically
+      // already nulled currentChannelId by the time this arrives. That's not
+      // the OC-0031 staleness (a rejoin into a *different* channel) — treat
+      // a cleared store as not-stale so the kick reason still gets shown.
+      const cur = voiceStore.getState().currentChannelId;
+      const stale = cur !== null && cur !== payload.channel_id;
       if (stale) {
         log.info("Ignoring stale voice_disconnected for a channel already left", {
           channelId: payload.channel_id,
@@ -1077,9 +1085,25 @@ export function wireDispatcher(
       if (payload.code === "VIDEO_LIMIT") {
         showToast(payload.message || "That voice channel has reached its video limit", "error");
         // max_video has no SFU-level enforcement — the server only refuses the
-        // DB write. Without this rollback the already-published camera track
-        // keeps streaming to everyone while voice_state says camera=false.
-        void livekitSession().then(({ disableCamera }) => disableCamera());
+        // DB write. Without this rollback the already-published track keeps
+        // streaming to everyone while voice_state says camera/screenshare is
+        // off. voice_controls.go routes both a refused voice_camera AND a
+        // refused voice_screenshare enable through the same shared
+        // enableVideoSlot cap check, so this code is not camera-specific —
+        // correlate by envelope id, exactly like the generic rollback below,
+        // instead of assuming it's always the camera. A bare VIDEO_LIMIT with
+        // no id (older server / no correlation available) still falls back
+        // to the camera, the only kind this branch used to handle.
+        if (id !== undefined) {
+          void import("@lib/screenShare").then(({ rollbackPendingVideo }) => {
+            const kind = rollbackPendingVideo(id);
+            void livekitSession().then(({ disableCamera, disableScreenshare }) =>
+              kind === "screen" ? disableScreenshare() : disableCamera(),
+            );
+          });
+        } else {
+          void livekitSession().then(({ disableCamera }) => disableCamera());
+        }
         return;
       }
       // Every remaining code has no dedicated handler above (not a pending

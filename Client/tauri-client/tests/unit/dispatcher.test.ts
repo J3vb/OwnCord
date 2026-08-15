@@ -2293,6 +2293,28 @@ describe("WS Dispatcher", () => {
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 
+  // OC-0033: on the ordinary kick path, the server's finishVoiceLeave
+  // broadcasts voice_leave to the leaver BEFORE handleVoiceModKickV2 ever
+  // sends voice_disconnected, so the sibling VOICE_LEAVE handler above has
+  // already nulled currentChannelId by the time this event lands. A cleared
+  // store is not the same staleness OC-0031 guards against (a rejoin into a
+  // *different* channel) and must not swallow the kick toast — it's the only
+  // explanation the user gets for being dropped from the call.
+  it("still surfaces the kick toast after the sibling voice_leave already cleared the store", async () => {
+    mockShowToast.mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // voice_leave for this same kick already cleared the store.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+
+    mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked by a moderator" });
+    await vi.runAllTimersAsync();
+
+    expect(mockShowToast).toHaveBeenCalledWith("kicked by a moderator", "error");
+  });
+
   it("wires voice_config to voice store", () => {
     mock.dispatch("voice_config", {
       channel_id: 3,
@@ -3619,6 +3641,22 @@ describe("WS Dispatcher", () => {
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
       expect(mockShowToast).toHaveBeenCalledWith("nope", "error");
       expect(uiStore.getState().transientError).toBeNull();
+    });
+
+    // OC-0032: voice_controls.go now routes a refused voice_screenshare
+    // enable through the same enableVideoSlot cap check as the camera, so
+    // VIDEO_LIMIT can correlate to a "screen" pending enable, not just
+    // "camera". Rolling back the camera unconditionally would tear down a
+    // working camera and leave the refused screen tracks published.
+    it("rolls back the screenshare publish, not the camera, when VIDEO_LIMIT refuses a screenshare enable", async () => {
+      vi.mocked(mockRollbackPendingVideo).mockReturnValue("screen");
+
+      mock.dispatch("error", { code: "VIDEO_LIMIT", message: "" }, "vid-screen-1");
+      await vi.runAllTimersAsync();
+
+      expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-screen-1");
+      expect(mockDisableScreenshare).toHaveBeenCalled();
+      expect(mockDisableCamera).not.toHaveBeenCalled();
     });
   });
 });
