@@ -140,6 +140,30 @@ their own LiveKit can turn the toggle off or set `voice.livekit_binary`.
 
 The server listens on `https://0.0.0.0:8443` by default. See [Server Configuration](server-configuration.md) for all options.
 
+## Running as a Linux Service (systemd)
+
+A crash — a panic under load, the OOM killer, a failed self-update — leaves a
+bare-metal server down until someone notices, so run the binary under a
+supervisor. A ready-made unit template ships in the repo at
+[`deploy/owncord.service`](../deploy/owncord.service); installation steps are
+in its header comments. The important choices it encodes:
+
+- `Restart=on-failure` — the server deliberately exits (rather than limping
+  along) when its WebSocket dispatch loop dies; the supervisor is what turns
+  that into a recovery.
+- `TimeoutStopSec=35` — the server drains gracefully on SIGTERM with a 30s
+  budget; systemd waits it out before escalating.
+- `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
+  directory must stay writable or the admin panel's self-update (which
+  renames the new binary into place) breaks.
+- `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
+  `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
+  user.
+
+Pair it with the scheduled backups in the admin panel — or an external cron
+line (see Backup Strategy below) if you prefer driving backups outside the
+server.
+
 ## Running as a Windows Service
 
 ### Option 1: NSSM (Non-Sucking Service Manager)
@@ -209,6 +233,48 @@ Not recommended. For development or when behind a TLS-terminating reverse proxy:
 ```yaml
 tls:
   mode: "off"
+```
+
+## Reverse Proxy Topology
+
+OwnCord terminates its own TLS by default and does not require a reverse
+proxy. If you front it with one anyway (shared host, existing nginx, central
+cert management), three things matter:
+
+1. **What the proxy can front.** Everything on port 8443 — the REST API, the
+   WebSocket at `/api/v1/ws`, the admin panel, uploads, **and LiveKit
+   signaling**, which the server already proxies at `/livekit/*`. You do NOT
+   need to expose LiveKit's port 7880 through your proxy.
+2. **What the proxy cannot front.** WebRTC media: UDP 50000–60000 (and the
+   TCP 7881 fallback) must remain directly reachable on the host running
+   LiveKit. An HTTP reverse proxy never carries this traffic.
+3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
+   proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
+   `X-Forwarded-For` for rate limiting and the admin IP allowlist. List only
+   the proxy hops, never client networks.
+
+Working nginx snippet:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name chat.example.com;
+    # ssl_certificate / ssl_certificate_key ...
+
+    location / {
+        proxy_pass https://127.0.0.1:8443;   # or http:// with tls.mode: off
+        proxy_http_version 1.1;              # required for WebSocket upgrade
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Idle chat WebSockets outlive nginx's 60s default read timeout;
+        # the client pings every 30s, so 300s has comfortable margin.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 100m;           # match upload.max_size_mb
+    }
+}
 ```
 
 ## Backup Strategy

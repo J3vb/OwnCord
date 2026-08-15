@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +16,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/api"
@@ -36,6 +40,12 @@ import (
 var version = "dev"
 
 func main() {
+	// `server healthcheck` probes the running instance's /health and exits
+	// 0/1. It exists for container healthchecks: the distroless image has no
+	// shell or curl, so the binary is its own probe.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(runHealthcheckCLI())
+	}
 	// `server token ...` is a direct-to-DB CLI (mint/list/revoke API tokens) —
 	// handled before any server/logging setup so it stays quiet and standalone.
 	if len(os.Args) > 1 && os.Args[1] == "token" {
@@ -480,6 +490,67 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	return nil
 }
 
+// runHealthcheckCLI probes the local server's /health endpoint and returns a
+// process exit code: 0 healthy, 1 degraded or unreachable. /health answers
+// 503 with a subsystem reason when the hub, database, or disk is unhealthy,
+// so a container orchestrator's healthcheck surfaces those too. TLS
+// verification is skipped — this talks to 127.0.0.1 and the default cert is
+// self-signed; the probe asserts liveness, not identity.
+func runHealthcheckCLI() int {
+	// Deliberately NOT config.Load: that writes a default config.yaml when
+	// none exists, and a probe must have no side effects. Peek at the file
+	// (and the env override) for just the two values that shape the URL.
+	port := 8443
+	scheme := "https"
+	if raw, err := os.ReadFile(config.DefaultPath); err == nil {
+		var partial struct {
+			Server struct {
+				Port int `yaml:"port"`
+			} `yaml:"server"`
+			TLS struct {
+				Mode string `yaml:"mode"`
+			} `yaml:"tls"`
+		}
+		if yaml.Unmarshal(raw, &partial) == nil {
+			if partial.Server.Port > 0 {
+				port = partial.Server.Port
+			}
+			if partial.TLS.Mode == "off" {
+				scheme = "http"
+			}
+		}
+	}
+	if env := os.Getenv("OWNCORD_SERVER_PORT"); env != "" {
+		if p, err := strconv.Atoi(env); err == nil && p > 0 {
+			port = p
+		}
+	}
+	if os.Getenv("OWNCORD_TLS_MODE") == "off" {
+		scheme = "http"
+	}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // loopback liveness probe against our own self-signed cert
+		},
+	}
+	if port < 1 || port > 65535 {
+		port = 8443
+	}
+	resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%d/health", scheme, port)) //nolint:gosec // G704: host is hardcoded loopback; only the port comes from the operator's own config
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck: unreachable:", err)
+		return 1
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		fmt.Fprintf(os.Stderr, "healthcheck: status %d: %s\n", resp.StatusCode, body)
+		return 1
+	}
+	return 0
+}
+
 // isAddrInUse checks if an error is an "address already in use" error.
 func isAddrInUse(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "Only one usage of each socket address"))
@@ -542,7 +613,7 @@ func wsURL(httpScheme, ip string, port int) string {
 // Free-space thresholds for the boot-time disk warning. /health uses its own
 // (lower) continuous threshold; these only shape startup log noise.
 const (
-	diskWarnBytes     = 1 << 30  // 1 GiB — warn
+	diskWarnBytes     = 1 << 30   // 1 GiB — warn
 	diskCriticalBytes = 256 << 20 // 256 MiB — error
 )
 

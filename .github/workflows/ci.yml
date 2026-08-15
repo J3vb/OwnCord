@@ -109,9 +109,14 @@ jobs:
           working-directory: Server/
           verify: false
 
+  # ubuntu-latest deliberately: the client TS code has zero win32-conditional
+  # paths (no process.platform / path.sep branches in src or the unit suites),
+  # prettier pins endOfLine: lf and .gitattributes forces eol=lf, so a Windows
+  # runner adds queue time without adding coverage. Windows-specific behavior
+  # is covered where it exists: rust-tests and the tauri-build matrix.
   client-check:
     name: Client Static Checks
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: Client/tauri-client/
@@ -165,9 +170,11 @@ jobs:
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
   # and must stay green — never "fix" a failing test by editing its assertions.
+  # ubuntu-latest for the same reason as client-check above: jsdom-only vitest
+  # with no platform-conditional code under test.
   client-tests:
     name: Client Unit Tests
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: Client/tauri-client/
@@ -292,6 +299,12 @@ jobs:
   # channel CRUD, audit log and re-login — the one DC-04 surface the mocked
   # suites cannot reach. Non-blocking while it earns its soak, same
   # graduation convention client-e2e followed.
+  # GRADUATION CRITERION (recorded 2026-08-15): flip continue-on-error to
+  # false once the job has ~30 consecutive green runs on main with no
+  # infra-flake reruns — the same evidence bar client-e2e cleared (270+ green
+  # runs cited in docs/audit-2026-08-04-docs-and-coverage.md) scaled to this
+  # job's lower traffic. Check with: gh run list -w CI -b main --json
+  # conclusion | jq '[.[] | .conclusion] | index("failure")'.
   admin-e2e:
     name: Admin Panel E2E (real server, non-blocking)
     runs-on: ubuntu-latest
