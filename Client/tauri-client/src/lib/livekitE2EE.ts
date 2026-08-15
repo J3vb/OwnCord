@@ -826,13 +826,26 @@ export class E2EEManager {
    * Handle a voice_e2ee_offer from the server — the key holder has sent us
    * the encrypted room key. Unwrap it and apply to the E2EE key provider.
    * Offers are applied one at a time, in delivery order.
+   *
+   * Chained through _announceChain first (OC-0002): handleAnnounceInner only
+   * stores the sender's ECDH key after several awaits (identity-pin lookup,
+   * signature verification, key import), while handleOfferInner's first
+   * statement is a synchronous _peerPublicKeys lookup. An offer dispatched
+   * immediately behind that same sender's announce — the OC-0098 send order
+   * guarantees exactly this WS delivery order — would otherwise reach the
+   * lookup before the announce applied, and be dropped as "unknown peer"
+   * with no retry until the next 5-minute rotation. Waiting on the announce
+   * chain reproduces WS delivery order exactly: the announce is enqueued on
+   * it before the offer's frame is even dispatched. No deadlock risk:
+   * handleAnnounceInner never awaits the offer chain and never rejects (it
+   * catches internally), and clearState() resets both chains together.
    */
   handleOffer(fromUserId: number, encryptedKeyBase64: string, ivBase64: string): Promise<void> {
     // handleOfferInner never rejects (it catches internally), so the chain
     // cannot wedge on a failed offer.
-    const run = this._offerChain.then(() =>
-      this.handleOfferInner(fromUserId, encryptedKeyBase64, ivBase64),
-    );
+    const run = this._offerChain
+      .then(() => this._announceChain)
+      .then(() => this.handleOfferInner(fromUserId, encryptedKeyBase64, ivBase64));
     this._offerChain = run;
     return run;
   }
@@ -1042,9 +1055,23 @@ export class E2EEManager {
    * insertion order (which is not guaranteed to match server join order).
    */
   async handleParticipantLeft(userId: number): Promise<void> {
-    const hadPeerKey = this._peerPublicKeys.has(userId);
+    const departingKey = this._peerPublicKeys.get(userId);
+    const hadPeerKey = departingKey !== undefined;
     this._peerPublicKeys.delete(userId);
     clearPeerVerification(userId);
+    // Retire the departing peer's key (OC-0020): _retiredPeerKeys is the only
+    // defense against replay of a validly-signed announce (the signed
+    // message carries no channel/epoch/nonce, F3) and handleAnnounceInner
+    // only records a retirement on an in-session key CHANGE. Without this, a
+    // peer that leaves and rejoins with a fresh key is neither live nor
+    // retired on their pre-leave key — a replay of the recorded old announce
+    // then passes both guards and overwrites the peer's live key with one
+    // whose private half no longer exists (blackholing them). A genuine
+    // rejoin always mints a fresh ECDH pair (setupKeyExchange,
+    // reannounceForReconnect), so this never rejects a legitimate re-announce.
+    if (departingKey) {
+      this.retirePeerKey(userId, await exportPublicKey(departingKey));
+    }
 
     const channelId = this._channelId ?? this.deps.getCurrentChannelId();
     if (!channelId) return;

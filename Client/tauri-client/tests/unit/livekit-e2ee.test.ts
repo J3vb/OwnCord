@@ -1125,4 +1125,90 @@ describe("E2EEManager", () => {
       vi.useRealTimers();
     }
   });
+
+  // ── Ledger findings OC-0002 / OC-0020 ─────────────────────────────────
+
+  it("[OC-0002] applies an offer that arrives while its sender's own announce is still verifying, instead of dropping it as an unknown peer", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // We were previously key holder (mirrors B in the repro): own keypair +
+    // room key already established.
+    await mgr.setupKeyExchange(true, 1);
+    mockSetKey.mockClear();
+    vi.mocked(unwrapRoomKey).mockClear();
+
+    // Stall the identity-pin lookup inside verifyPeerAnnounce so the
+    // announce is still mid-flight (queued on _announceChain, not yet
+    // applied to _peerPublicKeys) when the offer from the SAME sender
+    // arrives right behind it — exactly the WS delivery order OC-0098
+    // guarantees the sender used.
+    let releasePin!: (v: { status: "unpinned" }) => void;
+    const stalledPin = new Promise<{ status: "unpinned" }>((resolve) => {
+      releasePin = resolve;
+    });
+    vi.mocked(getIdentityPin).mockReturnValueOnce(stalledPin);
+
+    const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalled());
+
+    // The offer is dispatched immediately behind the announce, before the
+    // announce has stored the peer's ECDH key.
+    const offerPromise = mgr.handleOffer(PEER_ID, "enc", "iv");
+
+    releasePin({ status: "unpinned" });
+    await Promise.all([announcePromise, offerPromise]);
+
+    // The offer must have been applied once the announce (which arrived
+    // first) finished verifying — not silently dropped as "unknown peer"
+    // with no retry until the next 5-minute rotation.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+    expect(unwrapRoomKey).toHaveBeenCalled();
+    expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
+  });
+
+  it("[OC-0020] retires a departed peer's key on leave, so a replay of it after they rejoin with a fresh key cannot resurrect it", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
+
+    // Make import/export round-trip faithfully on the announced base64
+    // string (the shared mock default returns a fixed constant regardless
+    // of input, which would mask this bug).
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+
+    const KEY_A = "b2xk";
+    const KEY_B = "bmV3";
+
+    try {
+      // Peer announces key A — accepted as their first (live) key.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_A}` });
+
+      // Peer leaves the channel.
+      await mgr.handleParticipantLeft(PEER_ID);
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // Peer rejoins and announces a fresh key B.
+      await mgr.handleAnnounce(PEER_ID, KEY_B, "sigB");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+
+      // A malicious relay re-emits the pre-leave, still validly-signed
+      // announce for key A. No channel/epoch/nonce binds the signed
+      // message, so it verifies cleanly — it must still be rejected as a
+      // replay of a retired key, not overwrite the live key B.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
 });
