@@ -519,10 +519,61 @@ func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
 	h.BroadcastToAll(buildUserUpdate(u))
 }
 
+// presenceCoalesceWindow is how long QueuePresence buffers connect/disconnect
+// presence before flushing. Long enough to collapse a socket flap
+// (disconnect+reconnect through a proxy blip) into one frame, short enough
+// that a genuine arrival still looks immediate to humans.
+const presenceCoalesceWindow = 300 * time.Millisecond
+
+// pendingPresence is the coalescer's latest-wins entry for one user.
+type pendingPresence struct {
+	status       string
+	customStatus *string
+}
+
+// QueuePresence coalesces connect/disconnect presence broadcasts: the latest
+// state per user is buffered for presenceCoalesceWindow and then flushed via
+// BroadcastPresence. Each un-coalesced presence change is a sequenced global
+// broadcast — an O(connected clients) fan-out under seqMu — so a reconnect
+// storm (proxy blip, deploy, network hiccup) used to fire O(users) of them
+// from the connect critical path all at once. Latest-wins is exactly
+// presence's semantics: a flap inside the window collapses to its final
+// state, and the flushed frames are ordinary sequenced presence messages, so
+// the wire format and replay behaviour are unchanged. User-chosen status
+// changes (presence_update handler) do not pass through here.
+func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
+	h.presenceMu.Lock()
+	if h.presenceQueue == nil {
+		h.presenceQueue = make(map[int64]pendingPresence)
+	}
+	h.presenceQueue[userID] = pendingPresence{status: status, customStatus: customStatus}
+	armed := h.presenceFlushArmed
+	h.presenceFlushArmed = true
+	h.presenceMu.Unlock()
+	if !armed {
+		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
+	}
+}
+
+// flushPresenceQueue drains the coalescer and broadcasts each user's latest
+// presence. Runs on the AfterFunc timer goroutine, never under presenceMu
+// during the fan-out.
+func (h *Hub) flushPresenceQueue() {
+	h.presenceMu.Lock()
+	queued := h.presenceQueue
+	h.presenceQueue = nil
+	h.presenceFlushArmed = false
+	h.presenceMu.Unlock()
+	for uid, p := range queued {
+		h.BroadcastPresence(uid, p.status, p.customStatus)
+	}
+}
+
 // BroadcastPresence fans a presence change out with the invisible mapping
 // applied: everyone else sees db.BroadcastStatus(status), the user themselves
 // sees the truth. It is the non-handler counterpart of presenceEvents, used by
-// the connect and disconnect paths which write to the hub directly.
+// the connect and disconnect paths (via the QueuePresence coalescer, which
+// delivers through here).
 func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *string) {
 	public := db.BroadcastStatus(status)
 	if public == status {

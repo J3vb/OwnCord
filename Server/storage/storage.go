@@ -191,8 +191,21 @@ func (s *Storage) Delete(uuid string) error {
 	return os.Remove(dst)
 }
 
+// File is what serving a stored blob requires of an opened file. Seeking is
+// load-bearing, not incidental: both serve paths hand the file to
+// http.ServeContent, which needs io.ReadSeeker for range requests — the
+// exact capability that makes a remote backend (e.g. S3) the hard part of
+// any future storage swap. Stat provides size and modtime the same way.
+// *os.File satisfies it.
+type File interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+	Stat() (os.FileInfo, error)
+}
+
 // Open opens the file named uuid for reading.
-func (s *Storage) Open(uuid string) (*os.File, error) {
+func (s *Storage) Open(uuid string) (File, error) {
 	if err := sanitizeFilename(uuid); err != nil {
 		return nil, err
 	}

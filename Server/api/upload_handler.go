@@ -152,7 +152,7 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 // per-channel ACLs on every file download. A nil permSvc would panic for
 // any authenticated file request, so we fail fast at mount time rather
 // than let the first user hit a 500.
-func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
+func MountUploadRoutes(r chi.Router, database *db.DB, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
 	if permSvc == nil {
 		panic("api: MountUploadRoutes requires a non-nil PermissionService")
 	}
@@ -165,7 +165,7 @@ func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, li
 	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins, permSvc))
 }
 
-func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleUpload(database *db.DB, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		user, ok := r.Context().Value(UserKey).(*db.User)
@@ -278,7 +278,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 	}
 }
 
-func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
+func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID := chi.URLParam(r, "id")
 		if fileID == "" {

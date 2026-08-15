@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -187,6 +188,35 @@ type ServerConfig struct {
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
 	MaxWSConnections int `koanf:"max_ws_connections"`
+	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
+	// exporter separately from the human admin surface, so a central
+	// Prometheus scraper can be allowlisted without widening /admin to its
+	// network. Empty (default) falls back to AdminAllowedCIDRs.
+	MetricsAllowedCIDRs []string `koanf:"metrics_allowed_cidrs"`
+	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
+	// endpoints. The webhook already authenticates cryptographically (LiveKit
+	// JWT signature over the body hash) — this perimeter is defence-in-depth,
+	// and giving it its own key means an externally-hosted LiveKit's IP no
+	// longer has to be added to the ADMIN allowlist. Empty (default) falls
+	// back to AdminAllowedCIDRs.
+	LiveKitWebhookAllowedCIDRs []string `koanf:"livekit_webhook_allowed_cidrs"`
+}
+
+// MetricsCIDRs returns the effective allowlist for the metrics surfaces.
+func (s *ServerConfig) MetricsCIDRs() []string {
+	if len(s.MetricsAllowedCIDRs) > 0 {
+		return s.MetricsAllowedCIDRs
+	}
+	return s.AdminAllowedCIDRs
+}
+
+// LiveKitWebhookCIDRs returns the effective allowlist for the LiveKit
+// webhook/health endpoints.
+func (s *ServerConfig) LiveKitWebhookCIDRs() []string {
+	if len(s.LiveKitWebhookAllowedCIDRs) > 0 {
+		return s.LiveKitWebhookAllowedCIDRs
+	}
+	return s.AdminAllowedCIDRs
 }
 
 // DatabaseConfig holds database settings.
@@ -515,6 +545,21 @@ func Load(cfgPath string) (*Config, error) {
 	// at startup instead. Common mistake: a bare IP without the /32 mask.
 	warnInvalidCIDRs("server.trusted_proxies", cfg.Server.TrustedProxies)
 	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
+	warnInvalidCIDRs("server.metrics_allowed_cidrs", cfg.Server.MetricsAllowedCIDRs)
+	warnInvalidCIDRs("server.livekit_webhook_allowed_cidrs", cfg.Server.LiveKitWebhookAllowedCIDRs)
+
+	// A customized admin allowlist with no trusted_proxies is a footgun
+	// behind any reverse proxy or container network: the check then compares
+	// the PROXY'S (or bridge's) address — by construction a private one —
+	// instead of the real client's, so the customization silently doesn't do
+	// what the operator believes. Warn, don't fail: direct-exposure setups
+	// are exactly this shape and are fine.
+	if len(cfg.Server.TrustedProxies) == 0 &&
+		!slices.Equal(cfg.Server.AdminAllowedCIDRs, defaults().Server.AdminAllowedCIDRs) {
+		slog.Warn("config: admin_allowed_cidrs is customized but trusted_proxies is empty — " +
+			"behind a reverse proxy or Docker network the allowlist checks the proxy's private " +
+			"address, not the real client; set server.trusted_proxies to the proxy hop(s)")
+	}
 
 	return &cfg, nil
 }

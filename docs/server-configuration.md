@@ -34,6 +34,8 @@ the server automatically when a startup-only value changed. Note that
 | `server.name` | string | `"OwnCord Server"` | Server display name (shown in `/api/v1/info` and admin panel) |
 | `server.data_dir` | string | `"data"` | Directory for database, certs, uploads, backups |
 | `server.max_ws_connections` | int | `0` | Cap on concurrently connected WebSocket clients; further upgrades get 503 until connections free up. `0` = unlimited. Every connection costs goroutines and buffered send queues — set a ceiling that matches the host's memory before opening the server to a large community. |
+| `server.metrics_allowed_cidrs` | []string | `[]` | Separate allowlist for `/api/v1/metrics` and the Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`. |
+| `server.livekit_webhook_allowed_cidrs` | []string | `[]` | Separate allowlist for the LiveKit webhook/health endpoints (which also authenticate cryptographically) — an externally-hosted LiveKit's IP goes here, not in the admin allowlist. Empty = falls back to `admin_allowed_cidrs`. |
 | `server.allowed_origins` | string[] | `[]` | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted. |
 | `server.trusted_proxies` | string[] | `[]` | CIDRs of trusted reverse proxies (for X-Forwarded-For) |
 | `server.admin_allowed_cidrs` | string[] | private networks | CIDRs allowed to access `/admin` routes. Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |

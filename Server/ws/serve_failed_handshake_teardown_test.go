@@ -105,6 +105,7 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	// The voice_leave broadcast must go out too, or every other client keeps
 	// rendering a tile for a participant that is gone.
 	sawVoiceLeave := false
+	h.flushPresenceQueue() // presence is coalesced; flush before inspecting
 	for len(h.broadcast) > 0 {
 		bm := <-h.broadcast
 		if bytes.Contains(bm.msg, []byte(`"type":"`+MsgTypeVoiceLeaveBC+`"`)) {
@@ -139,6 +140,7 @@ func TestFailedHandshake_OfflineBroadcastDropsStaleCustomStatus(t *testing.T) {
 	h.unregisterFailedHandshake(ctx, c)
 
 	var presence []byte
+	h.flushPresenceQueue() // presence is coalesced; flush before inspecting
 	for len(h.broadcast) > 0 {
 		bm := <-h.broadcast
 		if bytes.Contains(bm.msg, []byte(`"type":"`+MsgTypePresence+`"`)) {

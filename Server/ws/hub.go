@@ -129,6 +129,12 @@ type Hub struct {
 	// Protected by keyHolderMu.
 	keyHolderMu     sync.RWMutex
 	voiceKeyHolders map[int64]int64
+
+	// Presence coalescer (QueuePresence): latest queued presence per user and
+	// whether a flush timer is armed. Guarded by presenceMu.
+	presenceMu         syncutil.Mutex
+	presenceQueue      map[int64]pendingPresence
+	presenceFlushArmed bool
 }
 
 // NewHub creates a Hub ready to be started with Run.

@@ -160,8 +160,20 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_perms_update", "channel", ch.ID,
 			fmt.Sprintf("set overrides for role %s on #%s (allow=%#x deny=%#x)", role.Name, ch.Name, allow, deny))
 
+		// Narrow the eviction to users actually holding this role: a
+		// role-scoped override cannot change any other user's verdict, and
+		// InvalidateAll here made every connected user repopulate (2 reads
+		// each) synchronously inside RefreshChannelVisibility below — a
+		// whole-cache stampede that grows with total population, not with the
+		// role's size. Same rationale (and same fail-safe) as the role-perms
+		// handler: an unreadable member list falls back to the full flush,
+		// because a missed eviction is a stale grant.
 		if permInvalidator != nil {
-			permInvalidator.InvalidateAll()
+			if affected, listErr := database.ListUserIDsByRole(r.Context(), roleID); listErr == nil {
+				invalidateUsers(permInvalidator, affected)
+			} else {
+				permInvalidator.InvalidateAll()
+			}
 		}
 		if hub != nil {
 			hub.RefreshChannelVisibility(ch)
@@ -222,8 +234,20 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_perms_clear", "channel", ch.ID,
 			fmt.Sprintf("cleared overrides for role %s on #%s", role.Name, ch.Name))
 
+		// Narrow the eviction to users actually holding this role: a
+		// role-scoped override cannot change any other user's verdict, and
+		// InvalidateAll here made every connected user repopulate (2 reads
+		// each) synchronously inside RefreshChannelVisibility below — a
+		// whole-cache stampede that grows with total population, not with the
+		// role's size. Same rationale (and same fail-safe) as the role-perms
+		// handler: an unreadable member list falls back to the full flush,
+		// because a missed eviction is a stale grant.
 		if permInvalidator != nil {
-			permInvalidator.InvalidateAll()
+			if affected, listErr := database.ListUserIDsByRole(r.Context(), roleID); listErr == nil {
+				invalidateUsers(permInvalidator, affected)
+			} else {
+				permInvalidator.InvalidateAll()
+			}
 		}
 		if hub != nil {
 			hub.RefreshChannelVisibility(ch)

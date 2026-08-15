@@ -21,7 +21,6 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/storage"
 )
 
 // EmojiBroadcaster is the slice of the hub the emoji routes need: after every
@@ -74,7 +73,7 @@ var allowedEmojiMIME = map[string]bool{
 // are gated on MANAGE_SERVER inside EmojiService. The image route is
 // authenticated rather than public so an emoji cannot be used as an
 // unauthenticated tracking pixel hosted on someone else's server.
-func MountEmojiRoutes(r chi.Router, database *db.DB, svc *service.Services, store *storage.Storage, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
+func MountEmojiRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
 	r.Route("/api/v1/emoji", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListEmoji(svc))
@@ -102,7 +101,7 @@ func handleListEmoji(svc *service.Services) http.HandlerFunc {
 // member without MANAGE_SERVER cannot make the server spool a body to disk; the
 // shortcode is validated next, so a malformed name costs nothing either; only
 // then are the bytes read, sniffed, measured and stored.
-func handleCreateEmoji(svc *service.Services, store *storage.Storage, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) http.HandlerFunc {
+func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -218,7 +217,7 @@ func handleCreateEmoji(svc *service.Services, store *storage.Storage, limiter *a
 	}
 }
 
-func handleDeleteEmoji(svc *service.Services, store *storage.Storage, broadcaster EmojiBroadcaster) http.HandlerFunc {
+func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster EmojiBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -277,7 +276,7 @@ func broadcastEmojiSet(ctx context.Context, svc *service.Services, broadcaster E
 // server-wide by construction, so authentication is the whole check. The
 // response is immutable for the id's lifetime (an emoji's bytes never change
 // — a replacement is a new row), which is what lets it be cached hard.
-func handleServeEmojiImage(svc *service.Services, store *storage.Storage) http.HandlerFunc {
+func handleServeEmojiImage(svc *service.Services, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil || id <= 0 {

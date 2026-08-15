@@ -504,7 +504,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// note in serve_pumps.go's readPump defer — that field is an
 		// auth-time snapshot, never updated, so broadcasting it here can
 		// resurrect a status the user already changed or cleared.
-		h.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, nil))
+		h.QueuePresence(c.userID, db.StatusOffline, nil)
 	}
 }
 
@@ -532,7 +532,7 @@ func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
 // announceConnectPresence fans out the status applyConnectStatus settled on,
 // with the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
-	h.BroadcastPresence(c.userID, c.user.Status, c.user.CustomStatus)
+	h.QueuePresence(c.userID, c.user.Status, c.user.CustomStatus)
 }
 
 // computeAllowedChannels returns the set of channel IDs a user may access,

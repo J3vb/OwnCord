@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -493,22 +495,23 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 // runHealthcheckCLI probes the local server's /health endpoint and returns a
 // process exit code: 0 healthy, 1 degraded or unreachable. /health answers
 // 503 with a subsystem reason when the hub, database, or disk is unhealthy,
-// so a container orchestrator's healthcheck surfaces those too. TLS
-// verification is skipped — this talks to 127.0.0.1 and the default cert is
-// self-signed; the probe asserts liveness, not identity.
+// so a container orchestrator's healthcheck surfaces those too.
 func runHealthcheckCLI() int {
 	// Deliberately NOT config.Load: that writes a default config.yaml when
 	// none exists, and a probe must have no side effects. Peek at the file
-	// (and the env override) for just the two values that shape the URL.
+	// (and the env overrides) for just the values that shape the URL and the
+	// certificate pin.
 	port := 8443
 	scheme := "https"
+	certFile := "data/cert.pem"
 	if raw, err := os.ReadFile(config.DefaultPath); err == nil {
 		var partial struct {
 			Server struct {
 				Port int `yaml:"port"`
 			} `yaml:"server"`
 			TLS struct {
-				Mode string `yaml:"mode"`
+				Mode     string `yaml:"mode"`
+				CertFile string `yaml:"cert_file"`
 			} `yaml:"tls"`
 		}
 		if yaml.Unmarshal(raw, &partial) == nil {
@@ -517,6 +520,9 @@ func runHealthcheckCLI() int {
 			}
 			if partial.TLS.Mode == "off" {
 				scheme = "http"
+			}
+			if partial.TLS.CertFile != "" {
+				certFile = partial.TLS.CertFile
 			}
 		}
 	}
@@ -531,7 +537,7 @@ func runHealthcheckCLI() int {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // loopback liveness probe against our own self-signed cert
+			TLSClientConfig: healthcheckTLSConfig(certFile),
 		},
 	}
 	if port < 1 || port > 65535 {
@@ -549,6 +555,51 @@ func runHealthcheckCLI() int {
 		return 1
 	}
 	return 0
+}
+
+// healthcheckTLSConfig builds the probe's TLS config. The default server cert
+// is self-signed, so WebPKI verification can never pass — instead the probe
+// PINS the server's own certificate from disk: hostname/chain checks are
+// replaced (not skipped) by VerifyPeerCertificate requiring the presented
+// leaf to be byte-identical to the local cert file. When no local cert is
+// readable (e.g. ACME mode, where the cert is CA-issued and lives in the ACME
+// cache), standard WebPKI verification is used instead.
+func healthcheckTLSConfig(certFile string) *tls.Config {
+	pinned := loadPinnedCert(certFile)
+	if pinned == nil {
+		return &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		// Chain/hostname verification is replaced by the exact-match pin
+		// below, which is strictly stronger for a cert we hold on disk.
+		// VerifyConnection (not VerifyPeerCertificate) so the pin also runs
+		// on resumed sessions (gosec G123).
+		InsecureSkipVerify: true, //nolint:gosec // G402: VerifyConnection below pins the exact local certificate
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("healthcheck: server presented no certificate")
+			}
+			if !bytes.Equal(cs.PeerCertificates[0].Raw, pinned) {
+				return errors.New("healthcheck: server certificate does not match " + certFile)
+			}
+			return nil
+		},
+	}
+}
+
+// loadPinnedCert reads the first PEM certificate block from path, returning
+// its DER bytes, or nil when unavailable.
+func loadPinnedCert(path string) []byte {
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the operator's own configured cert file
+	if err != nil {
+		return nil
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil
+	}
+	return block.Bytes
 }
 
 // isAddrInUse checks if an error is an "address already in use" error.

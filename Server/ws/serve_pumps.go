@@ -206,7 +206,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				// or cleared mid-session. presentableMembers applies the same
 				// rule for a fresh ready payload (serve_ready.go) — a member with
 				// no live connection shows no custom status.
-				hub.BroadcastToAll(buildPresenceMsg(c.userID, db.StatusOffline, nil))
+				hub.QueuePresence(c.userID, db.StatusOffline, nil)
 			}
 		}
 	}()

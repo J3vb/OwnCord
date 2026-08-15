@@ -1,0 +1,131 @@
+# Manual WebSocket load baseline against a locally booted server.
+#
+# workflow_dispatch ONLY, and deliberately not part of the blocking CI matrix:
+# a perf run on shared runners is a flake source and a wall-clock tax the
+# 10-job/~15-min pipeline doesn't need. Run it before/after changes to the
+# hub, the write path, or the replay budget, and compare the uploaded
+# k6-summary.json + metrics snapshot between runs. Runner-grade hardware is
+# NOT a capacity promise for real deployments — treat results as relative
+# (before vs after), not absolute.
+name: Load Baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      users:
+        description: "Load-test users to register (max VUs in the script is 100)"
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+jobs:
+  k6-baseline:
+    name: k6 WebSocket baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Server/go.sum
+
+      - name: Build server
+        working-directory: Server
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o chatserver .
+
+      - name: Boot server
+        working-directory: Server
+        env:
+          # Registration/login are per-IP rate limited (3/min and 5/min by
+          # default) and every VU logs in from 127.0.0.1 — scale the auth
+          # limits up with the knob that exists for shared-IP scenarios.
+          OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER: "100"
+        run: |
+          mkdir -p "$RUNNER_TEMP/loadtest"
+          cp chatserver "$RUNNER_TEMP/loadtest/"
+          cd "$RUNNER_TEMP/loadtest"
+          ./chatserver > server.log 2>&1 &
+          echo $! > server.pid
+          for _ in $(seq 1 30); do
+            sleep 1
+            if ./chatserver healthcheck; then exit 0; fi
+          done
+          echo "::error::server never became healthy"
+          tail -50 server.log
+          exit 1
+
+      - name: Seed owner, channel, and load-test users
+        working-directory: Server
+        run: |
+          BASE=https://127.0.0.1:8443
+          TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "::error::setup failed"; exit 1; }
+
+          CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"name":"loadtest","type":"text"}' | jq -r .id)
+          [ -n "$CHANNEL_ID" ] && [ "$CHANNEL_ID" != "null" ] || { echo "::error::channel create failed"; exit 1; }
+          echo "CHANNEL_ID=$CHANNEL_ID" >> "$GITHUB_ENV"
+          echo "ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+          INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"max_uses":0}' | jq -r .code)
+          [ -n "$INVITE" ] && [ "$INVITE" != "null" ] || { echo "::error::invite create failed"; exit 1; }
+
+          USERS="${{ inputs.users }}"
+          for i in $(seq 1 "${USERS:-100}"); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/auth/register" \
+              -H 'Content-Type: application/json' \
+              -d "{\"username\":\"loadtest$i\",\"password\":\"LoadTest123!\",\"invite_code\":\"$INVITE\"}")
+            if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+              echo "::error::registering loadtest$i failed with $code"
+              exit 1
+            fi
+          done
+
+      - name: Install k6
+        run: |
+          curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Run k6 baseline
+        working-directory: Server/scripts/k6
+        env:
+          K6_WS_URL: wss://127.0.0.1:8443/api/v1/ws
+          K6_HTTP_URL: https://127.0.0.1:8443
+          K6_CHANNEL_ID: ${{ env.CHANNEL_ID }}
+        run: |
+          mkdir -p reports
+          k6 run --insecure-skip-tls-verify ws-load.js
+
+      - name: Snapshot server metrics
+        if: always()
+        run: |
+          curl -sk https://127.0.0.1:8443/api/v1/metrics | tee "$RUNNER_TEMP/loadtest/metrics-after.json" || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          kill "$(cat "$RUNNER_TEMP/loadtest/server.pid")" 2>/dev/null || true
+          sleep 3
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: k6-baseline
+          path: |
+            Server/scripts/k6/reports/k6-summary.json
+            ${{ runner.temp }}/loadtest/metrics-after.json
+            ${{ runner.temp }}/loadtest/server.log
+          retention-days: 30

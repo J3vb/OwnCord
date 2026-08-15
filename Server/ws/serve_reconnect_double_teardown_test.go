@@ -118,6 +118,7 @@ func TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce(t *testing.T) {
 	}
 
 	var offlineBroadcasts int
+	h.flushPresenceQueue() // presence is coalesced; flush before inspecting
 	for len(h.broadcast) > 0 {
 		bm := <-h.broadcast
 		if bytes.Contains(bm.msg, []byte(`"status":"offline"`)) {

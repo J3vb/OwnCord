@@ -1,7 +1,11 @@
 # Infrastructure roadmap — design
 
 Date: 2026-08-15
-Status: proposed, not implemented
+Status: implemented 2026-08-15 (same PR), with two deliberate leftovers:
+the TOTP/partial-auth persister seam (Track 2 §3 — lowest impact, cut to
+bound the change) and published capacity numbers (Track 3 §7 — the
+`load-baseline` workflow now exists to produce them; publish only measured
+values).
 
 ## Problem
 

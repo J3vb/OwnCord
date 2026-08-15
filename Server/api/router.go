@@ -218,19 +218,25 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		}
 		if lkHost != "" && lkHost != "localhost" && lkHost != "127.0.0.1" && lkHost != "::1" {
 			slog.Warn("LiveKit is externally managed but webhook endpoint is admin-IP-restricted — "+
-				"ensure the LiveKit server's IP is in admin_allowed_cidrs or webhooks will be silently dropped",
+				"add the LiveKit server's IP to livekit_webhook_allowed_cidrs or webhooks will be silently dropped",
 				"livekit_host", lkHost)
 		}
 	}
 
-	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
+	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT
+	// verification). The IP gate is defence-in-depth on top of that signature
+	// check, with its own allowlist key (livekit_webhook_allowed_cidrs) so an
+	// externally-hosted LiveKit can be admitted WITHOUT widening the admin
+	// panel's perimeter to the SFU's network. Falls back to
+	// admin_allowed_cidrs when unset.
 	if lkErr == nil {
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+		webhookCIDRs := cfg.Server.LiveKitWebhookCIDRs()
+		r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
 			Post("/api/v1/livekit/webhook",
 				ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
-		// LiveKit health check — admin-IP-restricted.
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+		// LiveKit health check — same perimeter as the webhook.
+		r.With(AdminIPRestrict(webhookCIDRs, cfg.Server.TrustedProxies)).
 			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
@@ -250,9 +256,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Mounted after hub creation so the hub can broadcast user_update events.
 	// A storage failure leaves store unusable, so the avatar-upload route is
 	// simply not registered; the rest of the profile surface is unaffected.
-	profileStore := store
-	if storeErr != nil {
-		profileStore = nil
+	// Built as a FileStore interface value from scratch — assigning the typed
+	// nil pointer would produce a non-nil interface and defeat the mount-time
+	// nil check.
+	var profileStore FileStore
+	if storeErr == nil {
+		profileStore = store
 	}
 	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
 
@@ -283,9 +292,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
-	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
-	// The shape is documented in docs/deployment.md — keep the two in sync.
-	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+	// Metrics endpoint — IP-restricted by metrics_allowed_cidrs (falls back to
+	// admin_allowed_cidrs) so a central scraper can be admitted without
+	// widening /admin. The shape is documented in docs/deployment.md — keep
+	// the two in sync.
+	r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(MetricsSources{
 			ConnectedUsers: hub.ClientCount,
 			VoiceSessions:  hub.VoiceSessionCount,
@@ -305,7 +316,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// build, exporter == "prometheus"). Returns 404 in the default no-op build
 	// because telemetry.PrometheusHandler() returns nil.
 	if promH := telemetry.PrometheusHandler(); promH != nil {
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
 
