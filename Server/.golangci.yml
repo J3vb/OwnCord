@@ -15,6 +15,16 @@ linters:
     - staticcheck    # advanced static analysis (correctness, performance, deprecation)
     - modernize      # flags outdated idioms (slices/maps/min/max, range-over-int, any, fmt.Appendf)
 
+    # Complexity budgets. These are a RATCHET, not a standard: each threshold sits
+    # just above today's worst offender, so the build is green now and the budget
+    # only blocks regression past the current extreme. Tighten them over time — each
+    # step is a one-line edit here plus the refactor it forces. Measured values and
+    # the work each budget is waiting on are in the settings block below.
+    - funlen         # function length (lines and statements)
+    - cyclop         # cyclomatic complexity per function
+    - nestif         # deeply nested if-blocks
+    - dupl           # verbatim duplicated blocks
+
   settings:
     staticcheck:
       checks:
@@ -26,6 +36,32 @@ linters:
         - performance
       disabled-checks:
         - hugeParam   # too noisy for struct-heavy code
+    # Ratchet thresholds. Measured 2026-08-16 over 1446 production functions
+    # (tests excluded). Each sits just above the current worst, so today's tree is
+    # green and only new extremes are blocked.
+    funlen:
+      # Worst today, in funlen's own units (it ignores blank lines and comments):
+      # 311 lines and 131 statements, both in main.go run(). For scale, 94 functions
+      # exceed 60 raw lines and 22 exceed 120 — this budget does NOT touch them.
+      # Dropping to 150 lines would flag roughly 16; that is the first useful step.
+      lines: 320
+      statements: 135
+    cyclop:
+      # Worst today: ws/voice_join.go handleVoiceJoin at 59, then main.go run at 57
+      # and plugin/registry.go InstallFromZip at 44.
+      max-complexity: 60
+    nestif:
+      # Worst today: 17. A conventional budget is ~10; three functions stand between
+      # here and there.
+      min-complexity: 18
+    dupl:
+      # 250 is where today's tree goes green. At the conventional 150 it flags three
+      # real duplicate pairs, all adjacent near-identical siblings worth collapsing:
+      #   db/mention_queries.go:322-357  vs  :364-399
+      #   ws/voice_controls.go:13-42     vs  :45-73
+      #   ws/voice_controls.go:76-121    vs  :124-171
+      # Fix those three and this can drop to 150.
+      threshold: 250
     gosec:
       excludes:
         - G104  # unhandled errors — errcheck covers this better
@@ -41,4 +77,9 @@ linters:
       - linters: [gosec]
         path: _test\.go
       - linters: [errcheck]
+        path: _test\.go
+      # Complexity budgets apply to production code only. Table-driven tests are
+      # legitimately long, and duplicated setup between test cases is clearer than
+      # a shared helper that hides what each case is doing.
+      - linters: [funlen, cyclop, nestif, dupl]
         path: _test\.go
