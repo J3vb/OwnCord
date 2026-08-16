@@ -23,4 +23,5 @@ prometheus.
   FIFO because clients ack only `max(seq)` — a frame that skips the queue, or a
   seq allocated for a frame that is then dropped, is silently unrecoverable.
 - Prefer the standard library. `syncutil` exists so lock usage is uniform and
-  detectable; do not hand-roll around it.
+  detectable; do not hand-roll around it. `Server/invariants/` enforces this
+  at `go test` time; exceptions are greppable via `grep -rn "invariant:allow" Server/`.
