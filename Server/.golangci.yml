@@ -15,6 +15,16 @@ linters:
     - staticcheck    # advanced static analysis (correctness, performance, deprecation)
     - modernize      # flags outdated idioms (slices/maps/min/max, range-over-int, any, fmt.Appendf)
 
+    # Complexity budgets. These are a RATCHET, not a standard: each threshold sits
+    # just above today's worst offender, so the build is green now and the budget
+    # only blocks regression past the current extreme. Tighten them over time — each
+    # step is a one-line edit here plus the refactor it forces. Measured values and
+    # the work each budget is waiting on are in the settings block below.
+    - funlen         # function length (lines and statements)
+    - cyclop         # cyclomatic complexity per function
+    - nestif         # deeply nested if-blocks
+    - dupl           # verbatim duplicated blocks
+
   settings:
     staticcheck:
       checks:
@@ -26,6 +36,38 @@ linters:
         - performance
       disabled-checks:
         - hugeParam   # too noisy for struct-heavy code
+    # Complexity budgets set to a TARGET, not to whatever passes today. Existing
+    # offenders are deliberately left failing rather than excluded: an exclusion
+    # list goes stale and quietly becomes permanent, whereas a failing check is a
+    # backlog you can see. Measured 2026-08-16 over 1446 production functions,
+    # tests excluded.
+    #
+    # These are not the tool defaults (60/40, 10, 4). The defaults descend from
+    # 1976-era cyclomatic-complexity work that predates Go's explicit error
+    # handling: every `if err != nil` costs a branch, so idiomatic Go scores high
+    # for no real complexity. That is why golangci-lint's other cyclomatic linter,
+    # gocyclo, defaults to 30 rather than 10. The values below are chosen for a Go
+    # server rather than copied from C-era literature.
+    funlen:
+      # funlen counts in its own units — it ignores blank lines and comments, so
+      # main.go run() is 311 here and 422 by raw line span. Worst today: 311 lines,
+      # 131 statements.
+      lines: 100
+      statements: 50
+    cyclop:
+      # Worst today: ws/voice_join.go handleVoiceJoin at 59, main.go run at 57,
+      # plugin/registry.go InstallFromZip at 44.
+      max-complexity: 20
+    nestif:
+      # Worst today: 17.
+      min-complexity: 8
+    dupl:
+      # The conventional value. Flags three real duplicate pairs, all adjacent
+      # near-identical siblings worth collapsing:
+      #   db/mention_queries.go:322-357  vs  :364-399
+      #   ws/voice_controls.go:13-42     vs  :45-73
+      #   ws/voice_controls.go:76-121    vs  :124-171
+      threshold: 150
     gosec:
       excludes:
         - G104  # unhandled errors — errcheck covers this better
@@ -42,3 +84,19 @@ linters:
         path: _test\.go
       - linters: [errcheck]
         path: _test\.go
+      # Complexity budgets apply to production code only. Table-driven tests are
+      # legitimately long, and duplicated setup between test cases is clearer than
+      # a shared helper that hides what each case is doing.
+      - linters: [funlen, cyclop, nestif, dupl]
+        path: _test\.go
+
+# Report every finding. The defaults hide work three separate ways, which is fine
+# when the list is meant to be empty and actively misleading when it is a backlog:
+# "fixed everything shown" would leave more behind. uniq-by-line is the sharp one —
+# it keeps a single issue per line, and since cyclop and funlen both anchor at the
+# function declaration, enabling cyclop silently swallowed 16 of funlen's 21
+# findings here.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
