@@ -528,6 +528,150 @@ func TestDisableTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
 	}
 }
 
+// ─── OC-0011: DeleteOtherSessions failures must not be silent successes ──────
+
+// TestConfirmTOTP_RevokeFailureSurfacesWarning locks down that when
+// DeleteOtherSessions fails after a 2FA enable commits, the handler must not
+// report unqualified success: it should mirror the ChangePassword contract
+// (service/user.go:262-274 / api/profile_handler.go:377) and report a 200
+// with an explicit warning, not a silent 204.
+func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	token := loginAndGetToken(t, router, database, "confirmrevokefail", 4)
+	user, _ := database.GetUserByUsername(context.Background(), "confirmrevokefail")
+	if user == nil {
+		t.Fatal("user not found")
+	}
+
+	// A second, unrelated session so DeleteOtherSessions has a row to delete
+	// (a DELETE that matches zero rows never fires a BEFORE DELETE trigger).
+	otherToken, _ := auth.GenerateToken()
+	if _, err := database.CreateSession(context.Background(), user.ID, auth.HashToken(otherToken), "other-device", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Step 1: enable to get a pending secret (before the trigger exists).
+	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
+		map[string]string{"password": "Password1!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var enableResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+
+	// Make every DELETE against sessions fail from here on, simulating a
+	// genuine DB-level failure (disk error, "database is closed" during
+	// shutdown) rather than a cancel race — the confirm call below already
+	// uses context.WithoutCancel, so a dead request cannot trigger this.
+	if _, err := database.ExecContext(context.Background(), `
+		CREATE TRIGGER block_delete_sessions
+		BEFORE DELETE ON sessions
+		BEGIN
+			SELECT RAISE(FAIL, 'delete blocked');
+		END;
+	`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	// Step 2: confirm. The secret update must still commit even though the
+	// session-revocation tail fails.
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
+		map[string]string{"password": "Password1!", "code": code})
+
+	updated, _ := database.GetUserByUsername(context.Background(), "confirmrevokefail")
+	if updated == nil || updated.TOTPSecret == nil {
+		t.Fatal("expected TOTPSecret to be committed even though revocation failed")
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("confirm-totp with revoke failure: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode confirm response: %v", err)
+	}
+	if resp["warning"] == nil {
+		t.Error("expected a warning field when session revocation failed after totp enable")
+	}
+
+	// The other session must still be present — revocation genuinely failed,
+	// it was not silently skipped or falsely reported as revoked.
+	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(otherToken)); s == nil {
+		t.Error("other session should still exist: DeleteOtherSessions was blocked by the trigger")
+	}
+}
+
+// TestDisableTOTP_RevokeFailureSurfacesWarning is the handleDisableTOTP
+// sibling of TestConfirmTOTP_RevokeFailureSurfacesWarning.
+func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	token := loginAndGetToken(t, router, database, "disablerevokefail", 4)
+	user, _ := database.GetUserByUsername(context.Background(), "disablerevokefail")
+	if user == nil {
+		t.Fatal("user not found")
+	}
+
+	// Enable and confirm TOTP first (before the trigger exists).
+	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
+		map[string]string{"password": "Password1!"})
+	var enableResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
+		map[string]string{"password": "Password1!", "code": code})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("setup confirm: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A second, unrelated session so DeleteOtherSessions has a row to delete.
+	otherToken, _ := auth.GenerateToken()
+	if _, err := database.CreateSession(context.Background(), user.ID, auth.HashToken(otherToken), "other-device", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if _, err := database.ExecContext(context.Background(), `
+		CREATE TRIGGER block_delete_sessions
+		BEFORE DELETE ON sessions
+		BEGIN
+			SELECT RAISE(FAIL, 'delete blocked');
+		END;
+	`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	rr = deleteWithToken(t, router, "/api/v1/users/me/totp", token,
+		map[string]string{"password": "Password1!"})
+
+	updated, _ := database.GetUserByUsername(context.Background(), "disablerevokefail")
+	if updated == nil || updated.TOTPSecret != nil {
+		t.Fatal("expected TOTPSecret to be cleared even though revocation failed")
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable-totp with revoke failure: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode disable response: %v", err)
+	}
+	if resp["warning"] == nil {
+		t.Error("expected a warning field when session revocation failed after totp disable")
+	}
+
+	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(otherToken)); s == nil {
+		t.Error("other session should still exist: DeleteOtherSessions was blocked by the trigger")
+	}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // deleteWithToken sends a DELETE request with a JSON body and auth token.
