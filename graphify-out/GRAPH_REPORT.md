@@ -5,12 +5,12 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 11347 nodes · 32684 edges · 540 communities (447 shown, 93 thin omitted)
+- 11334 nodes · 32669 edges · 503 communities (427 shown, 76 thin omitted)
 - Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 4683 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fb04a579`
+- Built from commit: `c0495f10`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -20,19 +20,19 @@
 - testing.T
 - livekitSession.ts
 - messages.store.ts
-- openMigratedMemory
+- seedChannel
 - context.Context
 - buildChannelRouter
-- MessageInput.ts
-- attachments.ts
-- telemetry_otel.go
+- content-parser.ts
+- media.ts
+- telemetry.go
 - waitRegistered
 - types.ts
 - NewAdminAPI
 - Fixed
 - messages_test.go
 - main.ts
-- DB
+- net/http.HandlerFunc
 - NewTestClient
 - newHandlerHub
 - livekitE2EE.ts
@@ -41,35 +41,35 @@
 - tofu.rs
 - newAuthTestDB
 - newMigratedTestDB
-- time.Time
+- EventPersister
 - Config
 - secret_store.rs
-- coverage_misc_test.go
+- Hub
 - database/sql.Result
 - newUploadTestDB
-- OverlayManagers.ts
-- net/http.HandlerFunc
-- newAdminTestDB
-- NewHub
-- content-parser.ts
+- SidebarArea.ts
+- writeJSON
+- audit_writer_test.go
+- HashToken
+- syntax-highlight.ts
 - ChannelSidebar.ts
 - plugin/registry_test.go
-- WriteAudit
+- Key
 - Registry
 - livekit_test.go
 - NewChecker
-- HashToken
-- authStore
+- net/http.Handler
+- userStatus.ts
 - DB
 - testing.F
 - Result
 - livekit_proxy.rs
 - native/helpers.ts
 - NewRouter
-- net/http.Handler
+- profileCreateToken
 - totp_test.go
-- newTestDB
-- seedMemberUser
+- MemberList.ts
+- openMigratedMemory
 - newServeHub
 - 3. Security
 - permissions_test.go
@@ -78,56 +78,56 @@
 - http_proxy.rs
 - newVoiceTestDB
 - messages.go
-- dbgen/models.go
+- time.Time
 - ProfileManager
-- README.md
+- architecture/README.md
 - devDependencies
-- doRequest
+- itoa
 - helpers_test.go
-- message.go
+- .handleReaction
 - Security Policy
 - Role
 - channels.sql.go
 - Deployment Guide
 - livekit_proxy_test.go
-- emoji_handler_test.go
+- newEmojiService
 - ws_proxy.rs
 - bughunt.js
 - openAdminTestDB
-- db/db.go
+- DB
 - Tables
 - newMentionFixture
-- PermissionService
-- NewWAFMiddlewareCRS
-- settings/helpers.ts
-- gif_handler.go
+- Channel
+- newWAFMiddleware
+- seedUser
+- storage_test.go
 - Migrate
 - Hub
 - chdirTemp
 - DB
 - updater_test.go
 - newTestMessageService
-- textAssetServer
+- newTestUpdater
 - Hub
 - compilerOptions
 - NewEventRingBuffer
-- newHarvestVoiceDB
-- LiveKitProcess
+- VoiceDeps
+- emoji_handler_test.go
 - handleCreateEmoji
-- deep-link.ts
+- doRequest
 - AudioPipeline
 - LoadOrGenerate
 - Auth Endpoints
 - MigrateFS
 - newOverrideFixture
-- Save
+- save.go
 - REST API Reference
 - NewRegistry
 - voice_moderation_test.go
 - ptt.rs
 - OwnCord Audit — Documentation Accuracy & UI/UX Test Coverage (2026-08-04)
 - scripts
-- totp.go
+- ResolveTokenHash
 - Load
 - handleVoiceE2EEOfferV2
 - commands.rs
@@ -135,22 +135,22 @@
 - Plan: Remediate security-hardening review regressions
 - verify.go
 - newRoleCRUDService
-- telemetry.go
+- PermissionService
 - EnsureLiveKitBinary
 - clientip_test.go
 - newDeafenRaceDB
 - Hub
 - gif_handler_test.go
-- e2e/helpers.ts
+- navigateToMainPage
 - messages.sql.go
 - Channel Endpoints
 - newSignedTestUpdater
 - host_http_test.go
 - Topic
-- buildJSON
+- DB
 - users
 - Client
-- NewAppMetrics
+- channel-controller.test.ts
 - Queries
 - Queries
 - Queries
@@ -166,15 +166,15 @@
 - Updater
 - Credential storage
 - dependencies
-- connectionStats.ts
+- VoiceWidget.ts
 - Config Key Reference
-- seedChannel
+- newTestPermService
 - markdown.ts
 - VideoGrid.ts
 - Manifest
 - rate-limiter.ts
-- buildChannelUpdate
-- Queries
+- e2e/helpers.ts
+- main.test.ts
 - testing.M
 - newMockDB
 - OwnCord
@@ -189,9 +189,9 @@
 - Plan: Slash command dispatcher in WS
 - net/http.Request
 - ChannelTopic
-- User
+- UserService
 - Blocked — fix attempted, revert-proof failed
-- Global
+- handlers_backup.go
 - logger.ts
 - fallback_crypto.rs
 - Direct Messages
@@ -199,7 +199,7 @@
 - command.go
 - NewRingBuffer
 - ws-load.js
-- NewMessageService
+- newDMFixture
 - handler
 - tauri-client/package.json
 - screen-share-tracks.test.ts
@@ -212,40 +212,40 @@
 - run
 - newWazeroTestRegistry
 - newUserSvc
-- otelProvider
+- plugins_handler_test.go
 - badDirFile
 - Contributing
-- .handleFreshConnect
+- User
 - mcp-introspect/package.json
 - v1.2.0-alpha.1 — Discord feature parity
 - Task Observer — Continuous Skill Discovery & Improvement
 - scanPluginDirectory
 - AuditWriter
 - 1. Channel sidebar
-- Messaging — target UX
-- .handleVoiceJoin
-- LiveKitClient
+- Voice, Video & E2EE — target UX
+- NewWAFMiddlewareCRS
+- LiveKitProcess
 - migrate.go
-- seed.go
-- Hub
-- VoiceTopic
-- TimeSince
-- itoa
+- sync.Mutex
+- Messaging — target UX
+- .handleWebhookParticipantLeft
+- handleChannelFocusV2
+- handlers_channel_perms_test.go
 - knip.json
 - RNNoiseProcessor
-- GlobalTracer
+- Name
 - finish
 - TestHarness
 - Connection & Authentication — target UX
 - Settings & Admin — target UX
 - buildClientUpdateRouter
-- handleVoiceE2EEAnnounceV2
-- newTestRoleService
+- Save
+- New
 - event.go
 - NewTopicRateLimiter
 - Skill Authoring — taxonomy, licensing, confidentiality, editing rules
 - .oxlintrc.json
-- VerifyTOTPCodeOnce
+- attachment_queries_test.go
 - e2e/dm-system.spec.ts
 - Queries
 - emoji.sql.go
@@ -253,8 +253,8 @@
 - LiveKit Setup Guide
 - Voice Signaling
 - Quick Start Guide
-- Database Schema Reference
-- NewEventPersister
+- readPump
+- mockTauriFullSessionWithVoice
 - index.mjs
 - countingReadStateStore
 - bughunt.harness.mjs
@@ -262,14 +262,14 @@
 - reactions.sql.go
 - Channel Permission Overrides
 - Server Stats & User Administration
-- Voice, Video & E2EE — target UX
-- Updater
-- buildErrorMsg
+- .UpdateUserProfile
+- groupDMFixture
+- handleChatCommandV2
 - slashFS
 - Running the bughunt pipeline
 - MainPage.ts
 - reconnectAfterCertAccept
-- window-state.ts
+- FenwickTree
 - emoji-voicemod.parity.spec.ts
 - voice-e2ee-verify.spec.ts
 - include
@@ -278,18 +278,18 @@
 - OwnCord — Test-Coverage Audit
 - OriginAcceptOptions
 - EventRingBuffer
-- EventPersister
+- FuzzImageDimensions
 - newTokenTestDB
 - scripts
 - bughunt-fix.harness.mjs
 - router.ts
 - E2E Test Status — 2026-08-05
 - render-ledger.mjs
-- .BeginTx
+- newBlockService
 - TestMigrate_UpgradeFromMigration019PreservesData
 - Queries
-- StartEventPruner
-- .deliverBroadcast
+- TestChannelVisibility_RESTWSAgreement
+- fuzzOpenMigratedMemory
 - Finish the V2 Dispatch Migration (backlog item 11) — Design
 - Port Forwarding Guide
 - Chat Messages
@@ -310,9 +310,9 @@
 - .finishVoiceLeave
 - ChatSendCmd
 - Environments, Activation Setup, and Handoff-Doc Mode
-- Tauri HTTP Capability Narrowing — Design
+- handlePingV2
 - capabilities-scope.test.ts
-- cancelAfterArm
+- ParseLevel
 - GET /admin/api/updates
 - Channel-Visibility Unification (backlog item 3) — Design
 - sqlc Adoption (D2) — Progress & Plan
@@ -323,71 +323,54 @@
 - prettier
 - openFileDB
 - hello plugin
-- newAssetTestInstance
-- buildUserUpdate
+- TestAdminAPI_PatchChannel_ArchiveCleansVoice
+- TestAdminDeleteChannel_UnlinksAttachmentsForReclaim
 - 4. Dependencies & Supply Chain
 - protocol_contract_test.go
 - ChatCommandCmd
 - ci-check
 - Comprehensive Review (scheduled or fallback)
 - VoiceWidgetOptions
-- navigation-guard.ts
+- countingLimiter
 - cert-tofu.spec.ts
-- navigateToMainPageReady
-- volume-menu.test.ts
+- updater.spec.ts
+- errDMParticipantsStore
 - tsconfig.build.json
 - User Blocks
 - PATCH /admin/api/settings
 - GET /api/v1/gif/search
 - First-Run Setup
 - LiveKit Endpoints
-- Permission-Middleware Consolidation (audit finding A-2026-07-16) — Design
-- Tailscale Guide (Zero-Config Remote Access)
+- README.md
 - LiveKitProcess
 - 5. Test Coverage & Quality
 - ChatEditCmd
 - VoiceE2EEOfferCmd
 - VoiceModDeafenCmd
 - VoiceModMuteCmd
-- Init
-- .Start
 - GET /api/v1/client-update/{target}/{current_version}
 - OwnCord Architecture Blueprints
 - Voice End-to-End Encryption
 - feature_request.md
-- NewDMService
-- buildMetricsRouter
-- handleApplyUpdate
+- setupDiagnosticsRouter
+- RunningInContainer
 - ChatDeleteCmd
-- MessageDeletedDMEvent
-- MessageEditedDMEvent
-- MessageSentDMEvent
-- PresenceOthersEvent
 - PresenceUpdateCmd
 - ReactionAddCmd
-- ReactionDMEvent
 - ReactionRemoveCmd
 - stubExcludeSenderEvent
 - stubSequencedDMEvent
 - stubVoiceChannelEvent
 - stubVoiceChannelGuardedEvent
-- TypingChannelEvent
 - VoiceE2EEAnnounceCmd
-- VoiceE2EEAnnounceEvent
-- VoiceE2EEOfferGuardedEvent
 - VoiceModMoveCmd
 - OwnCord
 - OwnCord Client (Tauri v2)
 - VadProcessor
 - log_level_from_env
 - TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull
-- MetricsSources
 - File Upload and Serving
 - Server Logs (SSE)
-- D7 — Module map
-- D5 — Entity-relationship overview
-- WebSocket / Real-time Engine
-- Audit 2026-07-19 — Maintainer Decisions
 - DM Calls
 - Channel Updates
 - Heartbeat and Connection Liveness
@@ -397,27 +380,17 @@
 - 1. Architecture
 - CallDeclineCmd
 - CallRingCmd
-- CallSignalEvent
 - ChannelFocusCmd
-- DMChannelOpenEvent
 - MarkReadCmd
-- MessageDeletedChannelEvent
-- MessageEditedChannelEvent
-- MessageSentChannelEvent
-- PluginBroadcastEvent
-- PresenceSelfEvent
-- ReactionChannelEvent
 - stubChannelEvent
 - stubUserTargetedEvent
-- TypingDMEvent
 - TypingStartCmd
 - VoiceCameraCmd
 - VoiceDeafenCmd
 - VoiceJoinCmd
 - VoiceMuteCmd
 - VoiceScreenshareCmd
-- VoiceStateEvent
-- roleDeletingInvalidator
+- errDMChannelIDsStore
 - db-change
 - enable_media_capture
 - admin-panel.spec.ts
@@ -430,15 +403,9 @@
 - pre-push
 - 6. CI/CD & DevEx
 - 7. Observability
-- TestDeleteExpiredSessions_SargableFormat
 - 015_plugins.sql
 - tryLoadPluginTOML
 - tryLoadPluginTOML
-- Security Policy
-- github.com/owncord/server/syncutil.Mutex
-- TestPresenceEvents_InvisibleBlanksCustomStatusForOthers
-- PresenceEvent
-- stubBroadcastAllEvent
 - protocol-change/SKILL.md
 - strip-appimage-bundled-libs.sh
 - jitsi-rnnoise.d.ts
@@ -478,74 +445,74 @@
 ## Surprising Connections (you probably didn't know these)
 - `buildTotpSection()` --indirect_call--> `render()`  [INFERRED]
   Client/tauri-client/src/components/settings/AccountTab.ts → .superpowers/render-ledger.mjs
-- `renderMessage()` --indirect_call--> `att()`  [INFERRED]
-  Client/tauri-client/src/components/message-list/renderers.ts → Client/tauri-client/tests/unit/attachments-media.test.ts
-- `mountModal()` --calls--> `createCertMismatchModal()`  [EXTRACTED]
-  Client/tauri-client/tests/unit/cert-mismatch-modal.test.ts → Client/tauri-client/src/components/CertMismatchModal.ts
-- `makeModal()` --calls--> `createCreateChannelModal()`  [EXTRACTED]
-  Client/tauri-client/tests/unit/create-channel-modal.test.ts → Client/tauri-client/src/components/CreateChannelModal.ts
-- `mount()` --calls--> `createDmSidebar()`  [EXTRACTED]
-  Client/tauri-client/tests/unit/dm-groups.test.ts → Client/tauri-client/src/components/DmSidebar.ts
+- `SidebarAreaResult` --references--> `MountableComponent`  [EXTRACTED]
+  Client/tauri-client/src/pages/main-page/SidebarArea.ts → Client/tauri-client/src/lib/safe-render.ts
+- `SidebarMemberSectionResult` --references--> `MountableComponent`  [EXTRACTED]
+  Client/tauri-client/src/pages/main-page/SidebarMemberSection.ts → Client/tauri-client/src/lib/safe-render.ts
+- `E2EEDeps` --references--> `WsClient`  [EXTRACTED]
+  Client/tauri-client/src/lib/livekitE2EE.ts → Client/tauri-client/src/lib/ws.ts
+- `ModerationGates` --calls--> `roleHasPermission()`  [EXTRACTED]
+  Client/tauri-client/src/components/MemberList.ts → Client/tauri-client/src/lib/permissions.ts
 
 ## Import Cycles
-- 3-file cycle: `Client/tauri-client/src/lib/audioElements.ts -> Client/tauri-client/src/lib/livekitSession.ts -> Client/tauri-client/src/lib/roomEventHandlers.ts -> Client/tauri-client/src/lib/audioElements.ts`
 - 3-file cycle: `Client/tauri-client/src/components/message-list/attachments.ts -> Client/tauri-client/src/components/message-list/media.ts -> Client/tauri-client/src/components/message-list/content-parser.ts -> Client/tauri-client/src/components/message-list/attachments.ts`
 - 3-file cycle: `Client/tauri-client/src/components/message-list/attachments.ts -> Client/tauri-client/src/components/message-list/media.ts -> Client/tauri-client/src/components/message-list/embeds.ts -> Client/tauri-client/src/components/message-list/attachments.ts`
+- 3-file cycle: `Client/tauri-client/src/lib/audioElements.ts -> Client/tauri-client/src/lib/livekitSession.ts -> Client/tauri-client/src/lib/roomEventHandlers.ts -> Client/tauri-client/src/lib/audioElements.ts`
 - 4-file cycle: `Client/tauri-client/src/components/message-list/attachments.ts -> Client/tauri-client/src/components/message-list/media.ts -> Client/tauri-client/src/components/message-list/content-parser.ts -> Client/tauri-client/src/components/message-list/custom-emoji.ts -> Client/tauri-client/src/components/message-list/attachments.ts`
 
-## Communities (540 total, 93 thin omitted)
+## Communities (503 total, 76 thin omitted)
 
 ### Community 0 - "dispatcher.ts"
-Cohesion: 0.02
-Nodes (174): MemberListOptions, invalidateReactionUsers(), QuickSwitcherOptions, QuickSwitchProfile, createVoiceWidget(), formatElapsed(), QUALITY_BARS, QUALITY_COLORS (+166 more)
+Cohesion: 0.01
+Nodes (213): invalidateReactionUsers(), DispatcherCleanup, enforceModeratorAudioState(), livekitSession(), log, mapDmPayload(), mapDmUser(), wireConnectionStatus() (+205 more)
 
 ### Community 1 - "createElement"
 Cohesion: 0.02
-Nodes (259): appendBanFlow(), BAN_DURATIONS, ChannelContextMenuOptions, ContextMenuResult, createChannelContextMenu(), createMemberContextMenu(), createMenuItem(), createSeparator() (+251 more)
+Nodes (246): buildRow(), CertFirstUseModalOptions, CertMismatchModalOptions, createCertFirstUseModal(), createCertMismatchModal(), createIdentityMismatchModal(), IdentityMismatchModalOptions, createChannelSidebar() (+238 more)
 
 ### Community 2 - "testing.T"
 Cohesion: 0.02
-Nodes (163): testing.T, adminPanelSource(), TestAdminPanelEmojiSectionIsWired(), TestAdminPanelEmojiUsesTheMemberAPI(), TestLoginRateLimit_Value(), TestRateLimiterCleanupHorizon_CoversMaxSlowMode(), TestSlashFS_GlobNormalizes(), TestSlashFS_ResolvesBackslashPath() (+155 more)
+Nodes (253): testing.T, adminPanelSource(), TestAdminPanelEmojiSectionIsWired(), TestAdminPanelEmojiUsesTheMemberAPI(), TestLoginRateLimit_Value(), TestRateLimiterCleanupHorizon_CoversMaxSlowMode(), TestSlashFS_GlobNormalizes(), TestSlashFS_ResolvesBackslashPath() (+245 more)
 
 ### Community 3 - "livekitSession.ts"
 Cohesion: 0.02
-Nodes (155): buildVoiceAudioTabInner(), CameraInvalidationRegistrar, CameraRegistrar, createVoiceAudioTab(), MicRegistrar, VoiceAudioTabHandle, AudioElements, getSavedUserVolume() (+147 more)
+Nodes (120): VoiceModerationCallbacks, buildKeybindsTab(), buildVoiceAudioTabInner(), CameraInvalidationRegistrar, CameraRegistrar, createVoiceAudioTab(), MicRegistrar, VoiceAudioTabHandle (+112 more)
 
 ### Community 4 - "messages.store.ts"
 Cohesion: 0.02
-Nodes (108): baseMime(), isAudioMime(), isVideoMime(), FenwickTree, createMessageList(), estimateItemHeight(), firstUnreadIndex(), log (+100 more)
+Nodes (107): baseMime(), isAudioMime(), isVideoMime(), isSameDay(), shouldGroup(), buildVirtualItems(), createMessageList(), estimateItemHeight() (+99 more)
 
-### Community 5 - "openMigratedMemory"
-Cohesion: 0.03
-Nodes (186): setRole(), TestDeleteAccount_AdminAllowedWhenOwnerExists(), TestDeleteAccount_AllowedWhenOtherAdminExists(), TestDeleteAccount_AnonymisesUsername(), TestDeleteAccount_ClearsAvatarAndTOTP(), TestDeleteAccount_ClearsPassword(), TestDeleteAccount_ClearsProfileFields(), TestDeleteAccount_DeletesSessions() (+178 more)
+### Community 5 - "seedChannel"
+Cohesion: 0.06
+Nodes (68): purgeSeed(), seedAroundMessages(), seedChannel(), TestAddReaction_Success(), TestAddReaction_UniqueConstraint(), TestCreateMessage_ContentPreserved(), TestCreateMessage_ReturnsID(), TestCreateMessage_WithReplyTo() (+60 more)
 
 ### Community 6 - "context.Context"
 Cohesion: 0.02
-Nodes (45): APITokenListItem, ChannelUpdate, fakeAuditor, fakeAuditStore, mentionExecer, ServerStats, context.Context, anonymiseUser() (+37 more)
+Nodes (40): ChannelUpdate, ServerStats, CountRoleMembersRow, CreateRoleParams, GetUserWithRoleRow, InstallPluginParams, PluginKVDeleteParams, PluginKVGetParams (+32 more)
 
 ### Community 7 - "buildChannelRouter"
 Cohesion: 0.06
 Nodes (146): aroundResponse, offlineBroadcaster, purgeBroadcast, purgeResponseBody, reactionUsersResponse, recordingPurgeBroadcaster, aroundPath(), decodeAround() (+138 more)
 
-### Community 8 - "MessageInput.ts"
-Cohesion: 0.03
-Nodes (100): buildPreview(), byLabel(), createEmojiAutocomplete(), EmojiAutocompleteComponent, EmojiAutocompleteOptions, EmojiSuggestion, filterEmojiSuggestions(), MAX_EMOJI_SUGGESTIONS (+92 more)
+### Community 8 - "content-parser.ts"
+Cohesion: 0.02
+Nodes (134): buildPreview(), byLabel(), createEmojiAutocomplete(), EmojiAutocompleteComponent, EmojiAutocompleteOptions, EmojiSuggestion, filterEmojiSuggestions(), MAX_EMOJI_SUGGESTIONS (+126 more)
 
-### Community 9 - "attachments.ts"
-Cohesion: 0.03
-Nodes (104): animateGifsPref, buildDownloadButton(), buildFileMeta(), clearAttachmentCaches(), closeDbAfterTransaction(), createObjectUrl(), downloadFile(), fetchImageAsDataUrl() (+96 more)
+### Community 9 - "media.ts"
+Cohesion: 0.04
+Nodes (65): CODE_BLOCK_REGEX, INLINE_CODE_REGEX, MASKED_LINK_REGEX, URL_REGEX, clearEmbedCaches(), EMPTY_OG, isPrivateHost(), log (+57 more)
 
-### Community 10 - "telemetry_otel.go"
-Cohesion: 0.13
-Nodes (13): go.opentelemetry.io/otel/attribute.KeyValue, go.opentelemetry.io/otel/metric.Float64Gauge, go.opentelemetry.io/otel/metric.Float64Histogram, go.opentelemetry.io/otel/metric.Int64Counter, go.opentelemetry.io/otel/trace.Span, convertAttrs(), TestOtelConvertAttrsHandlesUnsignedInts(), TestOtelConvertAttrsUint64OverflowFallsBackToString() (+5 more)
+### Community 10 - "telemetry.go"
+Cohesion: 0.03
+Nodes (72): go.opentelemetry.io/otel/attribute.KeyValue, go.opentelemetry.io/otel/metric.Float64Gauge, go.opentelemetry.io/otel/metric.Float64Histogram, go.opentelemetry.io/otel/metric.Int64Counter, go.opentelemetry.io/otel/metric.Meter, go.opentelemetry.io/otel/trace.Span, go.opentelemetry.io/otel/trace.Tracer, Invite (+64 more)
 
 ### Community 11 - "waitRegistered"
-Cohesion: 0.07
-Nodes (116): TestBuildReady_IncludesCanSend(), TestBuildReady_CarriesChannelFeatureFlags(), TestHandleVoiceCamera_BadPayload(), TestHandleVoiceCamera_NotInVoice2(), TestHandleVoiceDeafen_BadPayload(), TestHandleVoiceDeafen_NotInVoice2(), TestHandleVoiceMute_BadPayload(), TestHandleVoiceMute_NotInVoice2() (+108 more)
+Cohesion: 0.06
+Nodes (135): TestBuildReady_IncludesCanSend(), TestBuildReady_CarriesChannelFeatureFlags(), TestHandleVoiceCamera_BadPayload(), TestHandleVoiceCamera_NotInVoice2(), TestHandleVoiceDeafen_BadPayload(), TestHandleVoiceDeafen_NotInVoice2(), TestHandleVoiceMute_BadPayload(), TestHandleVoiceMute_NotInVoice2() (+127 more)
 
 ### Community 12 - "types.ts"
 Cohesion: 0.02
-Nodes (122): CHANNEL_TYPES, CreateChannelModalOptions, attachReactionTooltip(), buildReactionTooltip(), cache, cacheKey(), chipSetFor(), formatReactorNames() (+114 more)
+Nodes (115): attachReactionTooltip(), buildReactionTooltip(), cache, cacheKey(), chipSetFor(), formatReactorNames(), getCachedReactionUsers(), hide() (+107 more)
 
 ### Community 13 - "NewAdminAPI"
 Cohesion: 0.08
@@ -556,136 +523,132 @@ Cohesion: 0.01
 Nodes (140): Fixed, OC-0002 — high — A dead E2EE worker is invisible; the Secured badge cannot detect it, OC-0004 — medium — Key-holder promotion silently no-ops when the client's own voice_state has not arrived, OC-0005 — medium — Rotation offers exceed the server rate limit in large channels, permanently starving the same peers, OC-0006 — medium — Both rotation paths call keyProvider.setKey with no session-generation guard, OC-0007 — medium — Reconnect reaches the Secured state without confirming the room key is current, OC-0008 — medium — restoreLocalVoiceState has no internal supersession guard, OC-0009 — low — attemptAutoReconnect's tail has no supersession checkpoints after connected (+132 more)
 
 ### Community 15 - "messages_test.go"
-Cohesion: 0.08
-Nodes (37): buildAuthError(), buildChatDeleted(), buildChatEdited(), buildMemberBan(), buildMemberJoin(), buildReactionUpdate(), buildTypingMsg(), buildVoiceToken() (+29 more)
+Cohesion: 0.06
+Nodes (56): buildAuthError(), buildChannelCreate(), buildChannelUpdate(), buildChatBulkDeleted(), buildChatDeleted(), buildChatEdited(), buildMemberBan(), buildMemberJoin() (+48 more)
 
 ### Community 16 - "main.ts"
 Cohesion: 0.02
-Nodes (106): createUserUpdateCredentialSaver(), deleteCredential(), getInvoke(), loadCredential(), log, saveCredential(), SavedCredential, ensureHttpProxy() (+98 more)
+Nodes (95): createUserUpdateCredentialSaver(), deleteCredential(), getInvoke(), loadCredential(), log, saveCredential(), SavedCredential, formatMessageLink() (+87 more)
 
-### Community 17 - "DB"
-Cohesion: 0.06
-Nodes (84): adminContextKey, adminMeResponse, adminUserResponse, backupEntry, createChannelRequest, createTokenRequest, createTokenResponse, errorResponse (+76 more)
+### Community 17 - "net/http.HandlerFunc"
+Cohesion: 0.09
+Nodes (65): createChannelRequest, createTokenRequest, createTokenResponse, errorResponse, HubBroadcaster, memberUnbanBroadcaster, patchUserRequest, PermissionInvalidator (+57 more)
 
 ### Community 18 - "NewTestClient"
-Cohesion: 0.06
-Nodes (87): TestEventDeliveryHasNoGuestPath(), NewEventSink(), NewTestClient(), SetClientLastActivityForTest(), TestChatCommand_MalformedPayload_ReturnsBadRequest(), TestChatCommand_NoRegistry_ReturnsError(), TestChatCommand_RateLimited_ReturnsError(), TestChatCommand_UnknownCommand_ReturnsError() (+79 more)
+Cohesion: 0.05
+Nodes (96): TestEventDeliveryHasNoGuestPath(), NewEventSink(), TestEmitSequencedDM_UsesNormalQueueToPreserveSeqOrder(), TestEmitUserTargeted_KeepsHighPriorityFastLane(), NewTestClient(), NewTestClientWithChannel(), TestChatCommand_MalformedPayload_ReturnsBadRequest(), TestChatCommand_NoRegistry_ReturnsError() (+88 more)
 
 ### Community 19 - "newHandlerHub"
-Cohesion: 0.08
-Nodes (90): channelFocusMsg(), denyReadOnChannel(), TestChannelFocus_AdminBypassesDeny(), TestChannelFocus_AllowedByDefault(), TestChannelFocus_DeniedByOverride(), TestChatSend_DeniedWithoutSendMessages(), ClientChannelIDForTest(), NewTestClientWithTokenHash() (+82 more)
+Cohesion: 0.06
+Nodes (137): channelFocusMsg(), denyReadOnChannel(), TestChannelFocus_AdminBypassesDeny(), TestChannelFocus_AllowedByDefault(), TestChannelFocus_DeniedByOverride(), TestChatSend_DeniedWithoutSendMessages(), callMsg(), seedGroupDM() (+129 more)
 
 ### Community 20 - "livekitE2EE.ts"
 Cohesion: 0.06
-Nodes (52): ANNOUNCE_DOMAIN, base64ToUint8(), buildAnnounceMessage(), computeKeyFingerprint(), deriveWrappingKey(), exportIdentityKeyPair(), exportPublicKey(), generateECDHKeyPair() (+44 more)
+Nodes (54): closeIdentityModal(), openIdentityMismatchModal(), ANNOUNCE_DOMAIN, base64ToUint8(), buildAnnounceMessage(), computeKeyFingerprint(), deriveWrappingKey(), exportIdentityKeyPair() (+46 more)
 
 ### Community 21 - "drainChanTimeout"
 Cohesion: 0.10
 Nodes (87): drainChanTimeout(), TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext(), captureLogs(), participantIdentityFor(), roomNameFor(), TestWebhook_ParticipantJoined_MalformedInput(), TestWebhook_ParticipantJoined_NilFieldsIgnored(), TestWebhook_ParticipantJoined_RogueParticipantFlagged() (+79 more)
 
 ### Community 22 - "buildDMRouter"
-Cohesion: 0.09
-Nodes (72): evictCall, mockBroadcaster, mockBroadcastMsg, watermarkVoiceBroadcaster, decodeBlockedIDs(), dmPut(), jsonContainsEmptyBlockList(), TestBlockUser_InvalidUserID() (+64 more)
+Cohesion: 0.08
+Nodes (74): cancelAfterArm, cancelOnLookupStore, evictCall, mockBroadcaster, mockBroadcastMsg, watermarkVoiceBroadcaster, decodeBlockedIDs(), dmPut() (+66 more)
 
 ### Community 23 - "tofu.rs"
 Cohesion: 0.06
 Nodes (54): CapturedFingerprint, CertificateDer, CaptureVerifier, cert_store_key(), decide(), default_verify_schemes(), evaluate(), extract_host() (+46 more)
 
 ### Community 24 - "newAuthTestDB"
-Cohesion: 0.09
-Nodes (82): buildAuthRouter(), buildAuthRouterWithProxies(), contains(), containsStr(), deleteJSONWithToken(), expiredInviteDB(), newAuthTestDB(), postJSON() (+74 more)
+Cohesion: 0.07
+Nodes (98): recordingAuthBroadcaster, TestDeleteAccount_BroadcastsMemberBan(), TestDeleteAccount_NoBroadcasterOmitted(), buildAuthRouter(), buildAuthRouterWithProxies(), contains(), containsStr(), deleteJSONWithToken() (+90 more)
 
 ### Community 25 - "newMigratedTestDB"
 Cohesion: 0.06
 Nodes (71): TestBlockUser_And_IsBlocked(), TestBlockUser_Idempotent(), TestBlockUser_SelfBlockIsSilentlyDropped(), TestIsEitherBlocked(), TestListBlockedUsers(), TestUnblockUser(), TestUnblockUser_NotBlockedIsNoOp(), seedEmojiUploader() (+63 more)
 
-### Community 26 - "time.Time"
-Cohesion: 0.06
-Nodes (17): touchThrottle, failingLockoutStore, PluginRow, rowScanner, rowsScanner, GetEventsSinceParams, GetEventsSinceRow, PersistEventParams (+9 more)
+### Community 26 - "EventPersister"
+Cohesion: 0.05
+Nodes (28): PluginRow, rowScanner, rowsScanner, sync/atomic.Bool, sync/atomic.Uint64, DB, parseSQLiteTime(), scanEventRows() (+20 more)
 
 ### Community 27 - "Config"
 Cohesion: 0.11
-Nodes (23): BackupConfig, DatabaseConfig, EventPersistenceConfig, LoggingConfig, PluginsConfig, SecurityConfig, ServerConfig, UploadConfig (+15 more)
+Nodes (24): BackupConfig, DatabaseConfig, EventPersistenceConfig, LoggingConfig, PluginsConfig, SecurityConfig, ServerConfig, UploadConfig (+16 more)
 
 ### Community 28 - "secret_store.rs"
 Cohesion: 0.07
 Nodes (61): credential_lock_serializes_overlapping_commands(), CredentialData, CredentialStoreProbe, delete_credential(), delete_identity_key(), identity_account(), load_credential(), load_identity_key() (+53 more)
 
-### Community 29 - "coverage_misc_test.go"
-Cohesion: 0.04
-Nodes (43): TestBuildDMChannelOpen_NilAvatar(), TestBuildDMChannelOpen_NilRecipient(), TestBuildDMChannelOpen_ValidRecipient(), TestQualityBitrate_EmptyFallsBackToMedium(), TestQualityBitrate_KnownPresets(), TestQualityBitrate_UnknownFallsBackToMedium(), TestBroadcastToAll_DropsWhenFull(), TestBroadcastToChannel_DropsWhenFull() (+35 more)
-
 ### Community 30 - "database/sql.Result"
 Cohesion: 0.04
-Nodes (34): ApplyVoiceServerDeafenParams, ApplyVoiceServerMuteParams, ClearVoiceServerDeafenParams, ClearVoiceServerMuteParams, CreateAPITokenParams, DeleteOtherSessionsParams, DeleteSessionByIDParams, EnableCameraIfUnderLimitParams (+26 more)
+Nodes (30): ApplyVoiceServerDeafenParams, ApplyVoiceServerMuteParams, ClearVoiceServerDeafenParams, ClearVoiceServerMuteParams, CreateAPITokenParams, DeleteOtherSessionsParams, DeleteSessionByIDParams, EnableCameraIfUnderLimitParams (+22 more)
 
 ### Community 31 - "newUploadTestDB"
-Cohesion: 0.06
-Nodes (111): io.Closer, io.Seeker, buildAvatarRouter(), doAvatarUpload(), TestUploadAvatar_IsReadableByOtherUsersWhileInUse(), TestUploadAvatar_NotMountedWithoutStorage(), TestUploadAvatar_RejectsNonImageAndOversizedDimensions(), TestUploadAvatar_RequiresAuthAndAFile() (+103 more)
+Cohesion: 0.11
+Nodes (71): io.Closer, io.Seeker, buildAvatarRouter(), doAvatarUpload(), TestUploadAvatar_IsReadableByOtherUsersWhileInUse(), TestUploadAvatar_NotMountedWithoutStorage(), TestUploadAvatar_RejectsNonImageAndOversizedDimensions(), TestUploadAvatar_RequiresAuthAndAFile() (+63 more)
 
-### Community 32 - "OverlayManagers.ts"
-Cohesion: 0.05
-Nodes (31): MAX_GROUP_DM_PARTICIPANTS, SCREENSHARE_TILE_ID_OFFSET, hasMessageJumpHandler(), createModal(), createPromptModal(), ModalInstance, ModalOptions, PromptModalOptions (+23 more)
+### Community 32 - "SidebarArea.ts"
+Cohesion: 0.04
+Nodes (82): DmConversation, QuickSwitcherOptions, QuickSwitchProfile, ToastContainer, adminPanelUrl(), openAdminPanel(), ApiClient, navigateToChannel() (+74 more)
 
-### Community 33 - "net/http.HandlerFunc"
-Cohesion: 0.10
-Nodes (66): changePasswordRequest, createDMRequest, createGroupDMRequest, createInviteRequest, dmVisibilityMarker, dmVoiceEvictor, inviteResponse, ProfileBroadcaster (+58 more)
+### Community 33 - "writeJSON"
+Cohesion: 0.09
+Nodes (64): changePasswordRequest, createDMRequest, createGroupDMRequest, createInviteRequest, dmVisibilityMarker, dmVoiceEvictor, inviteResponse, ProfileBroadcaster (+56 more)
 
-### Community 34 - "newAdminTestDB"
-Cohesion: 0.06
-Nodes (60): slowAuditStore, newAdminTestDB(), TestAdminCreateChannel(), TestAdminCreateChannel_DefaultsNotNSFW(), TestAdminCreateChannel_EmptyOptionals(), TestAdminDeleteChannel(), TestAdminDeleteChannel_NonExistent(), TestAdminUpdateChannel() (+52 more)
+### Community 34 - "audit_writer_test.go"
+Cohesion: 0.19
+Nodes (15): fakeAuditor, captureLogs(), TestWriteAudit_LogsFailureButDoesNotPropagate(), TestWriteAudit_SuccessLogsNothing(), NewAuditWriter(), TestAuditWriter_BatchFlush(), TestAuditWriter_ConcurrentEnqueue(), TestAuditWriter_DrainOnStop() (+7 more)
 
-### Community 35 - "NewHub"
-Cohesion: 0.10
-Nodes (44): TestSeedHubReplayState_ForcesFullResyncForOfflineClient(), equalSets(), idSet(), seedVisibilityUser(), sortedKeys(), TestChannelVisibility_RESTWSAgreement(), TestChannelVisibility_UserOverrideAgreement(), TestWritePump_DrainsQueuedFramesAfterCloseSend() (+36 more)
+### Community 35 - "HashToken"
+Cohesion: 0.11
+Nodes (49): TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(), TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(), voiceJoinWSMsg(), GenerateToken(), HashToken(), TestGenerateToken_HexCharacters(), TestGenerateToken_Length(), TestGenerateToken_MultiDeviceUniqueness() (+41 more)
 
-### Community 36 - "content-parser.ts"
-Cohesion: 0.06
-Nodes (54): appendBlocks(), appendInline(), buildChannelNode(), buildList(), buildMaskedLink(), buildMentionNode(), buildMessageLinkNode(), buildSpoiler() (+46 more)
+### Community 36 - "syntax-highlight.ts"
+Cohesion: 0.12
+Nodes (14): ALIASES, BACKTICK_STRING, C_BLOCK_COMMENT, CodeToken, DQ_STRING, HASH_COMMENT, JS_LIKE, LANGS (+6 more)
 
 ### Community 37 - "ChannelSidebar.ts"
-Cohesion: 0.04
-Nodes (82): attachChannelContextMenu(), CHANNEL_MUTE_CHANGED, attachDragHandlers(), DragState, ensureGlobalDragListeners(), listenerOwners, releaseOwner(), retargetDetachedDrag() (+74 more)
+Cohesion: 0.05
+Nodes (78): attachChannelContextMenu(), CHANNEL_MUTE_CHANGED, attachDragHandlers(), DragState, ensureGlobalDragListeners(), listenerOwners, releaseOwner(), retargetDetachedDrag() (+70 more)
 
 ### Community 38 - "plugin/registry_test.go"
 Cohesion: 0.19
 Nodes (27): buildZip(), Registry, newRegistryWithDir(), simpleManifest(), TestRegistry_Activate_AfterClose(), TestRegistry_Activate_WithoutRuntime(), TestRegistry_DisablePlugin_ClearsFlagAndCommands(), TestRegistry_DisablePlugin_UnknownIDIsNoOp() (+19 more)
 
-### Community 39 - "WriteAudit"
-Cohesion: 0.09
-Nodes (41): backupFile, AuthBroadcaster, authSuccessResponse, deleteAccountRequest, loginRequest, passwordConfirmationRequest, registerRequest, totpConfirmationRequest (+33 more)
+### Community 39 - "Key"
+Cohesion: 0.07
+Nodes (47): AuthBroadcaster, authSuccessResponse, deleteAccountRequest, loginRequest, passwordConfirmationRequest, registerRequest, totpConfirmationRequest, totpEnableResponse (+39 more)
 
 ### Community 40 - "Registry"
-Cohesion: 0.05
-Nodes (23): lockedBuffer, github.com/tetratelabs/wazero/api.Memory, github.com/tetratelabs/wazero/api.Module, sync.Mutex, Broadcaster, bytesReaderAt, CommandResult, Config (+15 more)
+Cohesion: 0.04
+Nodes (27): github.com/tetratelabs/wazero/api.Memory, github.com/tetratelabs/wazero/api.Module, Broadcaster, bytesReaderAt, CommandResult, Instance, UITabBinding, Registry (+19 more)
 
 ### Community 41 - "livekit_test.go"
-Cohesion: 0.06
-Nodes (51): google.golang.org/protobuf/proto.Message, TestWebhookParseIdentity_Invalid(), TestWebhookParseIdentity_Valid(), TestWebhookParseRoomChannelID_Invalid(), TestWebhookParseRoomChannelID_Valid(), ParseIdentityForTest(), ParseParticipantIdentityForTest(), ParseRoomChannelIDForTest() (+43 more)
+Cohesion: 0.03
+Nodes (102): google.golang.org/protobuf/proto.Message, TestBuildDMChannelOpen_NilAvatar(), TestBuildDMChannelOpen_NilRecipient(), TestBuildDMChannelOpen_ValidRecipient(), TestQualityBitrate_EmptyFallsBackToMedium(), TestQualityBitrate_KnownPresets(), TestQualityBitrate_UnknownFallsBackToMedium(), TestBuildChatSendOK_ValidJSON() (+94 more)
 
 ### Community 42 - "NewChecker"
-Cohesion: 0.18
-Nodes (44): NewChecker(), TestHandleChannelFocus_SkipsNoOpReadStateWrite(), NewChannelService(), Store, TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(), TestHandlePresenceUpdate_CustomStatusWriteFailureKeepsStoredText(), TestHandlePresenceUpdate_CustomStatusWriteFailureSwallowedAfterStatusCommit(), TestHandleChannelFocus_DMExemptFromArchiveGate() (+36 more)
+Cohesion: 0.19
+Nodes (47): NewChecker(), TestHandleChannelFocus_SkipsNoOpReadStateWrite(), NewChannelService(), Store, TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(), TestHandlePresenceUpdate_CustomStatusWriteFailureKeepsStoredText(), TestHandlePresenceUpdate_CustomStatusWriteFailureSwallowedAfterStatusCommit(), TestHandleChannelFocus_DMExemptFromArchiveGate() (+39 more)
 
-### Community 43 - "HashToken"
-Cohesion: 0.06
-Nodes (72): recordingAuthBroadcaster, TestDeleteAccount_BroadcastsMemberBan(), TestDeleteAccount_NoBroadcasterOmitted(), SecurityHeaders(), TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket(), TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(), AdminIPRestrict(), AuthMiddleware() (+64 more)
+### Community 43 - "net/http.Handler"
+Cohesion: 0.07
+Nodes (61): contextKey, errorResponse, go.opentelemetry.io/otel/sdk/metric.MeterProvider, go.opentelemetry.io/otel/sdk/trace.TracerProvider, net/http.Handler, TestBodyCapExemptions_RouteEnvelopesReachable(), SecurityHeaders(), TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket() (+53 more)
 
-### Community 44 - "authStore"
-Cohesion: 0.04
-Nodes (67): StatusPickerComponent, createUserBar(), STATUS_TEXT, UserBarOptions, ACTIVITY_EVENTS, ACTIVITY_THROTTLE_MS, AUTO_IDLE_DELAY_MS, AutoIdleController (+59 more)
+### Community 44 - "userStatus.ts"
+Cohesion: 0.10
+Nodes (23): UserBarOptions, ACTIVITY_EVENTS, ACTIVITY_THROTTLE_MS, AUTO_IDLE_DELAY_MS, AutoIdleController, nextAutoStatus(), startAutoIdle(), createPresenceSender() (+15 more)
 
 ### Community 45 - "DB"
 Cohesion: 0.06
-Nodes (22): ChannelUnread, MessageWithUser, ReactionCount, ReactionInfo, UserPublic, database/sql.Rows, ReactionUser, Message (+14 more)
+Nodes (22): ChannelUnread, MessageWithUser, ReactionCount, ReactionInfo, UserPublic, ReactionUser, Message, DB (+14 more)
 
 ### Community 46 - "testing.F"
-Cohesion: 0.09
-Nodes (19): fuzzTestHelper, github.com/livekit/protocol/livekit.WebhookEvent, testing.F, FuzzValidateAvatarURL(), FuzzValidateDisplayName(), FuzzSanitizeUploadFilename(), fuzzOpenMigratedMemory(), FuzzSanitizeFTSQuery() (+11 more)
+Cohesion: 0.12
+Nodes (11): testing.F, FuzzValidateAvatarURL(), FuzzValidateDisplayName(), FuzzSanitizeUploadFilename(), FuzzValidateUsername(), FuzzEffectiveChannelPerms(), FuzzEffectivePerms(), FuzzValidateShortcode() (+3 more)
 
 ### Community 47 - "Result"
-Cohesion: 0.04
-Nodes (107): Key(), VoiceState, MessageService, Store, getCommandConstructor(), hasChannelAccess(), hasChannelAccessLive(), hasPerm() (+99 more)
+Cohesion: 0.12
+Nodes (41): requirePerm(), Event, BuildCallSignalForTest(), handleCallDeclineV2(), handleCallRingV2(), dmEventOrFallback(), TestDMEventOrFallback(), Event (+33 more)
 
 ### Community 48 - "livekit_proxy.rs"
 Cohesion: 0.06
@@ -696,88 +659,88 @@ Cohesion: 0.09
 Nodes (35): CDP_PORT, cleanupUserDataDir(), createUserDataDir(), __dirname, __filename, NativeFixtures, acquirePersistentPage(), CDP_PORT (+27 more)
 
 ### Community 50 - "NewRouter"
-Cohesion: 0.05
-Nodes (47): clientDiag, diagnosticsResponse, healthDeps, healthResponse, infoResponse, livekitHealthResponse, serverDiag, tauriPlatformResponse (+39 more)
+Cohesion: 0.06
+Nodes (44): clientDiag, diagnosticsResponse, EventPersisterMetrics, healthDeps, healthResponse, infoResponse, livekitHealthResponse, MetricsSources (+36 more)
 
-### Community 51 - "net/http.Handler"
-Cohesion: 0.12
-Nodes (49): net/http.Handler, net/http/httptest.ResponseRecorder, doRequestRaw(), getWithToken(), TestUpdateProfile_BroadcastCarriesEveryProfileField(), TestUpdateProfile_RejectsBadDisplayName(), TestUpdateProfile_SetsDisplayNameAndAbout(), TestChangePassword_MalformedBody() (+41 more)
+### Community 51 - "profileCreateToken"
+Cohesion: 0.11
+Nodes (48): identityKeyFailStore, net/http/httptest.ResponseRecorder, getWithToken(), TestUpdateProfile_BroadcastCarriesEveryProfileField(), TestUpdateProfile_RejectsBadDisplayName(), TestUpdateProfile_SetsDisplayNameAndAbout(), TestChangePassword_MalformedBody(), TestChangePassword_MissingNewPassword() (+40 more)
 
 ### Community 52 - "totp_test.go"
-Cohesion: 0.15
-Nodes (20): NewPartialAuthStore(), NewPendingTOTPStore(), TestGenerateTOTPCode_InvalidSecret(), TestGenerateTOTPCodeAndVerify_RFCVector(), TestGenerateTOTPSecret_Unique(), TestPartialAuthStore_Consume(), TestPartialAuthStore_ConsumeInvalidToken(), TestPartialAuthStore_ExpiryCleanup() (+12 more)
+Cohesion: 0.08
+Nodes (37): PartialAuthChallenge, pendingTOTPEnrollment, BuildTOTPURI(), generateOpaqueToken(), PartialAuthStore, PendingTOTPStore, UsedTOTPCodeStore, NewPartialAuthStore() (+29 more)
 
-### Community 53 - "newTestDB"
-Cohesion: 0.04
-Nodes (79): newTestDB(), TestBanUser_Permanent(), TestBanUser_Temporary(), TestCreateInvite_Success(), TestCreateInvite_UnlimitedUses(), TestCreateSession_Success(), TestCreateUser_CaseInsensitiveDuplicate(), TestCreateUser_DuplicateUsername() (+71 more)
+### Community 53 - "MemberList.ts"
+Cohesion: 0.05
+Nodes (48): appendBanFlow(), BAN_DURATIONS, ChannelContextMenuOptions, ContextMenuResult, createChannelContextMenu(), createMemberContextMenu(), createMenuItem(), createSeparator() (+40 more)
 
-### Community 54 - "seedMemberUser"
-Cohesion: 0.17
-Nodes (47): callMsg(), seedGroupDM(), TestCallDecline_ForwardsToOtherParticipants(), TestCallDecline_RateLimited(), TestCallRing_BlockedOneToOneForbidden(), TestCallRing_ForwardsToOtherParticipants(), TestCallRing_GroupWithInternalBlockStillRings(), TestCallRing_NonParticipantForbidden() (+39 more)
+### Community 54 - "openMigratedMemory"
+Cohesion: 0.06
+Nodes (62): openMigratedMemory(), TestCreateChannel_EmptyCategory(), TestCreateChannel_ReturnsID(), TestCreateChannel_UniqueIDs(), TestDeleteChannel_NonExistent(), TestDeleteChannel_RemovesChannel(), TestDeleteChannelOverride(), TestGetChannel_Found() (+54 more)
 
 ### Community 55 - "newServeHub"
-Cohesion: 0.09
-Nodes (45): ParseChannelIDForTest(), TestBuildReady_IncludesDMVoiceStates(), TestBuildReady_PropagatesDMChannelsError(), TestBuildReady_PropagatesListMembersError(), TestBuildReady_PropagatesUnreadCountsError(), TestBuildReady_IncludesOwnVoiceStateAfterDMClosed(), newServeHub(), ownerRole() (+37 more)
+Cohesion: 0.11
+Nodes (40): TestBuildReady_IncludesDMVoiceStates(), TestBuildReady_PropagatesDMChannelsError(), TestBuildReady_PropagatesListMembersError(), TestBuildReady_PropagatesUnreadCountsError(), TestBuildReady_IncludesOwnVoiceStateAfterDMClosed(), newServeHub(), ownerRole(), seedServeUser() (+32 more)
 
 ### Community 56 - "3. Security"
 Cohesion: 0.20
 Nodes (10): 3. Security, Authentication & Authorization, Input Validation, Observations (not blocking), Overall Posture: **GOOD** (no critical issues in core app security), Rate Limiting, Secrets & Configuration, SQL Injection (+2 more)
 
 ### Community 57 - "permissions_test.go"
-Cohesion: 0.06
-Nodes (56): overrideMatrixBits(), permGridBits(), TestAdminPanelOverrideMatrixCoversChannelScopedBits(), TestAdminPanelOverrideMatrixHasSingleDefinedBits(), TestAdminPanelPermGridCoversEveryPermissionBit(), TestAdminPanelPermGridHasNoDuplicateOrCompositeBits(), EffectiveChannelPerms(), EffectivePerms() (+48 more)
+Cohesion: 0.09
+Nodes (39): EffectivePerms(), HasAdmin(), HasAnyPerm(), HasPerm(), HasServerPerm(), TestAdminPerimeter_Membership(), TestEffectivePerms_AllowAddsPermission(), TestEffectivePerms_AllowAndDenyTogether() (+31 more)
 
 ### Community 58 - "mappers.go"
 Cohesion: 0.08
 Nodes (17): Attachment, AttachmentAccess, SessionWithBanStatus, Session, DB, generateInviteCode(), Invite, Session (+9 more)
 
 ### Community 59 - "postJSONWithToken"
-Cohesion: 0.13
-Nodes (42): postJSONWithToken(), TestCombinedRouter_ProfileAndInvites(), TestCreateInvite_MalformedJSON(), TestCreateInvite_WithExpiration(), TestEnableTOTP_AlreadyEnabled(), TestListInvites_MemberForbidden(), TestRevokeInvite_AlreadyRevoked(), buildInviteRouter() (+34 more)
+Cohesion: 0.18
+Nodes (30): postJSONWithToken(), buildCombinedRouter(), TestCombinedRouter_ProfileAndInvites(), TestCreateInvite_MalformedJSON(), TestCreateInvite_WithExpiration(), TestListInvites_MemberForbidden(), TestRevokeInvite_AlreadyRevoked(), buildInviteRouter() (+22 more)
 
 ### Community 60 - "http_proxy.rs"
 Cohesion: 0.08
 Nodes (39): A, B, copy_with_deadline(), copy_with_deadline_reclaims_a_stalled_connection(), handle_connection(), HttpProxyState, ProxyEntry, remove_if_port_matches_removes_only_matching_entry() (+31 more)
 
 ### Community 61 - "newVoiceTestDB"
-Cohesion: 0.15
-Nodes (44): TestVoice_CountActiveCameras_SomeCameras(), TestVoice_CountActiveCameras_Zero(), TestVoice_EnableCameraIfUnderLimit_AtLimit(), TestVoice_EnableCameraIfUnderLimit_Success(), TestVoice_GetAllVoiceStates_MultipleChannels(), TestVoice_JoinVoiceChannelIfCapacity_AtLimit(), TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(), TestVoice_JoinVoiceChannelIfCapacity_UnderLimit() (+36 more)
+Cohesion: 0.14
+Nodes (45): TestVoice_CountActiveCameras_SomeCameras(), TestVoice_CountActiveCameras_Zero(), TestVoice_EnableCameraIfUnderLimit_AtLimit(), TestVoice_EnableCameraIfUnderLimit_Success(), TestVoice_GetAllVoiceStates_Empty(), TestVoice_GetAllVoiceStates_MultipleChannels(), TestVoice_JoinVoiceChannelIfCapacity_AtLimit(), TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState() (+37 more)
 
 ### Community 62 - "messages.go"
-Cohesion: 0.08
-Nodes (29): buildChatMessage(), emojiUpdatePayload, callSignalPayload, channelDeletePayload, chatBulkDeletedPayload, chatDeletedPayload, chatEditedPayload, chatMessageArgs (+21 more)
+Cohesion: 0.04
+Nodes (68): userUpdateSpy, encoding/json.RawMessage, parseCallChannelID(), BuildDMChannelOpenInfoForTest(), ParseChannelIDForTest(), buildChannelCreateFor(), buildChatMessage(), buildChatSendOK() (+60 more)
 
-### Community 63 - "dbgen/models.go"
-Cohesion: 0.05
-Nodes (29): Attachment, AuditLog, Channel, ChannelOverride, ChannelUserOverride, DmOpenState, DmParticipant, Emoji (+21 more)
+### Community 63 - "time.Time"
+Cohesion: 0.03
+Nodes (40): touchThrottle, failingLockoutStore, Attachment, AuditLog, Channel, ChannelOverride, ChannelUserOverride, DmOpenState (+32 more)
 
-### Community 65 - "README.md"
-Cohesion: 0.11
-Nodes (9): D2 — Package map, D3 — REST request lifecycle, Server Architecture, D1 — System context and trust boundaries, D8 — Deployment topology, System Overview, D6 — Voice join + E2EE key exchange, Voice and End-to-End Encryption (+1 more)
+### Community 65 - "architecture/README.md"
+Cohesion: 0.06
+Nodes (31): Client Architecture (Tauri), D7 — Module map, Key mechanisms, Quality tooling, D5 — Entity-relationship overview, Data Model, Domain notes, How the schema is accessed (+23 more)
 
 ### Community 66 - "devDependencies"
 Cohesion: 0.06
 Nodes (35): devDependencies, eslint, @eslint/js, fast-check, jsdom, knip, oxlint, @playwright/test (+27 more)
 
-### Community 67 - "doRequest"
+### Community 67 - "itoa"
 Cohesion: 0.11
-Nodes (42): doRequest(), TestDeleteChannelPermission_RefusesEqualOrHigherRole(), TestPutChannelPermission_ModeratorCannotEscalate(), TestPutChannelPermission_RefusesEqualOrHigherRole(), TestAdminAPI_PatchRole_NoRenameNoMemberUpdate(), TestAdminAPI_PatchRole_RenameBroadcastsMemberUpdate(), createUserWithRole(), decodeRole() (+34 more)
+Nodes (37): itoa(), TestDeleteChannelPermission_RefusesEqualOrHigherRole(), TestPutChannelPermission_ModeratorCannotEscalate(), TestPutChannelPermission_RefusesEqualOrHigherRole(), seedOverrideTarget(), TestChannelUserPermission_NonAdminForbidden(), TestDeleteChannelUserPermission_ClearsOverride(), TestPutChannelUserPermission_AdministratorCanGrantAnyBit() (+29 more)
 
 ### Community 68 - "helpers_test.go"
-Cohesion: 0.08
-Nodes (40): ExtractBearerToken(), FuzzValidateUsername(), IsEffectivelyBanned(), IsSessionExpired(), TestExtractBearerToken_BearerCaseInsensitive(), TestExtractBearerToken_BearerWithNoToken(), TestExtractBearerToken_EmptyHeaderValue(), TestExtractBearerToken_MissingHeader() (+32 more)
+Cohesion: 0.09
+Nodes (39): ExtractBearerToken(), IsEffectivelyBanned(), IsSessionExpired(), TestExtractBearerToken_BearerCaseInsensitive(), TestExtractBearerToken_BearerWithNoToken(), TestExtractBearerToken_EmptyHeaderValue(), TestExtractBearerToken_MissingHeader(), TestExtractBearerToken_MultipleSpaces() (+31 more)
 
-### Community 69 - "message.go"
-Cohesion: 0.07
-Nodes (25): AttachmentInfo, ReactionUser, MessageService, Store, MessageService, Store, requireChannelWritable(), RequireDMNotBlocked() (+17 more)
+### Community 69 - ".handleReaction"
+Cohesion: 0.36
+Nodes (4): ReactionUser, MessageService, validateEmoji(), ReactionResult
 
 ### Community 70 - "Security Policy"
 Cohesion: 0.14
 Nodes (14): Account Deletion, Audit Logging, Client Security Hardening, Credential Storage, Input Validation, Known Limitations, Reporting Vulnerabilities, Search and Rate Limiting (+6 more)
 
 ### Community 71 - "Role"
-Cohesion: 0.12
-Nodes (17): Role, Store, ModerationService, Store, NewModerationService(), RoleInput, RoleService, Store (+9 more)
+Cohesion: 0.13
+Nodes (15): Role, Store, ModerationService, RoleInput, RoleService, Store, NewRoleService(), requireBelowActor() (+7 more)
 
 ### Community 72 - "channels.sql.go"
 Cohesion: 0.08
@@ -788,12 +751,12 @@ Cohesion: 0.05
 Nodes (39): Admin Backup Endpoint, Auto-Update, Background Maintenance, Backup Strategy, Building from Source, Client, config.yaml for Docker, Data Persistence (+31 more)
 
 ### Community 74 - "livekit_proxy_test.go"
-Cohesion: 0.08
-Nodes (45): net/url.URL, LiveKitHealthHandlerForTest(), copyWS(), isOriginAllowed(), isWebSocketUpgrade(), NewLiveKitProxy(), proxyWebSocket(), TestIsOriginAllowed_CaseInsensitive() (+37 more)
+Cohesion: 0.09
+Nodes (42): LiveKitHealthHandlerForTest(), isOriginAllowed(), isWebSocketUpgrade(), NewLiveKitProxy(), TestIsOriginAllowed_CaseInsensitive(), TestIsOriginAllowed_EmptyAllowlistDenies(), TestIsOriginAllowed_EmptyOriginAllowed(), TestIsOriginAllowed_FirstPartyDesktopOrigins() (+34 more)
 
-### Community 75 - "emoji_handler_test.go"
-Cohesion: 0.07
-Nodes (60): emojiHarness, recordingEmojiBroadcaster, emojiSeedUser(), gifBytes(), jpegBytes(), newEmojiHarness(), pngBytes(), TestBroadcastEmojiSet_SurvivesCanceledRequestContext() (+52 more)
+### Community 75 - "newEmojiService"
+Cohesion: 0.10
+Nodes (28): recordingEmojiBroadcaster, Emoji, EmojiImageURL(), Store, NewEmojiService(), NormalizeShortcode(), newEmojiService(), TestEmojiCreate_DuplicateShortcodeIsConflict() (+20 more)
 
 ### Community 76 - "ws_proxy.rs"
 Cohesion: 0.12
@@ -804,36 +767,36 @@ Cohesion: 0.06
 Nodes (31): ARGS, BUGCLASS_LENSES, buildAdaptiveLenses(), churnFiles, cleanStreak, clusterOf(), confirmedAll, confirmedSorted (+23 more)
 
 ### Community 78 - "openAdminTestDB"
-Cohesion: 0.10
-Nodes (35): TestNewHandler_APIRoutesMounted(), TestNewHandler_AuthProtectedRoute(), TestNewHandler_ReturnsNonNilHandler(), TestNewHandler_ServesStaticRoot(), TestNewHandler_SetsCSPOnRoot(), TestNewHandler_WithUpdater(), TestOwnerOnlyMiddleware_AdminDenied(), TestOwnerOnlyMiddleware_Unauthenticated() (+27 more)
+Cohesion: 0.11
+Nodes (34): TestNewHandler_APIRoutesMounted(), TestNewHandler_AuthProtectedRoute(), TestNewHandler_ReturnsNonNilHandler(), TestNewHandler_ServesStaticRoot(), TestNewHandler_SetsCSPOnRoot(), TestNewHandler_WithUpdater(), TestOwnerOnlyMiddleware_AdminDenied(), TestOwnerOnlyMiddleware_MemberDenied() (+26 more)
 
-### Community 79 - "db/db.go"
-Cohesion: 0.09
-Nodes (24): dbtx, database/sql.DB, database/sql.Row, database/sql.Stmt, hasKeywordPrefix(), isMemoryPath(), isReadOnlySQL(), newDB() (+16 more)
+### Community 79 - "DB"
+Cohesion: 0.05
+Nodes (49): roleDeletingInvalidator, dbtx, DBTX, database/sql.DB, database/sql.Row, database/sql.Rows, database/sql.Stmt, database/sql.Tx (+41 more)
 
 ### Community 80 - "Tables"
-Cohesion: 0.08
-Nodes (26): api_tokens, attachments, audit_log, channel_overrides, channel_user_overrides, channels, dm_open_state, dm_participants (+18 more)
+Cohesion: 0.05
+Nodes (37): Admin perimeter, api_tokens, attachments, audit_log, Bit Map, channel_overrides, channel_user_overrides, channels (+29 more)
 
 ### Community 81 - "newMentionFixture"
-Cohesion: 0.16
-Nodes (33): parseMentionTokens(), MessageService, mentionCount(), newMentionFixture(), sendAs(), TestChannelFocus_ClearsMentionCount(), TestEditMessage_EveryoneGateApplies(), TestEditMessage_ReplacesMentionsWithoutRecounting() (+25 more)
+Cohesion: 0.15
+Nodes (34): parseMentionTokens(), MessageService, mentionCount(), newMentionFixture(), sendAs(), TestChannelFocus_ClearsMentionCount(), TestEditMessage_EveryoneGateApplies(), TestEditMessage_ReplacesMentionsWithoutRecounting() (+26 more)
 
-### Community 82 - "PermissionService"
-Cohesion: 0.04
-Nodes (20): memberUpdateCall, mockHub, mockHubWB, restartCall, sync.RWMutex, DB, Channel, ChannelOverride (+12 more)
+### Community 82 - "Channel"
+Cohesion: 0.05
+Nodes (15): memberUpdateCall, mockHub, mockHubWB, restartCall, unbanMockHub, Channel, channelRefs(), ChannelService (+7 more)
 
-### Community 83 - "NewWAFMiddlewareCRS"
+### Community 83 - "newWAFMiddleware"
+Cohesion: 0.13
+Nodes (19): matchRecorder, coraza.WAF, github.com/corazawaf/coraza/v3/types.Interruption, github.com/corazawaf/coraza/v3/types.MatchedRule, github.com/corazawaf/coraza/v3/types.Transaction, TestNewCRSWAF_LoadsCoreRuleSet(), TestNormalizeCRSMode(), TestWAFMiddleware_CRSDetectMode_AllowsBenignSQLishChatMessage() (+11 more)
+
+### Community 84 - "seedUser"
+Cohesion: 0.08
+Nodes (45): setRole(), TestDeleteAccount_AdminAllowedWhenOwnerExists(), TestDeleteAccount_AllowedWhenOtherAdminExists(), TestDeleteAccount_AnonymisesUsername(), TestDeleteAccount_ClearsAvatarAndTOTP(), TestDeleteAccount_ClearsPassword(), TestDeleteAccount_ClearsProfileFields(), TestDeleteAccount_DeletesSessions() (+37 more)
+
+### Community 85 - "storage_test.go"
 Cohesion: 0.09
-Nodes (33): matchRecorder, coraza.WAF, github.com/corazawaf/coraza/v3/types.Interruption, github.com/corazawaf/coraza/v3/types.MatchedRule, github.com/corazawaf/coraza/v3/types.Transaction, captureSlog(), TestNewCRSWAF_LoadsCoreRuleSet(), TestNormalizeCRSMode() (+25 more)
-
-### Community 84 - "settings/helpers.ts"
-Cohesion: 0.18
-Nodes (19): applyTheme(), THEME_KEYS, ThemeName, THEMES, applyStoredAppearance(), syncOsMotionListener(), applyThemeByName(), BUILT_IN_THEMES (+11 more)
-
-### Community 85 - "gif_handler.go"
-Cohesion: 0.33
-Nodes (8): gifMediaFormat, gifResponse, gifResult, fetchGIFs(), handleGIFProxy(), TestRedactKeyMatchesPercentEncodedForm(), parseGIFLimit(), redactKey()
+Nodes (40): newTestStorage(), TestDelete_DotDot(), TestDelete_DotPrefixFilename(), TestDelete_EmptyFilename(), TestDelete_NotFound(), TestDelete_PathTraversal(), TestDelete_ValidUUID(), TestOpen_DotDot() (+32 more)
 
 ### Community 86 - "Migrate"
 Cohesion: 0.13
@@ -848,24 +811,24 @@ Cohesion: 0.11
 Nodes (31): TestOwnerOnlyMiddleware_OwnerAllowed(), backdate(), listBackupFiles(), mustSetSetting(), TestMaintainBackups_RetentionNeverDeletesNewest(), TestMaintainBackups_ScheduleAndRetention(), CaptureSetupLimiter(), SetBackupBaseDir() (+23 more)
 
 ### Community 89 - "DB"
-Cohesion: 0.09
-Nodes (10): channelPermissionsResponse, channelFields, channelFromFields(), Channel, ChannelOverride, ChannelRoleOverride, ChannelUserOverride, DB (+2 more)
+Cohesion: 0.06
+Nodes (19): channelPermissionsResponse, channelFields, MemberSummary, channelFromFields(), Channel, ChannelOverride, ChannelRoleOverride, ChannelUserOverride (+11 more)
 
 ### Community 90 - "updater_test.go"
-Cohesion: 0.07
-Nodes (52): TestCheckForUpdate_ErrorCaching(), TestCheckForUpdate_IncludesAssetsList(), TestDownloadFile_NoTokenToExternalHost(), TestDownloadFile_SendsTokenToGitHub(), TestFetchTextAsset_Error(), TestFetchTextAsset_Success(), TestFindClientAssets_ByTarget(), TestFindClientAssets_NilCache() (+44 more)
+Cohesion: 0.11
+Nodes (31): TestCheckForUpdate_IncludesAssetsList(), TestDownloadFile_NoTokenToExternalHost(), TestDownloadFile_SendsTokenToGitHub(), TestFetchTextAsset_Success(), TestFindClientAssets_ByTarget(), TestFindClientAssets_NilCache(), TestFindClientAssets_NoMatchingAssets(), TestParseChecksumFile_EmptyData() (+23 more)
 
 ### Community 91 - "newTestMessageService"
 Cohesion: 0.12
 Nodes (31): seedAroundHistory(), TestGetMessagesAround_ClampsLimit(), TestGetMessagesAround_DeletedCentreIsNotFound(), TestGetMessagesAround_EdgesReportNoMore(), TestGetMessagesAround_ExactFitReportsNoMore(), TestGetMessagesAround_MessageFromAnotherChannelIsNotFound(), TestGetMessagesAround_RejectsBadIDs(), TestGetMessagesAround_SplitsTheLimitAroundTheCentre() (+23 more)
 
-### Community 92 - "textAssetServer"
-Cohesion: 0.22
-Nodes (10): net/http/httptest.Server, dialAndAuthWS(), TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(), TestCheckForUpdateCancelledCallerDoesNotPoisonCache(), TestFetchTextAssetCachedCancelledCallerDoesNotPoisonCache(), TestFetchTextAssetCachedCachesFailures(), TestFetchTextAssetCachedCoalescesConcurrentMisses(), TestFetchTextAssetCachedEvictsExpiredKeys() (+2 more)
+### Community 92 - "newTestUpdater"
+Cohesion: 0.09
+Nodes (31): net/http/httptest.Server, dialAndAuthWS(), TestCheckForUpdateCancelledCallerDoesNotPoisonCache(), TestFetchTextAssetCachedCancelledCallerDoesNotPoisonCache(), TestCheckForUpdate_ErrorCaching(), TestFetchTextAsset_Error(), serverDownloadAssetName(), TestCheckForUpdateCoalescesConcurrentMisses() (+23 more)
 
 ### Community 93 - "Hub"
-Cohesion: 0.09
-Nodes (10): Hub, buildChannelCreateFor(), buildChannelDelete(), buildPresenceMsg(), buildRolesUpdate(), buildServerRestartMsg(), TestBuildChannelDelete_Payload(), TestBuildChannelDelete_Type() (+2 more)
+Cohesion: 0.08
+Nodes (10): TestExtractEventType(), TestExtractEventTypeLengthCap(), Hub, extractEventType(), wrapWithSeq(), buildChannelDelete(), TestBuildChannelDelete_Payload(), TestBuildChannelDelete_Type() (+2 more)
 
 ### Community 94 - "compilerOptions"
 Cohesion: 0.06
@@ -875,21 +838,21 @@ Nodes (32): compilerOptions, esModuleInterop, forceConsistentCasingInFileNames, 
 Cohesion: 0.20
 Nodes (18): NewEventRingBuffer(), TestConcurrent_PushAndEventsSince(), TestEventsSince_AfterSeqEqualsOldest_ReturnsNil(), TestEventsSince_AfterSeqZero_ReturnsBehavior(), TestEventsSince_AfterSpecificSeq(), TestEventsSince_AheadOfNewestSeq(), TestEventsSince_AtLatestSeq(), TestEventsSince_CapacityBoundaries() (+10 more)
 
-### Community 96 - "newHarvestVoiceDB"
-Cohesion: 0.18
-Nodes (18): mustCreateVoiceChannel(), newHarvestVoiceDB(), seedHarvestVoiceUser(), TestHandleVoiceCameraV2_ChannelLookupErrorFailsClosed(), TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(), TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(), TestRefreshChannelVisibility_ReconnectDuringFanOutActsOnLiveClient(), TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel() (+10 more)
+### Community 96 - "VoiceDeps"
+Cohesion: 0.09
+Nodes (31): hasChannelAccess(), hasChannelAccessLive(), registerCallHandlers(), registerChatHandlers(), registerPingHandler(), registerPresenceHandlers(), reactionV2Handler(), registerReactionHandlers() (+23 more)
 
-### Community 97 - "LiveKitProcess"
-Cohesion: 0.24
-Nodes (4): net/http.Client, os/exec.Cmd, SetGIFUpstreamForTest(), LiveKitProcess
+### Community 97 - "emoji_handler_test.go"
+Cohesion: 0.17
+Nodes (32): emojiHarness, emojiSeedUser(), gifBytes(), jpegBytes(), newEmojiHarness(), pngBytes(), TestBroadcastEmojiSet_SurvivesCanceledRequestContext(), TestEmojiDelete_BadIDIs400() (+24 more)
 
 ### Community 98 - "handleCreateEmoji"
-Cohesion: 0.11
-Nodes (31): EmojiBroadcaster, emojiResponse, FileStore, uploadResponse, broadcastEmojiSet(), chi.Router, handleCreateEmoji(), handleDeleteEmoji() (+23 more)
+Cohesion: 0.14
+Nodes (26): EmojiBroadcaster, emojiResponse, FileStore, uploadResponse, broadcastEmojiSet(), chi.Router, handleCreateEmoji(), handleDeleteEmoji() (+18 more)
 
-### Community 99 - "deep-link.ts"
-Cohesion: 0.20
-Nodes (11): initDeepLinks(), InviteLink, linkSegments(), log, MessageLink, parseIdSegment(), parseInviteLink(), parseMessageLink() (+3 more)
+### Community 99 - "doRequest"
+Cohesion: 0.16
+Nodes (26): doRequest(), TestAdminAPI_PatchRole_NoRenameNoMemberUpdate(), TestAdminAPI_PatchRole_RenameBroadcastsMemberUpdate(), createUserWithRole(), decodeRole(), doRequestRaw(), newRolesHandler(), TestAdminAPI_CreateRole_DuplicateNameIsBadRequest() (+18 more)
 
 ### Community 100 - "AudioPipeline"
 Cohesion: 0.05
@@ -904,16 +867,16 @@ Cohesion: 0.07
 Nodes (30): Auth Endpoints, DELETE /api/v1/auth/account, DELETE /api/v1/users/me/totp, Errors, Errors, Errors, Errors, GET /api/v1/auth/me (+22 more)
 
 ### Community 103 - "MigrateFS"
-Cohesion: 0.20
-Nodes (29): testing/fstest.MapFS, MigrateFS(), countVersions(), hasVersion(), simpleFS(), tableExists(), TestMigrate_AllMigrationsRecorded(), TestMigrate_AppliedAtIsISO8601() (+21 more)
+Cohesion: 0.17
+Nodes (31): testing/fstest.MapFS, MigrateFS(), countVersions(), hasVersion(), simpleFS(), tableExists(), TestMigrate_AllMigrationsRecorded(), TestMigrate_AppliedAtIsISO8601() (+23 more)
 
 ### Community 104 - "newOverrideFixture"
 Cohesion: 0.62
 Nodes (6): newOverrideFixture(), seedChannelUserOverride(), TestListVisibleChannels_PerUserOverrideSplitsRoleMates(), TestPermissionService_AppliesUserOverrideLayer(), TestPermissionService_InvalidateUserPicksUpNewOverride(), visibleIDs()
 
-### Community 105 - "Save"
-Cohesion: 0.18
-Nodes (20): bytesProvider, go.yaml.in/yaml/v3.Node, validateYAML(), applyPatch(), atomicWrite(), findValue(), Patch, mappingRoot() (+12 more)
+### Community 105 - "save.go"
+Cohesion: 0.26
+Nodes (11): bytesProvider, go.yaml.in/yaml/v3.Node, validateYAML(), applyPatch(), atomicWrite(), findValue(), Patch, mappingRoot() (+3 more)
 
 ### Community 106 - "REST API Reference"
 Cohesion: 0.07
@@ -939,25 +902,25 @@ Nodes (28): 10. Appendix — session command log index, 11. Remediation addendum
 Cohesion: 0.07
 Nodes (27): scripts, build, dev, format, format:check, knip, lint, lint:fix (+19 more)
 
-### Community 112 - "totp.go"
-Cohesion: 0.18
-Nodes (7): PartialAuthChallenge, pendingTOTPEnrollment, BuildTOTPURI(), generateOpaqueToken(), PartialAuthStore, PendingTOTPStore, TestBuildTOTPURI_ContainsIssuerAndSecret()
+### Community 112 - "ResolveTokenHash"
+Cohesion: 0.09
+Nodes (15): fakeStore, tokenStore, APITokenListItem, ResolveTokenHash(), future(), past(), TestResolveTokenHash(), DB (+7 more)
 
 ### Community 113 - "Load"
 Cohesion: 0.16
 Nodes (22): IsDefaultVoiceCredentials(), Load(), TestIsDefaultVoiceCredentials(), TestLoadDefaults(), TestLoadEnvironmentVariableOverrides(), TestLoadEnvOverride_EventPersistence(), TestLoadEnvOverridesPrecedenceOverYAML(), TestLoadEnvVarNoUnderscore() (+14 more)
 
 ### Community 114 - "handleVoiceE2EEOfferV2"
-Cohesion: 0.31
-Nodes (13): offerDeps(), TestVoiceE2EEOfferV2_EmptyFields(), TestVoiceE2EEOfferV2_HappyPath(), TestVoiceE2EEOfferV2_InvalidBase64(), TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(), TestVoiceE2EEOfferV2_NoReply(), TestVoiceE2EEOfferV2_NotInVoiceChannel(), TestVoiceE2EEOfferV2_NotKeyHolder() (+5 more)
+Cohesion: 0.16
+Nodes (24): offerDeps(), TestVoiceE2EEOfferV2_EmptyFields(), TestVoiceE2EEOfferV2_HappyPath(), TestVoiceE2EEOfferV2_InvalidBase64(), TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(), TestVoiceE2EEOfferV2_NoReply(), TestVoiceE2EEOfferV2_NotInVoiceChannel(), TestVoiceE2EEOfferV2_NotKeyHolder() (+16 more)
 
 ### Community 115 - "commands.rs"
 Cohesion: 0.14
 Nodes (15): get_cert_fingerprint(), get_identity_pin(), get_settings(), identity_pin_key(), is_settings_key_allowed(), log_cmd_err(), open_devtools(), AppHandle (+7 more)
 
 ### Community 116 - "newEmitTestHub"
-Cohesion: 0.21
-Nodes (20): TestEmitEvents_PresenceEvent_UsesNormalPriorityQueue(), drainChan(), Hub, newEmitTestHub(), registerEmitTestClient(), registerEmitTestVoiceClient(), TestEmitEvents_BroadcastAllEvent(), TestEmitEvents_ChannelEvent_CallsBroadcastToChannel() (+12 more)
+Cohesion: 0.12
+Nodes (28): TestEmitEvents_PresenceEvent_UsesNormalPriorityQueue(), drainChan(), Hub, newEmitTestHub(), registerEmitTestClient(), registerEmitTestVoiceClient(), TestEmitEvents_BroadcastAllEvent(), TestEmitEvents_ChannelEvent_CallsBroadcastToChannel() (+20 more)
 
 ### Community 117 - "Plan: Remediate security-hardening review regressions"
 Cohesion: 0.08
@@ -968,36 +931,32 @@ Cohesion: 0.13
 Nodes (15): aead.dev/minisign.PublicKey, os.File, TestEnsureVPrefix(), ensureVPrefix(), TestOpenVerifiedBinary_CommitHappyPath(), TestOpenVerifiedBinary_SwapAfterVerifyDetectedAtCommit(), TestOpenVerifiedBinary_WrongHash(), fileSHA256() (+7 more)
 
 ### Community 119 - "newRoleCRUDService"
-Cohesion: 0.17
-Nodes (24): assertAudit(), newRoleCRUDService(), TestAffectedUserIDs(), TestCreateRole_CannotGrantUnheldBit(), TestCreateRole_CannotPlaceAtOrAboveOwnRank(), TestCreateRole_DefaultPlacementAvoidsCollision(), TestCreateRole_DefaultsToJustBelowActor(), TestCreateRole_HappyPath() (+16 more)
+Cohesion: 0.14
+Nodes (26): TestAffectedUserIDs_LookupFailureReportsNotOK(), TestCreateRole_ConcurrentCreatesCannotCollideOnPosition(), assertAudit(), newRoleCRUDService(), TestAffectedUserIDs(), TestCreateRole_CannotGrantUnheldBit(), TestCreateRole_CannotPlaceAtOrAboveOwnRank(), TestCreateRole_DefaultPlacementAvoidsCollision() (+18 more)
 
-### Community 120 - "telemetry.go"
-Cohesion: 0.17
-Nodes (10): Float64(), init(), Int64(), SetGlobal(), String(), Attr, noopCounter, noopGauge (+2 more)
+### Community 120 - "PermissionService"
+Cohesion: 0.11
+Nodes (15): sync.RWMutex, DB, ChannelOverride, ChannelRef, Checker, EffectiveChannelPerms(), ChannelOverride, TestEffectiveChannelPerms_ResolutionOrder() (+7 more)
 
 ### Community 121 - "EnsureLiveKitBinary"
 Cohesion: 0.15
 Nodes (24): io.Reader, io.ReaderAt, sync/atomic.Int32, extractChatserverFromTarGz(), TestExtractChatserverFromTarGz(), cleanupOldLiveKitBinaries(), downloadTo(), EnsureLiveKitBinary() (+16 more)
 
 ### Community 122 - "clientip_test.go"
-Cohesion: 0.16
-Nodes (25): contextKey, errorResponse, net.IPNet, inCIDRs(), TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(), TestClientIP_NoTrustedProxies_UsesRemoteAddr(), TestClientIP_RemoteAddrWithoutPort(), TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored() (+17 more)
+Cohesion: 0.18
+Nodes (23): net.IPNet, inCIDRs(), TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(), TestClientIP_NoTrustedProxies_UsesRemoteAddr(), TestClientIP_RemoteAddrWithoutPort(), TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(), TestClientIP_TrustedProxy_NoXRealIP_FallsBackToRemoteAddr(), TestClientIP_TrustedProxy_UsesXRealIP() (+15 more)
 
 ### Community 123 - "newDeafenRaceDB"
 Cohesion: 0.73
 Nodes (5): mustCreateDeafenRaceChannel(), newDeafenRaceDB(), seedDeafenRaceUser(), TestVoiceModDeafen_RollbackFollowsTargetChannelMove(), TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel()
 
-### Community 124 - "Hub"
-Cohesion: 0.29
-Nodes (3): Client, Hub, buildVoiceLeave()
-
 ### Community 125 - "gif_handler_test.go"
-Cohesion: 0.26
-Nodes (21): lastRequest, chi.Router, MountGIFRoutes(), buildGIFRouter(), decodeGIFError(), decodeGIFResults(), gifGET(), stubKlipy() (+13 more)
+Cohesion: 0.21
+Nodes (23): lastRequest, net/http.Client, SetGIFUpstreamForTest(), chi.Router, MountGIFRoutes(), buildGIFRouter(), decodeGIFError(), decodeGIFResults() (+15 more)
 
-### Community 126 - "e2e/helpers.ts"
-Cohesion: 0.14
-Nodes (12): MOCK_INVITES, MOCK_MESSAGES_RICH, MOCK_READY_PAYLOAD, mockTauriFullSession(), mockTauriFullSessionWithAutoConnect(), mockTauriFullSessionWithEcho(), mockTauriFullSessionWithFailingMessages(), mockTauriFullSessionWithMessages() (+4 more)
+### Community 126 - "navigateToMainPage"
+Cohesion: 0.19
+Nodes (6): emitWsEvent(), emitWsMessage(), mockTauriFullSession(), mockTauriFullSessionWithMessages(), navigateToMainPage(), simulateReconnect()
 
 ### Community 127 - "messages.sql.go"
 Cohesion: 0.13
@@ -1008,20 +967,20 @@ Cohesion: 0.09
 Nodes (23): Channel Endpoints, DELETE /api/v1/channels/{id}/pins/{messageId}, Errors, GET /api/v1/channels, GET /api/v1/channels/{id}/messages, GET /api/v1/channels/{id}/messages/around/{messageId}, GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users, GET /api/v1/channels/{id}/pins (+15 more)
 
 ### Community 129 - "newSignedTestUpdater"
-Cohesion: 0.19
-Nodes (23): aead.dev/minisign.PrivateKey, multiAssetManifest(), testHash(), TestVerifyReleaseManifest_LegacySingleAssetStillVerifies(), TestVerifyReleaseManifest_MultiAssetBadChecksumFails(), TestVerifyReleaseManifest_MultiAssetSelectsLinuxEntry(), TestVerifyReleaseManifest_MultiAssetSelectsWindowsEntry(), TestVerifyReleaseManifest_MultiAssetUnknownAssetFails() (+15 more)
+Cohesion: 0.20
+Nodes (22): aead.dev/minisign.PrivateKey, multiAssetManifest(), testHash(), TestVerifyReleaseManifest_LegacySingleAssetStillVerifies(), TestVerifyReleaseManifest_MultiAssetBadChecksumFails(), TestVerifyReleaseManifest_MultiAssetSelectsLinuxEntry(), TestVerifyReleaseManifest_MultiAssetSelectsWindowsEntry(), TestVerifyReleaseManifest_MultiAssetUnknownAssetFails() (+14 more)
 
 ### Community 130 - "host_http_test.go"
 Cohesion: 0.13
 Nodes (19): net.Conn, net.IP, HTTPRequest, HTTPResponse, TestEmptyAllowlistDeniesEveryHost(), Registry, GuardedDialContext(), ipAllowed() (+11 more)
 
 ### Community 131 - "Topic"
-Cohesion: 0.22
-Nodes (8): channelTopicID(), Client, NewPubSub(), TestUserTopic(), topicFor(), UserTopic(), PubSub, Topic
-
-### Community 132 - "buildJSON"
 Cohesion: 0.14
-Nodes (13): buildChatBulkDeleted(), buildChatSendOK(), buildJSON(), buildMemberUpdate(), buildVoiceDisconnected(), buildVoiceE2EEOffer(), buildVoiceMoved(), TestBuildChatBulkDeleted_NilIDsEncodesAsEmptyArray() (+5 more)
+Nodes (12): TestGracefulStopContext_BudgetBoundsNoticeWait(), TestGracefulStopContext_IdleSkipsNoticeWait(), TestEmitEvents_DirectPresenceDropsQueuedEntry(), Client, NewPubSub(), TestUserTopic(), TestVoiceTopic(), topicFor() (+4 more)
+
+### Community 132 - "DB"
+Cohesion: 0.12
+Nodes (9): mentionExecer, ChannelOverride, DB, MentionTarget, Message, insertMentionRows(), LowerASCII(), MessageService (+1 more)
 
 ### Community 133 - "users"
 Cohesion: 0.14
@@ -1031,9 +990,9 @@ Nodes (15): channel_overrides, channels, messages, messages_fts, roles, sessions
 Cohesion: 0.12
 Nodes (4): Hub, Client, newClient(), wsConn
 
-### Community 135 - "NewAppMetrics"
-Cohesion: 0.21
-Nodes (8): go.opentelemetry.io/otel/metric.Meter, NewAppMetrics(), AppMetrics, Counter, Gauge, Histogram, noopMeter, otelMeter
+### Community 135 - "channel-controller.test.ts"
+Cohesion: 0.13
+Nodes (19): acknowledgeNsfw(), clearNsfwAcknowledgements(), isNsfwAcknowledged(), nsfwGateRequired(), setNsfwGateHost(), storageKey(), makeOpts(), makeSlots() (+11 more)
 
 ### Community 136 - "Queries"
 Cohesion: 0.12
@@ -1060,8 +1019,8 @@ Cohesion: 0.19
 Nodes (20): TestAddReaction_RefusedInArchivedChannel(), TestEditMessage_RefusedInArchivedChannel(), TestPurgeMessages_RefusedInArchivedChannel(), TestSendMessage_AllowedAfterUnarchive(), TestSendMessage_RefusedInArchivedChannel(), TestSetMessagePinned_RefusedInArchivedChannel(), MessageService, newPurgeService() (+12 more)
 
 ### Community 142 - "handleVoiceTokenRefreshV2"
-Cohesion: 0.18
-Nodes (16): seedTokenRefreshUser(), seedVoiceOnlyRole(), TestVoiceTokenRefreshV2_GenerateTokenError(), TestVoiceTokenRefreshV2_HappyPath(), TestVoiceTokenRefreshV2_IsKeyHolderReflectedInReply(), TestVoiceTokenRefreshV2_NoEvents(), TestVoiceTokenRefreshV2_NotInVoice(), TestVoiceTokenRefreshV2_PermissionsPassedToTokenGen() (+8 more)
+Cohesion: 0.16
+Nodes (17): seedTokenRefreshUser(), seedVoiceOnlyRole(), TestVoiceTokenRefreshV2_GenerateTokenError(), TestVoiceTokenRefreshV2_HappyPath(), TestVoiceTokenRefreshV2_IsKeyHolderReflectedInReply(), TestVoiceTokenRefreshV2_NoEvents(), TestVoiceTokenRefreshV2_NotInVoice(), TestVoiceTokenRefreshV2_PermissionsPassedToTokenGen() (+9 more)
 
 ### Community 143 - "pubsub_test.go"
 Cohesion: 0.26
@@ -1072,8 +1031,8 @@ Cohesion: 0.25
 Nodes (20): channelFlags, newChannel(), newChannelTestAPI(), patchChannelFlags(), TestCreateChannel_AnyTypeUnderAnyCategory(), TestCreateChannel_UnknownTypeRejected(), TestDeleteChannel_RefusesDM(), TestListChannels_ExcludesDMs() (+12 more)
 
 ### Community 145 - "handleLogStream"
-Cohesion: 0.16
-Nodes (12): gapProbeSSEWriter, revokingSSEWriter, bytes.Buffer, net/http.Header, TestHandleLogStream_EntryWrittenDuringBackfillIsDelivered(), TestRingBuffer_SnapshotAndSubscribe_NoGap(), TestRingBuffer_SnapshotAndSubscribe_SnapshotExcludedFromChannel(), handleLogStream() (+4 more)
+Cohesion: 0.13
+Nodes (13): gapProbeSSEWriter, revokingSSEWriter, lockedBuffer, bytes.Buffer, net/http.Header, TestHandleLogStream_EntryWrittenDuringBackfillIsDelivered(), TestRingBuffer_SnapshotAndSubscribe_NoGap(), TestRingBuffer_SnapshotAndSubscribe_SnapshotExcludedFromChannel() (+5 more)
 
 ### Community 146 - "handleSetup"
 Cohesion: 0.18
@@ -1084,8 +1043,8 @@ Cohesion: 0.14
 Nodes (9): log/slog.Value, logAttrValue(), Config, GIFConfig, GitHubConfig, VoiceConfig, redactSecret(), Session (+1 more)
 
 ### Community 148 - "Updater"
-Cohesion: 0.22
-Nodes (10): context.CancelFunc, golang.org/x/sync/singleflight.Group, detachFetch(), Updater, hasRequiredServerAssetsFor(), TestHasRequiredServerAssets_SignatureGOOSAware(), Asset, assetResponse (+2 more)
+Cohesion: 0.16
+Nodes (14): tauriPlatformResponse, tauriUpdateResponse, golang.org/x/sync/singleflight.Group, ensureV(), chi.Router, handleClientUpdate(), MountClientUpdateRoute(), Updater (+6 more)
 
 ### Community 149 - "Credential storage"
 Cohesion: 0.25
@@ -1095,25 +1054,25 @@ Nodes (8): Credential storage, Environment causes that remain possible, From the
 Cohesion: 0.09
 Nodes (23): dependencies, @jitsi/rnnoise-wasm, livekit-client, @tauri-apps/api, @tauri-apps/plugin-autostart, @tauri-apps/plugin-deep-link, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs (+15 more)
 
-### Community 151 - "connectionStats.ts"
-Cohesion: 0.17
-Nodes (13): collectAllStats(), ConnectionStats, ConnectionStatsPoller, createConnectionStatsPoller(), EMPTY_STATS, extractMetrics(), formatBitrate(), formatBytes() (+5 more)
+### Community 151 - "VoiceWidget.ts"
+Cohesion: 0.12
+Nodes (22): createVoiceWidget(), formatElapsed(), QUALITY_BARS, QUALITY_COLORS, STATUS_LABELS, collectAllStats(), ConnectionStats, ConnectionStatsPoller (+14 more)
 
 ### Community 152 - "Config Key Reference"
 Cohesion: 0.10
 Nodes (21): Backups (`backup`), Config Key Reference, Database (`database`), Environment Variable Overrides, Event Persistence (`event_persistence`), Example config.yaml, First-run setup wizard, GIF Picker (`gif`) (+13 more)
 
-### Community 153 - "seedChannel"
+### Community 153 - "newTestPermService"
 Cohesion: 0.18
-Nodes (23): TestSendMessage_DMMentionsResolve(), TestGetMessagesAround_DMNonParticipantIsNotFound(), TestCanPost_DMBlockEnforced(), TestCacheStats_HitsAndMisses(), newTestPermService(), TestHasChannelPerm_Allowed(), TestHasChannelPerm_Denied(), TestHasChannelPerm_OverrideAllow() (+15 more)
+Nodes (18): TestGetMessagesAround_DMNonParticipantIsNotFound(), TestCacheStats_HitsAndMisses(), newTestPermService(), TestHasChannelPerm_Allowed(), TestHasChannelPerm_Denied(), TestHasChannelPerm_OverrideAllow(), TestHasChannelPerm_OverrideDeny(), TestHasChannelPerm_UnknownUserReturnsFalse() (+10 more)
 
 ### Community 154 - "markdown.ts"
 Cohesion: 0.18
 Nodes (19): BlockNode, buildMatches(), codeSpanEnd(), DELIMS, DelimSpec, EMPTY_MATCHES, InlineNode, InlineStyle (+11 more)
 
 ### Community 155 - "VideoGrid.ts"
-Cohesion: 0.06
-Nodes (28): computeGridLayout(), createVideoGrid(), GridLayout, setButtonIcon(), TileConfig, VideoGridComponent, volumeIcon(), volumeXIcon() (+20 more)
+Cohesion: 0.04
+Nodes (38): appendModerationSection(), showUserVolumeMenu(), VoiceModMenuOptions, computeGridLayout(), createVideoGrid(), GridLayout, setButtonIcon(), TileConfig (+30 more)
 
 ### Community 156 - "Manifest"
 Cohesion: 0.22
@@ -1123,13 +1082,13 @@ Nodes (9): Capability, CommandSpec, Resources, UISpec, UITab, Manifest, FuzzVali
 Cohesion: 0.22
 Nodes (12): createChatLimiter(), createPresenceLimiter(), createRateLimiter(), createRateLimiterSet(), createReactionLimiter(), createTypingLimiter(), createVideoCameraLimiter(), createVoiceLimiter() (+4 more)
 
-### Community 158 - "buildChannelUpdate"
-Cohesion: 0.21
-Nodes (15): buildChannelCreate(), buildChannelUpdate(), channelPayloadFrom(), flaggedSampleChannel(), sampleChannel(), TestBuildChannelCreate_Payload(), TestBuildChannelCreate_Type(), TestBuildChannelCreate_ValidJSON() (+7 more)
+### Community 158 - "e2e/helpers.ts"
+Cohesion: 0.18
+Nodes (11): MOCK_INVITES, MOCK_MESSAGES_RICH, MOCK_READY_PAYLOAD, mockTauriConnect(), mockTauriConnectWith2FA(), mockTauriFullSessionWithEcho(), mockTauriFullSessionWithMessagesAndEcho(), mockTauriLoginError() (+3 more)
 
-### Community 159 - "Queries"
-Cohesion: 0.15
-Nodes (7): CountRoleMembersRow, CreateRoleParams, GetUserWithRoleRow, SetRolePositionParams, UpdateRoleParams, Queries, Role
+### Community 159 - "main.test.ts"
+Cohesion: 0.27
+Nodes (11): createWsClient(), ensureTauriApis(), uuid(), emitTauriEvent(), eventHandlers, mockInvoke, mockListen, capturedConnectCallbacks (+3 more)
 
 ### Community 160 - "testing.M"
 Cohesion: 0.11
@@ -1148,8 +1107,8 @@ Cohesion: 0.11
 Nodes (15): allResults, ARGS, byFile, clusters, commits, excluded, FIX_RESULTS, fixed (+7 more)
 
 ### Community 164 - "buildTauriMockScript"
-Cohesion: 0.12
-Nodes (14): buildReadyPayload(), buildTauriMockScript(), chatEchoHandlers(), MOCK_LOGIN_2FA_RESPONSE, MOCK_LOGIN_RESPONSE, MOCK_TOKEN, mockTauriConnect(), mockTauriConnectWith2FA() (+6 more)
+Cohesion: 0.13
+Nodes (13): buildReadyPayload(), buildTauriMockScript(), chatEchoHandlers(), MOCK_LOGIN_2FA_RESPONSE, MOCK_LOGIN_RESPONSE, MOCK_TOKEN, mockTauriFullSessionWithAutoConnect(), mockTauriFullSessionWithFailingMessages() (+5 more)
 
 ### Community 165 - "OwnCord Introspection MCP Server"
 Cohesion: 0.08
@@ -1180,28 +1139,28 @@ Cohesion: 0.11
 Nodes (17): Built-in commands, Code surface, Concurrency & lifecycle, Failure modes & UX, Files-to-touch checklist (for the implementing agent), Manifest changes, Non-goals, Open questions (+9 more)
 
 ### Community 172 - "net/http.Request"
-Cohesion: 0.14
-Nodes (27): PluginAdminHandler, net/http.Request, net/http.ResponseWriter, okHandler(), ok(), hasZipMagic(), isZipContentType(), NewPluginAdminHandler() (+19 more)
+Cohesion: 0.10
+Nodes (25): gifMediaFormat, gifResponse, gifResult, PluginAdminHandler, net/http.Request, net/http.ResponseWriter, net/url.URL, TestQueryInt_LimitStillCapped() (+17 more)
 
 ### Community 173 - "ChannelTopic"
-Cohesion: 0.16
-Nodes (15): TestEmitSequencedDM_UsesNormalQueueToPreserveSeqOrder(), TestEmitUserTargeted_KeepsHighPriorityFastLane(), NewTestClientWithChannel(), TestComputeAllowedChannels_DMLookupErrorIsFatal(), TestDeliverBroadcast_ShedFrameLeavesNoSeqGap(), TestEmitEvents_DMChannelOpenForcesFullResyncForOlderClients(), TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(), TestKickClient_SubscribeRaceCannotLeaveDeadSubscriber() (+7 more)
+Cohesion: 0.24
+Nodes (8): TestComputeAllowedChannels_DMLookupErrorIsFatal(), TestDeliverBroadcast_ShedFrameLeavesNoSeqGap(), TestEmitEvents_DMChannelOpenForcesFullResyncForOlderClients(), TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(), TestKickClient_SubscribeRaceCannotLeaveDeadSubscriber(), TestStaleTick_PrunesIdleTopicLimiterBuckets(), ChannelTopic(), TestChannelTopic()
 
-### Community 174 - "User"
-Cohesion: 0.04
-Nodes (39): createDMResponse, listDMsResponse, fakeStore, tokenStore, ResolveTokenHash(), future(), past(), TestResolveTokenHash() (+31 more)
+### Community 174 - "UserService"
+Cohesion: 0.07
+Nodes (24): createDMResponse, listDMsResponse, github.com/owncord/server/syncutil.Mutex, TestNewDMChannelInfo_EmptyRecipientsIsNotNil(), TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(), DMChannelInfo, DMUser, NewDMChannelInfo() (+16 more)
 
 ### Community 175 - "Blocked — fix attempted, revert-proof failed"
 Cohesion: 0.14
 Nodes (13): Blocked — fix attempted, revert-proof failed, Declined, OC-0001 — high — Wrapped room keys have no freshness binding, so old offers replay forever, OC-0003 — high — Unverified peers get no safety number, removing TOFU's only out-of-band escape hatch, OC-0012 — low — CleanupVoiceForChannel never clears voiceKeyHolders, OC-0039 — medium — DeleteMessage treats a GetChannel read error as "not a DM", letting a moderator hard-delete another user's private DM message, OC-0058 — low — Unban emits no WS event — *ws.Hub does not implement memberUnbanBroadcaster, OC-0081 — low — voice_max_video cap counts the requester's own camera row, so a user whose server-side camera flag is already 1 can never re-enable (+5 more)
 
-### Community 176 - "Global"
-Cohesion: 0.31
-Nodes (11): HTTPMiddleware(), PrometheusHandler(), Global(), resetGlobalForTest(), TestOtelAppMetricsRebindsAfterInit(), TestOtelHistogramRecordsSeconds(), TestOtelInitDisabledReturnsNoopProvider(), TestOtelInitNoneReturnsNoopProvider() (+3 more)
+### Community 176 - "handlers_backup.go"
+Cohesion: 0.17
+Nodes (14): backupEntry, backupFile, MaintainBackups(), pruneExpiredBackups(), runScheduledBackup(), scanBackups(), absOrRaw(), closeDatabase() (+6 more)
 
 ### Community 177 - "logger.ts"
 Cohesion: 0.05
-Nodes (52): createLogsTab(), formatLogEntry(), LOG_FILTER_LEVELS, LOG_LEVEL_COLORS, LOG_MIN_LEVELS, LogsTabHandle, TabName, createUpdateNotifier() (+44 more)
+Nodes (62): buildAppearanceTab(), getDefaultAccent(), hexToRgb(), applyTheme(), THEME_KEYS, ThemeName, THEMES, createLogsTab() (+54 more)
 
 ### Community 178 - "fallback_crypto.rs"
 Cohesion: 0.25
@@ -1220,20 +1179,20 @@ Cohesion: 0.12
 Nodes (7): encoding/json.Number, parseModTarget(), ChannelScoped, PingCmd, VoiceLeaveCmd, VoiceModKickCmd, VoiceTokenRefreshCmd
 
 ### Community 182 - "NewRingBuffer"
-Cohesion: 0.14
-Nodes (22): TestRingBuffer_WriteDoesNotAllocate(), NewRingBuffer(), newTeeLogger(), TestCategorizeSource_AttributesAdminPackage(), TestMultiHandler_Enabled(), TestMultiHandler_ErrorAttr_RecordLevel(), TestMultiHandler_ErrorAttr_WithAttrsLevel(), TestMultiHandler_LogValuerResolved() (+14 more)
+Cohesion: 0.15
+Nodes (22): TestRingBuffer_WriteDoesNotAllocate(), NewRingBuffer(), newTeeLogger(), TestCategorizeSource_AttributesAdminPackage(), TestMultiHandler_Enabled(), TestMultiHandler_ErrorAttr_RecordLevel(), TestMultiHandler_ErrorAttr_WithAttrsLevel(), TestMultiHandler_HandleReturnsNil() (+14 more)
 
 ### Community 183 - "ws-load.js"
 Cohesion: 0.12
 Nodes (14): authTime, broadcastLatency, CHANNEL_ID, handleSummary(), options, textSummary(), wsAcks, wsAuthed (+6 more)
 
-### Community 184 - "NewMessageService"
-Cohesion: 0.26
-Nodes (13): newDMFixture(), TestDeleteMessage_DMFanoutSurvivesDeleterDisconnectAfterCommit(), TestDeleteMessage_FailsClosedWhenChannelLookupErrors(), TestDeleteMessage_RefusedInArchivedChannel(), TestEditMessage_DMFanoutSurvivesEditorDisconnectAfterCommit(), TestEditMessage_FailsClosedWhenChannelLookupErrors(), TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(), TestSendMessage_DMFanoutSurvivesSenderDisconnectAfterCommit() (+5 more)
+### Community 184 - "newDMFixture"
+Cohesion: 0.31
+Nodes (10): newDMFixture(), TestDeleteMessage_DMFanoutSurvivesDeleterDisconnectAfterCommit(), TestDeleteMessage_FailsClosedWhenChannelLookupErrors(), TestDeleteMessage_RefusedInArchivedChannel(), TestEditMessage_DMFanoutSurvivesEditorDisconnectAfterCommit(), TestEditMessage_FailsClosedWhenChannelLookupErrors(), TestSendMessage_DMFanoutSurvivesSenderDisconnectAfterCommit(), TestSendMessage_DMReopenSurvivesSenderDisconnectAfterCommit() (+2 more)
 
 ### Community 185 - "handler"
-Cohesion: 0.12
-Nodes (16): multiHandler, ringHandler, log/slog.Attr, log/slog.Handler, log/slog.Level, log/slog.Record, handler, categorizeSource() (+8 more)
+Cohesion: 0.13
+Nodes (13): multiHandler, ringHandler, log/slog.Attr, log/slog.Handler, log/slog.Level, log/slog.Leveler, log/slog.Record, handler (+5 more)
 
 ### Community 186 - "tauri-client/package.json"
 Cohesion: 0.25
@@ -1248,7 +1207,7 @@ Cohesion: 0.16
 Nodes (14): MENTION_SEEDED_CHANNELS, mockTauriSessionWithChannels(), NSFW_CHANNELS, MOCK_MEMBERS_MULTI_ROLE, MOCK_MESSAGES, MOCK_PINNED_MESSAGES, CapturedCall, captureScript() (+6 more)
 
 ### Community 190 - "fakeDirInfo"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (3): fakeDirInfo, fakeFileInfo, io/fs.FileMode
 
 ### Community 191 - "Role Management"
@@ -1264,32 +1223,32 @@ Cohesion: 0.12
 Nodes (15): Client session (`livekitSession.ts`), Compatibility posture (transition), F3 status 2026-07-23 (branch `feat/e2ee-identity-tofu`), F3 — Voice E2EE identity keys + TOFU (the remaining work), F6 detail (done, committed `e6a0d87`), Infrastructure (mirror existing patterns), Notes carried from the build, Resume checklist (do these first) (+7 more)
 
 ### Community 194 - "run"
-Cohesion: 0.20
-Nodes (16): log/slog.LevelVar, log/slog.Logger, ParseLevel(), TestLoggingLevelFromEnv(), TestParseLevel(), getOutboundIP(), healthcheckTLSConfig(), isAddrInUse() (+8 more)
+Cohesion: 0.23
+Nodes (14): log/slog.LevelVar, log/slog.Logger, getOutboundIP(), healthcheckTLSConfig(), isAddrInUse(), loadPinnedCert(), main(), printBanner() (+6 more)
 
 ### Community 195 - "newWazeroTestRegistry"
-Cohesion: 0.35
-Nodes (13): Registry, newWazeroTestRegistry(), TestWazeroActivateCompilesModule(), TestWazeroCloseTearsDownRuntime(), TestWazeroConcurrentDispatchRace(), TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(), TestWazeroDeactivateClosesCompiledModule(), TestWazeroDisablePluginFreesModule() (+5 more)
+Cohesion: 0.26
+Nodes (15): Config, PluginStore, Registry, newWazeroTestRegistry(), TestWazeroActivateCompilesModule(), TestWazeroCloseTearsDownRuntime(), TestWazeroConcurrentDispatchRace(), TestWazeroCPUBudgetOverrunDoesNotBrickPlugin() (+7 more)
 
 ### Community 196 - "newUserSvc"
-Cohesion: 0.16
-Nodes (15): Store, newUserSvc(), TestAvatarFileURL(), TestClearCustomStatus(), TestSetCustomStatus_RoundTripClearAndBound(), TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(), TestUpdateProfile_ConcurrentUpdatesSerializePerUser(), TestUpdateProfile_RejectsOverlongFields() (+7 more)
+Cohesion: 0.20
+Nodes (15): Store, newUserSvc(), TestClearCustomStatus(), TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(), TestHandlePresenceUpdate_RejectsUnknownStatusAndOverlongText(), TestSetCustomStatus_RoundTripClearAndBound(), TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(), TestUpdateProfile_ConcurrentUpdatesSerializePerUser() (+7 more)
 
-### Community 197 - "otelProvider"
-Cohesion: 0.18
-Nodes (6): go.opentelemetry.io/otel/sdk/metric.MeterProvider, go.opentelemetry.io/otel/sdk/trace.TracerProvider, GlobalMeter(), Meter, noopProvider, otelProvider
+### Community 197 - "plugins_handler_test.go"
+Cohesion: 0.34
+Nodes (15): NewPluginAdminHandler(), buildZipUpload(), newTestPluginRegistry(), newTestPluginRegistryWithStore(), openPluginTestDB(), TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(), TestPluginsHandlerInstallHappyPath(), TestPluginsHandlerInstallRejectsNonZipContentType() (+7 more)
 
 ### Community 198 - "badDirFile"
-Cohesion: 0.14
+Cohesion: 0.13
 Nodes (5): badDirFile, fakeDir, fakeDirEntry, io/fs.DirEntry, io/fs.FileInfo
 
 ### Community 199 - "Contributing"
 Cohesion: 0.13
 Nodes (15): Active Branches, Available Commands, Branch Naming, Client (Tauri v2), Code Style, Commit Format, Contributing, Dependency Policy (+7 more)
 
-### Community 200 - ".handleFreshConnect"
-Cohesion: 0.30
-Nodes (6): github.com/coder/websocket.Conn, applyConnectStatus(), authenticateConn(), Client, Hub, resumeHint
+### Community 200 - "User"
+Cohesion: 0.14
+Nodes (13): adminContextKey, adminMeResponse, adminUserResponse, github.com/coder/websocket.Conn, toAdminUserResponse(), toAdminUserResponseFromUser(), User, UserWithRole (+5 more)
 
 ### Community 201 - "mcp-introspect/package.json"
 Cohesion: 0.13
@@ -1308,56 +1267,56 @@ Cohesion: 0.24
 Nodes (10): foundPlugin, Manifest, rejectSymlinksUnder(), scanPluginDirectory(), TestRejectSymlinksUnderClean(), TestRejectSymlinksUnderFindsNestedSymlink(), TestRejectSymlinksUnderFindsSymlink(), TestScanPluginDirectoryRejectsSymlinkEntrypoint() (+2 more)
 
 ### Community 205 - "AuditWriter"
-Cohesion: 0.24
-Nodes (4): AuditStore, pendingAudit, AuditWriter, DB
+Cohesion: 0.20
+Nodes (6): AuditStore, pendingAudit, sync.Once, AuditWriter, DB, waitForPersisted()
 
 ### Community 206 - "1. Channel sidebar"
 Cohesion: 0.14
 Nodes (14): 1.1 Channel type affordances, 1.1a Per-channel notification mutes, 1.2 Channel switching, 1.3 Reorder & CRUD (admin), 1. Channel sidebar, 2.1 Typing indicator, 2.2 Member actions (context menu), 2. Member list (+6 more)
 
-### Community 207 - "Messaging — target UX"
-Cohesion: 0.08
-Nodes (23): 1. Message list — states, 2. Composer — permission & connection gating, 3. Sending — optimistic lifecycle, 4. Edit / delete, 5. Reactions, 6. Attachments, 7. Replies, pins, search, read/unread, 7a. Jumping to a message (+15 more)
+### Community 207 - "Voice, Video & E2EE — target UX"
+Cohesion: 0.09
+Nodes (20): 1. View-state vocabulary, 2. Feedback primitives, 3. Connection status is a first-class, observable state, 4. Global event → reaction map, 5. Error & permission reaction matrix, 6. Cross-cutting principles, Documents, Maintenance rule (+12 more)
 
-### Community 208 - ".handleVoiceJoin"
-Cohesion: 0.16
-Nodes (11): encoding/json.RawMessage, parseCallChannelID(), buildVoiceConfig(), buildVoiceE2EEAnnounce(), parseChannelID(), TestBuildVoiceE2EEAnnounce_ValidJSON(), qualityBitrate(), Client (+3 more)
+### Community 208 - "NewWAFMiddlewareCRS"
+Cohesion: 0.22
+Nodes (14): captureSlog(), TestWAFMiddleware_CRSBlockMode_AllowsBenignJSONRequest(), TestWAFMiddleware_CRSBlockMode_BlocksXSSProbe(), TestWAFMiddleware_CRSBlockMode_FalsePositivesOnSQLishChatProse(), TestWAFMiddleware_CRSDetectMode_AggregatesMatchLoggingPerRequest(), TestWAFMiddleware_InlineRulesStillBlockInEveryCRSMode(), TestWAFMiddleware_UploadBodyNotBufferedOrEmptied(), NewWAFMiddlewareCRS() (+6 more)
 
-### Community 209 - "LiveKitClient"
-Cohesion: 0.12
-Nodes (9): github.com/livekit/protocol/livekit.ParticipantInfo, github.com/livekit/server-sdk-go/v2.RoomServiceClient, LiveKitProcess, Hub, LiveKitClient, participantIdentity(), RoomName(), TestRoomName() (+1 more)
+### Community 209 - "LiveKitProcess"
+Cohesion: 0.06
+Nodes (16): context.CancelFunc, github.com/livekit/protocol/livekit.ParticipantInfo, github.com/livekit/server-sdk-go/v2.RoomServiceClient, os/exec.Cmd, Store, detachFetch(), LiveKitProcess, Hub (+8 more)
 
 ### Community 210 - "migrate.go"
 Cohesion: 0.33
 Nodes (13): io/fs.FS, applyMigration(), ensureSchemaVersions(), DB, isApplied(), isCommentOnly(), isDuplicateColumn(), isExistingDatabase() (+5 more)
 
-### Community 211 - "seed.go"
-Cohesion: 0.26
-Nodes (11): seedChannel, seedMessage, seedUser, createChannels(), createDMConversation(), createMessages(), createUsers(), main() (+3 more)
-
-### Community 212 - "Hub"
-Cohesion: 0.15
-Nodes (3): Hub, EventStore, slowEventStore
-
-### Community 213 - "VoiceTopic"
-Cohesion: 0.23
-Nodes (11): TestVoiceTopic(), VoiceTopic(), Client, Hub, setupVoiceRoom(), TestRegisterNow_KeepsKeyHolderWhenVoiceStateTransfers(), TestRegisterNow_ReelectsKeyHolderWhenReplacedClientLeavesVoice(), TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey() (+3 more)
-
-### Community 214 - "TimeSince"
+### Community 211 - "sync.Mutex"
 Cohesion: 0.18
-Nodes (8): Invite, TestAttrConstructors(), TestNewAppMetrics_InstrumentsAreUsable(), TestNoopProvider_HTTPMiddlewareIsPassThrough(), TestNoopProvider_MeterInstrumentsAreInert(), TestTimeSince(), TimeSince(), noopHistogram
+Nodes (9): fakeAuditStore, slowAuditStore, sync.Mutex, TestAuditWriter_StopDrainsBeforeStoreClose(), TestAuditWriter_StopWaitsForGoroutineExit(), TestPersistAudits_EmptyBatch(), TestPersistAudits_PoisonRowFallsBackPerRow(), TestPersistAudits_SingleTransaction() (+1 more)
 
-### Community 215 - "itoa"
-Cohesion: 0.09
-Nodes (32): mockPermInvalidator, unbanMockHub, TestOwnerOnlyMiddleware_MemberDenied(), createMemberUser(), itoa(), TestAdminAPI_Stats_Forbidden(), TestAdminAPI_PatchChannel_ArchiveCleansVoice(), TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice() (+24 more)
+### Community 212 - "Messaging — target UX"
+Cohesion: 0.14
+Nodes (14): 1. Message list — states, 2. Composer — permission & connection gating, 3. Sending — optimistic lifecycle, 4. Edit / delete, 5. Reactions, 6. Attachments, 7. Replies, pins, search, read/unread, 7a. Jumping to a message (+6 more)
+
+### Community 213 - ".handleWebhookParticipantLeft"
+Cohesion: 0.27
+Nodes (7): github.com/livekit/protocol/livekit.WebhookEvent, FuzzParseParticipantIdentity(), FuzzParseRoomChannelID(), Hub, MountWebhookRoute(), parseParticipantIdentity(), parseRoomChannelID()
+
+### Community 214 - "handleChannelFocusV2"
+Cohesion: 0.40
+Nodes (10): newFocusTestDeps(), TestChannelFocusV2_ChannelNotFound_SilentDrop(), TestChannelFocusV2_HappyPath_SetsChannelID(), TestChannelFocusV2_InvalidChannelID_SilentDrop(), TestChannelFocusV2_NoEvents(), TestChannelFocusV2_NoPermission_ReturnsForbidden(), TestChannelFocusV2_RateLimited_SilentDrop(), TestMarkReadV2_RateLimited_SkipsReadStateWrite() (+2 more)
+
+### Community 215 - "handlers_channel_perms_test.go"
+Cohesion: 0.15
+Nodes (10): mockPermInvalidator, TestDeleteChannelPermission_ClearsOverride(), TestDeleteChannelPermission_UnknownRole(), TestGetChannelPermissions_DMRejected(), TestGetChannelPermissions_NotFound(), TestGetChannelPermissions_ReturnsAllRoles(), TestPutChannelPermission_AdministratorCanGrantAnyBit(), TestPutChannelPermission_MasksUnknownBits() (+2 more)
 
 ### Community 216 - "knip.json"
 Cohesion: 0.15
 Nodes (12): entry, ignore, ignoreDependencies, ignoreExportsUsedInFile, public/**, project, $schema, src/lib/protocolTypes.ts (+4 more)
 
-### Community 218 - "GlobalTracer"
-Cohesion: 0.21
-Nodes (6): Store, NewBlockService(), TestNoopProvider_TracerAndSpanAreInert(), GlobalTracer(), BlockService, Tracer
+### Community 218 - "Name"
+Cohesion: 0.31
+Nodes (9): overrideMatrixBits(), permGridBits(), TestAdminPanelOverrideMatrixCoversChannelScopedBits(), TestAdminPanelOverrideMatrixHasSingleDefinedBits(), TestAdminPanelPermGridCoversEveryPermissionBit(), TestAdminPanelPermGridHasNoDuplicateOrCompositeBits(), Name(), TestMentionEveryone_BitIsFreeAndNamed() (+1 more)
 
 ### Community 219 - "finish"
 Cohesion: 0.38
@@ -1379,17 +1338,17 @@ Nodes (13): 1. Settings overlay, 2.1 Profile edit, 2.2 Change password (with ses
 Cohesion: 0.41
 Nodes (12): buildClientUpdateRouter(), fakeGitHubRelease(), platformEntry(), TestClientUpdate_AlreadyLatest(), TestClientUpdate_DebTargetNoContent(), TestClientUpdate_FutureVersion(), TestClientUpdate_GitHubError(), TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage() (+4 more)
 
-### Community 224 - "handleVoiceE2EEAnnounceV2"
-Cohesion: 0.30
-Nodes (11): TestVoiceE2EEAnnounceV2_EmptyPublicKey(), TestVoiceE2EEAnnounceV2_HappyPath(), TestVoiceE2EEAnnounceV2_InvalidBase64(), TestVoiceE2EEAnnounceV2_NoReply(), TestVoiceE2EEAnnounceV2_NoSignature_LegacyAccepted(), TestVoiceE2EEAnnounceV2_NotInVoiceChannel(), TestVoiceE2EEAnnounceV2_PublicKeyTooLarge(), TestVoiceE2EEAnnounceV2_SignatureInvalidBase64() (+3 more)
+### Community 224 - "Save"
+Cohesion: 0.47
+Nodes (9): Save(), loadNoEnv(), TestSaveCreatesMissingFileFromTemplate(), TestSaveLeavesUnparseableFileIntact(), TestSavePatchesGeneratedDefaultFile(), TestSavePreservesHandEdits(), TestSaveVoiceAutoDownloadBool(), TestSaveVoiceCredentialsOnlyWhenEmpty() (+1 more)
 
-### Community 225 - "newTestRoleService"
-Cohesion: 0.31
-Nodes (12): newTestModerationService(), newTestRoleService(), roleIDOf(), TestBanUser_AuthorizedSucceeds(), TestBanUser_HierarchyEnforced(), TestBanUser_RequiresBanPermission(), TestChangeUserRole_AuditWritten(), TestChangeUserRole_CannotAssignAtOrAboveOwnRank() (+4 more)
+### Community 225 - "New"
+Cohesion: 0.15
+Nodes (20): NewDMService(), TestDMService_CreateDM_AllowsLapsedTemporaryBan(), TestDMService_CreateDM_RefusesBannedRecipient(), TestDMService_CreateGroupDM_RefusesBannedRecipient(), Store, NewModerationService(), newTestModerationService(), newTestRoleService() (+12 more)
 
 ### Community 226 - "event.go"
-Cohesion: 0.22
-Nodes (12): presenceEvents(), TestEmitEvents_DirectPresenceDropsQueuedEntry(), BroadcastAllEvent, ChannelEvent, ClientError, Event, ExcludeSenderEvent, SequencedDMEvent (+4 more)
+Cohesion: 0.02
+Nodes (32): TestPresenceEvents_InvisibleBlanksCustomStatusForOthers(), presenceEvents(), BroadcastAllEvent, CallSignalEvent, ChannelEvent, ClientError, DMChannelOpenEvent, Event (+24 more)
 
 ### Community 227 - "NewTopicRateLimiter"
 Cohesion: 0.24
@@ -1403,13 +1362,13 @@ Nodes (11): Author Attribution Template, Confidentiality layers, Editing skills 
 Cohesion: 0.17
 Nodes (11): categories, correctness, perf, suspicious, ignorePatterns, public, rules, no-map-spread (+3 more)
 
-### Community 230 - "VerifyTOTPCodeOnce"
-Cohesion: 0.25
-Nodes (10): UsedTOTPCodeStore, NewUsedTOTPCodeStore(), TestUsedTOTPCodeStore_DifferentCodes(), TestUsedTOTPCodeStore_DifferentUsersSameCode(), TestUsedTOTPCodeStore_MarkUsed(), TestVerifyTOTPCodeOnce_InvalidCodeRejected(), TestVerifyTOTPCodeOnce_NilStoreAccepted(), TestVerifyTOTPCodeOnce_ReplayRejected() (+2 more)
+### Community 230 - "attachment_queries_test.go"
+Cohesion: 0.20
+Nodes (9): TestGetAttachmentByID_Found(), TestGetAttachmentByID_NotFound(), TestGetAttachmentsByMessageIDs_Empty(), TestGetAttachmentsByMessageIDs_GroupsByMessage(), TestLinkAttachmentsToMessage_Empty(), TestLinkAttachmentsToMessage_LinksUnlinked(), TestLinkAttachmentsToMessage_OwnershipGuard(), TestLinkAttachmentsToMessage_SkipsAlreadyLinked() (+1 more)
 
 ### Community 231 - "e2e/dm-system.spec.ts"
-Cohesion: 0.20
-Nodes (13): MOCK_DM_CHANNELS, MOCK_READY_WITH_DMS, mockTauriSessionWithDms(), navigateToMainPageWithDms(), emitWsEvent(), emitWsMessage(), MOCK_AUTH_OK, MOCK_CHANNELS (+5 more)
+Cohesion: 0.23
+Nodes (10): MOCK_DM_CHANNELS, MOCK_READY_WITH_DMS, mockTauriSessionWithDms(), navigateToMainPageWithDms(), MOCK_AUTH_OK, MOCK_CHANNELS, MOCK_ROLES, submitLogin() (+2 more)
 
 ### Community 232 - "Queries"
 Cohesion: 0.21
@@ -1435,13 +1394,13 @@ Nodes (12): voice_camera (Client -> Server), voice_config (Server -> Client, dir
 Cohesion: 0.17
 Nodes (12): Choose Your Setup Path, Client Connection Notes, If Remote Users Cannot Connect, Next Steps, Option A: Prebuilt binaries (recommended), Option B: Docker (Linux server), Option C: Build from source, Optional: enable the GIF picker (+4 more)
 
-### Community 238 - "Database Schema Reference"
-Cohesion: 0.18
-Nodes (11): Admin perimeter, Bit Map, Database Configuration, Database Schema Reference, Default Role Permission Values, Indexes, Migration History, Migration System (+3 more)
+### Community 238 - "readPump"
+Cohesion: 0.22
+Nodes (7): TestWritePump_DrainsQueuedFramesAfterCloseSend(), Client, Hub, TestWritePump_DrainsAllNormalBeforeAnyLow(), readPump(), writePump(), TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce()
 
-### Community 239 - "NewEventPersister"
-Cohesion: 0.62
-Nodes (6): NewEventPersister(), openPersisterTestDB(), TestEventPersisterDropsOnFullQueue(), TestEventPersisterFlushesBatch(), TestEventPersisterStopDrains(), TestEventPersisterStopWaitsForGoroutineExit()
+### Community 239 - "mockTauriFullSessionWithVoice"
+Cohesion: 0.25
+Nodes (6): joinVoiceChannelByName(), mockTauriFullSessionWithVoice(), mockTauriFullSessionWithVoiceFailure(), voiceJoinFailureHandler(), NOTE: These tests do NOT exercise real LiveKit/WebRTC connections., VOICE_STATE_EVENT
 
 ### Community 240 - "index.mjs"
 Cohesion: 0.23
@@ -1471,17 +1430,17 @@ Nodes (11): Audit, Cache and fan-out, Channel Permission Overrides, DELETE /admi
 Cohesion: 0.18
 Nodes (11): DELETE /admin/api/users/{id}/sessions, Errors, GET /admin/api/stats, GET /admin/api/users, PATCH /admin/api/users/{id}, Request, Response 200 OK, Response 200 OK (+3 more)
 
-### Community 247 - "Voice, Video & E2EE — target UX"
-Cohesion: 0.18
-Nodes (11): 1. Two state machines, one status, 2. Join / leave, 3. Local controls, 4. Push-to-talk, 5. Voice roster (per channel), 6. Token refresh & reconnect (invisible), 7. E2EE identity verification surface, 8. Media processing & devices (+3 more)
+### Community 247 - ".UpdateUserProfile"
+Cohesion: 0.28
+Nodes (4): UpdateUserCustomStatusParams, UpdateUserPasswordParams, UpdateUserProfileParams, Queries
 
-### Community 248 - "Updater"
-Cohesion: 0.20
-Nodes (7): assetFilenameFromURL(), Updater, isGitHubHost(), TestIsGitHubHost(), TestAssetFilenameFromURL(), ClientAssets, textAssetCacheEntry
+### Community 248 - "groupDMFixture"
+Cohesion: 0.42
+Nodes (8): groupDMFixture(), TestCreateGroupDMChannel_OpensForEveryone(), TestCreateGroupDMChannel_RefusesUnderThree(), TestGetDMParticipants_CollapsesInvisible(), TestGetOrCreateDMChannel_IgnoresShrunkGroup(), TestLeaveGroupDM_DeletesChannelOnLastLeave(), TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(), TestSetDMChannelName_RefusesNonDM()
 
-### Community 249 - "buildErrorMsg"
-Cohesion: 0.35
-Nodes (4): Client, Hub, buildErrorMsg(), buildErrorMsgWithID()
+### Community 249 - "handleChatCommandV2"
+Cohesion: 0.13
+Nodes (15): getCommandConstructor(), TestCanPluginBroadcast_NilServiceFailsClosed(), TestChatCommandConstructor_Errors(), TestHandleChatCommandV2_NoRegistry(), TestHandleVoiceJoinV2_SignalsJoin(), TestHandleVoiceLeaveV2_RateLimited(), TestHandleVoiceLeaveV2_SignalsLeave(), TestVoiceJoinConstructor_Errors() (+7 more)
 
 ### Community 250 - "slashFS"
 Cohesion: 0.29
@@ -1493,23 +1452,19 @@ Nodes (9): 1. Hunt, 2. Gate (human), 3. Fix, 4. Verify the fixes independently �
 
 ### Community 252 - "MainPage.ts"
 Cohesion: 0.03
-Nodes (73): closeActiveLightbox(), clearReactionUsersCache(), setReactionUsersFetcher(), applyConnectionStatus(), createServerBanner(), ServerBannerControl, ToastType, setAudioVolumeHost() (+65 more)
+Nodes (73): DmProfileSidebarComponent, closeActiveLightbox(), clearReactionUsersCache(), setReactionUsersFetcher(), applyConnectionStatus(), createServerBanner(), ServerBannerControl, createToastContainer() (+65 more)
 
 ### Community 253 - "reconnectAfterCertAccept"
 Cohesion: 0.31
 Nodes (3): CertReconnectRouter, CertReconnectWs, reconnectAfterCertAccept()
 
-### Community 254 - "window-state.ts"
-Cohesion: 0.22
-Nodes (7): initWindowState(), isRectOnScreen(), log, MonitorRect, WindowRect, h, PRIMARY
-
 ### Community 255 - "emoji-voicemod.parity.spec.ts"
-Cohesion: 0.19
-Nodes (10): CapturedCall, getCapturedCalls(), mockSessionWithCustomEmoji(), mockVoiceSessionWithoutModPermission(), SEEDED_CUSTOM_EMOJI, waitForCapturedCall(), emitWsMessageAndWait(), mockTauriFullSessionWithVoice() (+2 more)
+Cohesion: 0.24
+Nodes (8): CapturedCall, getCapturedCalls(), mockSessionWithCustomEmoji(), mockVoiceSessionWithoutModPermission(), SEEDED_CUSTOM_EMOJI, waitForCapturedCall(), emitWsMessageAndWait(), voiceWsHandlers()
 
 ### Community 256 - "voice-e2ee-verify.spec.ts"
-Cohesion: 0.18
-Nodes (7): joinVoiceChannelByName(), MOCK_CHANNELS_WITH_CATEGORIES, MOCK_VOICE_STATE, emitPeerAnnounce(), mockE2EEVoiceSession(), PeerCrypto, voiceJoinWithTokenHandler()
+Cohesion: 0.22
+Nodes (6): MOCK_CHANNELS_WITH_CATEGORIES, MOCK_VOICE_STATE, emitPeerAnnounce(), mockE2EEVoiceSession(), PeerCrypto, voiceJoinWithTokenHandler()
 
 ### Community 257 - "include"
 Cohesion: 0.20
@@ -1535,9 +1490,9 @@ Nodes (8): github.com/coder/websocket.AcceptOptions, OriginAcceptOptions(), Test
 Cohesion: 0.27
 Nodes (3): github.com/owncord/server/syncutil.RWMutex, eventEntry, EventRingBuffer
 
-### Community 263 - "EventPersister"
-Cohesion: 0.27
-Nodes (4): sync/atomic.Uint64, sync.Once, EventPersister, pendingEvent
+### Community 263 - "FuzzImageDimensions"
+Cohesion: 0.46
+Nodes (7): fuzzGIFBytes(), FuzzImageDimensions(), fuzzJPEGBytes(), fuzzPNGBytes(), fuzzWebPVP8(), fuzzWebPVP8L(), fuzzWebPVP8X()
 
 ### Community 264 - "newTokenTestDB"
 Cohesion: 0.51
@@ -1563,9 +1518,9 @@ Nodes (8): CI wiring (`.github/workflows/ci.yml`), Current status: 291 web tests
 Cohesion: 0.27
 Nodes (6): main(), render(), selftest(), SEV_RANK, VALID_STATUS, validate()
 
-### Community 270 - ".BeginTx"
-Cohesion: 0.28
-Nodes (6): DBTX, database/sql.Tx, database/sql.TxOptions, Queries, Queries, New()
+### Community 270 - "newBlockService"
+Cohesion: 0.46
+Nodes (7): newBlockService(), TestBlockService_BlockUser(), TestBlockService_BlockUser_Idempotent(), TestBlockService_BlockUser_Rejections(), TestBlockService_ListBlocked(), TestBlockService_UnblockUser(), TestBlockService_UnblockUser_Rejections()
 
 ### Community 271 - "TestMigrate_UpgradeFromMigration019PreservesData"
 Cohesion: 0.36
@@ -1575,13 +1530,13 @@ Nodes (4): migrationCutoffFS, columnExists(), TestMigrate_FullChainSchemaIsCoher
 Cohesion: 0.28
 Nodes (4): CreateAttachmentParams, GetAttachmentByIDRow, GetAttachmentWithChannelRow, Queries
 
-### Community 273 - "StartEventPruner"
-Cohesion: 0.36
-Nodes (7): runPrune(), StartEventPruner(), TestRunPruneCutoffCalculation(), TestRunPruneErrorDoesNotPanic(), TestStartEventPrunerContextCancellation(), TestStartEventPrunerNilStoreIsNoop(), TestStartEventPrunerStartupDelayBoundedByInterval()
+### Community 273 - "TestChannelVisibility_RESTWSAgreement"
+Cohesion: 0.67
+Nodes (6): equalSets(), idSet(), seedVisibilityUser(), sortedKeys(), TestChannelVisibility_RESTWSAgreement(), TestChannelVisibility_UserOverrideAgreement()
 
-### Community 274 - ".deliverBroadcast"
-Cohesion: 0.27
-Nodes (4): TestExtractEventType(), TestExtractEventTypeLengthCap(), extractEventType(), wrapWithSeq()
+### Community 274 - "fuzzOpenMigratedMemory"
+Cohesion: 0.60
+Nodes (4): fuzzTestHelper, fuzzOpenMigratedMemory(), FuzzSanitizeFTSQuery(), DB
 
 ### Community 275 - "Finish the V2 Dispatch Migration (backlog item 11) — Design"
 Cohesion: 0.22
@@ -1600,12 +1555,12 @@ Cohesion: 0.22
 Nodes (9): 8. Plugin System Governance, 9. Prioritized Top-10 Action List, Bonus (quick wins), CRITICAL Issues, Finding closure status (maintained; last updated 2026-07-20), OwnCord — Comprehensive Project Audit, Plugin Architecture, Strengths (+1 more)
 
 ### Community 280 - "RingBuffer"
-Cohesion: 0.24
-Nodes (7): LogEntry, ticketEntry, ticketStore, log/slog.Leveler, RingBuffer, NewMultiHandler(), TestMultiHandler_HandleReturnsNil()
+Cohesion: 0.30
+Nodes (5): LogEntry, ticketEntry, ticketStore, RingBuffer, NewMultiHandler()
 
 ### Community 281 - "Client HTTP TOFU Proxy (D5) — Design"
-Cohesion: 0.22
-Nodes (9): Approach — loopback TCP→TLS tunnel (reuse the LiveKit proxy pattern), Client HTTP TOFU Proxy (D5) — Design, Implementation summary (what shipped), Lifecycle & wiring, Non-goals, Problem, Testing, TOFU semantics (must match ws_proxy) (+1 more)
+Cohesion: 0.10
+Nodes (18): Approach — loopback TCP→TLS tunnel (reuse the LiveKit proxy pattern), Client HTTP TOFU Proxy (D5) — Design, Implementation summary (what shipped), Lifecycle & wiring, Non-goals, Problem, Testing, TOFU semantics (must match ws_proxy) (+10 more)
 
 ### Community 282 - "create_tray"
 Cohesion: 0.61
@@ -1651,17 +1606,17 @@ Nodes (3): Client, Hub, leaveVoiceChannelWithRetry()
 Cohesion: 0.29
 Nodes (6): Compaction behaviour, Environments, Activation Setup, and Handoff-Doc Mode, Handoff-doc analysis (when one arrives), Handoff-doc mode (no persistent storage), Recommended activation setup, User-facing documentation
 
-### Community 295 - "Tauri HTTP Capability Narrowing — Design"
-Cohesion: 0.22
-Nodes (9): Decision, Finding 1 — only ONE of the three identifiers is actually scoped, Finding 2 — the host set is NOT enumerable, Non-goals, Problem, Tauri HTTP Capability Narrowing — Design, Test / smoke plan, What cannot be narrowed, and why (+1 more)
+### Community 295 - "handlePingV2"
+Cohesion: 0.60
+Nodes (4): TestPingV2_HappyPath_ReturnsPongReply(), TestPingV2_NoEvents(), TestPingV2_RateLimited_ReturnsEmpty(), handlePingV2()
 
 ### Community 296 - "capabilities-scope.test.ts"
 Cohesion: 0.29
 Nodes (4): Permission, permissions, ScopedPermission, ScopeEntry
 
-### Community 297 - "cancelAfterArm"
-Cohesion: 0.29
-Nodes (3): cancelAfterArm, cancelOnLookupStore, sync/atomic.Bool
+### Community 297 - "ParseLevel"
+Cohesion: 0.67
+Nodes (3): ParseLevel(), TestLoggingLevelFromEnv(), TestParseLevel()
 
 ### Community 298 - "GET /admin/api/updates"
 Cohesion: 0.29
@@ -1703,14 +1658,6 @@ Nodes (6): openFileDB(), seedChannelAndUser(), TestFilePool_ConcurrentReadsAndWr
 Cohesion: 0.29
 Nodes (6): Build command, Building the WASM, hello plugin, Manifest, Prerequisites, Tests
 
-### Community 308 - "newAssetTestInstance"
-Cohesion: 0.48
-Nodes (6): Registry, newAssetTestInstance(), TestAssetHandlerRejectsTraversal(), TestAssetHandlerRejectsUnlistedFile(), TestAssetHandlerServesAllowedFile(), TestAssetHandlerServesNestedAsset()
-
-### Community 309 - "buildUserUpdate"
-Cohesion: 0.38
-Nodes (5): userUpdateSpy, buildUserUpdate(), UserUpdate, TestBuildUserUpdate_IncludesIdentityKey(), userUpdatePayload
-
 ### Community 310 - "4. Dependencies & Supply Chain"
 Cohesion: 0.29
 Nodes (7): 4. Dependencies & Supply Chain, Go Modules — 30 direct deps, ALL exact-pinned ✅, Known Vulnerabilities, License Compliance, Lockfile Status, npm — 13 production deps, ALL floating (^) ⚠️, Overall Posture: **MODERATE RISK** (Go excellent, npm floating)
@@ -1730,10 +1677,6 @@ Nodes (5): Approval policy, Comprehensive Review (scheduled or fallback), Constr
 ### Community 317 - "cert-tofu.spec.ts"
 Cohesion: 0.33
 Nodes (4): CertTofuPayload, FIRST_USE, MISMATCH, MISMATCH_LIVE_HOST
-
-### Community 318 - "navigateToMainPageReady"
-Cohesion: 0.18
-Nodes (5): mockTauriFullSessionWithVoiceFailure(), navigateToMainPageReady(), voiceJoinFailureHandler(), mockUpdaterSession(), NOTE: These tests do NOT exercise real LiveKit/WebRTC connections.
 
 ### Community 320 - "tsconfig.build.json"
 Cohesion: 0.33
@@ -1759,25 +1702,13 @@ Nodes (6): First-Run Setup, GET /admin/api/setup/status, POST /admin/api/setup, 
 Cohesion: 0.33
 Nodes (6): GET /api/v1/livekit/health, LiveKit Endpoints, /livekit/* (Reverse Proxy), POST /api/v1/livekit/webhook, Response 200 OK, Response 503 Service Unavailable
 
-### Community 326 - "Permission-Middleware Consolidation (audit finding A-2026-07-16) — Design"
-Cohesion: 0.33
-Nodes (6): Approach — one server-scoped predicate, and fail closed on override load, Files touched, Non-goals, Permission-Middleware Consolidation (audit finding A-2026-07-16) — Design, Problem, Test plan
-
-### Community 327 - "Tailscale Guide (Zero-Config Remote Access)"
-Cohesion: 0.33
-Nodes (6): Benefits, Setup, Tailscale Guide (Zero-Config Remote Access), TLS Recommendation, Voice/Video with Tailscale, Why Tailscale
+### Community 327 - "README.md"
+Cohesion: 0.16
+Nodes (10): Benefits, Setup, Tailscale Guide (Zero-Config Remote Access), TLS Recommendation, Voice/Video with Tailscale, Why Tailscale, Hardening documentation, Reporting a vulnerability (+2 more)
 
 ### Community 329 - "5. Test Coverage & Quality"
 Cohesion: 0.29
 Nodes (7): 5. Test Coverage & Quality, Go — Critical Coverage Gaps, Go — Package Coverage, Go — Test Quality: GOOD, TypeScript — E2E Coverage: EXCELLENT, TypeScript — Test Files, TypeScript — Unit Coverage: MINIMAL (<10%)
-
-### Community 334 - "Init"
-Cohesion: 0.33
-Nodes (6): TelemetryConfig, resetAppMetricsForInit(), Init(), TraceIDFromContext(), Init(), ShutdownFunc
-
-### Community 335 - ".Start"
-Cohesion: 0.33
-Nodes (4): go.opentelemetry.io/otel/trace.Tracer, noopTracer, otelTracer, Span
 
 ### Community 336 - "GET /api/v1/client-update/{target}/{current_version}"
 Cohesion: 0.40
@@ -1795,17 +1726,13 @@ Nodes (5): voice_e2ee_announce (Client -> Server), voice_e2ee_announce (Server -
 Cohesion: 0.40
 Nodes (4): Additional Context, Alternatives Considered, Problem, Proposed Solution
 
-### Community 340 - "NewDMService"
-Cohesion: 0.60
-Nodes (4): NewDMService(), TestDMService_CreateDM_AllowsLapsedTemporaryBan(), TestDMService_CreateDM_RefusesBannedRecipient(), TestDMService_CreateGroupDM_RefusesBannedRecipient()
+### Community 341 - "setupDiagnosticsRouter"
+Cohesion: 0.24
+Nodes (10): setupDiagnosticsRouter(), TestDiagnosticsConnectivity_MemberForbidden(), TestDiagnosticsConnectivity_ReturnsData(), TestDiagnosticsConnectivity_Unauthenticated(), TestIsPrivateIP(), buildMetricsRouter(), TestHandleMetrics_AdminIPRestrict_AllowsAdmin(), TestHandleMetrics_AdminIPRestrict_BlocksNonAdmin() (+2 more)
 
-### Community 341 - "buildMetricsRouter"
-Cohesion: 0.53
-Nodes (5): buildMetricsRouter(), TestHandleMetrics_AdminIPRestrict_AllowsAdmin(), TestHandleMetrics_AdminIPRestrict_BlocksNonAdmin(), TestHandleMetrics_ReturnsExpectedFields(), TestHandleMetrics_WithoutLiveKitHealthCheck()
-
-### Community 342 - "handleApplyUpdate"
-Cohesion: 0.31
-Nodes (6): applyStagedUpdate(), handleApplyUpdate(), handleCheckUpdate(), RunningInContainer(), TestRunningInContainer_BareMetalDefault(), TestRunningInContainer_EnvSemantics()
+### Community 342 - "RunningInContainer"
+Cohesion: 0.50
+Nodes (3): RunningInContainer(), TestRunningInContainer_BareMetalDefault(), TestRunningInContainer_EnvSemantics()
 
 ### Community 361 - "OwnCord"
 Cohesion: 0.33
@@ -1823,10 +1750,6 @@ Nodes (3): log_level_from_env(), run(), LevelFilter
 Cohesion: 0.73
 Nodes (5): mustCreateVideoCappedChannel(), newOC0023VideoLimitDB(), seedOC0023VideoLimitUser(), TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(), TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull()
 
-### Community 366 - "MetricsSources"
-Cohesion: 0.50
-Nodes (4): EventPersisterMetrics, MetricsSources, ServerMetrics, database/sql.DBStats
-
 ### Community 367 - "File Upload and Serving"
 Cohesion: 0.50
 Nodes (4): File Upload and Serving, GET /api/v1/files/{id}, POST /api/v1/uploads, Response 201 Created
@@ -1834,22 +1757,6 @@ Nodes (4): File Upload and Serving, GET /api/v1/files/{id}, POST /api/v1/uploads
 ### Community 368 - "Server Logs (SSE)"
 Cohesion: 0.50
 Nodes (4): GET /admin/api/logs/stream?ticket={ticket}, POST /admin/api/logs/ticket, Response 200 OK, Server Logs (SSE)
-
-### Community 369 - "D7 — Module map"
-Cohesion: 0.50
-Nodes (4): Client Architecture (Tauri), D7 — Module map, Key mechanisms, Quality tooling
-
-### Community 370 - "D5 — Entity-relationship overview"
-Cohesion: 0.50
-Nodes (4): D5 — Entity-relationship overview, Data Model, Domain notes, How the schema is accessed
-
-### Community 371 - "WebSocket / Real-time Engine"
-Cohesion: 0.50
-Nodes (4): D4a — Connect, authenticate, replay, D4b — Broadcast fanout and backpressure, D4c — Typed command dispatch, WebSocket / Real-time Engine
-
-### Community 372 - "Audit 2026-07-19 — Maintainer Decisions"
-Cohesion: 0.50
-Nodes (4): Audit 2026-07-19 — Maintainer Decisions, Decisions, Explicitly not decided here, Suggested sequencing
 
 ### Community 373 - "DM Calls"
 Cohesion: 0.50
@@ -1903,33 +1810,29 @@ Nodes (5): 6. CI/CD & DevEx, Build Reproducibility, Gaps, Linting Enforcement, P
 Cohesion: 0.40
 Nodes (5): 7. Observability, Client-Side: LIMITED ⚠️, Error Surfacing: GOOD ✅, Logging: STRONG ✅, Metrics & Tracing: PRESENT (build-tag gated)
 
-### Community 419 - "Security Policy"
-Cohesion: 0.40
-Nodes (4): Hardening documentation, Reporting a vulnerability, Security Policy, Supported versions
-
 ### Community 449 - "RateLimiter"
-Cohesion: 0.11
-Nodes (18): entry, lockoutEntry, LockoutPersister, rateLimiterShard, time.Duration, searchRateLimitMiddleware(), buildCombinedRouter(), rateLimitMiddlewareWithPrefix() (+10 more)
+Cohesion: 0.20
+Nodes (10): entry, lockoutEntry, LockoutPersister, rateLimiterShard, time.Duration, RateLimiter, NewPersistentRateLimiter(), newRateLimiter() (+2 more)
 
 ## Knowledge Gaps
-- **1822 isolated node(s):** `here`, `scenarios`, `FOUR_FILES`, `PROVE_FAIL`, `meta` (+1817 more)
+- **1822 isolated node(s):** `OC-0012 — low — CleanupVoiceForChannel never clears voiceKeyHolders`, `OC-0058 — low — Unban emits no WS event — *ws.Hub does not implement memberUnbanBroadcaster`, `OC-0081 — low — voice_max_video cap counts the requester's own camera row, so a user whose server-side camera flag is already 1 can never re-enable`, `OC-0086 — low — sweepStaleVoiceStates classifies ghost rows from a snapshot and then deletes them without re-checking, so an in-flight voice_join is ejected from the SFU while the hub still believes the user is in the room`, `OC-0090 — low — channelReadAudience falls through to a server-wide role scan when the channel row is gone, leaking a private group-DM's voice_leave to every connected member` (+1817 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **93 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **76 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `DB` connect `DB` to `testing.T`, `buildJSON`, `openMigratedMemory`, `buildChannelRouter`, `newTokenTestDB`, `middleware_and_spawn_test.go`, `waitRegistered`, `NewAdminAPI`, `.BeginTx`, `TestMigrate_UpgradeFromMigration019PreservesData`, `newChannelTestAPI`, `handleLogStream`, `roleDeletingInvalidator`, `handleSetup`, `newPurgeService`, `newHandlerHub`, `buildDMRouter`, `handleVoiceTokenRefreshV2`, `newAuthTestDB`, `newMigratedTestDB`, `seedChannel`, `NewTestClient`, `drainChanTimeout`, `coverage_misc_test.go`, `database/sql.Result`, `newUploadTestDB`, `net/http.HandlerFunc`, `newAdminTestDB`, `NewHub`, `WriteAudit`, `cancelAfterArm`, `NewChecker`, `HashToken`, `net/http.Request`, `DB`, `Result`, `NewRouter`, `net/http.Handler`, `openFileDB`, `newTestDB`, `seedMemberUser`, `newServeHub`, `NewMessageService`, `postJSONWithToken`, `newVoiceTestDB`, `run`, `doRequest`, `newUserSvc`, `Role`, `.handleFreshConnect`, `emoji_handler_test.go`, `AuditWriter`, `openAdminTestDB`, `db/db.go`, `newMentionFixture`, `PermissionService`, `seed.go`, `Migrate`, `itoa`, `Hub`, `DB`, `newTestMessageService`, `newHarvestVoiceDB`, `newTestRoleService`, `handleCreateEmoji`, `MigrateFS`, `newOverrideFixture`, `NewRegistry`, `voice_moderation_test.go`, `TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull`, `NewEventPersister`, `countingReadStateStore`, `newRoleCRUDService`, `newDeafenRaceDB`, `gif_handler_test.go`?**
-  _High betweenness centrality (0.030) - this node is a cross-community bridge._
+- **Why does `DB` connect `DB` to `testing.T`, `seedChannel`, `context.Context`, `buildChannelRouter`, `waitRegistered`, `NewAdminAPI`, `net/http.HandlerFunc`, `NewTestClient`, `newHandlerHub`, `drainChanTimeout`, `buildDMRouter`, `newAuthTestDB`, `newMigratedTestDB`, `EventPersister`, `Hub`, `database/sql.Result`, `newUploadTestDB`, `writeJSON`, `HashToken`, `Key`, `livekit_test.go`, `NewChecker`, `net/http.Handler`, `Result`, `NewRouter`, `profileCreateToken`, `openMigratedMemory`, `newServeHub`, `postJSONWithToken`, `newVoiceTestDB`, `itoa`, `Role`, `newEmojiService`, `openAdminTestDB`, `newMentionFixture`, `Channel`, `seedUser`, `Migrate`, `Hub`, `DB`, `newTestMessageService`, `VoiceDeps`, `emoji_handler_test.go`, `handleCreateEmoji`, `doRequest`, `MigrateFS`, `newOverrideFixture`, `NewRegistry`, `voice_moderation_test.go`, `newRoleCRUDService`, `PermissionService`, `newDeafenRaceDB`, `gif_handler_test.go`, `middleware_and_spawn_test.go`, `newPurgeService`, `handleVoiceTokenRefreshV2`, `newChannelTestAPI`, `handleLogStream`, `handleSetup`, `newTestPermService`, `handlers_backup.go`, `newDMFixture`, `run`, `newUserSvc`, `plugins_handler_test.go`, `User`, `AuditWriter`, `New`, `countingReadStateStore`, `groupDMFixture`, `newTokenTestDB`, `newBlockService`, `TestMigrate_UpgradeFromMigration019PreservesData`, `TestChannelVisibility_RESTWSAgreement`, `openFileDB`, `errDMParticipantsStore`, `setupDiagnosticsRouter`, `TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull`, `errDMChannelIDsStore`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
 - **Why does `installTestPlugin()` connect `newMigratedTestDB` to `testing.T`, `context.Context`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
+  _High betweenness centrality (0.019) - this node is a cross-community bridge._
 - **Why does `mustSetSetting()` connect `chdirTemp` to `testing.T`, `context.Context`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
+  _High betweenness centrality (0.017) - this node is a cross-community bridge._
 - **Are the 281 inferred relationships involving `waitRegistered()` (e.g. with `TestChannelFocus_AdminBypassesDeny()` and `TestChannelFocus_AllowedByDefault()`) actually correct?**
   _`waitRegistered()` has 281 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 2 inferred relationships involving `NewTestClientWithUser()` (e.g. with `TestRefreshChannelVisibility_ReconnectDuringFanOutActsOnLiveClient()` and `TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady()`) actually correct?**
   _`NewTestClientWithUser()` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `here`, `scenarios`, `FOUR_FILES` to the rest of the system?**
+- **What connects `OC-0012 — low — CleanupVoiceForChannel never clears voiceKeyHolders`, `OC-0058 — low — Unban emits no WS event — *ws.Hub does not implement memberUnbanBroadcaster`, `OC-0081 — low — voice_max_video cap counts the requester's own camera row, so a user whose server-side camera flag is already 1 can never re-enable` to the rest of the system?**
   _1822 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `dispatcher.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.020540899286543887 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.014710957722174288 - nodes in this community are weakly interconnected._

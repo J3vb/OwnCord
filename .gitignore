@@ -114,3 +114,6 @@ server.log
 # dated YYYY-MM-DD/ backup on each rebuild — 18 MB of stale duplicate that is a
 # local rollback aid, not shared state.
 graphify-out/*/
+
+# Transient graphify rebuild-state file.
+graphify-out/.pending_changes

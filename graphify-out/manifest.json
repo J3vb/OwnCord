@@ -5481,17 +5481,17 @@
   },
   "Client/tauri-client/src-tauri/capabilities/default.json": {
     "mtime": 1786272933.6755219,
-    "ast_hash": "",
+    "ast_hash": "72fd589daf6497717ac840ef00c9660f",
     "semantic_hash": ""
   },
   "Server/plugin/examples/hello/plugin.json": {
     "mtime": 1784557739.5584006,
-    "ast_hash": "",
+    "ast_hash": "bdf9b835ac2e05602839d0ceb9a9b6d0",
     "semantic_hash": ""
   },
   "docs/protocol-schema.json": {
     "mtime": 1786170197.508181,
-    "ast_hash": "",
+    "ast_hash": "98858de1d31ba62f7d0b036816f97123",
     "semantic_hash": ""
   },
   ".superpowers/render-ledger.mjs": {
@@ -5507,6 +5507,11 @@
   ".superpowers/FINDINGS.md": {
     "mtime": 1786726188.2133741,
     "ast_hash": "079cf5eb892902cca706d62bb14703c7",
+    "semantic_hash": ""
+  },
+  "Client/tauri-client/src-tauri/tauri.conf.json": {
+    "mtime": 1786822952.264749,
+    "ast_hash": "f05bbc86946be8157b818eb83315c87f",
     "semantic_hash": ""
   }
 }
