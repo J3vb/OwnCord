@@ -261,6 +261,12 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.WaitDelay = 6 * time.Second // bound Wait to prevent goroutine leak on Windows
+		if attr := liveKitSysProcAttr(); attr != nil {
+			// Linux: die with a parent that never ran its teardown (kill -9,
+			// OOM, restart-backstop force-exit) instead of orphaning with
+			// 7880/UDP still bound.
+			cmd.SysProcAttr = attr
+		}
 
 		slog.Info("livekit: starting process",
 			"binary", binPath,
