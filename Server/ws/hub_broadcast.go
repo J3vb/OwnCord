@@ -599,27 +599,68 @@ func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
 	}
 }
 
-// dropQueuedPresence removes a user's pending coalesced presence, if any.
-// Called when a fresher presence for that user is broadcast directly (the
-// presence_update handler path), so the coalescer's later flush cannot
-// resurrect the stale connect-time state over it. Ordering holds because a
-// user's connect (which queues) and their presence_update (which drops) run
-// serially on the same connection's readPump.
-func (h *Hub) dropQueuedPresence(userID int64) {
+// dropQueuedPresenceAndBroadcast atomically removes any coalesced presence
+// still queued for userID and runs broadcast, both under presenceMu. Called
+// when a fresher presence for that user is delivered directly (the
+// presence_update handler path, via EmitEvents), so the delete and the send
+// of the fresher frame can never straddle flushPresenceQueue's own
+// snapshot-and-broadcast critical section (OC-0005).
+//
+// Holding presenceMu across the delete AND the broadcast — rather than just
+// the delete — is what actually closes the race: whichever of this call and
+// flushPresenceQueue acquires presenceMu second also enqueues its broadcast
+// second.
+//   - If this call goes first, it deletes the entry before flush can ever
+//     snapshot it, so flush never broadcasts the stale state at all.
+//   - If flush goes first, this call's delete is a no-op against the
+//     already-cleared queue, but its broadcast still cannot run until flush's
+//     own broadcast has already been enqueued — so the fresher frame is
+//     stamped with the higher seq by deliverBroadcast's single FIFO consumer
+//     and every client's final view converges on it, not the stale one.
+//
+// broadcast runs with presenceMu held: every current caller
+// (BroadcastToAll, broadcastExcludeLow) only enqueues onto a non-blocking
+// channel or pub/sub topic via a different mutex (h.broadcast's channel send,
+// PubSub.mu), so this cannot block and introduces no new lock-order edge.
+func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
 	delete(h.presenceQueue, userID)
-	h.presenceMu.Unlock()
+	broadcast()
 }
 
+// presenceFlushRaceHook, when non-nil, runs once per flushPresenceQueue call
+// immediately after the coalesced queue has been snapshotted and cleared,
+// while presenceMu is still held. Test-only (always nil in production): the
+// snapshot-to-broadcast window is too narrow to land a real concurrent
+// dropQueuedPresenceAndBroadcast reliably, so tests use this hook to
+// reproduce that interleaving deterministically. Mirrors the established
+// refreshChannelVisibilityRaceHook / voiceJoinPostTokenRaceHook pattern.
+var presenceFlushRaceHook func()
+
 // flushPresenceQueue drains the coalescer and broadcasts each user's latest
-// presence. Runs on the AfterFunc timer goroutine, never under presenceMu
-// during the fan-out.
+// presence, all under presenceMu (OC-0005). Runs on the AfterFunc timer
+// goroutine.
+//
+// presenceMu is held across the broadcast loop, not just the snapshot: it
+// used to be released beforehand, which let a concurrent
+// dropQueuedPresenceAndBroadcast (nee dropQueuedPresence) call race in after
+// the snapshot had already escaped the lock. The drop was then a guaranteed
+// no-op against the live (already-nilled) map, AND nothing constrained
+// whether that call's own fresher broadcast landed on h.broadcast before or
+// after this loop's stale one — so the stale connect-time presence could win
+// the seq race and permanently overwrite a user-chosen status. Holding the
+// lock here forces the two critical sections to serialize, which is what
+// dropQueuedPresenceAndBroadcast's ordering guarantee depends on.
 func (h *Hub) flushPresenceQueue() {
 	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
 	queued := h.presenceQueue
 	h.presenceQueue = nil
 	h.presenceFlushArmed = false
-	h.presenceMu.Unlock()
+	if presenceFlushRaceHook != nil {
+		presenceFlushRaceHook()
+	}
 	for uid, p := range queued {
 		h.BroadcastPresence(uid, p.status, p.customStatus)
 	}
