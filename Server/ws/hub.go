@@ -127,7 +127,7 @@ type Hub struct {
 	// voiceKeyHolders maps channelID → userID of the current key holder.
 	// The key holder is the connected participant with the lowest userID in the channel.
 	// Protected by keyHolderMu.
-	keyHolderMu     sync.RWMutex
+	keyHolderMu     syncutil.RWMutex
 	voiceKeyHolders map[int64]int64
 
 	// Presence coalescer (QueuePresence): latest queued presence per user and

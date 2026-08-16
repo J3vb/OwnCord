@@ -1,14 +1,15 @@
 package ws
 
 import (
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 )
 
 // TopicRateLimiter enforces per-topic throughput caps to prevent a single
 // busy channel from saturating the broadcast loop and starving others.
 type TopicRateLimiter struct {
-	mu          sync.Mutex
+	mu          syncutil.Mutex
 	buckets     map[Topic]*tokenBucket
 	defaultRate int           // messages per window
 	window      time.Duration // window size

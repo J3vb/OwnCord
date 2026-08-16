@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 )
 
 // RoleService owns create/edit/delete/reorder of roles. It is the only writer
@@ -28,7 +28,7 @@ type RoleService struct {
 	// the role cap are enforced against a ListRoles snapshot, not by a DB
 	// constraint, so two interleaved mutations can both see the same free
 	// slot. Single-process server — one lock covers every writer.
-	mu sync.Mutex
+	mu syncutil.Mutex
 }
 
 // NewRoleService creates a RoleService.
