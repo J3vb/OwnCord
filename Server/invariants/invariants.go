@@ -18,7 +18,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -152,18 +151,32 @@ var skipDirs = map[string]bool{
 
 // Run parses every non-test .go file under root and returns every violation,
 // sorted by file then line so failures are deterministic.
+//
+// The tree is walked through os.Root, which confines every read to root and
+// cannot be escaped by a symlink. That also makes the walk paths slash-
+// separated and already relative to root, which is exactly the form
+// CheckSource and Violation.File want.
 func Run(root string) ([]Violation, error) {
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = r.Close()
+	}()
+	rfs := r.FS()
+
 	fset := token.NewFileSet()
 	var out []Violation
 
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(rfs, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			// Never skip the root itself: its DirEntry name is ".." or similar,
-			// which would otherwise match the dot-prefix test and abort the walk.
-			if p == root {
+			// Never skip the root itself: its name is ".", which would
+			// otherwise match the dot-prefix test and abort the whole walk.
+			if p == "." {
 				return nil
 			}
 			if skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".") {
@@ -174,15 +187,11 @@ func Run(root string) ([]Violation, error) {
 		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		rel, err := filepath.Rel(root, p)
+		src, err := fs.ReadFile(rfs, p)
 		if err != nil {
 			return err
 		}
-		src, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		out = append(out, CheckSource(fset, filepath.ToSlash(rel), src)...)
+		out = append(out, CheckSource(fset, p, src)...)
 		return nil
 	})
 	if err != nil {
