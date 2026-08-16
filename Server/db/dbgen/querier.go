@@ -70,10 +70,14 @@ type Querier interface {
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
-	// Camera and screenshare share one voice_max_video budget: a channel capped
-	// at N simultaneous video streams must not let a camera publish ignore
-	// screenshare occupants (or vice versa), so both gates count the same
-	// `camera = 1 OR screenshare = 1` slot usage (OC-0023).
+	// Camera and screenshare share one voice_max_video budget, counted in
+	// STREAMS, not rows: a channel capped at N simultaneous video streams must
+	// not let a camera publish ignore screenshare occupants (or vice versa,
+	// OC-0023), and a single user with both flags set must consume two of the N
+	// slots, not one (OC-0006) -- so both gates sum `vs2.camera + vs2.screenshare`
+	// across the channel's rows rather than counting rows where either is set.
+	// The enabling user's own bit is still 0 at gate time, so no self-exclusion
+	// term is needed.
 	EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error)
 	EnablePlugin(ctx context.Context, id int64) error
 	EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error)

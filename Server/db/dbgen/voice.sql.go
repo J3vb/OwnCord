@@ -102,40 +102,44 @@ const enableCameraIfUnderLimit = `-- name: EnableCameraIfUnderLimit :execresult
 
 UPDATE voice_states SET camera = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?
+  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) < ?4
 `
 
 type EnableCameraIfUnderLimitParams struct {
 	UserID      int64 `json:"userId"`
 	ChannelID   int64 `json:"channelId"`
 	ChannelID_2 int64 `json:"channelId2"`
-	ChannelID_3 int64 `json:"channelId3"`
+	MaxVideo    int64 `json:"maxVideo"`
 }
 
-// Camera and screenshare share one voice_max_video budget: a channel capped
-// at N simultaneous video streams must not let a camera publish ignore
-// screenshare occupants (or vice versa), so both gates count the same
-// `camera = 1 OR screenshare = 1` slot usage (OC-0023).
+// Camera and screenshare share one voice_max_video budget, counted in
+// STREAMS, not rows: a channel capped at N simultaneous video streams must
+// not let a camera publish ignore screenshare occupants (or vice versa,
+// OC-0023), and a single user with both flags set must consume two of the N
+// slots, not one (OC-0006) -- so both gates sum `vs2.camera + vs2.screenshare`
+// across the channel's rows rather than counting rows where either is set.
+// The enabling user's own bit is still 0 at gate time, so no self-exclusion
+// term is needed.
 func (q *Queries) EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, enableCameraIfUnderLimit,
 		arg.UserID,
 		arg.ChannelID,
 		arg.ChannelID_2,
-		arg.ChannelID_3,
+		arg.MaxVideo,
 	)
 }
 
 const enableScreenshareIfUnderLimit = `-- name: EnableScreenshareIfUnderLimit :execresult
 UPDATE voice_states SET screenshare = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND (vs2.camera = 1 OR vs2.screenshare = 1)) < ?
+  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) < ?4
 `
 
 type EnableScreenshareIfUnderLimitParams struct {
 	UserID      int64 `json:"userId"`
 	ChannelID   int64 `json:"channelId"`
 	ChannelID_2 int64 `json:"channelId2"`
-	ChannelID_3 int64 `json:"channelId3"`
+	MaxVideo    int64 `json:"maxVideo"`
 }
 
 func (q *Queries) EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error) {
@@ -143,7 +147,7 @@ func (q *Queries) EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableS
 		arg.UserID,
 		arg.ChannelID,
 		arg.ChannelID_2,
-		arg.ChannelID_3,
+		arg.MaxVideo,
 	)
 }
 

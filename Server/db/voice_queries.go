@@ -278,7 +278,7 @@ func (d *DB) EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int
 		UserID:      userID,
 		ChannelID:   channelID,
 		ChannelID_2: channelID,
-		ChannelID_3: int64(maxVideo),
+		MaxVideo:    int64(maxVideo),
 	})
 	if err != nil {
 		return false, fmt.Errorf("EnableCameraIfUnderLimit: %w", err)
@@ -311,7 +311,7 @@ func (d *DB) EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelI
 		UserID:      userID,
 		ChannelID:   channelID,
 		ChannelID_2: channelID,
-		ChannelID_3: int64(maxVideo),
+		MaxVideo:    int64(maxVideo),
 	})
 	if err != nil {
 		return false, fmt.Errorf("EnableScreenshareIfUnderLimit: %w", err)
