@@ -36,32 +36,38 @@ linters:
         - performance
       disabled-checks:
         - hugeParam   # too noisy for struct-heavy code
-    # Ratchet thresholds. Measured 2026-08-16 over 1446 production functions
-    # (tests excluded). Each sits just above the current worst, so today's tree is
-    # green and only new extremes are blocked.
+    # Complexity budgets set to a TARGET, not to whatever passes today. Existing
+    # offenders are deliberately left failing rather than excluded: an exclusion
+    # list goes stale and quietly becomes permanent, whereas a failing check is a
+    # backlog you can see. Measured 2026-08-16 over 1446 production functions,
+    # tests excluded.
+    #
+    # These are not the tool defaults (60/40, 10, 4). The defaults descend from
+    # 1976-era cyclomatic-complexity work that predates Go's explicit error
+    # handling: every `if err != nil` costs a branch, so idiomatic Go scores high
+    # for no real complexity. That is why golangci-lint's other cyclomatic linter,
+    # gocyclo, defaults to 30 rather than 10. The values below are chosen for a Go
+    # server rather than copied from C-era literature.
     funlen:
-      # Worst today, in funlen's own units (it ignores blank lines and comments):
-      # 311 lines and 131 statements, both in main.go run(). For scale, 94 functions
-      # exceed 60 raw lines and 22 exceed 120 — this budget does NOT touch them.
-      # Dropping to 150 lines would flag roughly 16; that is the first useful step.
-      lines: 320
-      statements: 135
+      # funlen counts in its own units — it ignores blank lines and comments, so
+      # main.go run() is 311 here and 422 by raw line span. Worst today: 311 lines,
+      # 131 statements.
+      lines: 100
+      statements: 50
     cyclop:
-      # Worst today: ws/voice_join.go handleVoiceJoin at 59, then main.go run at 57
-      # and plugin/registry.go InstallFromZip at 44.
-      max-complexity: 60
+      # Worst today: ws/voice_join.go handleVoiceJoin at 59, main.go run at 57,
+      # plugin/registry.go InstallFromZip at 44.
+      max-complexity: 20
     nestif:
-      # Worst today: 17. A conventional budget is ~10; three functions stand between
-      # here and there.
-      min-complexity: 18
+      # Worst today: 17.
+      min-complexity: 8
     dupl:
-      # 250 is where today's tree goes green. At the conventional 150 it flags three
-      # real duplicate pairs, all adjacent near-identical siblings worth collapsing:
+      # The conventional value. Flags three real duplicate pairs, all adjacent
+      # near-identical siblings worth collapsing:
       #   db/mention_queries.go:322-357  vs  :364-399
       #   ws/voice_controls.go:13-42     vs  :45-73
       #   ws/voice_controls.go:76-121    vs  :124-171
-      # Fix those three and this can drop to 150.
-      threshold: 250
+      threshold: 150
     gosec:
       excludes:
         - G104  # unhandled errors — errcheck covers this better
@@ -83,3 +89,14 @@ linters:
       # a shared helper that hides what each case is doing.
       - linters: [funlen, cyclop, nestif, dupl]
         path: _test\.go
+
+# Report every finding. The defaults hide work three separate ways, which is fine
+# when the list is meant to be empty and actively misleading when it is a backlog:
+# "fixed everything shown" would leave more behind. uniq-by-line is the sharp one —
+# it keeps a single issue per line, and since cyclop and funlen both anchor at the
+# function declaration, enabling cyclop silently swallowed 16 of funlen's 21
+# findings here.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
