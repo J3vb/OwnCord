@@ -695,6 +695,44 @@ describe("WS Dispatcher", () => {
     expect(member?.avatar).toBe("/api/v1/files/abc");
   });
 
+  // OC-0009: voiceStore.voiceUsers keeps its own frozen copy of each
+  // participant's username, written only by setVoiceStates (ready) and
+  // updateVoiceState (voice_state). USER_UPDATE fans a profile change out to
+  // membersStore and dmStore, which hold the same kind of frozen copy, but
+  // not to voiceStore — so a rename leaves the voice roster showing the old
+  // username for the rest of the call.
+  it("updates the voice roster username on user_update", () => {
+    voiceStore.setState((prev) => {
+      const userMap = new Map([
+        [
+          10,
+          {
+            userId: 10,
+            username: "bob",
+            muted: false,
+            deafened: false,
+            speaking: false,
+            camera: false,
+            screenshare: false,
+          },
+        ],
+      ]);
+      const voiceUsers = new Map(prev.voiceUsers);
+      voiceUsers.set(5, userMap);
+      return { ...prev, voiceUsers };
+    });
+
+    mock.dispatch("user_update", {
+      user_id: 10,
+      username: "bobby",
+      avatar: "new.png",
+      display_name: null,
+    });
+
+    const voiceUser = voiceStore.getState().voiceUsers.get(5)?.get(10);
+    expect(voiceUser?.username).toBe("bobby");
+  });
+
   describe("presence and user_update sync dmStore", () => {
     const dmChannel = {
       channelId: 50,
@@ -1376,6 +1414,54 @@ describe("WS Dispatcher", () => {
       await Promise.resolve();
       expect(getChannelMessages(1).map((m) => m.id)).toEqual([900]);
       expect(isChannelLoaded(1)).toBe(true);
+    });
+
+    // OC-0007: invalidateLoadedMessageWindows() synchronously drops the
+    // active channel's rows and loadedChannels entry, but leaves
+    // historyLoadState untouched. If the resync handler doesn't also mark
+    // the channel "loading", MessageList's empty-state branch (no rows +
+    // idle load state) reads as a genuinely empty channel for the entire
+    // round trip of the refetch, instead of showing the in-region spinner
+    // every other first-page fetch shows.
+    it("marks the active channel loading (not idle) while the resync refetch is in flight", () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      // Never resolves within this test — pins the synchronous state right
+      // after the resync `ready` is handled, before the refetch lands.
+      const getMessages = vi.fn().mockReturnValue(new Promise(() => {}));
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+      ];
+
+      // First ready: initial connect.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // Second ready: a full-ready resync. The synchronous invalidation runs
+      // and the refetch is fired but never resolves in this test.
+      mock.dispatch("ready", {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      // The window was dropped...
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getChannelMessages(1)).toEqual([]);
+      // ...but the load state must be "loading", not idle (null) — idle+empty
+      // is exactly the shape MessageList reads as "channel has no history".
+      expect(getHistoryLoadState(1)).toBe("loading");
     });
 
     // OC-0203: the refetch above is fired-and-forgotten against whatever

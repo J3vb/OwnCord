@@ -244,6 +244,28 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
   });
 }
 
+/** Patch a user's username in every voice channel they currently occupy.
+ *  VoiceUser keeps its own frozen copy of the username (the same shape as
+ *  membersStore's and dmStore's copies), refreshed only by setVoiceStates
+ *  (ready) and updateVoiceState (voice_state) — a profile rename via
+ *  USER_UPDATE must patch it too, or the voice roster keeps showing the old
+ *  name for the rest of the call, until the user leaves and rejoins voice. */
+export function updateVoiceUserProfile(userId: number, patch: { readonly username: string }): void {
+  voiceStore.setState((prev) => {
+    let changed = false;
+    const nextChannels = new Map(prev.voiceUsers);
+    for (const [channelId, users] of prev.voiceUsers) {
+      const existing = users.get(userId);
+      if (existing === undefined) continue;
+      const nextUsers = new Map(users);
+      nextUsers.set(userId, { ...existing, username: patch.username });
+      nextChannels.set(channelId, nextUsers);
+      changed = true;
+    }
+    return changed ? { ...prev, voiceUsers: nextChannels } : prev;
+  });
+}
+
 /** Remove a user from a voice channel. */
 export function removeVoiceUser(payload: VoiceLeavePayload): void {
   voiceStore.setState((prev) => {

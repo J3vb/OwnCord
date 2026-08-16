@@ -34,6 +34,15 @@ func messageFromGen(m dbgen.Message) *Message {
 // ("-col: expr"), so keeping it turns "well-known" into a filter on a
 // nonexistent column "known" and SQLite errors instead of matching. Folding
 // to a space (rather than dropping it) still matches the indexed tokens.
+//
+// Filtering characters alone is not enough: FTS5's MATCH grammar also
+// recognizes bareword keywords -- AND, OR, NOT (uppercase only) -- as
+// boolean operators rather than search terms. Those are ordinary letters, so
+// the character filter lets them through unchanged, and a query that places
+// one in an invalid position (e.g. the whole query is "AND", or it starts or
+// ends with one) makes SQLite raise "fts5: syntax error" instead of running
+// the search. Any such token is dropped below so the result is always a
+// plain sequence of bareword terms.
 func sanitizeFTSQuery(q string) string {
 	var sb strings.Builder
 	sb.Grow(len(q))
@@ -51,7 +60,16 @@ func sanitizeFTSQuery(q string) string {
 	if runes := []rune(result); len(runes) > 200 {
 		result = string(runes[:200])
 	}
-	return result
+
+	fields := strings.Fields(result)
+	kept := fields[:0]
+	for _, f := range fields {
+		if f == "AND" || f == "OR" || f == "NOT" {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return strings.Join(kept, " ")
 }
 
 // CreateMessage inserts a new message and returns the assigned ID.

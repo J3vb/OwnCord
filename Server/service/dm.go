@@ -273,9 +273,20 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, fmt.Errorf("%w: failed to create group DM", ErrInternal)
 	}
 
-	participants, err := s.st.GetDMParticipants(ctx, ch.ID, userID)
+	// The channel, all dm_participants rows and all dm_open_state rows are
+	// already committed at this point, so this read must not turn a fully-
+	// persisted group DM into a reported failure (OC-0004): it runs
+	// uncancellable (context.WithoutCancel) so a client disconnect landing
+	// right after the commit can't fail it via ctx.Err(), and any other
+	// failure is logged rather than propagated so the caller still gets a
+	// usable result to fan dm_channel_open out from. Group DMs are
+	// duplicate-by-design — there is no "the group for these users" to find —
+	// so telling the caller creation failed when it actually committed only
+	// invites a retry that creates a second, indistinguishable group.
+	participants, err := s.st.GetDMParticipants(context.WithoutCancel(ctx), ch.ID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read group DM participants: %v", ErrInternal, err)
+		slog.Error("DMService.CreateGroupDM: failed to read participants after commit", "err", err, "channel_id", ch.ID)
+		participants = nil
 	}
 
 	return &CreateGroupDMResult{

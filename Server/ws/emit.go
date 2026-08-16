@@ -32,12 +32,33 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// An invisible user's public presence half rides this branch;
 			// like the visible case below, it must invalidate any queued
 			// coalescer entry so a stale connect-time presence can't flush
-			// after (and overwrite) this fresher user-chosen status.
+			// after (and overwrite) this fresher user-chosen status. The
+			// drop and the broadcast run atomically under presenceMu (see
+			// dropQueuedPresenceAndBroadcast, OC-0005) so a flush racing in
+			// at the same moment can never enqueue its stale frame after
+			// this fresher one.
 			if po, isPresence := ev.(PresenceOthersEvent); isPresence {
-				h.dropQueuedPresence(po.excludeUserID)
+				h.dropQueuedPresenceAndBroadcast(po.excludeUserID, func() {
+					// Normal priority, excluding the owner — NOT
+					// broadcastExcludeLow. Every other source of this same
+					// user's presence (connect/disconnect via BroadcastToAll,
+					// and the visible presence_update path below) already
+					// shares the normal-priority queue; putting this one on
+					// the low-priority queue instead split one user's
+					// presence across two per-client FIFOs with different
+					// durability (low silently drops on overflow instead of
+					// disconnecting, so no replay ever repairs the loss) and
+					// different drain order (writePump always drains normal
+					// strictly before low, so a newer frame on one queue can
+					// be delivered before an older frame still sitting on the
+					// other) — exactly the hazard OC-0214 fixed for the
+					// visible case below (OC-0003).
+					h.BroadcastToAllExcept(po.excludeUserID, e.Payload())
+				})
+			} else {
+				// Low priority: typing indicators are ephemeral.
+				h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 			}
-			// Low priority: typing indicators are ephemeral.
-			h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
 			// dm_channel_open is unsequenced and targeted, so replay can never
@@ -75,12 +96,18 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// single ordered, seq-stamped, replayable stream (OC-0214).
 			if pe, isPresence := ev.(PresenceEvent); isPresence {
 				// A user-chosen presence also bypasses the connect/disconnect
-				// coalescer; drop any entry still queued for this user or the
-				// pending flush (up to 300ms later) would overwrite this
-				// fresher status with the stale connect-time one.
-				h.dropQueuedPresence(pe.userID)
+				// coalescer; drop any entry still queued for this user and
+				// broadcast atomically under presenceMu (see
+				// dropQueuedPresenceAndBroadcast, OC-0005), or the pending
+				// flush (up to 300ms later) could race in between the drop
+				// and the broadcast and overwrite this fresher status with
+				// the stale connect-time one.
+				h.dropQueuedPresenceAndBroadcast(pe.userID, func() {
+					h.BroadcastToAll(e.Payload())
+				})
+			} else {
+				h.BroadcastToAll(e.Payload())
 			}
-			h.BroadcastToAll(e.Payload())
 		default:
 			slog.Warn("EmitEvents: unknown event type", "type", fmt.Sprintf("%T", ev))
 		}

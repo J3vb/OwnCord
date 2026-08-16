@@ -247,8 +247,12 @@ func (e PresenceEvent) Payload() []byte   { return e.payload }
 
 // PresenceOthersEvent is the public half of an invisible user's presence: the
 // mapped ("offline") payload, broadcast to everyone except the user it
-// describes. Satisfies ExcludeSenderEvent with a channel id of 0, which
-// broadcastExcludeLow routes as a global publish minus one subscriber.
+// describes. Satisfies ExcludeSenderEvent with a channel id of 0; EmitEvents
+// special-cases it onto h.BroadcastToAllExcept (normal priority, sequenced,
+// replayable) rather than the ExcludeSenderEvent default of
+// broadcastExcludeLow, so this frame shares the same durable per-client FIFO
+// as every other source of the same user's presence instead of the
+// ephemeral, drop-on-overflow one built for typing indicators (OC-0003).
 type PresenceOthersEvent struct {
 	excludeUserID int64
 	payload       []byte

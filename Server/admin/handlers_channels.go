@@ -317,13 +317,33 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			hub.CleanupVoiceForChannel(id)
 		}
 
-		if err := database.AdminDeleteChannel(r.Context(), id); err != nil {
+		// From here on the archive (and, if it ran, the voice eviction)
+		// already committed. If the admin's browser goes away in this window
+		// (tab close, navigation, network blip), r.Context() cancels, and an
+		// AdminDeleteChannel that still used it would fail with
+		// context.Canceled — 500ing while leaving the channel silently
+		// archived, unbroadcast and unaudited (OC-0010). Run the rest of the
+		// delete on an uncancellable tail, matching the repo's convention
+		// for other durable side effects (totp_handler.go, service/user.go).
+		delCtx := context.WithoutCancel(r.Context())
+		if err := database.AdminDeleteChannel(delCtx, id); err != nil {
+			// A genuine failure here (not caller cancellation, which delCtx
+			// already absorbs) still leaves the archive committed — tell
+			// connected clients about the state that did change instead of
+			// leaving them stuck seeing a live channel that now 403s on
+			// every read and write.
+			if hub != nil && !existing.Archived {
+				if archived, gErr := database.GetChannel(delCtx, id); gErr == nil && archived != nil {
+					hub.BroadcastChannelUpdate(archived)
+					hub.RefreshChannelVisibility(archived)
+				}
+			}
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
 			return
 		}
 		actor := actorFromContext(r)
 		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_delete", "channel", id,
+		db.WriteAudit(delCtx, database, actor, "channel_delete", "channel", id,
 			fmt.Sprintf("deleted #%s", existing.Name))
 		if hub != nil {
 			hub.BroadcastChannelDelete(id)

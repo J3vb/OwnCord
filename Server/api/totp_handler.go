@@ -225,6 +225,30 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 	}
 }
 
+// revokeOtherSessionsAfterAuthChange revokes every session for userID except
+// keepSessionID as the security tail of a committed 2FA state change. It
+// mirrors UserService.ChangePassword (service/user.go:262-274): a failure is
+// logged and retried once (bounded compensating retry for transient write
+// contention); if the retry also fails, revoked reports what did succeed and
+// failed is true so the caller can report a partial success instead of
+// silently claiming the other sessions were revoked when they were not.
+func revokeOtherSessionsAfterAuthChange(ctx context.Context, database *db.DB, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
+	revoked, err := database.DeleteOtherSessions(ctx, userID, keepSessionID)
+	if err != nil {
+		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)
+		revokedRetry, retryErr := database.DeleteOtherSessions(ctx, userID, keepSessionID)
+		if retryErr != nil {
+			slog.Error("DeleteOtherSessions retry after "+action, "err", retryErr, "user_id", userID)
+			return revoked, true
+		}
+		revoked += revokedRetry
+	}
+	if revoked > 0 {
+		slog.Info("revoked other sessions after "+action, "user_id", userID, "revoked", revoked)
+	}
+	return revoked, false
+}
+
 func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore, limiter *auth.RateLimiter, totpKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
@@ -313,14 +337,25 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		}
 		// Security tail of the 2FA change: once the secret update committed,
 		// revoking the other sessions must not be aborted by a dead request.
-		n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, keepSessionID)
-		if n > 0 {
-			slog.Info("revoked other sessions after totp enable", "user_id", user.ID, "revoked", n)
-		}
+		tailCtx := context.WithoutCancel(r.Context())
+		revoked, revokeFailed := revokeOtherSessionsAfterAuthChange(tailCtx, database, user.ID, keepSessionID, "totp enable")
 
 		slog.Info("totp enabled", "user_id", user.ID)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "totp_enabled", "user", user.ID,
+		db.WriteAudit(tailCtx, database, user.ID, "totp_enabled", "user", user.ID,
 			"two-factor authentication enrolled")
+
+		if revokeFailed {
+			// Partial success: 2FA IS enabled; only revoking the other
+			// sessions failed. A 5xx here would be a lie — the state change
+			// already committed — so mirror the ChangePassword contract
+			// (api/profile_handler.go) and report 200 with an explicit warning
+			// instead of a silent, unqualified 204.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"warning":          "two-factor authentication enabled, but other sessions could not be revoked; revoke them from the sessions list",
+				"sessions_revoked": revoked,
+			})
+			return
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -403,14 +438,25 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 		}
 		// Security tail of the 2FA change: once the secret update committed,
 		// revoking the other sessions must not be aborted by a dead request.
-		n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, keepSessionID)
-		if n > 0 {
-			slog.Info("revoked other sessions after totp disable", "user_id", user.ID, "revoked", n)
-		}
+		tailCtx := context.WithoutCancel(r.Context())
+		revoked, revokeFailed := revokeOtherSessionsAfterAuthChange(tailCtx, database, user.ID, keepSessionID, "totp disable")
 
 		slog.Info("totp disabled", "user_id", user.ID)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "totp_disabled", "user", user.ID,
+		db.WriteAudit(tailCtx, database, user.ID, "totp_disabled", "user", user.ID,
 			"two-factor authentication disabled")
+
+		if revokeFailed {
+			// Partial success: 2FA IS disabled; only revoking the other
+			// sessions failed. A 5xx here would be a lie — the state change
+			// already committed — so mirror the ChangePassword contract
+			// (api/profile_handler.go) and report 200 with an explicit warning
+			// instead of a silent, unqualified 204.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"warning":          "two-factor authentication disabled, but other sessions could not be revoked; revoke them from the sessions list",
+				"sessions_revoked": revoked,
+			})
+			return
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
