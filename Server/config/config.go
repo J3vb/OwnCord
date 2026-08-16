@@ -200,6 +200,19 @@ type ServerConfig struct {
 	// longer has to be added to the ADMIN allowlist. Empty (default) falls
 	// back to AdminAllowedCIDRs.
 	LiveKitWebhookAllowedCIDRs []string `koanf:"livekit_webhook_allowed_cidrs"`
+	// RestartMode selects how a self-restart (update apply, backup restore,
+	// setup wizard) hands the process over to its replacement once the server
+	// has fully drained:
+	//   - "supervised": exit cleanly and rely on the process supervisor
+	//     (systemd Restart=, NSSM AppExit, Docker restart policy) to relaunch.
+	//   - "spawn": start the replacement binary directly before exiting
+	//     (unmanaged deployments: console, Task Scheduler).
+	//   - "auto" (default): "supervised" when a supervisor or container is
+	//     detected (updater.RunningUnderSupervisor / RunningInContainer),
+	//     otherwise "spawn".
+	// Env override: OWNCORD_SERVER_RESTART_MODE. NSSM deployments must set
+	// this to "supervised" — NSSM 2.24 is not auto-detectable.
+	RestartMode string `koanf:"restart_mode"`
 }
 
 // MetricsCIDRs returns the effective allowlist for the metrics surfaces.
@@ -290,7 +303,8 @@ func defaults() Config {
 				"192.168.0.0/16", // private class C
 				"fc00::/7",       // IPv6 unique local
 			},
-			WAFCRSMode: "detect",
+			WAFCRSMode:  "detect",
+			RestartMode: "auto",
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -369,6 +383,11 @@ server:
   # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
   # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs
   #                           # CRS matches without blocking (safe default for chat traffic)
+  # restart_mode: "auto"      # auto | spawn | supervised — how self-restarts (update,
+  #                           # restore, setup wizard) hand off. "supervised" exits and
+  #                           # lets systemd/NSSM/Docker relaunch; "spawn" starts the
+  #                           # replacement directly; "auto" detects (NSSM users: set
+  #                           # "supervised" explicitly, NSSM is not auto-detectable)
 
 database:
   type: "sqlite"          # "sqlite" is the only supported backend
