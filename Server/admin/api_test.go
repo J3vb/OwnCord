@@ -1436,6 +1436,60 @@ func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 	}
 }
 
+// OC-0010: handleDeleteChannel commits archived=1 as its own transaction and
+// evicts voice participants BEFORE calling AdminDeleteChannel — all on
+// r.Context(). If the admin's browser aborts the request in that window (tab
+// close, navigation, network blip), r.Context() is canceled and the final
+// AdminDeleteChannel call fails with context.Canceled: the handler 500s, but
+// the archive and the voice eviction already committed. Nothing reverts the
+// archive, nothing broadcasts it, and no audit row is written — the channel
+// is left silently archived (writes refused, channel_focus 403s) while every
+// connected client still shows it live in the sidebar.
+//
+// This reproduces the race deterministically by canceling the request
+// context from inside CleanupVoiceForChannel — exactly the call the repro
+// says the real-world cancellation lands during — instead of relying on
+// timing. The fix must make the delete tolerate a caller cancellation that
+// arrives after the archive has already committed.
+func TestAdminAPI_DeleteChannel_SurvivesContextCancelAfterArchiveCommits(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel(context.Background(), "del-cancel-race", "text", "", "", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Fires synchronously inside handleDeleteChannel, after the archive
+	// commit but before the final AdminDeleteChannel call — the same window
+	// the repro describes a browser abort landing in.
+	hub.onVoiceCleanup = func(int64) {
+		cancel()
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/channels/"+itoa(chID), nil)
+	req = req.WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (delete must survive a caller cancellation that arrives after the archive already committed); body: %s", w.Code, w.Body.String())
+	}
+
+	ch, err := database.GetChannel(context.Background(), chID)
+	if err != nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if ch != nil {
+		t.Errorf("channel %d still exists after a reported-successful delete: %+v", chID, ch)
+	}
+
+	if len(hub.channelDeleteIDs) != 1 || hub.channelDeleteIDs[0] != chID {
+		t.Errorf("BroadcastChannelDelete calls = %v, want exactly [%d]", hub.channelDeleteIDs, chID)
+	}
+}
+
 // ─── API tokens: /admin/api/tokens ───────────────────────────────────────────
 
 func TestAdminAPI_CreateAPIToken_OK(t *testing.T) {
