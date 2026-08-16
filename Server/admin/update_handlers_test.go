@@ -418,8 +418,9 @@ func TestAdminAPI_ApplyUpdate_ContainerOptOut(t *testing.T) {
 // "Reconnecting..." state) with no corrective signal ever sent. These tests
 // call the swap logic directly — admin.ApplyStagedUpdate — with inputs
 // engineered to fail at different points, and assert a corrective
-// "update_aborted" broadcast follows. They deliberately do not exercise the
-// success path: that ends in os.Exit(0), which would kill the test binary.
+// "update_aborted" broadcast follows. The success path is covered too, now
+// that the swap has no process side effects (the restart happens through the
+// coordinator hook, not an in-package spawn + os.Exit).
 
 // TestApplyStagedUpdate_VerifyFails_BroadcastsAbort covers the earliest abort
 // point: the staged binary re-verification (OpenVerifiedBinary) fails

@@ -42,6 +42,7 @@ the server automatically when a startup-only value changed. Note that
 | `server.waf_enabled` | bool | `false` | Enable the Coraza WAF middleware (inline rules + OWASP Core Rule Set) |
 | `server.waf_paranoia_level` | int | `2` | OWASP CRS paranoia level 1–4; values outside that range fall back to 2 |
 | `server.waf_crs_mode` | string | `"detect"` | CRS layer mode: `off` (inline rules only), `detect` (matches logged, never blocks), `block` (anomaly-scoring blocking). Unknown values fall back to `detect`. |
+| `server.restart_mode` | string | `"auto"` | How self-restarts (update apply, backup restore, setup wizard) hand off after the server drains: `supervised` exits cleanly and relies on systemd/NSSM/Docker to relaunch; `spawn` starts the replacement binary directly; `auto` picks `supervised` when a supervisor or container is detected, else `spawn`. NSSM deployments must set `supervised` explicitly (see [Deployment](deployment.md)). |
 
 ### TLS (`tls`)
 
@@ -190,6 +191,7 @@ absent from the table below (it is a representative subset, not the full list).
 | `OWNCORD_SERVER_PORT` | `server.port` |
 | `OWNCORD_SERVER_NAME` | `server.name` |
 | `OWNCORD_SERVER_DATA_DIR` | `server.data_dir` |
+| `OWNCORD_SERVER_RESTART_MODE` | `server.restart_mode` |
 | `OWNCORD_DATABASE_PATH` | `database.path` |
 | `OWNCORD_TLS_MODE` | `tls.mode` |
 | `OWNCORD_TLS_CERT_FILE` | `tls.cert_file` |

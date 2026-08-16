@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -71,15 +70,41 @@ func main() {
 	log := slog.New(logctx.New(multiHandler))
 	slog.SetDefault(log)
 
-	if err := run(log, logBuf, levelVar); err != nil {
+	// The restart coordinator carries a self-restart request (update apply,
+	// backup restore, setup wizard) across run()'s teardown — see restart.go.
+	// The backstop closure fires only if a requested restart's drain wedges
+	// past restartBackstopDelay: it performs the handoff and force-exits,
+	// mirroring what the code below does on the healthy path.
+	var rc *restartCoordinator
+	rc = newRestartCoordinator(restartBackstopDelay, func() {
+		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
+		reason, _ := rc.Requested()
+		performRestartHandoff(reason, rc.Mode(), slog.Default())
+		os.Exit(0)
+	})
+
+	err := run(log, logBuf, levelVar, rc)
+	rc.disarm()
+
+	// Perform the handoff even when run() returned an error: a restart is
+	// only ever requested after a committed binary swap or a restore that
+	// closed the database, so not restarting is strictly worse than
+	// restarting into whatever the error was.
+	if reason, ok := rc.Requested(); ok {
+		performRestartHandoff(reason, rc.Mode(), log)
+	}
+
+	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
 }
 
-// run is the real entrypoint — separated for testability.
-func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) error {
+// run is the real entrypoint — separated for testability. rc carries a
+// self-restart request out to main(), which performs the actual handoff once
+// everything here has drained (see restart.go).
+func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *restartCoordinator) error {
 	// bgCtx is a cancellable context shared by all background goroutines
 	// (event persister, event pruner, plugin loader, maintenance loop).
 	//
@@ -92,14 +117,27 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
-	// Clean up old binary from a previous update.
+	// Clean up old binary from a previous update. Bounded retry: in spawn
+	// mode the predecessor spawns this process as its very last act, so for
+	// the first few hundred milliseconds it may not have fully exited — and
+	// on Windows its image file (the .old after the swap) stays locked until
+	// it does.
 	exePath, exeErr := os.Executable()
 	if exeErr != nil {
 		log.Warn("failed to determine executable path", "error", exeErr)
 	} else {
 		oldPath := exePath + ".old"
 		if _, statErr := os.Stat(oldPath); statErr == nil {
-			if rmErr := os.Remove(oldPath); rmErr != nil {
+			var rmErr error
+			for attempt := range 5 {
+				if attempt > 0 {
+					time.Sleep(250 * time.Millisecond)
+				}
+				if rmErr = os.Remove(oldPath); rmErr == nil {
+					break
+				}
+			}
+			if rmErr != nil {
 				log.Warn("failed to remove old binary", "path", oldPath, "error", rmErr)
 			} else {
 				log.Info("removed old binary from previous update", "path", oldPath)
@@ -121,6 +159,11 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	} else {
 		log.Warn("unknown logging.level, keeping info", "value", cfg.Logging.Level)
 	}
+
+	// Resolve how a self-restart hands off (spawn the replacement vs exit
+	// for a supervisor) now that config is loaded — main() reads it back
+	// after run() returns.
+	rc.SetMode(resolveRestartMode(cfg.Server.RestartMode, log))
 
 	// ── 2. Ensure data directory exists ────────────────────────────────────
 	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
@@ -167,6 +210,11 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	// Backup handlers and the scheduled-backup maintenance write to the
 	// configured backup directory (defaults to data/backups).
 	admin.SetBackupDir(cfg.Backup.Dir)
+	// Admin restart requests (update apply, backup restore, setup wizard)
+	// land in the coordinator, which drains this process and lets main()
+	// perform the handoff. Wired before the listener starts serving, so no
+	// admin request can ever hit the unwired default hook.
+	admin.SetRestartHandoff(rc.Request)
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
@@ -316,8 +364,8 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		}
 		go func() {
 			log.Info("ACME HTTP challenge server starting on :80")
-			if err := acmeSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Error("ACME HTTP server error", "error", err)
+			if err := serveWithBindRetry(log, "acme-http", acmeSrv.ListenAndServe); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("ACME HTTP server error — HTTP-01 challenges and certificate renewal will fail until the next restart", "error", err)
 			}
 		}()
 	}
@@ -410,8 +458,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		}
 	}()
 
-	// Listen for OS signals for graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Listen for OS signals for graceful shutdown. The coordinator's context
+	// is the parent, so a programmatic restart request (rc.Request) drains
+	// exactly like a SIGTERM — including on Windows, where a process cannot
+	// signal itself. Signals arriving mid-drain are swallowed until stop()
+	// runs, same as on the real-signal path.
+	ctx, stop := signal.NotifyContext(rc.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// Start serving in a goroutine.
@@ -419,23 +471,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	go func() {
 		log.Info("server starting", "addr", addr, "tls", tlsCfg != nil, "version", version)
 
-		for attempt := range 20 {
-			var listenErr error
+		err := serveWithBindRetry(log, "server", func() error {
 			if tlsCfg != nil {
-				listenErr = srv.ListenAndServeTLS("", "")
-			} else {
-				listenErr = srv.ListenAndServe()
+				return srv.ListenAndServeTLS("", "")
 			}
-			if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-				// Check if it's an "address already in use" error (port not released yet from old process)
-				if attempt < 19 && isAddrInUse(listenErr) {
-					log.Warn("port in use, retrying...", "attempt", attempt+1, "error", listenErr)
-					time.Sleep(500 * time.Millisecond)
-					continue
-				}
-				serveErr <- listenErr
-			}
-			break
+			return srv.ListenAndServe()
+		})
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 		}
 		close(serveErr)
 	}()
@@ -447,7 +490,11 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 			return fmt.Errorf("server error: %w", err)
 		}
 	case <-ctx.Done():
-		log.Info("shutdown signal received, draining connections (30s timeout)")
+		if reason, ok := rc.Requested(); ok {
+			log.Info("restart requested, draining connections (30s timeout)", "reason", reason)
+		} else {
+			log.Info("shutdown signal received, draining connections (30s timeout)")
+		}
 	}
 
 	// Graceful shutdown.
@@ -643,11 +690,6 @@ func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *
 	hub.SeedSeq(uint64(maxSeq))
 	log.Info("event persistence: seeded hub seq from persisted events", "seq", maxSeq)
 	hub.MarkVisibilityChanged()
-}
-
-// isAddrInUse checks if an error is an "address already in use" error.
-func isAddrInUse(err error) bool {
-	return err != nil && (strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "Only one usage of each socket address"))
 }
 
 // printBanner writes the startup banner to stderr (so it doesn't mix with

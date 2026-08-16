@@ -505,3 +505,45 @@ func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 		t.Errorf("EventPersistence.RetentionHours = %d, want 48", cfg.EventPersistence.RetentionHours)
 	}
 }
+
+func TestLoadRestartMode(t *testing.T) {
+	// server.restart_mode drives the self-restart handoff (see main.go's
+	// resolveRestartMode): default "auto", overridable via YAML and via
+	// OWNCORD_SERVER_RESTART_MODE — the env case pins envKeyToKoanf's
+	// server_restart_mode -> server.restart_mode mapping.
+	t.Run("default", func(t *testing.T) {
+		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.Server.RestartMode != "auto" {
+			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "auto")
+		}
+	})
+
+	t.Run("yaml override", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+		yaml := "server:\n  restart_mode: \"supervised\"\n"
+		if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+			t.Fatalf("failed to write yaml: %v", err)
+		}
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.Server.RestartMode != "supervised" {
+			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "supervised")
+		}
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		t.Setenv("OWNCORD_SERVER_RESTART_MODE", "spawn")
+		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.Server.RestartMode != "spawn" {
+			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "spawn")
+		}
+	})
+}
