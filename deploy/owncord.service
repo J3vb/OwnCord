@@ -21,8 +21,17 @@ User=owncord
 Group=owncord
 WorkingDirectory=/opt/owncord
 ExecStart=/opt/owncord/chatserver
-Restart=on-failure
+# always, not on-failure: the server exits 0 ON PURPOSE after an admin-panel
+# self-update, backup restore, or setup-wizard change, expecting systemd to
+# relaunch it (now running the swapped binary). `systemctl stop` is unaffected
+# — systemd never auto-restarts an explicitly stopped unit. Failure exits
+# (e.g. the WebSocket dispatch panic breaker, exit 1) restart the same as
+# they did under on-failure.
+Restart=always
 RestartSec=3
+# A crash-looping binary still trips systemd's start limit (default 5 starts
+# in 10s) and parks the unit as failed; raise StartLimitIntervalSec /
+# StartLimitBurst in [Unit] if you want a longer leash.
 
 # The server drains gracefully on SIGTERM with a 30s budget; give it a little
 # headroom before systemd escalates to SIGKILL.

@@ -104,6 +104,13 @@ image sets `OWNCORD_CONTAINER=1` to mark this; operators who bind-mount the
 server binary into a container and genuinely want in-place self-update can
 set `OWNCORD_CONTAINER=0` to opt back in.
 
+The admin panel's backup **restore** (and a setup-wizard restart) does work
+in containers: the server drains and exits cleanly, relying on the
+container's restart policy to relaunch it. The shipped `docker-compose.yml`
+sets `restart: unless-stopped`, which covers this; if you run the container
+by hand, pass `--restart unless-stopped` or the restore leaves the container
+stopped.
+
 ### LiveKit in Docker
 
 LiveKit runs as its own container (`livekit/livekit-server:v1`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
@@ -148,9 +155,17 @@ supervisor. A ready-made unit template ships in the repo at
 [`deploy/owncord.service`](../deploy/owncord.service); installation steps are
 in its header comments. The important choices it encodes:
 
-- `Restart=on-failure` — the server deliberately exits (rather than limping
-  along) when its WebSocket dispatch loop dies; the supervisor is what turns
-  that into a recovery.
+- `Restart=always` — two deliberate exits rely on it: the server exits
+  nonzero (rather than limping along) when its WebSocket dispatch loop dies,
+  and it exits **cleanly** after an admin-panel self-update, backup restore,
+  or setup-wizard restart, expecting systemd to relaunch it running the
+  swapped binary (the server auto-detects systemd via `INVOCATION_ID` and
+  hands off this way instead of spawning a child that the unit's cgroup
+  cleanup would kill). `systemctl stop` still stops it — systemd never
+  auto-restarts an explicitly stopped unit. **Update the unit file before
+  applying server updates from the admin panel** — it also repairs the
+  update handoff when updating from older OwnCord releases, whose spawned
+  replacement gets reaped by the cgroup cleanup.
 - `TimeoutStopSec=35` — the server drains gracefully on SIGTERM with a 30s
   budget; systemd waits it out before escalating.
 - `ReadWritePaths=/opt/owncord` under `ProtectSystem=strict` — the install
@@ -178,6 +193,12 @@ nssm set OwnCord AppDirectory "C:\OwnCord"
 nssm set OwnCord DisplayName "OwnCord Chat Server"
 nssm set OwnCord Start SERVICE_AUTO_START
 
+# REQUIRED: tell the server NSSM supervises it. On a self-update/restore the
+# server then exits cleanly and NSSM's default AppExit=Restart relaunches it
+# with the new binary. (NSSM 2.24 is not auto-detectable, so without this the
+# server spawns its own replacement, which races NSSM's relaunch.)
+nssm set OwnCord AppEnvironmentExtra OWNCORD_SERVER_RESTART_MODE=supervised
+
 # Manage
 nssm start OwnCord
 nssm stop OwnCord
@@ -192,6 +213,10 @@ nssm restart OwnCord
 4. Set "Start in" to the directory containing `config.yaml`
 5. Check "Run whether user is logged on or not"
 6. Check "Run with highest privileges"
+
+Task Scheduler starts the process but does not supervise it, so leave
+`server.restart_mode` on its default (`auto` resolves to `spawn` here): on a
+self-update or restore the server starts its own replacement after draining.
 
 ## TLS Setup
 
@@ -430,7 +455,17 @@ The server checks GitHub Releases for updates:
 - Downloads `chatserver.exe` with detached Ed25519/minisign signature verification
 - Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
 - Cross-checks the binary SHA256 against `checksums.sha256`
-- On restart, the current binary is rotated to `chatserver.exe.old` before the new binary takes its place
+
+Applying an update then runs in this order: the current binary is rotated to
+`chatserver.exe.old` and the verified download takes its place; connected
+clients get a "restarting in 5s" notice; the server drains completely
+(HTTP listeners, WebSocket hub, the companion `livekit-server`, queued
+event/audit writes, the database and its process lock); and only then does
+the handoff happen — the server either starts the new binary itself or, under
+a supervisor (systemd/NSSM/Docker, see `server.restart_mode` in
+[Server Configuration](server-configuration.md)), exits cleanly so the
+supervisor relaunches it. Because the old process is fully gone before the
+new one starts, the successor boots with no port or database-lock contention.
 
 Set `github.token` in config for higher API rate limits (5000/hr vs 60/hr unauthenticated).
 
