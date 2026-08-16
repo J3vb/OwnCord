@@ -5513,5 +5513,10 @@
     "mtime": 1786822952.264749,
     "ast_hash": "f05bbc86946be8157b818eb83315c87f",
     "semantic_hash": ""
+  },
+  ".superpowers/findings-ledger.json": {
+    "mtime": 1786726188.1687238,
+    "ast_hash": "58dae6fc97c268eaa9ffbe31ef78d179",
+    "semantic_hash": ""
   }
 }
