@@ -29,6 +29,7 @@ import {
   messagesStore,
   setMessages,
   invalidateLoadedMessageWindows,
+  setChannelLoading,
   setChannelLoadError,
 } from "@stores/messages.store";
 import {
@@ -44,6 +45,7 @@ import {
   voiceStore,
   setVoiceStates,
   updateVoiceState,
+  updateVoiceUserProfile,
   removeVoiceUser,
   setVoiceConfig,
   setSpeakers,
@@ -364,6 +366,13 @@ export function wireDispatcher(
         // showing only carried-through pending rows until the user navigates
         // away and back.
         if (activeAfterReady !== null && getMessages !== undefined) {
+          // Mark the active channel loading BEFORE invalidating its window —
+          // invalidate drops its rows synchronously, and if historyLoadState
+          // is left idle for even one microtask, MessageList's "no rows +
+          // idle" empty-state branch renders the channel as genuinely empty
+          // for the whole in-flight refetch instead of showing the in-region
+          // spinner (OC-0007).
+          setChannelLoading(activeAfterReady);
           invalidateLoadedMessageWindows();
           getMessages(activeAfterReady, { limit: 50 })
             .then((resp) => {
@@ -797,6 +806,11 @@ export function wireDispatcher(
         avatar: payload.avatar ?? "",
         ...(payload.display_name === undefined ? {} : { displayName: payload.display_name ?? "" }),
       });
+      // voiceStore.voiceUsers is the third store holding a frozen username
+      // copy (see updateVoiceUserProfile's doc comment) — without this, a
+      // rename leaves the voice roster showing the old name for the rest of
+      // the call.
+      updateVoiceUserProfile(payload.user_id, { username: payload.username });
 
       // Update auth store if the current user changed their own profile.
       const currentUser = authStore.getState().user;
