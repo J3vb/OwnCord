@@ -39,8 +39,21 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// this fresher one.
 			if po, isPresence := ev.(PresenceOthersEvent); isPresence {
 				h.dropQueuedPresenceAndBroadcast(po.excludeUserID, func() {
-					// Low priority: typing indicators are ephemeral.
-					h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
+					// Normal priority, excluding the owner — NOT
+					// broadcastExcludeLow. Every other source of this same
+					// user's presence (connect/disconnect via BroadcastToAll,
+					// and the visible presence_update path below) already
+					// shares the normal-priority queue; putting this one on
+					// the low-priority queue instead split one user's
+					// presence across two per-client FIFOs with different
+					// durability (low silently drops on overflow instead of
+					// disconnecting, so no replay ever repairs the loss) and
+					// different drain order (writePump always drains normal
+					// strictly before low, so a newer frame on one queue can
+					// be delivered before an older frame still sitting on the
+					// other) — exactly the hazard OC-0214 fixed for the
+					// visible case below (OC-0003).
+					h.BroadcastToAllExcept(po.excludeUserID, e.Payload())
 				})
 			} else {
 				// Low priority: typing indicators are ephemeral.

@@ -20,6 +20,13 @@ type broadcastMsg struct {
 	// recipient's role may not READ, and the audience is resolved off the hub
 	// goroutine so deliverBroadcast stays free of permission queries.
 	recipients []int64
+	// excludeUserID, when non-zero, is omitted from a global (channelID == 0)
+	// broadcast's live delivery. Used for the public half of an invisible
+	// user's presence (see BroadcastToAllExcept): everyone else must see it,
+	// but the owner's own view comes from a separate, synchronous, targeted
+	// send, and the two racing would let the async global broadcast overwrite
+	// it. Ignored outside the channelID == 0 branch of deliverBroadcast.
+	excludeUserID int64
 	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
 	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
 	enqueuedAt time.Time
@@ -43,6 +50,29 @@ func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 func (h *Hub) BroadcastToAll(msg []byte) {
 	select {
 	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg, enqueuedAt: time.Now()}:
+	default:
+		h.broadcastDrops.Add(1)
+		slog.Warn("hub: broadcast channel full, dropping global message",
+			"msg_len", len(msg))
+	}
+}
+
+// BroadcastToAllExcept enqueues msg for delivery to every connected client
+// except excludeUserID. Non-blocking, like BroadcastToAll: if the broadcast
+// channel is full the message is dropped with a warning.
+//
+// Routes through the SAME h.broadcast channel — and so the same single-
+// goroutine hub dispatch loop and seqMu-serialized deliverBroadcast — as
+// BroadcastToAll and every other normal-priority global broadcast. That
+// shared serialization is what gives two broadcasts about the same user (say,
+// a connect/disconnect presence frame and this one) their correct relative
+// order at each observer: whichever enqueues onto h.broadcast first is also
+// delivered to c.send first. A caller that instead published straight to
+// pub/sub, bypassing this queue, would reintroduce exactly that kind of
+// reordering from the other direction (OC-0003).
+func (h *Hub) BroadcastToAllExcept(excludeUserID int64, msg []byte) {
+	select {
+	case h.broadcast <- broadcastMsg{channelID: 0, excludeUserID: excludeUserID, msg: msg, enqueuedAt: time.Now()}:
 	default:
 		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping global message",
@@ -618,10 +648,13 @@ func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
 //     stamped with the higher seq by deliverBroadcast's single FIFO consumer
 //     and every client's final view converges on it, not the stale one.
 //
-// broadcast runs with presenceMu held: every current caller
-// (BroadcastToAll, broadcastExcludeLow) only enqueues onto a non-blocking
-// channel or pub/sub topic via a different mutex (h.broadcast's channel send,
-// PubSub.mu), so this cannot block and introduces no new lock-order edge.
+// broadcast runs with presenceMu held: every current caller (BroadcastToAll,
+// BroadcastToAllExcept) only enqueues onto h.broadcast's non-blocking
+// channel send, so this cannot block and introduces no new lock-order edge.
+// Both callers sharing that same channel also means the "enqueues second"
+// ordering guarantee above translates directly into delivery order: both
+// broadcasts are drained by the same single-consumer hub dispatch loop
+// (deliverBroadcast), in the order they were enqueued.
 func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
@@ -684,7 +717,15 @@ func (h *Hub) BroadcastPresence(userID int64, status string, customStatus *strin
 	// presencePayload.CustomStatus has no omitempty) so the client clears any
 	// cached text, matching what db.MemberSummary.ForViewer already does for
 	// the ready payload's member list.
-	h.broadcastExcludeLow(0, userID, buildPresenceMsg(userID, public, nil))
+	//
+	// Normal priority, excluding the owner (BroadcastToAllExcept), not
+	// broadcastExcludeLow: the low-priority queue is unsequenced and dropped
+	// (not disconnected) on overflow, so it could silently lose this frame
+	// with no replay recovery, and — since writePump always drains normal
+	// strictly before low — deliver it out of order against the very
+	// connect/disconnect presence frames this same coalescer flush also
+	// produces for other users via BroadcastToAll (OC-0003).
+	h.BroadcastToAllExcept(userID, buildPresenceMsg(userID, public, nil))
 	h.SendToUser(userID, buildPresenceMsg(userID, status, customStatus))
 }
 
@@ -899,8 +940,12 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 				h.SendToUser(userID, msg)
 			}
 		case bm.channelID == 0:
-			// Global broadcast — deliver to every connected client.
-			h.pubsub.PublishGlobal(msg)
+			// Global broadcast — deliver to every connected client, minus
+			// excludeUserID when the caller set one (see BroadcastToAllExcept).
+			// Publish(TopicGlobal, msg, 0) is exactly PublishGlobal(msg) when
+			// excludeUserID is the zero value, so ordinary BroadcastToAll
+			// callers are unaffected.
+			h.pubsub.Publish(TopicGlobal, msg, bm.excludeUserID)
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq
