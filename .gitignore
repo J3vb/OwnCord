@@ -9,6 +9,7 @@ Server/.env
 .claude/*
 !.claude/skills/
 !.claude/workflows/
+!.claude/settings.json
 CLAUDE.local.md
 .mcp.json
 
@@ -67,8 +68,16 @@ node_modules/
 # AI tooling
 .gstack/
 .claude-flow/
-.superpowers/
 .rust-review-results/
+
+# Bug-hunt ledger: shared so contributors can add findings. Only the ledger,
+# its render and its validator are tracked; hunt transcripts, .bak snapshots
+# and debris patches are per-session scratch and stay local.
+.superpowers/*
+!.superpowers/findings-ledger.json
+!.superpowers/FINDINGS.md
+!.superpowers/render-ledger.mjs
+
 .claude/worktrees/
 
 # Internal dev tools (e.g. tools/livekit-server.exe) are ignored, but the
@@ -98,4 +107,13 @@ Client/tauri-client/.env
 
 # local server run logs
 server.log
-graphify-out/
+
+# Knowledge graph (graphify). The top-level built graph is tracked so a fresh
+# clone can query it without a rebuild. Every subdirectory stays local: cache/
+# is a per-machine AST build cache, and graphify parks the PREVIOUS graph in a
+# dated YYYY-MM-DD/ backup on each rebuild — 18 MB of stale duplicate that is a
+# local rollback aid, not shared state.
+graphify-out/*/
+
+# Transient graphify rebuild-state file.
+graphify-out/.pending_changes

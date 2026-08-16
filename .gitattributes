@@ -7,3 +7,15 @@
 *.ico binary
 *.wasm binary
 *.exe binary
+
+# Knowledge graph (graphify) — generated, committed so a fresh clone can query
+# it without rebuilding. `* text=auto eol=lf` above would rewrite line endings
+# inside these on checkout, and .graphify_labels.json.sig signs the labels
+# byte-for-byte, so normalization would invalidate the signature. -text opts the
+# whole tree out; -diff keeps a 17 MB graph out of textual diffs.
+graphify-out/** -text linguist-generated=true
+graphify-out/graph.json -diff
+graphify-out/graph.html -diff
+
+# Rendered from findings-ledger.json by render-ledger.mjs — never hand-edit.
+.superpowers/FINDINGS.md linguist-generated=true
