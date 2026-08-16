@@ -112,11 +112,68 @@ type Hub struct {
 `,
 			want: 1,
 		},
+		{
+			name: "short assignment composite literal is flagged",
+			path: "ws/x.go",
+			src: `package ws
+import "sync"
+func f() {
+	mu := sync.Mutex{}
+	_ = mu
+}
+`,
+			want: 1,
+		},
+		{
+			name: "var with inferred type (nil ValueSpec.Type) is flagged",
+			path: "ws/x.go",
+			src: `package ws
+import "sync"
+var mu = sync.Mutex{}
+`,
+			want: 1,
+		},
+		{
+			name: "type alias to sync.Mutex is flagged",
+			path: "ws/x.go",
+			src: `package ws
+import "sync"
+type m = sync.Mutex
+`,
+			want: 1,
+		},
+		{
+			name: "aliased sync import is flagged",
+			path: "ws/x.go",
+			src: `package ws
+import s "sync"
+type Hub struct{ mu s.Mutex }
+`,
+			want: 1,
+		},
+		{
+			name: "dot-import of sync is flagged as its own violation",
+			path: "ws/x.go",
+			src: `package ws
+import . "sync"
+var mu Mutex
+`,
+			want: 1,
+		},
+		{
+			name: "slice-of-mutex composite type is flagged",
+			path: "ws/x.go",
+			src: `package ws
+import "sync"
+type Hub struct{ mus []sync.Mutex }
+`,
+			want: 1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CheckSource(token.NewFileSet(), tt.path, []byte(tt.src))
+			got := checkSourceWith([]Rule{syncutilLocks}, token.NewFileSet(), tt.path, []byte(tt.src))
 			if len(got) != tt.want {
 				t.Fatalf("got %d violation(s), want %d:\n%v", len(got), tt.want, got)
 			}
@@ -129,7 +186,7 @@ func TestSyncutilLocksMessageNamesTheFix(t *testing.T) {
 import "sync"
 type Hub struct{ mu sync.RWMutex }
 `
-	got := CheckSource(token.NewFileSet(), "ws/x.go", []byte(src))
+	got := checkSourceWith([]Rule{syncutilLocks}, token.NewFileSet(), "ws/x.go", []byte(src))
 	if len(got) != 1 {
 		t.Fatalf("got %d violation(s), want 1: %v", len(got), got)
 	}

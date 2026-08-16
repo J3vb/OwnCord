@@ -1,8 +1,11 @@
 package invariants
 
 import (
+	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +23,66 @@ func TestServerInvariants(t *testing.T) {
 		t.Logf("%d invariant violation(s). Each message names the fix; "+
 			"use //invariant:allow <rule> — <reason> only with a real reason.",
 			len(violations))
+	}
+
+	assertScopesCovered(t, "..")
+}
+
+// assertScopesCovered guards against the gate passing vacuously: zero
+// violations is indistinguishable from zero files scanned (a moved package,
+// or a Scope entry that no longer exists, would go green while enforcing
+// nothing). It fails loudly, naming the offending Scope entry, if any
+// registered Rule.Scope directory does not exist under root or holds no
+// non-test .go file.
+func assertScopesCovered(t *testing.T, root string) {
+	t.Helper()
+	for _, r := range Rules {
+		for _, scope := range r.Scope {
+			dir := filepath.Join(root, filepath.FromSlash(scope))
+			info, err := os.Stat(dir)
+			if err != nil || !info.IsDir() {
+				t.Fatalf("rule %q Scope entry %q does not resolve to a directory under %q: %v",
+					r.ID, scope, root, err)
+				continue
+			}
+
+			found := false
+			walkErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !d.IsDir() && strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go") {
+					found = true
+				}
+				return nil
+			})
+			if walkErr != nil {
+				t.Fatalf("walking rule %q Scope entry %q: %v", r.ID, scope, walkErr)
+			}
+			if !found {
+				t.Fatalf("rule %q Scope entry %q contains no non-test .go file under %q; "+
+					"the gate would be enforcing nothing there", r.ID, scope, root)
+			}
+		}
+	}
+}
+
+// TestBuildTagGatedFilesAreStillChecked locks in the package doc's central
+// anti-evasion guarantee: parser.ParseFile ignores build constraints, so a
+// file gated behind e.g. -tags deadlock is checked exactly like any other --
+// a raw mutex cannot be hidden from the rules by moving it behind a tag.
+func TestBuildTagGatedFilesAreStillChecked(t *testing.T) {
+	src := `//go:build deadlock
+
+package ws
+
+import "sync"
+
+type Hub struct{ mu sync.Mutex }
+`
+	got := CheckSource(token.NewFileSet(), "ws/x.go", []byte(src))
+	if len(got) != 1 {
+		t.Fatalf("got %d violation(s), want 1: %v", len(got), got)
 	}
 }
 

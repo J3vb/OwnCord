@@ -68,7 +68,9 @@ var Rules = []Rule{syncutilLocks}
 //	mu sync.Mutex //invariant:allow syncutil-locks — <reason>
 //
 // The reason is mandatory. An allow comment without one does not suppress
-// anything and is itself reported, so the hatch cannot silently disable a rule.
+// anything and is itself reported, so the hatch cannot silently disable a
+// rule. The comment must be on the same line as the flagged code -- one on
+// the line above it is not matched and silently fails to suppress.
 const allowPrefix = "//invariant:allow"
 
 // allowIndex maps line number to the set of rule ids suppressed on that line.
@@ -114,6 +116,13 @@ func allowIndex(f *ast.File, fset *token.FileSet, rel string) (map[int]map[strin
 // slash-separated path relative to the tree root, because Scope matching and
 // the reported File both derive from it.
 func CheckSource(fset *token.FileSet, rel string, src []byte) []Violation {
+	return checkSourceWith(Rules, fset, rel, src)
+}
+
+// checkSourceWith is CheckSource against an explicit rule set rather than the
+// global registry, so one rule's tests can run it in isolation instead of
+// tripping over violations from fixtures written for a sibling rule.
+func checkSourceWith(rules []Rule, fset *token.FileSet, rel string, src []byte) []Violation {
 	f, err := parser.ParseFile(fset, rel, src, parser.ParseComments)
 	if err != nil {
 		return []Violation{{Rule: "parse", File: rel, Line: 0, Msg: err.Error()}}
@@ -126,12 +135,15 @@ func CheckSource(fset *token.FileSet, rel string, src []byte) []Violation {
 		dir = ""
 	}
 
-	for _, r := range Rules {
+	for _, r := range rules {
 		if !r.inScope(dir) {
 			continue
 		}
 		for _, v := range r.Check(f, fset, rel) {
-			if allowed[v.Line][r.ID] {
+			// Keyed on v.Rule (what the rule actually emits), not r.ID: a
+			// rule that reports a sub-id would otherwise require an allow
+			// comment naming an id nobody prints.
+			if allowed[v.Line][v.Rule] {
 				continue
 			}
 			out = append(out, v)
@@ -140,8 +152,11 @@ func CheckSource(fset *token.FileSet, rel string, src []byte) []Violation {
 	return out
 }
 
-// skipDirs are never descended into. Generated trees are governed by their
-// generator, not by these rules.
+// skipDirs are never descended into, for two different reasons: dbgen and
+// vendor hold generated/vendored code governed by their own generator or
+// upstream, not by these rules; testdata and data hold non-source content --
+// test fixtures, and (for data, Server/data/) gitignored runtime state such
+// as the SQLite db, certs and uploads -- with no Go files to check.
 var skipDirs = map[string]bool{
 	"dbgen":    true,
 	"vendor":   true,
@@ -198,7 +213,10 @@ func Run(root string) ([]Violation, error) {
 		return nil, err
 	}
 
-	sort.Slice(out, func(i, j int) bool {
+	// Stable: two violations can share a file:line (an allow comment with no
+	// reason produces exactly that, alongside the rule it failed to
+	// suppress), and sort.Slice does not promise to preserve their order.
+	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File
 		}
