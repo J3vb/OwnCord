@@ -692,6 +692,20 @@ func (h *Hub) handleFreshConnect(
 			allowedChannelIDs = allowed
 		}
 	}
+	// handleReconnect may have promoted an auth-frame active_channel_id into
+	// c.channelID (serve.go, honoured only when it was READ-visible at that
+	// moment) and then aborted on one of its own re-checks — most notably the
+	// final mustFullResync check, tripped by a permission revocation that
+	// landed mid-handshake. None of those abort paths undo the c.channelID
+	// write. registerNow subscribes c.channelID's ChannelTopic
+	// unconditionally, so re-gate it here against the freshly recomputed
+	// permission set before registering. Fail closed: a nil allowedChannelIDs
+	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
+	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
+		c.mu.Lock()
+		c.channelID = 0
+		c.mu.Unlock()
+	}
 	h.registerNow(c, allowedChannelIDs)
 
 	// Settle the session's status before buildReady reads the member list, so
