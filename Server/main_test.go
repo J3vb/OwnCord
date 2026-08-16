@@ -45,8 +45,12 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 
 	leakOpt := goleak.IgnoreCurrent()
 
-	if err := run(log, logBuf, levelVar); err == nil {
+	rc := newRestartCoordinator(time.Hour, nil)
+	if err := run(log, logBuf, levelVar, rc); err == nil {
 		t.Fatal("expected run() to return an error for an out-of-range port")
+	}
+	if _, requested := rc.Requested(); requested {
+		t.Error("no restart was requested, but the coordinator reports one")
 	}
 
 	// hub.Run's dispatch goroutine only exits once hub.stop is closed, which

@@ -13,19 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"syscall"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
-	"github.com/owncord/server/updater"
-)
-
-const (
-	// restartGraceDelay lets the HTTP response and the server_restart
-	// broadcast reach clients before the process goes away.
-	restartGraceDelay = 2 * time.Second
-	// shutdownGraceDelay is how long SIGTERM gets before the os.Exit backstop.
-	shutdownGraceDelay = 10 * time.Second
 )
 
 // backupBaseDir is the directory for backup files, resolved to an absolute
@@ -211,6 +200,18 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
+		// Serialize against a concurrent update apply (which stages a new
+		// binary and then restarts) and an already-requested restart — a
+		// restore must not close the database out from under either. The
+		// deferred release is a busy→idle CAS, so it covers every failure
+		// return below and harmlessly no-ops once a branch has promoted the
+		// state to restart-pending via commitRestartPending.
+		if !beginRestartSensitiveOp() {
+			writeRestartConflict(w)
+			return
+		}
+		defer abortRestartSensitiveOp()
+
 		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
@@ -276,13 +277,14 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			// database.Close() closes the writer and reader pools regardless of
 			// the error it returns (Server/db/db.go), so this process cannot
 			// serve anything more either way — every other failure path below
-			// (copyFile failing, and the success path itself) respawns for
+			// (copyFile failing, and the success path itself) restarts for
 			// exactly that reason. The live database file is still intact here
-			// (copyFile hasn't run yet), so the respawned process comes back on
+			// (copyFile hasn't run yet), so the restarted process comes back on
 			// the pre-restore data rather than leaving clients pinned on
 			// "Reconnecting..." against a process that never actually restarts.
 			slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to close database")
+			commitRestartPending()
 			go requestRestart("backup_restore_close_failed")
 			return
 		}
@@ -304,8 +306,9 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			}
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", msg)
 			// The database was closed before the copy: this process cannot serve
-			// anything more either way, so it must respawn exactly as it does on
+			// anything more either way, so it must restart exactly as it does on
 			// the success path.
+			commitRestartPending()
 			go requestRestart("backup_restore_failed")
 			return
 		}
@@ -321,18 +324,11 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// this process can serve nothing more. It used to stop here, leaving a
 		// live server answering every request against a closed DB while the
 		// response and the restart broadcast both claimed a restart was
-		// happening. Respawn for real, the same way applying an update does.
+		// happening. Restart for real, the same way applying an update does.
+		commitRestartPending()
 		go requestRestart("backup_restore")
 	})
 }
-
-// restartSelf is the process-restart hook, swappable in tests (which must not
-// respawn or exit the test binary). Guarded because the swap happens on the
-// test goroutine while the restore handler reads it from its own.
-var (
-	restartMu   sync.Mutex
-	restartSelf = restartProcess
-)
 
 // dbCloser is swappable in tests to simulate database.Close() returning an
 // error. modernc.org/sqlite's sqlite3_close_v2 essentially never fails on a
@@ -351,44 +347,6 @@ func closeDatabase(database *db.DB) error {
 	fn := dbCloser
 	closeMu.Unlock()
 	return fn(database)
-}
-
-// requestRestart invokes the current restart hook.
-func requestRestart(reason string) {
-	restartMu.Lock()
-	fn := restartSelf
-	restartMu.Unlock()
-	fn(reason)
-}
-
-// restartProcess spawns a fresh copy of this server and shuts the current one
-// down. Mirrors the update-apply path (update_handlers.go): SIGTERM first so
-// main.go's graceful shutdown runs, os.Exit as the backstop.
-func restartProcess(reason string) {
-	// Give the HTTP response and the restart broadcast a moment to flush.
-	time.Sleep(restartGraceDelay)
-
-	exePath, err := os.Executable()
-	if err != nil {
-		slog.Error("restart: cannot determine executable path — manual restart required",
-			"reason", reason, "error", err)
-		return
-	}
-	if resolved, symErr := filepath.EvalSymlinks(exePath); symErr == nil {
-		exePath = resolved
-	}
-	if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
-		slog.Error("restart: spawning the replacement process failed — manual restart required",
-			"reason", reason, "error", err)
-		return
-	}
-
-	slog.Info("restart: replacement process spawned, shutting down", "reason", reason)
-	if p, findErr := os.FindProcess(os.Getpid()); findErr == nil {
-		_ = p.Signal(syscall.SIGTERM)
-		time.Sleep(shutdownGraceDelay)
-	}
-	os.Exit(0) //nolint:gocritic // backstop if the SIGTERM handler didn't exit
 }
 
 // copyBackupFile is the restore path's file-copy hook. It exists as a var so

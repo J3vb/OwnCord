@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/owncord/server/updater"
@@ -35,6 +34,11 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	}
 }
 
+// applyRestartDelay is how long the "restarting in 5s" countdown broadcast to
+// clients actually gets before the swap + restart request. A var so tests can
+// shrink it; the broadcast countdown below stays 5 to match this value.
+var applyRestartDelay = 5 * time.Second
+
 // handleApplyUpdate downloads and applies a server update.
 func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +55,24 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
 			return
 		}
+
+		// Serialize against concurrent applies, restores, and an
+		// already-requested restart — claimed before any updater work so a
+		// pending restart answers 409 without an outbound GitHub call, and
+		// so two concurrent applies can never both stage into the same .new
+		// path (each download removes the other's staged file). The deferred
+		// release covers every early return; ownership transfers to the
+		// applyAndRestart goroutine at the bottom.
+		if !beginRestartSensitiveOp() {
+			writeRestartConflict(w)
+			return
+		}
+		claimed := true
+		defer func() {
+			if claimed {
+				abortRestartSensitiveOp()
+			}
+		}()
 
 		// Check for available update.
 		info, err := u.CheckForUpdate(r.Context())
@@ -94,7 +116,7 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		// DownloadAndVerify stages the binary and returns its trusted hash
 		// (bound to the signed release manifest). The apply goroutine below
 		// re-verifies the staged file against this hash through an open
-		// handle — never by path — before the rename+spawn.
+		// handle — never by path — before the rename.
 		stagedHash, err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
 		if err != nil {
 			slog.Error("update download/verify failed", "err", err)
@@ -108,41 +130,54 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			"version": info.Latest,
 		})
 
-		// Broadcast restart notification and apply in background.
-		go func() {
-			if hub != nil {
-				hub.BroadcastServerRestart("update", 5)
-			}
-			time.Sleep(5 * time.Second)
-			if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
-				// Every deferred cleanup inside applyStagedUpdate has run by
-				// now, which is why the exit lives out here.
-				os.Exit(0) // fallback if the SIGTERM handler didn't exit
-			}
-		}()
+		// Broadcast the restart countdown and finish in the background — the
+		// goroutine takes over the busy state claimed above, so the deferred
+		// release must stand down.
+		claimed = false
+		go applyAndRestart(hub, exePath, oldPath, newPath, stagedHash)
 	})
 }
 
-// applyStagedUpdate performs the on-disk swap (verified staged binary ->
-// exePath) and spawns the replacement process. The caller has already
-// broadcast "restarting in 5s" to every connected client before invoking
-// this, so every return path that does NOT end in a successful respawn must
-// correct that promise — otherwise the client's restart banner counts down
-// to a permanent "Reconnecting..." over a connection that never actually
-// dropped (OC-0226). The deferred broadcast below covers all such paths
-// (verification failure, rename failure, commit failure, spawn failure) with
-// one guard instead of one broadcast per failure branch; it is cancelled by
-// setting restarting=true immediately before the process commits to
-// respawning.
-// It reports whether the process is committed to exiting for the replacement.
-// The exit itself belongs to the caller: calling os.Exit here would skip both
-// deferred cleanups below (the staged-file handle and the corrective
-// broadcast), and on Windows releasing that handle is the very thing the
-// restart is for.
+// applyAndRestart is POST /updates/apply's background tail: give clients the
+// promised countdown, swap the binary on disk, and hand the process over to
+// the main package's restart coordinator. On a failed swap it releases the
+// exclusive slot claimed by the handler so a corrected release can be applied
+// without a manual restart (the corrective update_aborted broadcast is sent
+// by applyStagedUpdate's deferred guard).
+func applyAndRestart(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
+	if hub != nil {
+		hub.BroadcastServerRestart("update", 5)
+	}
+	time.Sleep(applyRestartDelay)
+	if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+		commitRestartPending()
+		requestRestart("update")
+		return
+	}
+	abortRestartSensitiveOp()
+}
+
+// applyStagedUpdate performs the on-disk swap: verified staged binary ->
+// exePath, previous binary -> .old. It reports whether the swap committed —
+// on true the caller must request a restart, because the file at exePath is
+// no longer the binary this process is running.
+//
+// The caller has already broadcast "restarting in 5s" to every connected
+// client before invoking this, so every failure path must correct that
+// promise — otherwise the client's restart banner counts down to a permanent
+// "Reconnecting..." over a connection that never actually dropped (OC-0226).
+// The deferred broadcast below covers all such paths (verification failure,
+// rename failure, commit failure) with one guard; it is cancelled by setting
+// committed=true once the verified binary is in place.
+//
+// It does NOT spawn, signal, or exit: the restart itself is the main
+// package's job, after run() has fully drained (Server/restart.go). Keeping
+// the swap free of process side effects is also what makes the success path
+// unit-testable.
 func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) bool {
-	restarting := false
+	committed := false
 	defer func() {
-		if !restarting && hub != nil {
+		if !committed && hub != nil {
 			hub.BroadcastServerRestart("update_aborted", 0)
 		}
 	}()
@@ -150,7 +185,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 	// TOCTOU guard: open the staged binary once, verify its hash
 	// through that handle, and commit (rename) that exact file.
 	// Commit fails if the path was swapped after verification, so
-	// the bytes verified are the bytes spawned.
+	// the bytes verified are the bytes the restart will execute.
 	staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
 	if err != nil {
 		slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
@@ -176,27 +211,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 		return false
 	}
 
-	// Spawn new process.
-	if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
-		slog.Error("update: spawn new process failed", "error", err)
-		return false
-	}
-
-	// The replacement process is spawned: from here on this process is
-	// committed to shutting down for it, so the "restarting" promise made at
-	// the top of handleApplyUpdate's goroutine is about to come true. Cancel
-	// the deferred corrective broadcast.
-	restarting = true
-
-	// Signal the process to shut down gracefully before exiting.
-	// We use SIGTERM on Unix to trigger the graceful shutdown handler
-	// in main.go. On Windows, os.Exit is unavoidable because the
-	// process must release its file lock on the binary.
-	slog.Info("update: new process spawned, shutting down current process")
-	if p, err := os.FindProcess(os.Getpid()); err == nil {
-		_ = p.Signal(syscall.SIGTERM)
-		// Give graceful shutdown a few seconds before force-killing.
-		time.Sleep(10 * time.Second)
-	}
+	committed = true
+	slog.Info("update: staged binary committed — requesting restart", "path", exePath)
 	return true
 }

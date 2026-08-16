@@ -18,12 +18,14 @@ func lockFilePath(dbPath string) string { return dbPath + ".lock" }
 // acquireProcessLock takes the single-process lock for dbPath, retrying for
 // a bounded window before giving up with errAlreadyLocked.
 //
-// The retry exists for the restart handoff: self-update and backup-restore
-// spawn the replacement process while the old one is still draining (worst
-// case ~12s — restartProcess SIGTERMs itself and hard-exits after a 10s
-// grace), so the successor must wait for the lock rather than die on it.
-// A genuinely concurrent long-lived second process still fails, just after
-// the wait.
+// The restart handoff no longer overlaps by design — the old process closes
+// the database (releasing this lock) and exits before its replacement is
+// started, in both spawn and supervised restart modes (Server/restart.go).
+// The retry survives as a safety net for the cases that can still race: a
+// supervisor relaunching the service while a wedged predecessor is being
+// backstop-killed, and the final old-style update from a release that still
+// spawned mid-drain. A genuinely concurrent long-lived second process still
+// fails, just after the wait.
 func acquireProcessLock(dbPath string) (release func(), err error) {
 	const (
 		retryFor   = 30 * time.Second

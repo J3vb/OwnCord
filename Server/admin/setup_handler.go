@@ -254,9 +254,16 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 
 		// Restart after the response is written so the browser receives the
 		// token and the reconnect URL. Mirrors handleRestoreBackup /
-		// handleApplyUpdate: broadcast, then respawn in a goroutine
-		// (requestRestart sleeps a grace delay before acting).
+		// handleApplyUpdate: broadcast, then request the restart in a
+		// goroutine — main.go drains the server and performs the handoff.
+		// tryDirectRestartPending loses only to an already in-flight update
+		// or restore, which will itself restart the process; skipping is
+		// correct then (the response above is already written either way).
 		if restartRequired {
+			if !tryDirectRestartPending() {
+				slog.Warn("setup restart skipped: another restart-sensitive operation is already in progress")
+				return
+			}
 			if hub != nil {
 				hub.BroadcastServerRestart("setup", restartBroadcastDelaySeconds)
 			}

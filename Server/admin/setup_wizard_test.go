@@ -33,9 +33,13 @@ func wizardRunningCfg() *config.Config {
 }
 
 // wizardHandler builds the admin API with wizard options and a restart stub
-// that signals restarted (buffered) instead of respawning the process.
+// that signals restarted (buffered) instead of restarting the process. A
+// wizard run that triggers a restart leaves the process-global
+// restart-serialization guard in restart-pending, so it is reset after every
+// wizard test.
 func wizardHandler(t *testing.T, database *db.DB, cfgPath string, restarted chan string) http.Handler {
 	t.Helper()
+	t.Cleanup(admin.ResetRestartState)
 	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database),
 		admin.SetupOptions{
 			ConfigPath: cfgPath,
