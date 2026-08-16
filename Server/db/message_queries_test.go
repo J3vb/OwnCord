@@ -720,6 +720,42 @@ func TestSearchMessages_HyphenatedQuery(t *testing.T) {
 	}
 }
 
+// OC-0002: sanitizeFTSQuery only filters characters, not FTS5's bareword
+// boolean keywords (AND, OR, NOT). A query consisting of (or containing) one
+// of those keywords in an operator position makes SQLite raise an
+// "fts5: syntax error", which SearchMessages surfaces as an error (mapped by
+// the service layer to a 500) instead of returning zero results.
+func TestSearchMessages_BooleanKeywordQuery(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "booleanuser")
+	chID := seedChannel(t, database, "booleanch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
+
+	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
+		if _, err := database.SearchMessages(context.Background(), q, nil, 10); err != nil {
+			t.Errorf("SearchMessages(%q): unexpected error: %v", q, err)
+		}
+	}
+}
+
+// Same root cause as TestSearchMessages_BooleanKeywordQuery, but through the
+// SearchMessagesInChannels caller, which sanitizes with the same
+// sanitizeFTSQuery helper.
+func TestSearchMessagesInChannels_BooleanKeywordQuery(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "boolchanuser")
+	chID := seedChannel(t, database, "boolchanch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
+
+	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
+		if _, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, 10); err != nil {
+			t.Errorf("SearchMessagesInChannels(%q): unexpected error: %v", q, err)
+		}
+	}
+}
+
 // ─── UpdateReadState ──────────────────────────────────────────────────────────
 
 func TestUpdateReadState_Upsert(t *testing.T) {
