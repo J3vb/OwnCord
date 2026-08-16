@@ -3,7 +3,8 @@ package ws
 import (
 	"strconv"
 	"strings"
-	"sync"
+
+	"github.com/owncord/server/syncutil"
 )
 
 // Topic is a named pub/sub channel that clients can subscribe to.
@@ -61,7 +62,7 @@ func UserTopic(userID int64) Topic {
 //
 // Thread-safe: all methods may be called from any goroutine.
 type PubSub struct {
-	mu sync.RWMutex
+	mu syncutil.RWMutex
 
 	// Forward index: topic → (userID → *Client)
 	topics map[Topic]map[int64]*Client

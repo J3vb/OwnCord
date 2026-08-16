@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 	"github.com/owncord/server/telemetry"
 )
 
@@ -31,7 +31,7 @@ type PermissionService struct {
 	st      Store
 	checker *permissions.Checker
 
-	mu    sync.RWMutex
+	mu    syncutil.RWMutex
 	cache map[int64]*cachedPerms // keyed by userID
 	// gen is bumped by every Invalidate* call. getOrPopulate snapshots it before
 	// its DB read and refuses to cache if it changed, so an invalidation that
