@@ -90,36 +90,170 @@ func writeModerationErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// patchUserPrecheck resolves and validates the target of a
+// PATCH /admin/api/users/{id} before any mutation is attempted. It reports
+// whether the handler may continue; on false it has already written the error
+// response.
+func patchUserPrecheck(w http.ResponseWriter, r *http.Request, database *db.DB) (int64, patchUserRequest, int64, bool) {
+	var req patchUserRequest
+
+	id, err := pathInt64(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+		return 0, req, 0, false
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		return 0, req, 0, false
+	}
+
+	user, err := database.GetUserByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+		return 0, req, 0, false
+	}
+	if user == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+		return 0, req, 0, false
+	}
+
+	actor := actorFromContext(r)
+
+	// Prevent admins from modifying their own role or ban status, which
+	// could lock them out of the admin panel with no recovery path.
+	if id == actor {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "cannot modify your own account via admin panel")
+		return 0, req, 0, false
+	}
+
+	return id, req, actor, true
+}
+
+// patchUserAuthorizeRole runs every ChangeUserRole precondition for a PATCH
+// carrying role_id without committing anything; a request without role_id is
+// a no-op. It reports whether the handler may continue; on false it has
+// already written the error response.
+func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+	if req.RoleID == nil {
+		return true
+	}
+	if mod == nil {
+		// Fail closed rather than fall back to an unchecked UPDATE.
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		return false
+	}
+	if _, _, _, err := mod.AuthorizeRoleChange(r.Context(), actor, id, *req.RoleID); err != nil {
+		writeModerationErr(w, err)
+		return false
+	}
+	return true
+}
+
+// patchUserApplyBan commits the ban/unban half of the PATCH and fans the
+// result out to connected clients; a request without banned is a no-op. It
+// reports whether the handler may continue; on false it has already written
+// the error response.
+func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+	if req.Banned == nil {
+		return true
+	}
+	if mod == nil {
+		// Fail closed rather than fall back to an unchecked UPDATE.
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		return false
+	}
+	banReason := ""
+	if req.BanReason != nil {
+		banReason = *req.BanReason
+	}
+	var banExpires *time.Time
+	if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
+		hours := *req.BanDurationHours
+		if hours < 0 || hours > maxBanDurationHours {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
+			return false
+		}
+		t := time.Now().Add(time.Duration(hours) * time.Hour)
+		banExpires = &t
+	}
+	var actionErr error
+	if *req.Banned {
+		actionErr = mod.BanUser(r.Context(), actor, id, banReason, banExpires)
+	} else {
+		actionErr = mod.UnbanUser(r.Context(), actor, id)
+	}
+	if actionErr != nil {
+		writeModerationErr(w, actionErr)
+		return false
+	}
+	switch {
+	case *req.Banned && hub != nil:
+		hub.BroadcastMemberBan(id)
+	case !*req.Banned && hub != nil:
+		// Ban had no WS event on the way out (member_ban hard-deletes
+		// the row client-side); unban needs one on the way back in, or
+		// every already-connected client keeps the user missing from
+		// its member store while a freshly connecting client sees them.
+		if mub, ok := hub.(memberUnbanBroadcaster); ok {
+			mub.BroadcastMemberUnban(id)
+		}
+	}
+	return true
+}
+
+// patchUserApplyRole commits the role half of the PATCH and fans the result
+// out to connected clients; a request without role_id is a no-op. It reports
+// whether the handler may continue; on false it has already written the error
+// response.
+func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+	if req.RoleID == nil {
+		return true
+	}
+	// Routed through ModerationService, which re-runs the same
+	// MANAGE_ROLES, actor-outranks-target, and assign-below-own-rank
+	// checks the AuthorizeRoleChange pre-flight above already passed
+	// (a second pass, not a redundant one: it catches anything that
+	// changed in the window between the pre-flight and here, e.g. a
+	// concurrent role delete), then commits and writes the audit row.
+	if mod == nil {
+		// Fail closed rather than fall back to an unchecked UPDATE.
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		return false
+	}
+	newRole, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
+	if err != nil {
+		writeModerationErr(w, err)
+		return false
+	}
+	if permInvalidator != nil {
+		permInvalidator.InvalidateUser(id)
+	}
+	// Use the role ChangeUserRole already loaded and validated rather
+	// than re-reading it: a re-read can race a concurrent role delete
+	// (or a transient read error) and silently skip this whole
+	// fan-out, leaving the demoted user's socket subscribed to
+	// channels it can no longer read (OC-0045). The role change
+	// itself already committed, so the fan-out must not be
+	// conditional on anything past that point.
+	if hub != nil {
+		hub.BroadcastMemberUpdate(id, newRole.Name)
+		// BroadcastMemberUpdate only revokes subscriptions the new
+		// role can no longer read (hub_broadcast.go's
+		// revokeUnreadableChannels); it never grants the ones the
+		// new role newly gained READ_MESSAGES on. Without this,
+		// a promoted user's sidebar is missing channels until
+		// their next reconnect, unlike a role permission edit or
+		// a role delete, which both re-derive visibility fully.
+		hub.RefreshAllChannelVisibility()
+	}
+	return true
+}
+
 func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathInt64(r, "id")
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
-			return
-		}
-
-		var req patchUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
-			return
-		}
-
-		user, err := database.GetUserByID(r.Context(), id)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
-			return
-		}
-		if user == nil {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
-			return
-		}
-
-		actor := actorFromContext(r)
-
-		// Prevent admins from modifying their own role or ban status, which
-		// could lock them out of the admin panel with no recovery path.
-		if id == actor {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "cannot modify your own account via admin panel")
+		id, req, actor, ok := patchUserPrecheck(w, r, database)
+		if !ok {
 			return
 		}
 
@@ -133,16 +267,8 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// (OC-0215). Running every ChangeUserRole precondition up front,
 		// before either mutation lands, keeps the PATCH all-or-nothing from
 		// the caller's perspective.
-		if req.RoleID != nil {
-			if mod == nil {
-				// Fail closed rather than fall back to an unchecked UPDATE.
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
-				return
-			}
-			if _, _, _, err := mod.AuthorizeRoleChange(r.Context(), actor, id, *req.RoleID); err != nil {
-				writeModerationErr(w, err)
-				return
-			}
+		if !patchUserAuthorizeRole(w, r, mod, actor, id, req) {
+			return
 		}
 
 		// Ban/unban first: it routes through ModerationService, which enforces
@@ -151,88 +277,12 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// role change, if requested, was already authorized above, so a ban
 		// committing here cannot be followed by a refused role change leaving
 		// a half-applied PATCH behind.
-		if req.Banned != nil {
-			if mod == nil {
-				// Fail closed rather than fall back to an unchecked UPDATE.
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
-				return
-			}
-			banReason := ""
-			if req.BanReason != nil {
-				banReason = *req.BanReason
-			}
-			var banExpires *time.Time
-			if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
-				hours := *req.BanDurationHours
-				if hours < 0 || hours > maxBanDurationHours {
-					writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
-					return
-				}
-				t := time.Now().Add(time.Duration(hours) * time.Hour)
-				banExpires = &t
-			}
-			var actionErr error
-			if *req.Banned {
-				actionErr = mod.BanUser(r.Context(), actor, id, banReason, banExpires)
-			} else {
-				actionErr = mod.UnbanUser(r.Context(), actor, id)
-			}
-			if actionErr != nil {
-				writeModerationErr(w, actionErr)
-				return
-			}
-			switch {
-			case *req.Banned && hub != nil:
-				hub.BroadcastMemberBan(id)
-			case !*req.Banned && hub != nil:
-				// Ban had no WS event on the way out (member_ban hard-deletes
-				// the row client-side); unban needs one on the way back in, or
-				// every already-connected client keeps the user missing from
-				// its member store while a freshly connecting client sees them.
-				if mub, ok := hub.(memberUnbanBroadcaster); ok {
-					mub.BroadcastMemberUnban(id)
-				}
-			}
+		if !patchUserApplyBan(w, r, hub, mod, actor, id, req) {
+			return
 		}
 
-		if req.RoleID != nil {
-			// Routed through ModerationService, which re-runs the same
-			// MANAGE_ROLES, actor-outranks-target, and assign-below-own-rank
-			// checks the AuthorizeRoleChange pre-flight above already passed
-			// (a second pass, not a redundant one: it catches anything that
-			// changed in the window between the pre-flight and here, e.g. a
-			// concurrent role delete), then commits and writes the audit row.
-			if mod == nil {
-				// Fail closed rather than fall back to an unchecked UPDATE.
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
-				return
-			}
-			newRole, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
-			if err != nil {
-				writeModerationErr(w, err)
-				return
-			}
-			if permInvalidator != nil {
-				permInvalidator.InvalidateUser(id)
-			}
-			// Use the role ChangeUserRole already loaded and validated rather
-			// than re-reading it: a re-read can race a concurrent role delete
-			// (or a transient read error) and silently skip this whole
-			// fan-out, leaving the demoted user's socket subscribed to
-			// channels it can no longer read (OC-0045). The role change
-			// itself already committed, so the fan-out must not be
-			// conditional on anything past that point.
-			if hub != nil {
-				hub.BroadcastMemberUpdate(id, newRole.Name)
-				// BroadcastMemberUpdate only revokes subscriptions the new
-				// role can no longer read (hub_broadcast.go's
-				// revokeUnreadableChannels); it never grants the ones the
-				// new role newly gained READ_MESSAGES on. Without this,
-				// a promoted user's sidebar is missing channels until
-				// their next reconnect, unlike a role permission edit or
-				// a role delete, which both re-derive visibility fully.
-				hub.RefreshAllChannelVisibility()
-			}
+		if !patchUserApplyRole(w, r, hub, permInvalidator, mod, actor, id, req) {
+			return
 		}
 
 		updated, err := database.GetUserByID(r.Context(), id)
