@@ -159,26 +159,10 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 	return true
 }
 
-// buildReady constructs the ready server→client message.
-// Per docs/protocol.md, channels include unread_count and last_message_id per
-// user, and only protocol-specified fields (no slow_mode, archived, voice_*
-// extras).
-func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
-	channels, err := database.ListChannels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
-	}
-	roles, err := database.ListRoles(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
-	}
-
-	members, err := database.ListMembers(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
-	}
-	members = h.presentableMembers(members, userID)
-
+// readyVisibleChannels resolves the channels the user may see for the ready
+// payload, returning the per-channel override map it fetched alongside them so
+// buildReady can reuse it for the can_send affordance without a second query.
+func (h *Hub) readyVisibleChannels(ctx context.Context, database *db.DB, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
 	// filtering (computeAllowedChannels). The overrides map is fetched once and
@@ -189,7 +173,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		var oErr error
 		overrides, oErr = database.GetChannelOverridesFor(ctx, role.ID, userID)
 		if oErr != nil {
-			return nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
+			return nil, nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
 		}
 	}
 	var visibleChannels []db.Channel
@@ -205,14 +189,12 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	if visibleChannels == nil {
 		visibleChannels = []db.Channel{}
 	}
+	return visibleChannels, overrides, nil
+}
 
-	// Per-user unread counts.
-	unreadMap, err := database.GetChannelUnreadCounts(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
-	}
-
-	// Build protocol-compliant channel objects (strip extra fields).
+// readyChannelPayloads builds the ready payload's channel objects — one entry
+// per visible channel, with the per-user unread fields folded in.
+func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -254,12 +236,13 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 		}
 		channelPayloads = append(channelPayloads, entry)
 	}
+	return channelPayloads
+}
 
-	// Load open DM channels for this user. Hoisted above the voice-state
-	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
-	// (and therefore visibleChannels) deliberately skips DM channels, since
-	// their visibility is membership-based rather than role-based, so without
-	// this a DM voice call's voice_state rows would never make it into ready.
+// readyDMChannels loads the user's open DM channels and reconciles them with
+// the rest of the ready payload: mention counts from unreadMap, and the same
+// presence rule presentableMembers applies to the members array.
+func (h *Hub) readyDMChannels(ctx context.Context, database *db.DB, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
@@ -281,7 +264,12 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 	// presentableMembers above; apply the same half here so dm_channels
 	// cannot disagree with members about the same user within one payload.
 	dmChannels = h.presentableDMChannels(dmChannels)
+	return dmChannels, nil
+}
 
+// readyVoiceStates gathers the voice states the ready payload may expose to
+// this user. A collect failure is non-fatal, so this returns no error.
+func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []db.Channel, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
 	// Collect voice states, filtered to visible channels (BUG-095) plus the
 	// user's own open DM channels — mirroring computeAllowedChannels, which
 	// layers DM IDs onto the same checker result for reconnect replay
@@ -318,6 +306,54 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			voiceStates = append(voiceStates, allVoiceStates[i])
 		}
 	}
+	return voiceStates
+}
+
+// buildReady constructs the ready server→client message.
+// Per docs/protocol.md, channels include unread_count and last_message_id per
+// user, and only protocol-specified fields (no slow_mode, archived, voice_*
+// extras).
+func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
+	channels, err := database.ListChannels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
+	}
+	roles, err := database.ListRoles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
+	}
+
+	members, err := database.ListMembers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
+	}
+	members = h.presentableMembers(members, userID)
+
+	visibleChannels, overrides, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
+	if err != nil {
+		return nil, err
+	}
+
+	// Per-user unread counts.
+	unreadMap, err := database.GetChannelUnreadCounts(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
+	}
+
+	// Build protocol-compliant channel objects (strip extra fields).
+	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role)
+
+	// Load open DM channels for this user. Hoisted above the voice-state
+	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
+	// (and therefore visibleChannels) deliberately skips DM channels, since
+	// their visibility is membership-based rather than role-based, so without
+	// this a DM voice call's voice_state rows would never make it into ready.
+	dmChannels, err := h.readyDMChannels(ctx, database, userID, unreadMap)
+	if err != nil {
+		return nil, err
+	}
+
+	voiceStates := h.readyVoiceStates(ctx, database, channels, visibleChannels, dmChannels, userID)
 
 	serverName, motd := h.getCachedSettings(ctx)
 

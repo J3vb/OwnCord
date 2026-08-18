@@ -86,7 +86,7 @@ func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
 	}
 }
 
-// ─── rollbackVoiceJoin (voice_join.go:239) ──────────────────────────────────
+// ─── rollbackVoiceJoin (voice_join.go) ──────────────────────────────────
 
 func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 	hub, database := newCoverageHub(t)
@@ -152,7 +152,7 @@ func TestRollbackVoiceJoin_NoDBState_DoesNotPanic(t *testing.T) {
 // "DELETE ... WHERE user_id = ?" with no channel/token condition wipes
 // whatever the user is currently in, not just the failed join.
 //
-// This covers the token-generation-failure call site (voice_join.go:300),
+// This covers the token-generation-failure call site (voiceJoinGrantToken),
 // which already holds the failed join's own JoinedAt by the time it rolls
 // back — that value must scope the delete instead of being discarded.
 func TestRollbackVoiceJoin_StaleTokenDoesNotDeleteNewerJoin(t *testing.T) {
@@ -193,7 +193,7 @@ func TestRollbackVoiceJoin_StaleTokenDoesNotDeleteNewerJoin(t *testing.T) {
 	}
 }
 
-// OC-0044: mirrors the GetVoiceState-failure call site (voice_join.go:208),
+// OC-0044: mirrors the GetVoiceState-failure call site (voiceJoinPersist),
 // which never learns the failed join's own JoinedAt and so rolls back with
 // an empty token. That must not degrade to the old unconditional
 // "DELETE ... WHERE user_id = ?" — it must re-read the row and refuse to

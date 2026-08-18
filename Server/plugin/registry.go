@@ -262,120 +262,23 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 		return "", fmt.Errorf("abs staging dir: %w", absErr)
 	}
 
-	var totalUncompressed int64
-	for _, f := range zr.File {
-		// Reject symlinks, devices, and any non-regular file mode.
-		if !f.Mode().IsRegular() && !f.Mode().IsDir() {
-			cleanup()
-			return "", fmt.Errorf("plugin zip: refusing non-regular entry %q (mode=%v)", f.Name, f.Mode())
-		}
-		if f.Mode()&os.ModeSymlink != 0 {
-			cleanup()
-			return "", fmt.Errorf("plugin zip: refusing symlink %q", f.Name)
-		}
-		// Reject zip-slip: cleaned absolute path must stay rooted at the
-		// staging directory.
-		clean := filepath.Clean(f.Name)
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) || strings.Contains(clean, "..\\") {
-			cleanup()
-			return "", fmt.Errorf("plugin zip: refusing path-traversal entry %q", f.Name)
-		}
-		dest := filepath.Join(stageAbs, clean)
-		destAbs, dErr := filepath.Abs(dest)
-		if dErr != nil {
-			cleanup()
-			return "", dErr
-		}
-		rel, relErr := filepath.Rel(stageAbs, destAbs)
-		if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-			cleanup()
-			return "", fmt.Errorf("plugin zip: refusing escape %q", f.Name)
-		}
-
-		if f.Mode().IsDir() {
-			if err := os.MkdirAll(destAbs, 0o750); err != nil {
-				cleanup()
-				return "", err
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(destAbs), 0o750); err != nil {
-			cleanup()
-			return "", err
-		}
-		rc, oErr := f.Open()
-		if oErr != nil {
-			cleanup()
-			return "", oErr
-		}
-		out, cErr := os.OpenFile(destAbs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-		if cErr != nil {
-			_ = rc.Close()
-			cleanup()
-			return "", cErr
-		}
-		// Cap each file at the remaining uncompressed budget so a zip bomb
-		// can't OOM the host.
-		remaining := maxUncompressedSum - totalUncompressed
-		if remaining <= 0 {
-			_ = rc.Close()
-			_ = out.Close()
-			cleanup()
-			return "", fmt.Errorf("plugin zip: uncompressed total exceeds %d bytes", maxUncompressedSum)
-		}
-		n, copyErr := io.CopyN(out, rc, remaining+1)
-		_ = rc.Close()
-		_ = out.Close()
-		if copyErr != nil && copyErr != io.EOF {
-			cleanup()
-			return "", copyErr
-		}
-		if n > remaining {
-			cleanup()
-			return "", fmt.Errorf("plugin zip: uncompressed total exceeds %d bytes", maxUncompressedSum)
-		}
-		totalUncompressed += n
+	if err := installZipExtract(zr, stageAbs); err != nil {
+		cleanup()
+		return "", err
 	}
 
 	// Stage 2: parse the manifest now that the staging dir is fully populated.
-	manifestPath := filepath.Join(stageAbs, "plugin.json")
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		cleanup()
-		return "", fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
-	}
-	manifest, err := ParseManifest(raw)
+	manifest, err := installZipStagedManifest(stageAbs)
 	if err != nil {
 		cleanup()
 		return "", err
-	}
-	// Validate the staged contents the same way scanPluginDirectory does.
-	if err := rejectSymlinksUnder(stageAbs); err != nil {
-		cleanup()
-		return "", err
-	}
-	wasmPath := filepath.Join(stageAbs, manifest.Entrypoint)
-	if info, statErr := os.Lstat(wasmPath); statErr != nil {
-		cleanup()
-		return "", fmt.Errorf("entrypoint %s missing: %w", manifest.Entrypoint, statErr)
-	} else if info.Mode()&os.ModeSymlink != 0 {
-		cleanup()
-		return "", fmt.Errorf("entrypoint %s is a symlink", manifest.Entrypoint)
 	}
 
 	// Stage 3: atomically rename into the canonical plugin name directory.
 	finalDir := filepath.Join(r.cfg.Directory, manifest.Name)
-	// If a previous version exists, remove it. The store row is replaced by
-	// installFromDisk via the existing UPSERT path.
-	if _, err := os.Stat(finalDir); err == nil {
-		if err := os.RemoveAll(finalDir); err != nil {
-			cleanup()
-			return "", fmt.Errorf("remove existing plugin dir: %w", err)
-		}
-	}
-	if err := os.Rename(stageAbs, finalDir); err != nil {
+	if err := installZipPromote(stageAbs, finalDir); err != nil {
 		cleanup()
-		return "", fmt.Errorf("install rename: %w", err)
+		return "", err
 	}
 
 	// Stage 4: register via the existing on-disk install path.
@@ -387,42 +290,187 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 		return manifest.Name, fmt.Errorf("installFromDisk: %w", err)
 	}
 
-	// installFromDisk always registers the fresh instance as disabled and
-	// InstallPlugin's upsert never touches the `enabled` column, so a plugin
-	// that was enabled before this upgrade would otherwise come out the
-	// other side with the store row still saying enabled while the runtime
-	// instance sits inactive. LoadAll's startup path avoids this because it
-	// always runs activateAll afterward; this is the one caller of
-	// installFromDisk that doesn't, so it has to reactivate for itself.
-	// EnablePlugin already rolls the DB flag back if activation fails, so
-	// the two can no longer disagree.
-	if row, err := r.cfg.Store.GetPluginByName(ctx, manifest.Name); err == nil && row != nil && row.Enabled {
-		if err := r.EnablePlugin(ctx, row.ID); err != nil {
-			if errors.Is(err, ErrRuntimeUnavailable) {
-				// Default (non-wazero) build: nothing can activate here, and
-				// leaving EnablePlugin's rollback in place would persistently
-				// disable a plugin the admin left enabled — after a rebuild
-				// with -tags wazero it would silently stay off. Preserve the
-				// enabled intent instead; the next wazero-tagged start's
-				// activateAll does the real activation.
-				if reErr := r.cfg.Store.EnablePlugin(ctx, row.ID); reErr != nil {
-					slog.Warn("plugin: could not preserve enabled flag across runtime-less upgrade",
-						"name", manifest.Name, "err", reErr)
-				} else {
-					r.mu.Lock()
-					if inst, ok := r.byName[manifest.Name]; ok {
-						inst.Enabled = true
-					}
-					r.mu.Unlock()
-					slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
-						"name", manifest.Name)
-				}
-			} else {
-				slog.Warn("plugin: reactivate after upgrade failed", "name", manifest.Name, "err", err)
+	r.installZipReactivate(ctx, manifest.Name)
+	return manifest.Name, nil
+}
+
+// installZipExtract writes every entry of zr into the already-created staging
+// directory stageAbs, enforcing the zip-slip, symlink and uncompressed-size
+// caps entry by entry before each write. The caller owns stageAbs and removes
+// it on any error returned here.
+func installZipExtract(zr *zip.Reader, stageAbs string) error {
+	var totalUncompressed int64
+	for _, f := range zr.File {
+		destAbs, entryErr := installZipEntryDest(f, stageAbs)
+		if entryErr != nil {
+			return entryErr
+		}
+
+		if f.Mode().IsDir() {
+			if err := os.MkdirAll(destAbs, 0o750); err != nil {
+				return err
 			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(destAbs), 0o750); err != nil {
+			return err
+		}
+		// Cap each file at the remaining uncompressed budget so a zip bomb
+		// can't OOM the host.
+		remaining := maxUncompressedSum - totalUncompressed
+		n, writeErr := installZipWriteEntry(f, destAbs, remaining)
+		if writeErr != nil {
+			return writeErr
+		}
+		totalUncompressed += n
+	}
+	return nil
+}
+
+// installZipEntryDest validates one zip entry's mode and name and returns the
+// absolute path it may be written to under stageAbs. Every rejection here is a
+// hard stop: non-regular modes, symlinks, and any name that escapes stageAbs.
+func installZipEntryDest(f *zip.File, stageAbs string) (string, error) {
+	// Reject symlinks, devices, and any non-regular file mode.
+	if !f.Mode().IsRegular() && !f.Mode().IsDir() {
+		return "", fmt.Errorf("plugin zip: refusing non-regular entry %q (mode=%v)", f.Name, f.Mode())
+	}
+	if f.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("plugin zip: refusing symlink %q", f.Name)
+	}
+	// Reject zip-slip: cleaned absolute path must stay rooted at the
+	// staging directory.
+	clean := filepath.Clean(f.Name)
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) || strings.Contains(clean, "..\\") {
+		return "", fmt.Errorf("plugin zip: refusing path-traversal entry %q", f.Name)
+	}
+	dest := filepath.Join(stageAbs, clean)
+	destAbs, dErr := filepath.Abs(dest)
+	if dErr != nil {
+		return "", dErr
+	}
+	rel, relErr := filepath.Rel(stageAbs, destAbs)
+	if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("plugin zip: refusing escape %q", f.Name)
+	}
+	return destAbs, nil
+}
+
+// installZipWriteEntry copies one regular entry to destAbs, refusing to write
+// more than remaining bytes — this entry's share of the maxUncompressedSum
+// budget — and returns how many bytes it wrote.
+func installZipWriteEntry(f *zip.File, destAbs string, remaining int64) (int64, error) {
+	rc, oErr := f.Open()
+	if oErr != nil {
+		return 0, oErr
+	}
+	out, cErr := os.OpenFile(destAbs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if cErr != nil {
+		_ = rc.Close()
+		return 0, cErr
+	}
+	if remaining <= 0 {
+		_ = rc.Close()
+		_ = out.Close()
+		return 0, fmt.Errorf("plugin zip: uncompressed total exceeds %d bytes", maxUncompressedSum)
+	}
+	n, copyErr := io.CopyN(out, rc, remaining+1)
+	_ = rc.Close()
+	_ = out.Close()
+	if copyErr != nil && copyErr != io.EOF {
+		return 0, copyErr
+	}
+	if n > remaining {
+		return 0, fmt.Errorf("plugin zip: uncompressed total exceeds %d bytes", maxUncompressedSum)
+	}
+	return n, nil
+}
+
+// installZipStagedManifest parses the staged plugin.json and holds the staged
+// tree to the same rules scanPluginDirectory applies to an on-disk plugin (no
+// symlinks anywhere, entrypoint present and not a symlink).
+func installZipStagedManifest(stageAbs string) (*Manifest, error) {
+	manifestPath := filepath.Join(stageAbs, "plugin.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
+	}
+	manifest, err := ParseManifest(raw)
+	if err != nil {
+		return nil, err
+	}
+	// Validate the staged contents the same way scanPluginDirectory does.
+	if err := rejectSymlinksUnder(stageAbs); err != nil {
+		return nil, err
+	}
+	wasmPath := filepath.Join(stageAbs, manifest.Entrypoint)
+	if info, statErr := os.Lstat(wasmPath); statErr != nil {
+		return nil, fmt.Errorf("entrypoint %s missing: %w", manifest.Entrypoint, statErr)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("entrypoint %s is a symlink", manifest.Entrypoint)
+	}
+	return manifest, nil
+}
+
+// installZipPromote moves the fully validated staging directory into its
+// canonical plugin-name directory.
+func installZipPromote(stageAbs, finalDir string) error {
+	// If a previous version exists, remove it. The store row is replaced by
+	// installFromDisk via the existing UPSERT path.
+	if _, err := os.Stat(finalDir); err == nil {
+		if err := os.RemoveAll(finalDir); err != nil {
+			return fmt.Errorf("remove existing plugin dir: %w", err)
 		}
 	}
-	return manifest.Name, nil
+	if err := os.Rename(stageAbs, finalDir); err != nil {
+		return fmt.Errorf("install rename: %w", err)
+	}
+	return nil
+}
+
+// installZipReactivate restores the enabled state of a plugin that was already
+// enabled before this upgrade.
+//
+// installFromDisk always registers the fresh instance as disabled and
+// InstallPlugin's upsert never touches the `enabled` column, so a plugin
+// that was enabled before this upgrade would otherwise come out the
+// other side with the store row still saying enabled while the runtime
+// instance sits inactive. LoadAll's startup path avoids this because it
+// always runs activateAll afterward; this is the one caller of
+// installFromDisk that doesn't, so it has to reactivate for itself.
+// EnablePlugin already rolls the DB flag back if activation fails, so
+// the two can no longer disagree.
+func (r *Registry) installZipReactivate(ctx context.Context, name string) {
+	row, rowErr := r.cfg.Store.GetPluginByName(ctx, name)
+	if rowErr != nil || row == nil || !row.Enabled {
+		return
+	}
+	err := r.EnablePlugin(ctx, row.ID)
+	if err == nil {
+		return
+	}
+	if !errors.Is(err, ErrRuntimeUnavailable) {
+		slog.Warn("plugin: reactivate after upgrade failed", "name", name, "err", err)
+		return
+	}
+	// Default (non-wazero) build: nothing can activate here, and
+	// leaving EnablePlugin's rollback in place would persistently
+	// disable a plugin the admin left enabled — after a rebuild
+	// with -tags wazero it would silently stay off. Preserve the
+	// enabled intent instead; the next wazero-tagged start's
+	// activateAll does the real activation.
+	if reErr := r.cfg.Store.EnablePlugin(ctx, row.ID); reErr != nil {
+		slog.Warn("plugin: could not preserve enabled flag across runtime-less upgrade",
+			"name", name, "err", reErr)
+		return
+	}
+	r.mu.Lock()
+	if inst, ok := r.byName[name]; ok {
+		inst.Enabled = true
+	}
+	r.mu.Unlock()
+	slog.Info("plugin: runtime unavailable, enabled flag preserved across upgrade",
+		"name", name)
 }
 
 // bytesReaderAt is a tiny wrapper that satisfies io.ReaderAt for a byte

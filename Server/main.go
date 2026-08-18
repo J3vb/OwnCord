@@ -117,6 +117,122 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
+	runRemoveOldBinary(log)
+
+	// ── 1. Load configuration ──────────────────────────────────────────────
+	cfg, err := runLoadConfig(log, levelVar, rc)
+	if err != nil {
+		return err
+	}
+
+	// ── 2. Ensure data directory exists ────────────────────────────────────
+	if err := runPrepareDataDir(log, cfg); err != nil {
+		return err
+	}
+
+	// ── 3. TLS ────────────────────────────────────────────────────────────
+	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
+	if err != nil {
+		return fmt.Errorf("configuring TLS: %w", err)
+	}
+	tlsCfg := tlsResult.TLSConfig
+
+	// Print startup banner first so it appears above all init logs.
+	printBanner(cfg, version, tlsCfg != nil)
+
+	// ── 4. Open database + run migrations ─────────────────────────────────
+	database, err := runOpenDatabase(cfg)
+	if err != nil {
+		return err
+	}
+	defer database.Close() //nolint:errcheck
+
+	if err := runInitDatabase(log, cfg, database, rc); err != nil {
+		return err
+	}
+
+	// ── 4b. Telemetry (Phase B Step 8) ─────────────────────────────────────
+	telemetryStop := runInitTelemetry(log, cfg)
+	defer telemetryStop()
+
+	// ── 5a. Construct plugin runtime BEFORE the router so the router can
+	// wire the live registry into the plugin admin handler. ────────────────
+	pluginRegistry := runInitPlugins(bgCtx, log, cfg, database)
+	defer runClosePlugins(pluginRegistry)
+
+	// ── 5b. Build HTTP router ──────────────────────────────────────────────
+	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf, pluginRegistry)
+	defer routerCleanup()
+	// Backstop for every early return below (serve error, ACME shutdown
+	// failure, etc.): hub.GracefulStop is the only caller of
+	// LiveKitProcess.Stop(), so skipping it orphans the companion
+	// livekit-server process and leaves the hub's dispatch goroutine
+	// running. gracefulOnce makes it idempotent alongside the explicit call
+	// on the normal shutdown path below.
+	defer hub.GracefulStop()
+
+	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
+	persister, prunerDone := runStartEventPersistence(bgCtx, log, cfg, hub, database)
+	defer runStopEventPersistence(log, bgCancel, persister, prunerDone)
+
+	// ── 5d. Async audit writer ─────────────────────────────────────────────
+	// Moves audit-log INSERTs off the request path: once the writer is
+	// installed, WriteAudit enqueues here and a background goroutine batches
+	// the writes (same shape as the event persister above). Paths that never
+	// install a writer — the token CLI, tests — keep the synchronous
+	// behavior. This defer is registered after `defer database.Close()` so
+	// LIFO ordering drains the queue before the database is torn down.
+	auditWriter := runStartAuditWriter(bgCtx, database)
+	defer runStopAuditWriter(auditWriter)
+
+	// ── 6. Start server ────────────────────────────────────────────────────
+	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		TLSConfig:    tlsCfg,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
+	}
+
+	// ── 6b. ACME HTTP challenge server on :80 ─────────────────────────────
+	// When using Let's Encrypt (tls.mode: acme), an HTTP server on port 80
+	// is needed for HTTP-01 challenge validation and HTTP→HTTPS redirect.
+	acmeSrv := runStartACME(log, tlsResult.HTTPHandler)
+
+	// ── 7. Background maintenance ────────────────────────────────────────
+	maintenanceStop := runStartMaintenance(bgCtx, log, cfg, database)
+	defer maintenanceStop()
+
+	// Listen for OS signals for graceful shutdown. The coordinator's context
+	// is the parent, so a programmatic restart request (rc.Request) drains
+	// exactly like a SIGTERM — including on Windows, where a process cannot
+	// signal itself. Signals arriving mid-drain are swallowed until stop()
+	// runs, same as on the real-signal path.
+	ctx, stop := signal.NotifyContext(rc.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := runServeAndWait(ctx, log, rc, srv, tlsCfg, addr); err != nil {
+		return err
+	}
+
+	// Graceful shutdown.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := runShutdownServers(shutdownCtx, log, srv, acmeSrv, hub); err != nil {
+		return err
+	}
+
+	log.Info("server stopped cleanly")
+	return nil
+}
+
+// runRemoveOldBinary deletes the binary a previous self-update left behind.
+// Extracted from run.
+func runRemoveOldBinary(log *slog.Logger) {
 	// Clean up old binary from a previous update. Bounded retry: in spawn
 	// mode the predecessor spawns this process as its very last act, so for
 	// the first few hundred milliseconds it may not have fully exited — and
@@ -125,30 +241,36 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 	exePath, exeErr := os.Executable()
 	if exeErr != nil {
 		log.Warn("failed to determine executable path", "error", exeErr)
-	} else {
-		oldPath := exePath + ".old"
-		if _, statErr := os.Stat(oldPath); statErr == nil {
-			var rmErr error
-			for attempt := range 5 {
-				if attempt > 0 {
-					time.Sleep(250 * time.Millisecond)
-				}
-				if rmErr = os.Remove(oldPath); rmErr == nil {
-					break
-				}
-			}
-			if rmErr != nil {
-				log.Warn("failed to remove old binary", "path", oldPath, "error", rmErr)
-			} else {
-				log.Info("removed old binary from previous update", "path", oldPath)
-			}
-		}
+		return
 	}
 
-	// ── 1. Load configuration ──────────────────────────────────────────────
+	oldPath := exePath + ".old"
+	if _, statErr := os.Stat(oldPath); statErr != nil {
+		return
+	}
+
+	var rmErr error
+	for attempt := range 5 {
+		if attempt > 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
+		if rmErr = os.Remove(oldPath); rmErr == nil {
+			break
+		}
+	}
+	if rmErr != nil {
+		log.Warn("failed to remove old binary", "path", oldPath, "error", rmErr)
+	} else {
+		log.Info("removed old binary from previous update", "path", oldPath)
+	}
+}
+
+// runLoadConfig loads the on-disk configuration, applies its logging level
+// and resolves the restart handoff mode. Extracted from run.
+func runLoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *restartCoordinator) (*config.Config, error) {
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	// Apply the configured log level. The admin panel's live log view (ring
@@ -165,7 +287,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 	// after run() returns.
 	rc.SetMode(resolveRestartMode(cfg.Server.RestartMode, log))
 
-	// ── 2. Ensure data directory exists ────────────────────────────────────
+	return cfg, nil
+}
+
+// runPrepareDataDir creates the configured data directory and warns when the
+// volumes the server writes to are low on free space. Extracted from run.
+func runPrepareDataDir(log *slog.Logger, cfg *config.Config) error {
 	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}
@@ -179,30 +306,31 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		warnLowDisk(log, "backup dir", cfg.Backup.Dir)
 	}
 
-	// ── 3. TLS ────────────────────────────────────────────────────────────
-	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
-	if err != nil {
-		return fmt.Errorf("configuring TLS: %w", err)
-	}
-	tlsCfg := tlsResult.TLSConfig
+	return nil
+}
 
-	// Print startup banner first so it appears above all init logs.
-	printBanner(cfg, version, tlsCfg != nil)
-
-	// ── 4. Open database + run migrations ─────────────────────────────────
+// runOpenDatabase validates the configured backend and opens the database.
+// Extracted from run.
+func runOpenDatabase(cfg *config.Config) (*db.DB, error) {
 	// SQLite is the only supported backend; the unfinished Postgres
 	// scaffolding (stubbed query layer, never wired into the runtime) was
 	// removed rather than completed.
 	if t := cfg.Database.Type; t != "" && t != "sqlite" {
-		return fmt.Errorf("database.type=%q is not supported; set \"sqlite\" or omit it", t)
+		return nil, fmt.Errorf("database.type=%q is not supported; set \"sqlite\" or omit it", t)
 	}
 
 	database, err := db.OpenWithMaxReaders(cfg.Database.Path, cfg.Database.MaxReaders)
 	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
+		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	defer database.Close() //nolint:errcheck
 
+	return database, nil
+}
+
+// runInitDatabase points the admin panel at the live database, runs the
+// migrations and clears state left over from a previous run. Extracted from
+// run.
+func runInitDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *restartCoordinator) error {
 	// The admin "Restore backup" handler needs the real database file path:
 	// without this, it falls back to a hardcoded "data/chatserver.db" and
 	// silently no-ops on any server with a configured database.path.
@@ -233,7 +361,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		log.Info("cleared stale voice states")
 	}
 
-	// ── 4b. Telemetry (Phase B Step 8) ─────────────────────────────────────
+	return nil
+}
+
+// runInitTelemetry initialises OpenTelemetry and returns the shutdown step
+// run defers. Extracted from run.
+func runInitTelemetry(log *slog.Logger, cfg *config.Config) func() {
 	// Init can return (nil, err) when the otel build-tag skeleton hasn't been
 	// finished wiring to the upstream SDK. Normalise to a no-op shutdown so
 	// the deferred closure never calls a nil function.
@@ -244,16 +377,19 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 	if telemetryShutdown == nil {
 		telemetryShutdown = func(context.Context) error { return nil }
 	}
-	defer func() {
+
+	return func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := telemetryShutdown(shutdownCtx); err != nil {
 			log.Warn("telemetry shutdown returned error", "error", err)
 		}
-	}()
+	}
+}
 
-	// ── 5a. Construct plugin runtime BEFORE the router so the router can
-	// wire the live registry into the plugin admin handler. ────────────────
+// runInitPlugins constructs the plugin runtime, returning nil when plugins
+// are disabled or failed to start. Extracted from run.
+func runInitPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) *plugin.Registry {
 	var pluginRegistry *plugin.Registry
 	if cfg.Plugins.Enabled {
 		registry, plugErr := plugin.NewRegistry(plugin.Config{
@@ -270,95 +406,99 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 			if err := registry.LoadAll(bgCtx); err != nil {
 				log.Warn("plugin loader: failed to scan directory", "error", err)
 			}
-			defer func() {
-				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = registry.Close(closeCtx)
-			}()
 		}
 	}
 
-	// ── 5b. Build HTTP router ──────────────────────────────────────────────
-	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf, pluginRegistry)
-	defer routerCleanup()
-	// Backstop for every early return below (serve error, ACME shutdown
-	// failure, etc.): hub.GracefulStop is the only caller of
-	// LiveKitProcess.Stop(), so skipping it orphans the companion
-	// livekit-server process and leaves the hub's dispatch goroutine
-	// running. gracefulOnce makes it idempotent alongside the explicit call
-	// on the normal shutdown path below.
-	defer hub.GracefulStop()
+	return pluginRegistry
+}
 
-	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
-	if cfg.EventPersistence.Enabled && hub != nil {
-		seedHubReplayState(bgCtx, hub, database, log)
-
-		persister := ws.NewEventPersister(
-			database,
-			4096,
-			cfg.EventPersistence.BatchSize,
-			time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
-		)
-		persister.Start(bgCtx)
-		hub.SetEventPersister(persister)
-		hub.SetEventStore(database)
-
-		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
-		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
-		prunerDone := ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
-		defer func() {
-			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer stopCancel()
-			persister.Stop(stopCtx)
-			// Cancel the shared background context and JOIN the pruner before
-			// the (LIFO-later) database.Close defer runs, so no prune is still
-			// mid-query against a closing pool. Bounded: a stuck prune delays
-			// shutdown by at most the timeout, then Close proceeds anyway.
-			bgCancel()
-			select {
-			case <-prunerDone:
-			case <-stopCtx.Done():
-				log.Warn("event pruner did not exit before shutdown timeout")
-			}
-		}()
+// runClosePlugins shuts the plugin runtime down. Registered by run as a defer
+// only once the registry exists, so a nil registry is the disabled case and
+// has nothing to close. Extracted from run.
+func runClosePlugins(registry *plugin.Registry) {
+	if registry == nil {
+		return
 	}
 
-	// ── 5d. Async audit writer ─────────────────────────────────────────────
-	// Moves audit-log INSERTs off the request path: once the writer is
-	// installed, WriteAudit enqueues here and a background goroutine batches
-	// the writes (same shape as the event persister above). Paths that never
-	// install a writer — the token CLI, tests — keep the synchronous
-	// behavior. This defer is registered after `defer database.Close()` so
-	// LIFO ordering drains the queue before the database is torn down.
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = registry.Close(closeCtx)
+}
+
+// runStartEventPersistence starts the event persister and pruner, returning
+// both as (nil, nil) when event persistence is disabled. Extracted from run.
+func runStartEventPersistence(bgCtx context.Context, log *slog.Logger, cfg *config.Config, hub *ws.Hub, database *db.DB) (*ws.EventPersister, <-chan struct{}) {
+	if !cfg.EventPersistence.Enabled || hub == nil {
+		return nil, nil
+	}
+
+	seedHubReplayState(bgCtx, hub, database, log)
+
+	persister := ws.NewEventPersister(
+		database,
+		4096,
+		cfg.EventPersistence.BatchSize,
+		time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
+	)
+	persister.Start(bgCtx)
+	hub.SetEventPersister(persister)
+	hub.SetEventStore(database)
+
+	retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
+	prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
+	prunerDone := ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
+
+	return persister, prunerDone
+}
+
+// runStopEventPersistence drains the event persister and pruner. Registered by
+// run as a defer unconditionally, so a nil persister is the disabled case and
+// must leave bgCtx alone — the LIFO backstop in run cancels it instead.
+// Extracted from run.
+func runStopEventPersistence(log *slog.Logger, bgCancel context.CancelFunc, persister *ws.EventPersister, prunerDone <-chan struct{}) {
+	if persister == nil {
+		return
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	persister.Stop(stopCtx)
+	// Cancel the shared background context and JOIN the pruner before
+	// the (LIFO-later) database.Close defer runs, so no prune is still
+	// mid-query against a closing pool. Bounded: a stuck prune delays
+	// shutdown by at most the timeout, then Close proceeds anyway.
+	bgCancel()
+	select {
+	case <-prunerDone:
+	case <-stopCtx.Done():
+		log.Warn("event pruner did not exit before shutdown timeout")
+	}
+}
+
+// runStartAuditWriter installs the async audit writer. Extracted from run.
+func runStartAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	auditWriter := db.NewAuditWriter(database, 1024, 50, 100*time.Millisecond)
 	auditWriter.Start(bgCtx)
 	database.SetAuditWriter(auditWriter)
-	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopCancel()
-		auditWriter.Stop(stopCtx)
-	}()
 
-	// ── 6. Start server ────────────────────────────────────────────────────
-	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		TLSConfig:    tlsCfg,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
-		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
-	}
+	return auditWriter
+}
 
-	// ── 6b. ACME HTTP challenge server on :80 ─────────────────────────────
-	// When using Let's Encrypt (tls.mode: acme), an HTTP server on port 80
-	// is needed for HTTP-01 challenge validation and HTTP→HTTPS redirect.
+// runStopAuditWriter drains the async audit writer. Extracted from run.
+func runStopAuditWriter(auditWriter *db.AuditWriter) {
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	auditWriter.Stop(stopCtx)
+}
+
+// runStartACME starts the ACME HTTP-01 challenge server when Let's Encrypt
+// is configured, and returns nil otherwise. Extracted from run.
+func runStartACME(log *slog.Logger, httpHandler http.Handler) *http.Server {
 	var acmeSrv *http.Server
-	if tlsResult.HTTPHandler != nil {
+	if httpHandler != nil {
 		acmeSrv = &http.Server{
 			Addr:         ":80",
-			Handler:      tlsResult.HTTPHandler,
+			Handler:      httpHandler,
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 10 * time.Second,
 		}
@@ -370,7 +510,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		}()
 	}
 
-	// ── 7. Background maintenance ────────────────────────────────────────
+	return acmeSrv
+}
+
+// runStartMaintenance starts the periodic maintenance loop and returns the
+// stop step run defers. Extracted from run.
+func runStartMaintenance(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) func() {
 	// Periodically purge expired sessions and orphaned attachments.
 	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if fileStorageErr != nil {
@@ -379,7 +524,9 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	defer func() {
+	go runMaintenanceLoop(bgCtx, log, database, fileStorage, stopMaintenance, maintenanceDone)
+
+	return func() {
 		// Backstop for early returns below (see hub.GracefulStop defer above),
 		// and a bounded join so an in-flight tick (which can hold the writer —
 		// scheduled backups run VACUUM INTO) isn't still using the database
@@ -390,82 +537,87 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		case <-time.After(5 * time.Second):
 			log.Warn("maintenance loop did not exit before shutdown timeout")
 		}
-	}()
-	go func() {
-		defer close(maintenanceDone)
-		ticker := time.NewTicker(15 * time.Minute)
-		defer ticker.Stop()
-		consecutiveFailures := 0
-		const maxConsecutiveFailures = 5
-		for {
-			select {
-			case <-ticker.C:
-				if consecutiveFailures >= maxConsecutiveFailures {
-					log.Error("maintenance loop: circuit breaker open, skipping tick",
-						"consecutive_failures", consecutiveFailures)
-					// Reset after one skip to allow retry next tick.
-					consecutiveFailures = maxConsecutiveFailures - 1
-					continue
-				}
+	}
+}
 
-				tickFailed := false
-				if err := database.DeleteExpiredSessions(bgCtx); err != nil {
-					log.Warn("failed to delete expired sessions", "error", err)
-					tickFailed = true
-				}
-
-				// Scheduled backups + retention pruning, driven by the
-				// backup_schedule / backup_retention admin settings.
-				if err := admin.MaintainBackups(bgCtx, database); err != nil {
-					log.Warn("backup maintenance failed", "error", err)
-					tickFailed = true
-				}
-
-				// Clean up orphaned attachments (uploaded but never linked to a message).
-				//
-				// Skipped entirely with no file storage configured: the delete is
-				// atomic (row goes the instant it's selected, by design — see
-				// db/attachment_queries.go), so with fileStorage nil the returned
-				// stored_as names — the only remaining handle on those blobs —
-				// would just be discarded and the files stranded on disk with no
-				// query left able to name them. Leaving the rows in place keeps
-				// them reclaimable once storage is available again.
-				if fileStorage != nil {
-					cutoff := time.Now().Add(-1 * time.Hour)
-					orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
-					if orphanErr != nil {
-						log.Warn("failed to delete orphaned attachments", "error", orphanErr)
-						tickFailed = true
-					} else if len(orphanFiles) > 0 {
-						// Best-effort file cleanup.
-						for _, filename := range orphanFiles {
-							if delErr := fileStorage.Delete(filename); delErr != nil {
-								log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
-							}
-						}
-						log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
-					}
-				}
-
-				if tickFailed {
-					consecutiveFailures++
-				} else {
-					consecutiveFailures = 0
-				}
-			case <-stopMaintenance:
-				return
+// runMaintenanceLoop is the periodic maintenance goroutine started by
+// runStartMaintenance. Extracted from run.
+func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, stopMaintenance, maintenanceDone chan struct{}) {
+	defer close(maintenanceDone)
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	consecutiveFailures := 0
+	const maxConsecutiveFailures = 5
+	for {
+		select {
+		case <-ticker.C:
+			if consecutiveFailures >= maxConsecutiveFailures {
+				log.Error("maintenance loop: circuit breaker open, skipping tick",
+					"consecutive_failures", consecutiveFailures)
+				// Reset after one skip to allow retry next tick.
+				consecutiveFailures = maxConsecutiveFailures - 1
+				continue
 			}
+
+			if runMaintenanceTick(bgCtx, log, database, fileStorage) {
+				consecutiveFailures++
+			} else {
+				consecutiveFailures = 0
+			}
+		case <-stopMaintenance:
+			return
 		}
-	}()
+	}
+}
 
-	// Listen for OS signals for graceful shutdown. The coordinator's context
-	// is the parent, so a programmatic restart request (rc.Request) drains
-	// exactly like a SIGTERM — including on Windows, where a process cannot
-	// signal itself. Signals arriving mid-drain are swallowed until stop()
-	// runs, same as on the real-signal path.
-	ctx, stop := signal.NotifyContext(rc.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+// runMaintenanceTick runs one maintenance pass and reports whether any step
+// of it failed. Extracted from run.
+func runMaintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage) bool {
+	tickFailed := false
+	if err := database.DeleteExpiredSessions(bgCtx); err != nil {
+		log.Warn("failed to delete expired sessions", "error", err)
+		tickFailed = true
+	}
 
+	// Scheduled backups + retention pruning, driven by the
+	// backup_schedule / backup_retention admin settings.
+	if err := admin.MaintainBackups(bgCtx, database); err != nil {
+		log.Warn("backup maintenance failed", "error", err)
+		tickFailed = true
+	}
+
+	// Clean up orphaned attachments (uploaded but never linked to a message).
+	//
+	// Skipped entirely with no file storage configured: the delete is
+	// atomic (row goes the instant it's selected, by design — see
+	// db/attachment_queries.go), so with fileStorage nil the returned
+	// stored_as names — the only remaining handle on those blobs —
+	// would just be discarded and the files stranded on disk with no
+	// query left able to name them. Leaving the rows in place keeps
+	// them reclaimable once storage is available again.
+	if fileStorage != nil {
+		cutoff := time.Now().Add(-1 * time.Hour)
+		orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
+		if orphanErr != nil {
+			log.Warn("failed to delete orphaned attachments", "error", orphanErr)
+			tickFailed = true
+		} else if len(orphanFiles) > 0 {
+			// Best-effort file cleanup.
+			for _, filename := range orphanFiles {
+				if delErr := fileStorage.Delete(filename); delErr != nil {
+					log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
+				}
+			}
+			log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+		}
+	}
+
+	return tickFailed
+}
+
+// runServeAndWait starts the listener and blocks until it fails or a
+// shutdown or restart signal arrives. Extracted from run.
+func runServeAndWait(ctx context.Context, log *slog.Logger, rc *restartCoordinator, srv *http.Server, tlsCfg *tls.Config, addr string) error {
 	// Start serving in a goroutine.
 	serveErr := make(chan error, 1)
 	go func() {
@@ -497,10 +649,13 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		}
 	}
 
-	// Graceful shutdown.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	return nil
+}
 
+// runShutdownServers performs the ordered graceful shutdown: the ACME
+// server, then in-flight HTTP handlers, then the WebSocket hub. Extracted
+// from run.
+func runShutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv *http.Server, hub *ws.Hub) error {
 	if acmeSrv != nil {
 		if err := acmeSrv.Shutdown(shutdownCtx); err != nil {
 			log.Warn("ACME HTTP server shutdown error", "error", err)
@@ -525,7 +680,6 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc
 		return fmt.Errorf("graceful shutdown: %w", shutdownErr)
 	}
 
-	log.Info("server stopped cleanly")
 	return nil
 }
 

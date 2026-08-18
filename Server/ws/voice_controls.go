@@ -4,70 +4,164 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/permissions"
 )
 
-// handleVoiceMuteV2 processes a voice_mute command.
-func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
-	d := deps.(VoiceDeps)
-	muteCmd := cmd.(VoiceMuteCmd)
+// voiceSelfToggle parameterises the two self-toggle handlers, voice_mute and
+// voice_deafen. They were verbatim duplicates of each other, differing only in
+// the fields below; a fix landing on one and not the other — the asymmetric
+// moderator gate is exactly such a fix — is the failure mode this collapse
+// removes.
+type voiceSelfToggle struct {
+	rateKey    string // auth.Key namespace, "voice_mute" / "voice_deafen"
+	rateLimit  int
+	rateWindow time.Duration
+	rateMsg    string
+	// serverDeafen picks which moderator flag refuseIfServerSilenced consults:
+	// false = ServerMuted (blocks a self-unmute), true = ServerDeafened (blocks a
+	// self-undeafen). A server deafen is the moderator's to lift, same as a mute.
+	serverDeafen bool
+	update       func(ctx context.Context, userID int64, on bool) error
+	updateLog    string // slog.Error message when update fails
+	failMsg      string
+	changedLog   string // slog.Debug message once applied
+	stateKey     string // slog key carrying the new value
+}
+
+// voiceSelfToggleV2 is the shared body of handleVoiceMuteV2 and
+// handleVoiceDeafenV2.
+func voiceSelfToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, on bool, t voiceSelfToggle) Result {
 	userID := info.UserID
 
-	ratKey := auth.Key("voice_mute", userID)
-	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many mute toggles"}}
+	ratKey := auth.Key(t.rateKey, userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, t.rateLimit, t.rateWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: t.rateMsg}}
 	}
 
 	if info.VoiceChannelID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	// A moderator-imposed mute is not the user's to lift. Only the unmute
-	// direction reads the row: muting oneself is always allowed.
-	if !muteCmd.Muted() {
-		if r := refuseIfServerSilenced(ctx, d, userID, false); r != nil {
+	// A moderator-imposed mute/deafen is not the user's to lift. Only the
+	// clearing direction reads the row: silencing oneself is always allowed.
+	if !on {
+		if r := refuseIfServerSilenced(ctx, d, userID, t.serverDeafen); r != nil {
 			return *r
 		}
 	}
 
-	if err := d.DB.UpdateVoiceMute(ctx, userID, muteCmd.Muted()); err != nil {
-		slog.Error("ws handleVoiceMuteV2 UpdateVoiceMute", "err", err, "user_id", userID)
-		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update mute state"}}
+	if err := t.update(ctx, userID, on); err != nil {
+		slog.Error(t.updateLog, "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: t.failMsg}}
 	}
-	slog.Debug("voice mute changed", "user_id", userID, "muted", muteCmd.Muted(), "channel_id", info.VoiceChannelID)
+	slog.Debug(t.changedLog, "user_id", userID, t.stateKey, on, "channel_id", info.VoiceChannelID)
 
 	return voiceStateBroadcast(ctx, d, userID)
+}
+
+// handleVoiceMuteV2 processes a voice_mute command.
+func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	muteCmd := cmd.(VoiceMuteCmd)
+	return voiceSelfToggleV2(ctx, d, info, muteCmd.Muted(), voiceSelfToggle{
+		rateKey:      "voice_mute",
+		rateLimit:    voiceMuteRateLimit,
+		rateWindow:   voiceMuteWindow,
+		rateMsg:      "too many mute toggles",
+		serverDeafen: false,
+		update:       d.DB.UpdateVoiceMute,
+		updateLog:    "ws handleVoiceMuteV2 UpdateVoiceMute",
+		failMsg:      "failed to update mute state",
+		changedLog:   "voice mute changed",
+		stateKey:     "muted",
+	})
 }
 
 // handleVoiceDeafenV2 processes a voice_deafen command.
 func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	deafenCmd := cmd.(VoiceDeafenCmd)
-	userID := info.UserID
+	return voiceSelfToggleV2(ctx, d, info, deafenCmd.Deafened(), voiceSelfToggle{
+		rateKey:      "voice_deafen",
+		rateLimit:    voiceDeafenRateLimit,
+		rateWindow:   voiceDeafenWindow,
+		rateMsg:      "too many deafen toggles",
+		serverDeafen: true,
+		update:       d.DB.UpdateVoiceDeafen,
+		updateLog:    "ws handleVoiceDeafenV2 UpdateVoiceDeafen",
+		failMsg:      "failed to update deafen state",
+		changedLog:   "voice deafen changed",
+		stateKey:     "deafened",
+	})
+}
 
-	ratKey := auth.Key("voice_deafen", userID)
-	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many deafen toggles"}}
+// voiceStreamToggle parameterises the two video-stream handlers, voice_camera
+// and voice_screenshare. Like the self-toggles above they were verbatim
+// duplicates. Keeping them one function is not only tidier: camera and
+// screenshare draw from a single per-channel voice_max_video budget (OC-0023),
+// and that bug existed precisely because the two paths had drifted apart.
+type voiceStreamToggle struct {
+	rateKey    string // auth.Key namespace, "voice_camera" / "voice_screenshare"
+	rateLimit  int
+	rateWindow time.Duration
+	rateMsg    string
+	perm       int64  // permission required to ENABLE the stream
+	permLabel  string // its name, for the refusal
+	// tryReserve is the atomic under-cap check-and-set for this stream's
+	// column; update is its plain unconditional write. Both are handed to
+	// enableVideoSlot, which owns the shared-budget rule.
+	tryReserve func(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+	update     func(ctx context.Context, userID int64, enabled bool) error
+	logPrefix  string // handler name, for slog messages
+	kind       string // "camera" / "screenshare", used in operator-facing text
+	disableLog string // slog.Error message when the disable update fails
+	changedLog string // slog.Debug message once applied
+}
+
+// voiceStreamToggleV2 is the shared body of handleVoiceCameraV2 and
+// handleVoiceScreenshareV2.
+//
+// Only the enable direction is gated on the permission, mirroring
+// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate — once a moderator
+// revokes it mid-call the user must still be able to turn the stream off, or
+// the column (voice_states.camera / voice_states.screenshare) stays stuck at 1:
+// for camera that permanently burns a voice_max_video slot, and for screenshare
+// every subsequent voice_state keeps advertising a stream nobody can watch.
+// Nothing else ever clears either one short of leaving voice.
+func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enabled bool, t voiceStreamToggle) Result {
+	userID := info.UserID
+	voiceChID := info.VoiceChannelID
+
+	ratKey := auth.Key(t.rateKey, userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, t.rateLimit, t.rateWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: t.rateMsg}}
 	}
 
-	if info.VoiceChannelID == 0 {
+	if voiceChID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	// See handleVoiceMuteV2: server deafen is the moderator's to lift.
-	if !deafenCmd.Deafened() {
-		if r := refuseIfServerSilenced(ctx, d, userID, true); r != nil {
+	if enabled {
+		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, t.perm, t.permLabel); r != nil {
 			return *r
 		}
+		// Enforce the channel's shared voice_max_video budget atomically (OC-0023:
+		// enableVideoSlot's query counts camera = 1 OR screenshare = 1 rows, so
+		// neither kind can occupy a slot the cap meant to deny it nor hide from
+		// the other's count).
+		if r := enableVideoSlot(ctx, d, userID, voiceChID, t.tryReserve, t.update, t.logPrefix, t.kind); r != nil {
+			return *r
+		}
+	} else {
+		if err := t.update(ctx, userID, false); err != nil {
+			slog.Error(t.disableLog, "err", err, "user_id", userID)
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update " + t.kind + " state"}}
+		}
 	}
-
-	if err := d.DB.UpdateVoiceDeafen(ctx, userID, deafenCmd.Deafened()); err != nil {
-		slog.Error("ws handleVoiceDeafenV2 UpdateVoiceDeafen", "err", err, "user_id", userID)
-		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update deafen state"}}
-	}
-	slog.Debug("voice deafen changed", "user_id", userID, "deafened", deafenCmd.Deafened(), "channel_id", info.VoiceChannelID)
+	slog.Debug(t.changedLog, "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
 
 	return voiceStateBroadcast(ctx, d, userID)
 }
@@ -76,98 +170,40 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	cameraCmd := cmd.(VoiceCameraCmd)
-	userID := info.UserID
-	voiceChID := info.VoiceChannelID
-
-	ratKey := auth.Key("voice_camera", userID)
-	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many camera toggles"}}
-	}
-
-	if voiceChID == 0 {
-		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
-	}
-
-	enabled := cameraCmd.Enabled()
-
-	// Only the enable direction is gated on USE_VIDEO — mirrors
-	// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate: once a
-	// moderator revokes the permission mid-call, the user must still be able
-	// to turn their camera off, or voice_states.camera stays stuck at 1 —
-	// permanently burning a voice_max_video slot — until they leave voice,
-	// since nothing else ever clears it.
-	if enabled {
-		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
-			return *r
-		}
-	}
-
-	// Enforce MaxVideo limit when enabling camera using an atomic check-and-update.
-	// Camera and screenshare draw from the same voice_max_video budget
-	// (OC-0023), so this gate is shared with handleVoiceScreenshareV2 below.
-	if enabled {
-		if r := enableVideoSlot(ctx, d, userID, voiceChID, d.DB.EnableCameraIfUnderLimit, d.DB.UpdateVoiceCamera, "handleVoiceCameraV2", "camera"); r != nil {
-			return *r
-		}
-	} else {
-		if err := d.DB.UpdateVoiceCamera(ctx, userID, false); err != nil {
-			slog.Error("ws handleVoiceCameraV2 UpdateVoiceCamera", "err", err, "user_id", userID)
-			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update camera state"}}
-		}
-	}
-	slog.Debug("voice camera changed", "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
-
-	return voiceStateBroadcast(ctx, d, userID)
+	return voiceStreamToggleV2(ctx, d, info, cameraCmd.Enabled(), voiceStreamToggle{
+		rateKey:    "voice_camera",
+		rateLimit:  voiceCameraRateLimit,
+		rateWindow: voiceCameraWindow,
+		rateMsg:    "too many camera toggles",
+		perm:       permissions.UseVideo,
+		permLabel:  "USE_VIDEO",
+		tryReserve: d.DB.EnableCameraIfUnderLimit,
+		update:     d.DB.UpdateVoiceCamera,
+		logPrefix:  "handleVoiceCameraV2",
+		kind:       "camera",
+		disableLog: "ws handleVoiceCameraV2 UpdateVoiceCamera",
+		changedLog: "voice camera changed",
+	})
 }
 
 // handleVoiceScreenshareV2 processes a voice_screenshare command.
 func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	ssCmd := cmd.(VoiceScreenshareCmd)
-	userID := info.UserID
-	voiceChID := info.VoiceChannelID
-
-	ratKey := auth.Key("voice_screenshare", userID)
-	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many screenshare toggles"}}
-	}
-
-	if voiceChID == 0 {
-		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
-	}
-
-	enabled := ssCmd.Enabled()
-
-	// Only the enable direction is gated on SHARE_SCREEN — mirrors
-	// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate: once a
-	// moderator revokes the permission mid-share, the user must still be able
-	// to stop sharing, or voice_states.screenshare stays stuck at 1 — every
-	// subsequent voice_state keeps advertising a stream nobody can watch —
-	// until they leave voice.
-	if enabled {
-		if r := requirePerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
-			return *r
-		}
-	}
-
-	// Enforce the same voice_max_video budget handleVoiceCameraV2 enforces —
-	// camera and screenshare are both "video streams" against one cap
-	// (OC-0023): a screenshare must not be able to occupy a slot the cap
-	// intended to deny it, and must not be invisible to the camera gate's
-	// count either (enableVideoSlot's atomic query counts both fields).
-	if enabled {
-		if r := enableVideoSlot(ctx, d, userID, voiceChID, d.DB.EnableScreenshareIfUnderLimit, d.DB.UpdateVoiceScreenshare, "handleVoiceScreenshareV2", "screenshare"); r != nil {
-			return *r
-		}
-	} else {
-		if err := d.DB.UpdateVoiceScreenshare(ctx, userID, false); err != nil {
-			slog.Error("ws handleVoiceScreenshareV2 UpdateVoiceScreenshare", "err", err, "user_id", userID)
-			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update screenshare state"}}
-		}
-	}
-	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
-
-	return voiceStateBroadcast(ctx, d, userID)
+	return voiceStreamToggleV2(ctx, d, info, ssCmd.Enabled(), voiceStreamToggle{
+		rateKey:    "voice_screenshare",
+		rateLimit:  voiceScreenshareRateLimit,
+		rateWindow: voiceScreenshareWindow,
+		rateMsg:    "too many screenshare toggles",
+		perm:       permissions.ShareScreen,
+		permLabel:  "SHARE_SCREEN",
+		tryReserve: d.DB.EnableScreenshareIfUnderLimit,
+		update:     d.DB.UpdateVoiceScreenshare,
+		logPrefix:  "handleVoiceScreenshareV2",
+		kind:       "screenshare",
+		disableLog: "ws handleVoiceScreenshareV2 UpdateVoiceScreenshare",
+		changedLog: "voice screenshare changed",
+	})
 }
 
 // enableVideoSlot enforces the channel's shared voice_max_video budget

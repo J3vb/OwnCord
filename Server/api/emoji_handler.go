@@ -141,56 +141,8 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
-		file, _, err := r.FormFile("file")
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "missing file field",
-			})
-			return
-		}
-		defer file.Close() //nolint:errcheck
-
-		// Read at most one byte past the cap so "exactly at the limit" passes
-		// and "one byte over" is caught, without buffering an unbounded body.
-		raw, err := io.ReadAll(io.LimitReader(file, maxEmojiFileBytes+1))
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "failed to read uploaded file",
-			})
-			return
-		}
-		if int64(len(raw)) > maxEmojiFileBytes {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("emoji must be at most %d KB", maxEmojiFileBytes>>10),
-			})
-			return
-		}
-
-		mimeType := http.DetectContentType(raw)
-		if !allowedEmojiMIME[mimeType] {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "emoji must be a PNG, JPEG, GIF or WebP image",
-			})
-			return
-		}
-
-		width, height, err := imageDimensions(raw, mimeType)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "could not read image dimensions",
-			})
-			return
-		}
-		// Re-check the sniffed dimensions rather than trusting anything the
-		// client said about the image: the cap is what keeps an "emoji" from
-		// being a full-size picture inlined into every message that names it.
-		if width <= 0 || height <= 0 || width > maxEmojiDimension || height > maxEmojiDimension {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height),
-			})
+		raw, mimeType, readOK := readEmojiUpload(w, r)
+		if !readOK {
 			return
 		}
 
@@ -215,6 +167,67 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 		broadcastEmojiSet(r.Context(), svc, broadcaster)
 		writeJSON(w, http.StatusCreated, toEmojiResponse(created))
 	}
+}
+
+// readEmojiUpload pulls the uploaded file out of the already-parsed multipart
+// form and enforces every property of the bytes themselves: the size cap, the
+// sniffed MIME type and the sniffed pixel dimensions. It writes the refusal
+// itself, so a false third result means the response is already complete.
+func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "missing file field",
+		})
+		return nil, "", false
+	}
+	defer file.Close() //nolint:errcheck
+
+	// Read at most one byte past the cap so "exactly at the limit" passes
+	// and "one byte over" is caught, without buffering an unbounded body.
+	raw, err := io.ReadAll(io.LimitReader(file, maxEmojiFileBytes+1))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "failed to read uploaded file",
+		})
+		return nil, "", false
+	}
+	if int64(len(raw)) > maxEmojiFileBytes {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: fmt.Sprintf("emoji must be at most %d KB", maxEmojiFileBytes>>10),
+		})
+		return nil, "", false
+	}
+
+	mimeType := http.DetectContentType(raw)
+	if !allowedEmojiMIME[mimeType] {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: "emoji must be a PNG, JPEG, GIF or WebP image",
+		})
+		return nil, "", false
+	}
+
+	width, height, err := imageDimensions(raw, mimeType)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "could not read image dimensions",
+		})
+		return nil, "", false
+	}
+	// Re-check the sniffed dimensions rather than trusting anything the
+	// client said about the image: the cap is what keeps an "emoji" from
+	// being a full-size picture inlined into every message that names it.
+	if width <= 0 || height <= 0 || width > maxEmojiDimension || height > maxEmojiDimension {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height),
+		})
+		return nil, "", false
+	}
+
+	return raw, mimeType, true
 }
 
 func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster EmojiBroadcaster) http.HandlerFunc {

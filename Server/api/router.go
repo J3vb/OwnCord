@@ -44,52 +44,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// (M1). Done first, before any other setup, so a fatal failure here
 	// (below) doesn't leave background goroutines or partially-mounted
 	// routes behind.
-	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
-	if totpKeyErr != nil {
-		if cfg.Server.DataDir != "" {
-			// A configured data directory means this is a real deployment —
-			// main.go creates cfg.Server.DataDir before calling NewRouter, so
-			// by this point LoadOrGenerateTOTPKey only fails for a malformed
-			// OWNCORD_TOTP_KEY or a corrupt/truncated totp.key file, never for
-			// a missing directory. (The zero-value "" DataDir used by handler
-			// tests that never touch TOTP crypto is exempted below so the
-			// existing test suite keeps passing.)
-			//
-			// Continuing here would leave totpKey nil: every AES call in
-			// auth.EncryptTOTPSecret/DecryptTOTPSecret then hits
-			// aes.NewCipher(nil) and 500s, so every 2FA-enabled account
-			// (including the owner) would be locked out of login and unable
-			// to re-enroll, forever, while /health kept reporting OK. Refuse
-			// to start instead.
-			panic(fmt.Sprintf("api: failed to load TOTP encryption key: %v", totpKeyErr))
-		}
-		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
-		// Fall through — only reachable when DataDir is unset; TOTP handlers
-		// cannot encrypt/decrypt until a data directory is configured.
-	}
+	totpKey := routerTOTPKey(cfg)
 
 	r := chi.NewRouter()
 
-	// Middleware stack.
-	r.Use(boundRequestID) // must precede RequestID — it reads the header verbatim
-	r.Use(middleware.RequestID)
-	r.Use(setRequestIDHeader) // echo request ID into response header
-	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
-	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
-	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
-	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
-	r.Use(requestLogger) // structured request/response logging
-	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
-	// disabled or the otel build tag is not set, so this is safe to mount
-	// unconditionally.
-	r.Use(telemetry.HTTPMiddleware())
-	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
-
-	// Coraza WAF — opt-in via config.
-	if cfg.Server.WAFEnabled {
-		r.Use(NewWAFMiddlewareCRS(cfg.Server.WAFParanoiaLevel, cfg.Server.WAFCRSMode))
-	}
+	routerMiddleware(r, cfg)
 
 	// Health check — unauthenticated, no versioning prefix.
 	// The hub-backed callbacks are set after hub creation below (late-bound
@@ -97,33 +56,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// handler instance backs both /health mounts so they share the check cache.
 	var getOnlineUsers func() int
 	var hubAlive func() bool
-	healthHandler := handleHealth(healthDeps{
-		onlineUsers: func() int {
-			if getOnlineUsers != nil {
-				return getOnlineUsers()
-			}
-			return 0
-		},
-		dbPing: func(ctx context.Context) error {
-			if database == nil {
-				return nil
-			}
-			// Reader pool, not the writer: a scheduled backup's VACUUM INTO
-			// holds the sole writer connection for its whole duration, and
-			// the server keeps serving reads throughout — /health must not
-			// call that outage (see db.PingRead).
-			return database.PingRead(ctx)
-		},
-		dispatchAlive: func() bool {
-			if hubAlive != nil {
-				return hubAlive()
-			}
-			return true
-		},
-		freeDiskBytes: func() (uint64, error) {
-			return diskutil.FreeBytes(cfg.Server.DataDir)
-		},
-	})
+	healthHandler := handleHealth(routerHealthDeps(cfg, database, &getOnlineUsers, &hubAlive))
 	r.Get("/health", healthHandler)
 
 	// Shared rate limiter for auth endpoints. Lockouts are persisted to the
@@ -167,18 +100,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
-	// L12: verify config upload size fits within the HTTP body limit.
-	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
-		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
-			"configured_mb", cfg.Upload.MaxSizeMB,
-			"http_limit_bytes", uploadMaxBodySize)
-	}
-	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
-	if storeErr != nil {
-		slog.Error("failed to create file storage", "error", storeErr)
-	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, svc.Permissions)
-	}
+	store, storeErr := routerUploadRoutes(r, database, limiter, cfg, svc.Permissions)
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
@@ -194,6 +116,209 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// anonymise-and-ban DB state.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey, hub)
 
+	routerPluginWiring(hub, pluginRegistry)
+
+	// Voice: LiveKit client, optional companion process, webhook and proxy routes.
+	routerVoiceRoutes(r, cfg, limiter, hub)
+
+	// Profile routes: update profile, change password, session management.
+	// Mounted after hub creation so the hub can broadcast user_update events.
+	// A storage failure leaves store unusable, so the avatar-upload route is
+	// simply not registered; the rest of the profile surface is unaffected.
+	// Built as a FileStore interface value from scratch — assigning the typed
+	// nil pointer would produce a non-nil interface and defeat the mount-time
+	// nil check.
+	var profileStore FileStore
+	if storeErr == nil {
+		profileStore = store
+	}
+	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
+
+	// DM (direct message) REST routes — mounted after hub creation so the
+	// hub can send real-time dm_channel_close events to WebSocket clients.
+	MountDMRoutes(r, database, svc, hub)
+
+	// Channel and message REST routes — mounted after hub creation so a
+	// message purge can broadcast chat_bulk_deleted to the channel.
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+
+	// Custom emoji REST routes — mounted after hub creation so an upload or a
+	// delete can fan the new set out as an emoji_update. Requires the same file
+	// storage the attachment routes use; without it the emoji endpoints are not
+	// mounted at all (a 404 the client reads as "this server has no emoji").
+	if storeErr == nil {
+		MountEmojiRoutes(r, database, svc, store, limiter, hub)
+	}
+
+	// H-8: Connectivity diagnostics restricted to admin users only.
+	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
+	r.With(AuthMiddleware(database),
+		RequirePermission(permissions.Administrator),
+		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
+		Get("/api/v1/diagnostics/connectivity",
+			handleDiagnosticsConnectivity(cfg, ver, hub))
+
+	go hub.Run()
+	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
+
+	routerMetricsRoutes(r, cfg, database, svc, hub)
+
+	// Admin panel: static files + REST API (Phase 6).
+	// Restrict /admin to configured CIDRs (default: private networks only).
+	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation, svc.Roles,
+		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
+	r.Group(func(r chi.Router) {
+		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
+		r.Mount("/admin", adminHandler)
+
+		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
+		// only the outer perimeter; plugin lifecycle endpoints additionally
+		// require a valid admin Bearer token via admin.RequireAdminAuth so a
+		// LAN attacker on the allowed CIDR cannot install/enable plugins
+		// without a session. The handler is wired with the live registry
+		// constructed in main.go (nil when plugin support is disabled, in
+		// which case lifecycle calls return 503 and list returns []).
+		r.Group(func(r chi.Router) {
+			r.Use(admin.RequireAdminAuth(database))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database))
+		})
+	})
+
+	// Client auto-update endpoint (unauthenticated). Per-IP rate limited to
+	// bound abuse; the signature fetch is cached inside the updater (DoS fix).
+	// Dedicated key prefix (mirroring "livekit_proxy:"): the empty-prefix
+	// middleware would share per-IP buckets with verify-totp, password change,
+	// and the other sensitive endpoints, so a client's 30/min auto-poll could
+	// 429 its user's own 2FA or password change.
+	MountClientUpdateRoute(
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		u,
+	)
+
+	// Issue 15: Warn if AllowedOrigins contains wildcard.
+	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
+		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
+	}
+
+	cleanup := func() {
+		close(limiterStopCh)
+	}
+
+	return r, hub, cleanup
+}
+
+// routerTOTPKey loads (or auto-generates) the AES-256 key NewRouter hands to the
+// auth routes for TOTP secret encryption (M1).
+func routerTOTPKey(cfg *config.Config) []byte {
+	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
+	if totpKeyErr != nil {
+		if cfg.Server.DataDir != "" {
+			// A configured data directory means this is a real deployment —
+			// main.go creates cfg.Server.DataDir before calling NewRouter, so
+			// by this point LoadOrGenerateTOTPKey only fails for a malformed
+			// OWNCORD_TOTP_KEY or a corrupt/truncated totp.key file, never for
+			// a missing directory. (The zero-value "" DataDir used by handler
+			// tests that never touch TOTP crypto is exempted below so the
+			// existing test suite keeps passing.)
+			//
+			// Continuing here would leave totpKey nil: every AES call in
+			// auth.EncryptTOTPSecret/DecryptTOTPSecret then hits
+			// aes.NewCipher(nil) and 500s, so every 2FA-enabled account
+			// (including the owner) would be locked out of login and unable
+			// to re-enroll, forever, while /health kept reporting OK. Refuse
+			// to start instead.
+			panic(fmt.Sprintf("api: failed to load TOTP encryption key: %v", totpKeyErr))
+		}
+		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
+		// Fall through — only reachable when DataDir is unset; TOTP handlers
+		// cannot encrypt/decrypt until a data directory is configured.
+	}
+	return totpKey
+}
+
+// routerHealthDeps builds the liveness probes behind the shared /health
+// handler. getOnlineUsers and hubAlive are taken as pointers because NewRouter
+// only assigns them once the hub exists, after this handler is already mounted;
+// the closures read whatever the variables hold at request time.
+func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func() int, hubAlive *func() bool) healthDeps {
+	return healthDeps{
+		onlineUsers: func() int {
+			if *getOnlineUsers != nil {
+				return (*getOnlineUsers)()
+			}
+			return 0
+		},
+		dbPing: func(ctx context.Context) error {
+			if database == nil {
+				return nil
+			}
+			// Reader pool, not the writer: a scheduled backup's VACUUM INTO
+			// holds the sole writer connection for its whole duration, and
+			// the server keeps serving reads throughout — /health must not
+			// call that outage (see db.PingRead).
+			return database.PingRead(ctx)
+		},
+		dispatchAlive: func() bool {
+			if *hubAlive != nil {
+				return (*hubAlive)()
+			}
+			return true
+		},
+		freeDiskBytes: func() (uint64, error) {
+			return diskutil.FreeBytes(cfg.Server.DataDir)
+		},
+	}
+}
+
+// routerMiddleware installs NewRouter's global middleware stack. The order is a
+// security property (request-id binding before the logger reads it, security
+// headers and the body cap before any handler runs) — keep it exactly as
+// written.
+func routerMiddleware(r chi.Router, cfg *config.Config) {
+	// Middleware stack.
+	r.Use(boundRequestID) // must precede RequestID — it reads the header verbatim
+	r.Use(middleware.RequestID)
+	r.Use(setRequestIDHeader) // echo request ID into response header
+	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
+	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
+	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
+	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
+	r.Use(requestLogger) // structured request/response logging
+	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
+	// disabled or the otel build tag is not set, so this is safe to mount
+	// unconditionally.
+	r.Use(telemetry.HTTPMiddleware())
+	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
+
+	// Coraza WAF — opt-in via config.
+	if cfg.Server.WAFEnabled {
+		r.Use(NewWAFMiddlewareCRS(cfg.Server.WAFParanoiaLevel, cfg.Server.WAFCRSMode))
+	}
+}
+
+// routerUploadRoutes mounts the file upload and serving routes and returns the
+// shared file storage (and its construction error) for the profile-avatar and
+// emoji mounts, which reuse the same store.
+func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config, permSvc *service.PermissionService) (*storage.Storage, error) {
+	// L12: verify config upload size fits within the HTTP body limit.
+	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
+		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
+			"configured_mb", cfg.Upload.MaxSizeMB,
+			"http_limit_bytes", uploadMaxBodySize)
+	}
+	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
+	if storeErr != nil {
+		slog.Error("failed to create file storage", "error", storeErr)
+	} else {
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, permSvc)
+	}
+	return store, storeErr
+}
+
+// routerPluginWiring wires the plugin registry and its event sink into the hub.
+func routerPluginWiring(hub *ws.Hub, pluginRegistry *plugin.Registry) {
 	// Phase C Step 9 — wire plugin registry and event sink into the hub.
 	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.
 	if pluginRegistry != nil {
@@ -202,7 +327,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		sink.SetBroadcaster(hub.BroadcastToChannel)
 		hub.SetPluginEventSink(sink)
 	}
+}
 
+// routerVoiceRoutes creates the LiveKit client, optionally starts the companion
+// LiveKit process, and mounts the webhook, LiveKit health and signaling-proxy
+// routes. Voice is disabled — and none of those routes are mounted — when the
+// client fails to build.
+func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimiter, hub *ws.Hub) {
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
 	if lkErr != nil {
@@ -274,47 +405,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
+}
 
-	// Profile routes: update profile, change password, session management.
-	// Mounted after hub creation so the hub can broadcast user_update events.
-	// A storage failure leaves store unusable, so the avatar-upload route is
-	// simply not registered; the rest of the profile surface is unaffected.
-	// Built as a FileStore interface value from scratch — assigning the typed
-	// nil pointer would produce a non-nil interface and defeat the mount-time
-	// nil check.
-	var profileStore FileStore
-	if storeErr == nil {
-		profileStore = store
-	}
-	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
-
-	// DM (direct message) REST routes — mounted after hub creation so the
-	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, svc, hub)
-
-	// Channel and message REST routes — mounted after hub creation so a
-	// message purge can broadcast chat_bulk_deleted to the channel.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
-
-	// Custom emoji REST routes — mounted after hub creation so an upload or a
-	// delete can fan the new set out as an emoji_update. Requires the same file
-	// storage the attachment routes use; without it the emoji endpoints are not
-	// mounted at all (a 404 the client reads as "this server has no emoji").
-	if storeErr == nil {
-		MountEmojiRoutes(r, database, svc, store, limiter, hub)
-	}
-
-	// H-8: Connectivity diagnostics restricted to admin users only.
-	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
-	r.With(AuthMiddleware(database),
-		RequirePermission(permissions.Administrator),
-		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
-		Get("/api/v1/diagnostics/connectivity",
-			handleDiagnosticsConnectivity(cfg, ver, hub))
-
-	go hub.Run()
-	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
-
+// routerMetricsRoutes mounts the JSON metrics endpoint and, when an OTel
+// Prometheus exporter is wired, the Prometheus handler beside it.
+func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub) {
 	// Metrics endpoint — IP-restricted by metrics_allowed_cidrs (falls back to
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
@@ -342,50 +437,6 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.With(AdminIPRestrict(cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
 			Mount("/metrics", promH)
 	}
-
-	// Admin panel: static files + REST API (Phase 6).
-	// Restrict /admin to configured CIDRs (default: private networks only).
-	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation, svc.Roles,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg})
-	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
-		r.Mount("/admin", adminHandler)
-
-		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
-		// only the outer perimeter; plugin lifecycle endpoints additionally
-		// require a valid admin Bearer token via admin.RequireAdminAuth so a
-		// LAN attacker on the allowed CIDR cannot install/enable plugins
-		// without a session. The handler is wired with the live registry
-		// constructed in main.go (nil when plugin support is disabled, in
-		// which case lifecycle calls return 503 and list returns []).
-		r.Group(func(r chi.Router) {
-			r.Use(admin.RequireAdminAuth(database))
-			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database))
-		})
-	})
-
-	// Client auto-update endpoint (unauthenticated). Per-IP rate limited to
-	// bound abuse; the signature fetch is cached inside the updater (DoS fix).
-	// Dedicated key prefix (mirroring "livekit_proxy:"): the empty-prefix
-	// middleware would share per-IP buckets with verify-totp, password change,
-	// and the other sensitive endpoints, so a client's 30/min auto-poll could
-	// 429 its user's own 2FA or password change.
-	MountClientUpdateRoute(
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
-		u,
-	)
-
-	// Issue 15: Warn if AllowedOrigins contains wildcard.
-	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
-		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
-	}
-
-	cleanup := func() {
-		close(limiterStopCh)
-	}
-
-	return r, hub, cleanup
 }
 
 // serverStartTime records when the process started; used for uptime in /health.

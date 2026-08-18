@@ -508,49 +508,8 @@ func handleUploadAvatar(
 		}
 		defer file.Close() //nolint:errcheck
 
-		// Read one byte past the cap so "exactly at the limit" passes and "one
-		// byte over" is caught, without buffering an unbounded body.
-		raw, err := io.ReadAll(io.LimitReader(file, maxAvatarFileBytes+1))
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "failed to read uploaded file",
-			})
-			return
-		}
-		if int64(len(raw)) > maxAvatarFileBytes {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10),
-			})
-			return
-		}
-
-		// Never trust the client's Content-Type — sniff the bytes.
-		mimeType := http.DetectContentType(raw)
-		if !allowedAvatarMIME[mimeType] {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "avatar must be a PNG, JPEG or WebP image",
-			})
-			return
-		}
-
-		width, height, err := imageDimensions(raw, mimeType)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "BAD_REQUEST", Message: "could not read image dimensions",
-			})
-			return
-		}
-		// Measured from the sniffed image, not from anything the client said.
-		// The client crops to a square before uploading; the server does not
-		// re-encode (that would mean decoding and re-compressing every upload
-		// to change nothing a CSS circle mask does not already do), it just
-		// refuses a picture too big to be an avatar.
-		if width <= 0 || height <= 0 || width > maxAvatarDimension || height > maxAvatarDimension {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height),
-			})
+		raw, mimeType, width, height, ok := avatarUploadReadImage(w, file)
+		if !ok {
 			return
 		}
 
@@ -611,4 +570,59 @@ func handleUploadAvatar(
 			Height:   &height,
 		})
 	}
+}
+
+// avatarUploadReadImage is the bytes stage of handleUploadAvatar: read the
+// uploaded file under its cap, sniff its type and measure it. It writes its own
+// 400 and reports ok=false when the upload is not an acceptable avatar, so the
+// caller only has to return. Deliberately not shared with the emoji route: the
+// two carry different caps and a different allowed MIME set.
+func avatarUploadReadImage(w http.ResponseWriter, file io.Reader) (raw []byte, mimeType string, width, height int, ok bool) {
+	// Read one byte past the cap so "exactly at the limit" passes and "one
+	// byte over" is caught, without buffering an unbounded body.
+	raw, err := io.ReadAll(io.LimitReader(file, maxAvatarFileBytes+1))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "failed to read uploaded file",
+		})
+		return nil, "", 0, 0, false
+	}
+	if int64(len(raw)) > maxAvatarFileBytes {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10),
+		})
+		return nil, "", 0, 0, false
+	}
+
+	// Never trust the client's Content-Type — sniff the bytes.
+	mimeType = http.DetectContentType(raw)
+	if !allowedAvatarMIME[mimeType] {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "avatar must be a PNG, JPEG or WebP image",
+		})
+		return nil, "", 0, 0, false
+	}
+
+	width, height, err = imageDimensions(raw, mimeType)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "BAD_REQUEST", Message: "could not read image dimensions",
+		})
+		return nil, "", 0, 0, false
+	}
+	// Measured from the sniffed image, not from anything the client said.
+	// The client crops to a square before uploading; the server does not
+	// re-encode (that would mean decoding and re-compressing every upload
+	// to change nothing a CSS circle mask does not already do), it just
+	// refuses a picture too big to be an avatar.
+	if width <= 0 || height <= 0 || width > maxAvatarDimension || height > maxAvatarDimension {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "BAD_REQUEST",
+			Message: fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height),
+		})
+		return nil, "", 0, 0, false
+	}
+
+	return raw, mimeType, width, height, true
 }

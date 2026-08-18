@@ -54,7 +54,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 
 	sweepStaleVoiceJoinRaceHook = func(userID, channelID int64, joinedAt string) {
 		if userID == uid {
-			// Simulates voice_join.go:253's c.setVoiceState landing inside
+			// Simulates voiceJoinPersist's c.setVoiceState landing inside
 			// the sweep's snapshot-to-delete window.
 			c.setVoiceState(channelID, joinedAt)
 		}

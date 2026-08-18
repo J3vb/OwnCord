@@ -156,22 +156,8 @@ var handleReconnectPreRegisterRaceHook func()
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
 ) (handled, startPumps bool) {
-	// Channel-visibility changes are delivered as targeted, unsequenced
-	// messages, so replay cannot bring a client that missed one back into a
-	// coherent state — force the full-ready path instead.
-	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
-			"user_id", c.userID, "last_seq", lastSeq)
-		h.reconnectTierFull.Add(1)
-		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return false, false
-	}
-	// Compute the set of channel IDs the reconnecting user can access so that
-	// channel-scoped replay events are filtered by current permissions (M3).
-	allowedChannelIDs, err := h.computeAllowedChannels(ctx, database, c.user)
-	if err != nil {
-		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
-			"user_id", c.userID, "err", err)
+	allowedChannelIDs, ok := h.reconnectPrecheck(ctx, database, c, lastSeq)
+	if !ok {
 		return false, false
 	}
 
@@ -190,123 +176,11 @@ func (h *Hub) handleReconnect(
 		liveVoiceChID = old.getVoiceChID()
 	}
 
-	var (
-		events          [][]byte
-		replaySource    = "buffer"
-		persistedTail   [][]byte // cold-tier rows only; re-merged with a fresh buffer tail below
-		maxPersistedSeq uint64
-	)
-	if buf := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs); buf != nil {
-		events = buf
-	} else {
-		// Phase B Step 7 — try cold-tier replay from the EventStore before
-		// giving up and forcing a full ready re-sync.
-		if esp := h.eventStore.Load(); esp != nil {
-			es := *esp
-			channelIDs := make([]int64, 0, len(allowedChannelIDs))
-			for cid := range allowedChannelIDs {
-				channelIDs = append(channelIDs, cid)
-			}
-			coldCap := h.maxColdReplayLimit()
-			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, coldCap) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
-			switch {
-			case dbErr != nil:
-				slog.Warn("ws handleReconnect: cold-tier replay query failed",
-					"user_id", c.userID, "err", dbErr)
-			case len(persisted) >= coldCap:
-				// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
-				// result means the gap exceeds the cap and the NEWEST events were
-				// dropped. Replaying it would look like a complete resume to the
-				// client — it tracks only max(seq) and cannot detect the hole —
-				// silently losing state events that REST history never repairs.
-				// Leave events nil so the fall-through forces a full ready.
-				slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
-					"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
-			case len(persisted) > 0:
-				// Retention pruning (PruneEventsOlderThan) deletes purely by
-				// created_at with no seq-floor coordination, so this
-				// channel-filtered result can be a surviving suffix left behind
-				// after the events between lastSeq and persisted[0] were
-				// pruned. Accepting it as-is would present a hole as a complete
-				// resume, since the client tracks only max(seq). Probe the
-				// store's oldest surviving seq UNFILTERED before trusting it —
-				// a channel-filtered contiguity check on persisted itself can't
-				// work, since a sparse per-channel result is legitimately
-				// non-contiguous.
-				oldest, oldestErr := es.GetEventsSince(ctx, 0, 1)
-				switch {
-				case oldestErr != nil:
-					slog.Warn("ws handleReconnect: cold-tier oldest-seq probe failed, forcing full ready",
-						"user_id", c.userID, "err", oldestErr)
-				case len(oldest) == 0 || uint64(oldest[0].Seq) > lastSeq+1: //nolint:gosec // seq is a counter bounded well below MaxInt64
-					var oldestSeq int64
-					if len(oldest) > 0 {
-						oldestSeq = oldest[0].Seq
-					}
-					slog.Warn("ws handleReconnect: retention pruning left a gap before last_seq, forcing full ready",
-						"user_id", c.userID, "last_seq", lastSeq, "oldest_seq", oldestSeq)
-				default:
-					persistedTail = make([][]byte, 0, len(persisted))
-					for _, p := range persisted {
-						persistedTail = append(persistedTail, p.Payload)
-					}
-					maxPersistedSeq = uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
-
-					// persisted is channel-filtered, so a hole in a channel
-					// outside allowedChannelIDs would slip past a contiguity
-					// check on persisted itself — and EventPersister can lose a
-					// row outright (a full queue drops silently in Enqueue, a
-					// per-row insert failure inside a batch flush is logged but
-					// never surfaced here; see event_persister.go). Count the
-					// UNFILTERED range (lastSeq, maxPersistedSeq] and require
-					// every seq in it to be present. seq is the events table's
-					// primary key, so the count can only come up short, never
-					// over.
-					expectedCount := maxPersistedSeq - lastSeq
-					switch gapCount, gapErr := es.CountEventsInRange(ctx, int64(lastSeq), int64(maxPersistedSeq)); { //nolint:gosec // bounded well below MaxInt64
-					case gapErr != nil:
-						slog.Warn("ws handleReconnect: cold-tier contiguity probe failed, forcing full ready",
-							"user_id", c.userID, "err", gapErr)
-						persistedTail = nil
-					case uint64(gapCount) != expectedCount: //nolint:gosec // bounded well below MaxInt64
-						slog.Warn("ws handleReconnect: cold-tier replay has an interior gap, forcing full ready",
-							"user_id", c.userID, "last_seq", lastSeq, "max_persisted_seq", maxPersistedSeq,
-							"expected", expectedCount, "found", gapCount)
-						persistedTail = nil
-					}
-
-					if persistedTail != nil {
-						// The EventPersister flushes asynchronously, so cold rows can
-						// lag the live seq: events broadcast after the last flush sit
-						// only in the ring buffer. Confirm the buffer can cover
-						// everything above the newest persisted row — the
-						// authoritative re-read happens atomically with registerNow
-						// below, but a hole here must still force a full ready
-						// rather than a replay with a silent gap at its end.
-						switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
-						case tail != nil:
-						case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
-							// Post-restart empty buffer with the hub seq seeded from
-							// the store max: nothing was broadcast after the last
-							// persisted row, so the cold rows alone are complete.
-						default:
-							slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
-								"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
-							persistedTail = nil
-						}
-					}
-					if persistedTail != nil {
-						events = persistedTail
-						replaySource = "db"
-					}
-				}
-			}
-		}
-		if events == nil {
-			h.reconnectTierFull.Add(1)
-			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false, false
-		}
+	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs)
+	if events == nil {
+		h.reconnectTierFull.Add(1)
+		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+		return false, false
 	}
 
 	// Register BEFORE writing replay data so broadcasts that arrive during
@@ -324,7 +198,8 @@ func (h *Hub) handleReconnect(
 	// means it can never be requested again once a later frame arrives.
 	// Close the window by re-reading the ring-buffer-derived portion of
 	// `events` and calling registerNow inside the SAME h.seqMu critical
-	// section deliverBroadcast uses, so no seq can be allocated in between.
+	// section deliverBroadcast uses, so no seq can be allocated in between
+	// (reconnectRegister below).
 	// Restore the client's channel subscription BEFORE registration.
 	//
 	// registerNow copies the channel subscription from the OLD client entry,
@@ -354,6 +229,218 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
+	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	if !ok {
+		return false, false
+	}
+
+	switch replaySource {
+	case "buffer":
+		h.reconnectTierBuf.Add(1)
+	case "db":
+		h.reconnectTierDB.Add(1)
+	}
+	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
+
+	// Best-effort supplement: the user's own live voice room may sit outside
+	// allowedChannelIDs (see the capture of liveVoiceChID above), so its
+	// voice_state/voice_leave would otherwise never reach this replay at all.
+	// Tries the ring buffer first, then the cold-tier store; a miss on both
+	// just leaves this one supplement as a no-op, not a regression versus the
+	// pre-fix behaviour.
+	if liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID] {
+		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
+	}
+
+	if !h.reconnectWriteReplay(ctx, conn, c, lastSeq, events, replaySource) {
+		// startPumps=false: the teardown inside reconnectWriteReplay already ran
+		// in full. Starting readPump on this closed conn would hit an immediate
+		// Read error and its defer would run the identical teardown a second
+		// time (OC-0051).
+		return true, false
+	}
+
+	// Update presence but skip member_join — user was already known.
+	applyConnectStatus(ctx, database, c)
+	h.announceConnectPresence(c)
+
+	return true, true
+}
+
+// reconnectPrecheck runs handleReconnect's two entry guards and, when replay is
+// still on the table, returns the read-permission set replay is filtered by.
+// ok=false means the caller must fall through to a full ready.
+func (h *Hub) reconnectPrecheck(
+	ctx context.Context, database *db.DB, c *Client, lastSeq uint64,
+) (map[int64]bool, bool) {
+	// Channel-visibility changes are delivered as targeted, unsequenced
+	// messages, so replay cannot bring a client that missed one back into a
+	// coherent state — force the full-ready path instead.
+	if h.mustFullResync(lastSeq) {
+		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
+			"user_id", c.userID, "last_seq", lastSeq)
+		h.reconnectTierFull.Add(1)
+		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+		return nil, false
+	}
+	// Compute the set of channel IDs the reconnecting user can access so that
+	// channel-scoped replay events are filtered by current permissions (M3).
+	allowedChannelIDs, err := h.computeAllowedChannels(ctx, database, c.user)
+	if err != nil {
+		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return nil, false
+	}
+	return allowedChannelIDs, true
+}
+
+// reconnectSelectReplay picks the tier that serves this resume — the ring
+// buffer when it still covers lastSeq, otherwise the cold-tier EventStore — and
+// returns the events found, the tier name, and (cold tier only) the persisted
+// rows plus their highest seq, which reconnectRegister needs for its re-read.
+// A nil events return means neither tier can replay and the caller must fall
+// through to a full ready.
+func (h *Hub) reconnectSelectReplay(
+	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs map[int64]bool,
+) ([][]byte, string, [][]byte, uint64) {
+	var (
+		events          [][]byte
+		replaySource    = "buffer"
+		persistedTail   [][]byte // cold-tier rows only; re-merged with a fresh buffer tail below
+		maxPersistedSeq uint64
+	)
+	if buf := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs); buf != nil {
+		events = buf
+		return events, replaySource, persistedTail, maxPersistedSeq
+	}
+	// Phase B Step 7 — try cold-tier replay from the EventStore before
+	// giving up and forcing a full ready re-sync.
+	if esp := h.eventStore.Load(); esp != nil {
+		es := *esp
+		channelIDs := make([]int64, 0, len(allowedChannelIDs))
+		for cid := range allowedChannelIDs {
+			channelIDs = append(channelIDs, cid)
+		}
+		coldCap := h.maxColdReplayLimit()
+		persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, coldCap) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
+		switch {
+		case dbErr != nil:
+			slog.Warn("ws handleReconnect: cold-tier replay query failed",
+				"user_id", c.userID, "err", dbErr)
+		case len(persisted) >= coldCap:
+			// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
+			// result means the gap exceeds the cap and the NEWEST events were
+			// dropped. Replaying it would look like a complete resume to the
+			// client — it tracks only max(seq) and cannot detect the hole —
+			// silently losing state events that REST history never repairs.
+			// Leave events nil so the fall-through forces a full ready.
+			slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
+				"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
+		case len(persisted) > 0:
+			// Retention pruning (PruneEventsOlderThan) deletes purely by
+			// created_at with no seq-floor coordination, so this
+			// channel-filtered result can be a surviving suffix left behind
+			// after the events between lastSeq and persisted[0] were
+			// pruned. Accepting it as-is would present a hole as a complete
+			// resume, since the client tracks only max(seq). Probe the
+			// store's oldest surviving seq UNFILTERED before trusting it —
+			// a channel-filtered contiguity check on persisted itself can't
+			// work, since a sparse per-channel result is legitimately
+			// non-contiguous.
+			oldest, oldestErr := es.GetEventsSince(ctx, 0, 1)
+			switch {
+			case oldestErr != nil:
+				slog.Warn("ws handleReconnect: cold-tier oldest-seq probe failed, forcing full ready",
+					"user_id", c.userID, "err", oldestErr)
+			case len(oldest) == 0 || uint64(oldest[0].Seq) > lastSeq+1: //nolint:gosec // seq is a counter bounded well below MaxInt64
+				var oldestSeq int64
+				if len(oldest) > 0 {
+					oldestSeq = oldest[0].Seq
+				}
+				slog.Warn("ws handleReconnect: retention pruning left a gap before last_seq, forcing full ready",
+					"user_id", c.userID, "last_seq", lastSeq, "oldest_seq", oldestSeq)
+			default:
+				persistedTail, maxPersistedSeq = h.reconnectVetColdTail(ctx, c, es, lastSeq, persisted, allowedChannelIDs)
+				if persistedTail != nil {
+					events = persistedTail
+					replaySource = "db"
+				}
+			}
+		}
+	}
+	return events, replaySource, persistedTail, maxPersistedSeq
+}
+
+// reconnectVetColdTail turns a cold-tier result into a replayable tail, or
+// returns nil when it cannot be trusted: the range it covers must have no
+// interior gap, and the ring buffer must cover everything newer than its last
+// row. The returned seq is the highest one in persisted.
+func (h *Hub) reconnectVetColdTail(
+	ctx context.Context, c *Client, es EventStore, lastSeq uint64,
+	persisted []db.PersistedEvent, allowedChannelIDs map[int64]bool,
+) ([][]byte, uint64) {
+	persistedTail := make([][]byte, 0, len(persisted))
+	for _, p := range persisted {
+		persistedTail = append(persistedTail, p.Payload)
+	}
+	maxPersistedSeq := uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
+
+	// persisted is channel-filtered, so a hole in a channel
+	// outside allowedChannelIDs would slip past a contiguity
+	// check on persisted itself — and EventPersister can lose a
+	// row outright (a full queue drops silently in Enqueue, a
+	// per-row insert failure inside a batch flush is logged but
+	// never surfaced here; see event_persister.go). Count the
+	// UNFILTERED range (lastSeq, maxPersistedSeq] and require
+	// every seq in it to be present. seq is the events table's
+	// primary key, so the count can only come up short, never
+	// over.
+	expectedCount := maxPersistedSeq - lastSeq
+	switch gapCount, gapErr := es.CountEventsInRange(ctx, int64(lastSeq), int64(maxPersistedSeq)); { //nolint:gosec // bounded well below MaxInt64
+	case gapErr != nil:
+		slog.Warn("ws handleReconnect: cold-tier contiguity probe failed, forcing full ready",
+			"user_id", c.userID, "err", gapErr)
+		persistedTail = nil
+	case uint64(gapCount) != expectedCount: //nolint:gosec // bounded well below MaxInt64
+		slog.Warn("ws handleReconnect: cold-tier replay has an interior gap, forcing full ready",
+			"user_id", c.userID, "last_seq", lastSeq, "max_persisted_seq", maxPersistedSeq,
+			"expected", expectedCount, "found", gapCount)
+		persistedTail = nil
+	}
+
+	if persistedTail != nil {
+		// The EventPersister flushes asynchronously, so cold rows can
+		// lag the live seq: events broadcast after the last flush sit
+		// only in the ring buffer. Confirm the buffer can cover
+		// everything above the newest persisted row — the
+		// authoritative re-read happens atomically with registerNow
+		// below, but a hole here must still force a full ready
+		// rather than a replay with a silent gap at its end.
+		switch tail := h.ReplayBuffer().EventsSinceFiltered(maxPersistedSeq, allowedChannelIDs); {
+		case tail != nil:
+		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
+			// Post-restart empty buffer with the hub seq seeded from
+			// the store max: nothing was broadcast after the last
+			// persisted row, so the cold rows alone are complete.
+		default:
+			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
+				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
+			persistedTail = nil
+		}
+	}
+	return persistedTail, maxPersistedSeq
+}
+
+// reconnectRegister re-reads the ring-buffer-derived portion of the replay and
+// registers c inside the SAME h.seqMu critical section deliverBroadcast uses,
+// so no seq can be allocated in between (see the comment in handleReconnect).
+// It returns the events to actually send; ok=false means one of the re-checks
+// tripped and the caller must fall through to a full ready.
+func (h *Hub) reconnectRegister(
+	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs map[int64]bool,
+	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
+) ([][]byte, bool) {
+	var events [][]byte
 	h.seqMu.Lock()
 	switch replaySource {
 	case "buffer":
@@ -367,7 +454,7 @@ func (h *Hub) handleReconnect(
 				"user_id", c.userID, "last_seq", lastSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false, false
+			return nil, false
 		}
 		events = fresh
 	case "db":
@@ -382,7 +469,7 @@ func (h *Hub) handleReconnect(
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return false, false
+			return nil, false
 		}
 	}
 	if handleReconnectPreRegisterRaceHook != nil {
@@ -404,29 +491,21 @@ func (h *Hub) handleReconnect(
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return false, false
+		return nil, false
 	}
 	h.registerNow(c, allowedChannelIDs)
 	h.seqMu.Unlock()
+	return events, true
+}
 
-	switch replaySource {
-	case "buffer":
-		h.reconnectTierBuf.Add(1)
-	case "db":
-		h.reconnectTierDB.Add(1)
-	}
-	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
-
-	// Best-effort supplement: the user's own live voice room may sit outside
-	// allowedChannelIDs (see the capture of liveVoiceChID above), so its
-	// voice_state/voice_leave would otherwise never reach this replay at all.
-	// Tries the ring buffer first, then the cold-tier store; a miss on both
-	// just leaves this one supplement as a no-op, not a regression versus the
-	// pre-fix behaviour.
-	if liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID] {
-		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
-	}
-
+// reconnectWriteReplay writes the resume handshake: auth_ok followed by the
+// replayed events. A false return means a write failed, in which case the full
+// unregisterFailedHandshake teardown has already run and conn is closed, so the
+// caller must not start any pump (OC-0051).
+func (h *Hub) reconnectWriteReplay(
+	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
+	events [][]byte, replaySource string,
+) bool {
 	// Replay succeeded — send auth_ok then missed events. The replay tier
 	// is included in the payload so the client can attribute reconnect
 	// behaviour without separate metric scraping.
@@ -435,26 +514,18 @@ func (h *Hub) handleReconnect(
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-		// startPumps=false: the teardown above already ran in full. Starting
-		// readPump on this closed conn would hit an immediate Read error and
-		// its defer would run the identical teardown a second time (OC-0051).
-		return true, false
+		return false
 	}
 	for _, evt := range events {
 		if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-			return true, false
+			return false
 		}
 	}
 	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
-
-	// Update presence but skip member_join — user was already known.
-	applyConnectStatus(ctx, database, c)
-	h.announceConnectPresence(c)
-
-	return true, true
+	return true
 }
 
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
@@ -620,47 +691,7 @@ func (h *Hub) handleFreshConnect(
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
 	if vs, err := database.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
-		// Replay-failure fallback (lastSeq > 0): registerNow below transfers
-		// the still-registered old connection's live voice state into this
-		// client. Deleting the DB row here — and the LiveKit participant,
-		// whose removal token is the very JoinedAt being transferred — would
-		// leave the user "in voice" on the hub only: voice_join bounces off
-		// ALREADY_JOINED and sweepStaleVoiceStates never heals
-		// memory-without-row. Keep the row so ready stays consistent. If the
-		// old client unregisters before registerNow runs, the transfer is
-		// skipped and the next sweep reaps the then-truly-stale row.
-		if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
-			slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
-				"user_id", c.userID, "channel_id", vs.ChannelID)
-		} else {
-			slog.Info("ws fresh connect: cleaning stale voice state",
-				"user_id", c.userID, "channel_id", vs.ChannelID)
-			if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
-				slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
-			}
-			h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
-			if h.livekit != nil {
-				// BUG-089: Capture stale join token so the goroutine only removes
-				// the exact stale participant. The identity includes joinedAt, so
-				// even if the user rejoins voice quickly, the new session has a
-				// different identity and won't be removed. The removal must
-				// complete even if this connection drops mid-handshake, so detach
-				// from cancellation (values kept); shutdown is handled via h.stop.
-				staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-				lkCtx := context.WithoutCancel(ctx)
-				go func() {
-					select {
-					case <-h.stop:
-						return
-					default:
-					}
-					if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
-						slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
-							"err", err, "user_id", staleUserID, "channel_id", staleChID)
-					}
-				}()
-			}
-		}
+		h.freshConnectCleanStaleVoice(ctx, database, c, vs)
 	}
 
 	// Look up role for permission-filtered ready payload.
@@ -742,4 +773,52 @@ func (h *Hub) handleFreshConnect(
 	h.announceConnectPresence(c)
 
 	return nil
+}
+
+// freshConnectCleanStaleVoice removes the voice state left behind by this
+// user's previous session, unless that session is the still-registered
+// connection this one is about to inherit from.
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, database *db.DB, c *Client, vs *db.VoiceState) {
+	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
+	// the still-registered old connection's live voice state into this
+	// client. Deleting the DB row here — and the LiveKit participant,
+	// whose removal token is the very JoinedAt being transferred — would
+	// leave the user "in voice" on the hub only: voice_join bounces off
+	// ALREADY_JOINED and sweepStaleVoiceStates never heals
+	// memory-without-row. Keep the row so ready stays consistent. If the
+	// old client unregisters before registerNow runs, the transfer is
+	// skipped and the next sweep reaps the then-truly-stale row.
+	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	slog.Info("ws fresh connect: cleaning stale voice state",
+		"user_id", c.userID, "channel_id", vs.ChannelID)
+	if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+	}
+	h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
+	if h.livekit == nil {
+		return
+	}
+	// BUG-089: Capture stale join token so the goroutine only removes
+	// the exact stale participant. The identity includes joinedAt, so
+	// even if the user rejoins voice quickly, the new session has a
+	// different identity and won't be removed. The removal must
+	// complete even if this connection drops mid-handshake, so detach
+	// from cancellation (values kept); shutdown is handled via h.stop.
+	staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
+	lkCtx := context.WithoutCancel(ctx)
+	go func() {
+		select {
+		case <-h.stop:
+			return
+		default:
+		}
+		if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
+			slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
+				"err", err, "user_id", staleUserID, "channel_id", staleChID)
+		}
+	}()
 }

@@ -317,28 +317,43 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 	return result, nil
 }
 
-// ListMentionTargetsByRoles returns non-banned users holding any of the given
-// roles, with the presence status @here filters on.
-func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]MentionTarget, error) {
-	if len(roleIDs) == 0 {
+// mentionTargetColumn is the users column a mention-target lookup matches its
+// id list against. It is a named type rather than a bare string so that every
+// call site has to name one of the two constants below instead of passing an
+// arbitrary string into the SELECT. Go named types are not closed, so this is
+// a convention the type makes visible, not one it enforces: do not introduce a
+// mentionTargetColumn(x) conversion from a runtime value.
+type mentionTargetColumn string
+
+const (
+	mentionTargetsByRole mentionTargetColumn = "role_id"
+	mentionTargetsByUser mentionTargetColumn = "id"
+)
+
+// listMentionTargets returns non-banned users whose column is in ids, with the
+// presence status @here filters on. It is the shared body of
+// ListMentionTargetsByRoles and ListMentionTargetsByUserIDs, which differ only
+// in the column they match and the name they report in errors.
+func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn, caller string, ids []int64) ([]MentionTarget, error) {
+	if len(ids) == 0 {
 		return []MentionTarget{}, nil
 	}
 
-	placeholders := make([]string, len(roleIDs))
-	args := make([]any, len(roleIDs))
-	for i, id := range roleIDs {
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
 	}
 
 	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, status, role_id FROM users WHERE %s AND role_id IN (%s)`,
-			notBannedClause, strings.Join(placeholders, ",")),
+		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a named-type column constant, not user input
+			`SELECT id, status, role_id FROM users WHERE %s AND %s IN (%s)`,
+			notBannedClause, string(column), strings.Join(placeholders, ",")),
 		args...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("ListMentionTargetsByRoles: %w", err)
+		return nil, fmt.Errorf("%s: %w", caller, err)
 	}
 	defer rows.Close() //nolint:errcheck
 
@@ -346,14 +361,20 @@ func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]
 	for rows.Next() {
 		var t MentionTarget
 		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
-			return nil, fmt.Errorf("ListMentionTargetsByRoles scan: %w", scanErr)
+			return nil, fmt.Errorf("%s scan: %w", caller, scanErr)
 		}
 		targets = append(targets, t)
 	}
 	if rows.Err() != nil {
-		return nil, fmt.Errorf("ListMentionTargetsByRoles rows: %w", rows.Err())
+		return nil, fmt.Errorf("%s rows: %w", caller, rows.Err())
 	}
 	return targets, nil
+}
+
+// ListMentionTargetsByRoles returns non-banned users holding any of the given
+// roles, with the presence status @here filters on.
+func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]MentionTarget, error) {
+	return d.listMentionTargets(ctx, mentionTargetsByRole, "ListMentionTargetsByRoles", roleIDs)
 }
 
 // ListMentionTargetsByUserIDs returns non-banned users by explicit id, with the
@@ -362,40 +383,7 @@ func (d *DB) ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]
 // READ_MESSAGES can read a channel their role cannot, so the role walk alone
 // would leave them out of an @everyone fan-out they are entitled to.
 func (d *DB) ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]MentionTarget, error) {
-	if len(userIDs) == 0 {
-		return []MentionTarget{}, nil
-	}
-
-	placeholders := make([]string, len(userIDs))
-	args := make([]any, len(userIDs))
-	for i, id := range userIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, status, role_id FROM users WHERE %s AND id IN (%s)`,
-			notBannedClause, strings.Join(placeholders, ",")),
-		args...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("ListMentionTargetsByUserIDs: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	targets := []MentionTarget{}
-	for rows.Next() {
-		var t MentionTarget
-		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
-			return nil, fmt.Errorf("ListMentionTargetsByUserIDs scan: %w", scanErr)
-		}
-		targets = append(targets, t)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("ListMentionTargetsByUserIDs rows: %w", rows.Err())
-	}
-	return targets, nil
+	return d.listMentionTargets(ctx, mentionTargetsByUser, "ListMentionTargetsByUserIDs", userIDs)
 }
 
 // ListBlockersOf returns the ids of users who have blocked the given user.

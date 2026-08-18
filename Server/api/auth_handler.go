@@ -145,79 +145,12 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 func handleRegister(database *db.DB, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
-		registrationOpen, err := isRegistrationOpen(r.Context(), database)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to load registration policy",
-			})
-			return
-		}
-		if !registrationOpen {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "registration is currently closed",
-			})
+		if !registerPolicyGate(w, r, database) {
 			return
 		}
 
-		require2FA, err := isRequire2FAEnabled(r.Context(), database)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to load registration policy",
-			})
-			return
-		}
-		if require2FA {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "registration is unavailable while two-factor authentication is required",
-			})
-			return
-		}
-
-		var req registerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-
-		// F: use the fixpoint sanitizer (service.SanitizeText), not the bare
-		// sanitizer.Sanitize below — Sanitize's output is always HTML-escaped
-		// (' -> &#39;, & -> &amp;, " -> &#34;), so a plain call here would store
-		// a different string than what handleLogin looks up (which only
-		// trims), permanently locking out any username containing one of
-		// those characters. See service.SanitizeText's doc comment.
-		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
-		req.InviteCode = strings.TrimSpace(req.InviteCode)
-
-		if req.Username == "" || req.Password == "" || req.InviteCode == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "username, password, and invite_code are required",
-			})
-			return
-		}
-
-		// Validate username format (length, no control/invisible chars).
-		if err := auth.ValidateUsername(req.Username); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
-			})
-			return
-		}
-
-		// Validate password strength before anything else.
-		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
-			})
+		req, ok := registerReadRequest(w, r)
+		if !ok {
 			return
 		}
 
@@ -294,146 +227,107 @@ func handleRegister(database *db.DB, trustedProxies []string) http.HandlerFunc {
 	}
 }
 
+// registerPolicyGate reports whether registration is currently permitted,
+// writing the refusal response itself when it is not.
+func registerPolicyGate(w http.ResponseWriter, r *http.Request, database *db.DB) bool {
+	registrationOpen, err := isRegistrationOpen(r.Context(), database)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error:   "INTERNAL_ERROR",
+			Message: "failed to load registration policy",
+		})
+		return false
+	}
+	if !registrationOpen {
+		writeJSON(w, http.StatusForbidden, errorResponse{
+			Error:   "FORBIDDEN",
+			Message: "registration is currently closed",
+		})
+		return false
+	}
+
+	require2FA, err := isRequire2FAEnabled(r.Context(), database)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error:   "INTERNAL_ERROR",
+			Message: "failed to load registration policy",
+		})
+		return false
+	}
+	if require2FA {
+		writeJSON(w, http.StatusForbidden, errorResponse{
+			Error:   "FORBIDDEN",
+			Message: "registration is unavailable while two-factor authentication is required",
+		})
+		return false
+	}
+	return true
+}
+
+// registerReadRequest decodes and validates the registration body, writing the
+// rejection response itself when the input cannot be used.
+func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerRequest, bool) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "malformed request body",
+		})
+		return req, false
+	}
+
+	// F: use the fixpoint sanitizer (service.SanitizeText), not the bare
+	// sanitizer.Sanitize below — Sanitize's output is always HTML-escaped
+	// (' -> &#39;, & -> &amp;, " -> &#34;), so a plain call here would store
+	// a different string than what handleLogin looks up (which only
+	// trims), permanently locking out any username containing one of
+	// those characters. See service.SanitizeText's doc comment.
+	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+	req.InviteCode = strings.TrimSpace(req.InviteCode)
+
+	if req.Username == "" || req.Password == "" || req.InviteCode == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "username, password, and invite_code are required",
+		})
+		return req, false
+	}
+
+	// Validate username format (length, no control/invisible chars).
+	if err := auth.ValidateUsername(req.Username); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: err.Error(),
+		})
+		return req, false
+	}
+
+	// Validate password strength before anything else.
+	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: err.Error(),
+		})
+		return req, false
+	}
+	return req, true
+}
+
 // handleLogin processes POST /api/v1/auth/login.
 func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req loginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-
-		req.Username = strings.TrimSpace(req.Username)
-		// Do NOT trim req.Password — passwords may intentionally contain
-		// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
-
-		if req.Username == "" || req.Password == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "username and password are required",
-			})
-			return
-		}
-
-		// F: reject an over-long username before it is ever used to build a
-		// RateLimiter map key below (unameKey, failKey, userFailKey, lockout
-		// keys). Unlike registration, login has no account to validate
-		// against yet, so nothing else bounds this value — an unauthenticated
-		// caller could otherwise pin an arbitrarily large, body-sized string
-		// as a retained key (Cleanup only evicts it after hours). Mirrors the
-		// same 32-rune cap auth.ValidateUsername enforces at registration.
-		if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "username is too long",
-			})
+		req, ok := loginReadRequest(w, r)
+		if !ok {
 			return
 		}
 
 		ip := clientIPWithProxies(r, proxyNets)
 
-		// Check per-IP lockout first.
-		lockKey := "login_lock:" + ip
-		if limiter.IsLockedOut(lockKey) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "account temporarily locked due to too many failed attempts",
-			})
+		user, ok := loginAuthenticate(w, r, database, limiter, req, ip)
+		if !ok {
 			return
 		}
-
-		// BUG-110: Also check per-username lockout to prevent distributed brute force.
-		// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
-		// NOCASE) before keying the lockout, so case variants of one account
-		// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
-		unameKey := strings.ToLower(req.Username)
-		userLockKey := "login_user_lock:" + unameKey
-		if limiter.IsLockedOut(userLockKey) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "account temporarily locked due to too many failed attempts",
-			})
-			return
-		}
-
-		// Constant-time lookup: always attempt bcrypt compare even when user
-		// does not exist to prevent timing-based username enumeration.
-		user, err := database.GetUserByUsername(r.Context(), req.Username)
-
-		// Distinguish DB errors from authentication failures. DB errors
-		// should NOT increment the rate limiter — otherwise a transient
-		// DB outage would lock out legitimate users.
-		if err != nil && user == nil {
-			// Could be a real DB error or simply "user not found".
-			// GetUserByUsername returns (nil, nil) for not-found, so a
-			// non-nil error here is a genuine DB failure.
-			slog.Error("login: GetUserByUsername failed", "err", err, "ip", ip)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "login temporarily unavailable",
-			})
-			return
-		}
-
-		failKey := "login_fail:" + ip
-		userFailKey := "login_user_fail:" + unameKey
-		// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
-		// read-only IsLockedOut gates above are check-then-act: N concurrent
-		// requests all pass them before any failure is recorded below, so the
-		// per-username cap — the only cross-IP brute-force defence — bound
-		// only sequential attackers. Allow records the attempt under the
-		// limiter's lock, capping a concurrent burst at the same budget a
-		// sequential attacker gets. Sized at threshold+1 so the sequential
-		// accepted-input set is unchanged: failures 1–10 still land, the 10th
-		// still trips the lockout (via the Check below), and a correct
-		// password on attempt 10 still succeeds — successful logins reset
-		// both counters. The reservation sits after the DB-error return above
-		// so a transient DB outage still does not consume attempts.
-		if !limiter.Allow(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) ||
-			!limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "account temporarily locked due to too many failed attempts",
-			})
-			return
-		}
-		// Always run the password check — with an empty hash when the user does
-		// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
-		// empty hash, so bcrypt executes on every path and response time stays
-		// constant, preventing timing-based username enumeration. (A `user == nil
-		// || CheckPassword(...)` short-circuit would skip bcrypt entirely for
-		// unknown usernames, reintroducing the timing side-channel.)
-		storedHash := ""
-		if user != nil {
-			storedHash = user.PasswordHash
-		}
-		if !auth.CheckPassword(storedHash, req.Password) {
-			// The attempt was already recorded atomically up-front (F3); here
-			// only decide the lockouts, at the same boundary as before: the
-			// 10th in-window failure locks the key. Check is read-only, so
-			// the reservation is not double-counted.
-			if !limiter.Check(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) {
-				limiter.Lockout(r.Context(), lockKey, loginLockoutDuration)
-			}
-			// BUG-110: per-username lockout on threshold.
-			if !limiter.Check(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
-				limiter.Lockout(r.Context(), userLockKey, loginUserLockoutDuration)
-			}
-			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid credentials",
-			})
-			return
-		}
-
-		// Reset failure counters on success.
-		limiter.Reset(r.Context(), failKey)
-		limiter.Reset(r.Context(), userFailKey)
 
 		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
@@ -500,6 +394,152 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			User:        toUserResponse(user),
 		})
 	}
+}
+
+// loginReadRequest decodes and validates the login body, writing the rejection
+// response itself when the input cannot be used.
+func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, bool) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "malformed request body",
+		})
+		return req, false
+	}
+
+	req.Username = strings.TrimSpace(req.Username)
+	// Do NOT trim req.Password — passwords may intentionally contain
+	// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
+
+	if req.Username == "" || req.Password == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "username and password are required",
+		})
+		return req, false
+	}
+
+	// F: reject an over-long username before it is ever used to build a
+	// RateLimiter map key below (unameKey, failKey, userFailKey, lockout
+	// keys). Unlike registration, login has no account to validate
+	// against yet, so nothing else bounds this value — an unauthenticated
+	// caller could otherwise pin an arbitrarily large, body-sized string
+	// as a retained key (Cleanup only evicts it after hours). Mirrors the
+	// same 32-rune cap auth.ValidateUsername enforces at registration.
+	if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "username is too long",
+		})
+		return req, false
+	}
+	return req, true
+}
+
+// loginAuthenticate runs the lockout gates, the constant-time password compare
+// and the failure accounting for one login attempt. It returns the
+// authenticated user, or false after writing the rejection response itself.
+func loginAuthenticate(w http.ResponseWriter, r *http.Request, database *db.DB, limiter *auth.RateLimiter, req loginRequest, ip string) (*db.User, bool) {
+	// Check per-IP lockout first.
+	lockKey := "login_lock:" + ip
+	if limiter.IsLockedOut(lockKey) {
+		writeJSON(w, http.StatusTooManyRequests, errorResponse{
+			Error:   "RATE_LIMITED",
+			Message: "account temporarily locked due to too many failed attempts",
+		})
+		return nil, false
+	}
+
+	// BUG-110: Also check per-username lockout to prevent distributed brute force.
+	// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
+	// NOCASE) before keying the lockout, so case variants of one account
+	// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
+	unameKey := strings.ToLower(req.Username)
+	userLockKey := "login_user_lock:" + unameKey
+	if limiter.IsLockedOut(userLockKey) {
+		writeJSON(w, http.StatusTooManyRequests, errorResponse{
+			Error:   "RATE_LIMITED",
+			Message: "account temporarily locked due to too many failed attempts",
+		})
+		return nil, false
+	}
+
+	// Constant-time lookup: always attempt bcrypt compare even when user
+	// does not exist to prevent timing-based username enumeration.
+	user, err := database.GetUserByUsername(r.Context(), req.Username)
+
+	// Distinguish DB errors from authentication failures. DB errors
+	// should NOT increment the rate limiter — otherwise a transient
+	// DB outage would lock out legitimate users.
+	if err != nil && user == nil {
+		// Could be a real DB error or simply "user not found".
+		// GetUserByUsername returns (nil, nil) for not-found, so a
+		// non-nil error here is a genuine DB failure.
+		slog.Error("login: GetUserByUsername failed", "err", err, "ip", ip)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error:   "INTERNAL_ERROR",
+			Message: "login temporarily unavailable",
+		})
+		return nil, false
+	}
+
+	failKey := "login_fail:" + ip
+	userFailKey := "login_user_fail:" + unameKey
+	// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
+	// read-only IsLockedOut gates above are check-then-act: N concurrent
+	// requests all pass them before any failure is recorded below, so the
+	// per-username cap — the only cross-IP brute-force defence — bound
+	// only sequential attackers. Allow records the attempt under the
+	// limiter's lock, capping a concurrent burst at the same budget a
+	// sequential attacker gets. Sized at threshold+1 so the sequential
+	// accepted-input set is unchanged: failures 1–10 still land, the 10th
+	// still trips the lockout (via the Check below), and a correct
+	// password on attempt 10 still succeeds — successful logins reset
+	// both counters. The reservation sits after the DB-error return above
+	// so a transient DB outage still does not consume attempts.
+	if !limiter.Allow(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) ||
+		!limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+		writeJSON(w, http.StatusTooManyRequests, errorResponse{
+			Error:   "RATE_LIMITED",
+			Message: "account temporarily locked due to too many failed attempts",
+		})
+		return nil, false
+	}
+	// Always run the password check — with an empty hash when the user does
+	// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
+	// empty hash, so bcrypt executes on every path and response time stays
+	// constant, preventing timing-based username enumeration. (A `user == nil
+	// || CheckPassword(...)` short-circuit would skip bcrypt entirely for
+	// unknown usernames, reintroducing the timing side-channel.)
+	storedHash := ""
+	if user != nil {
+		storedHash = user.PasswordHash
+	}
+	if !auth.CheckPassword(storedHash, req.Password) {
+		// The attempt was already recorded atomically up-front (F3); here
+		// only decide the lockouts, at the same boundary as before: the
+		// 10th in-window failure locks the key. Check is read-only, so
+		// the reservation is not double-counted.
+		if !limiter.Check(failKey, scaledAuthLimit(loginFailureThreshold)+1, loginFailureWindow) {
+			limiter.Lockout(r.Context(), lockKey, loginLockoutDuration)
+		}
+		// BUG-110: per-username lockout on threshold.
+		if !limiter.Check(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+			limiter.Lockout(r.Context(), userLockKey, loginUserLockoutDuration)
+		}
+		slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
+		writeJSON(w, http.StatusUnauthorized, errorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: "invalid credentials",
+		})
+		return nil, false
+	}
+
+	// Reset failure counters on success.
+	limiter.Reset(r.Context(), failKey)
+	limiter.Reset(r.Context(), userFailKey)
+	return user, true
 }
 
 // handleLogout processes POST /api/v1/auth/logout.

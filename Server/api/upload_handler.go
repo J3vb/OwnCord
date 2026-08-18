@@ -286,122 +286,13 @@ func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, 
 			return
 		}
 
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-
-		// Look up attachment metadata with channel context.
-		aa, err := database.GetAttachmentWithChannel(r.Context(), fileID)
-		if err != nil {
-			slog.Error("failed to look up attachment", "id", fileID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "internal server error",
-			})
-			return
-		}
+		aa := serveFileResolve(w, r, database, fileID)
 		if aa == nil {
-			http.NotFound(w, r)
 			return
 		}
 
-		// A soft-deleted message's attachments must stop being servable the
-		// moment the message is deleted — the client shows a tombstone, but
-		// without this check the file stays reachable by URL forever (no
-		// sweep can ever reclaim a linked row either, since the only reaper
-		// requires message_id IS NULL). Checked before the ACL branch so it
-		// also covers admins, matching the tombstone applying to everyone.
-		//
-		// Queried directly rather than through database.GetMessage: that
-		// wrapper's SELECT list carries every message column, and the
-		// `deleted` flag is the only one this check needs.
-		if aa.MessageID != nil {
-			var deleted bool
-			deletedErr := database.QueryRowContext(r.Context(),
-				`SELECT deleted FROM messages WHERE id = ?`, *aa.MessageID).Scan(&deleted)
-			switch {
-			case errors.Is(deletedErr, sql.ErrNoRows):
-				// No message row — leave ACL to decide (unlinked-shaped by now).
-			case deletedErr != nil:
-				slog.Error("failed to look up message for attachment", "id", fileID, "error", deletedErr)
-				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "INTERNAL_ERROR",
-					Message: "internal server error",
-				})
-				return
-			case deleted:
-				http.NotFound(w, r)
-				return
-			}
-		}
-
-		// ── Access control ──────────────────────────────────────────────
-		isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
-
-		// DM participation is required of everyone, including admins — this
-		// matches every other DM read gate in the codebase (requireChannelRead,
-		// PermissionService.RequireChannelAccess, checkSendPermission), none of
-		// which have an admin bypass. Checked ahead of the `!isAdmin` block so
-		// the admin bypass below cannot skip it.
-		if aa.ChannelID != nil && aa.ChannelType == "dm" {
-			if user == nil {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "you do not have access to this file",
-				})
-				return
-			}
-			ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
-			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "you do not have access to this file",
-				})
-				return
-			}
-		}
-
-		if !isAdmin {
-			if aa.ChannelID == nil {
-				// An unlinked attachment that some user's avatar points at is
-				// readable by every authenticated user: an avatar has to be
-				// visible to the people who see the messages it sits next to.
-				// The check is by the exact URL the column stores, so the file
-				// stops being public the instant the avatar is replaced.
-				isAvatar, avatarErr := database.IsAvatarFileURL(r.Context(), service.AvatarFileURL(fileID))
-				if avatarErr != nil {
-					slog.Error("failed to check avatar file", "id", fileID, "error", avatarErr)
-				}
-				switch {
-				case isAvatar:
-					// Public while in use — fall through to serving.
-				// Unlinked attachment — only the uploader may access.
-				// M-2: Legacy rows (NULL uploader_id) are now denied rather than
-				// served to any authenticated user.
-				case aa.UploaderID == nil:
-					slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", fileID)
-					writeJSON(w, http.StatusForbidden, errorResponse{
-						Error:   "FORBIDDEN",
-						Message: "you do not have access to this file",
-					})
-					return
-				case user == nil || *aa.UploaderID != user.ID:
-					writeJSON(w, http.StatusForbidden, errorResponse{
-						Error:   "FORBIDDEN",
-						Message: "you do not have access to this file",
-					})
-					return
-				}
-			} else if aa.ChannelType != "dm" {
-				// Linked attachment in a guild channel — check channel
-				// permissions. The DM case is handled unconditionally above.
-				if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
-					writeJSON(w, http.StatusForbidden, errorResponse{
-						Error:   "FORBIDDEN",
-						Message: "you do not have access to this file",
-					})
-					return
-				}
-			}
+		if !serveFileAuthorize(w, r, database, permSvc, aa, fileID) {
+			return
 		}
 
 		// Open file from storage.
@@ -449,4 +340,135 @@ func handleServeFile(database *db.DB, store FileStore, allowedOrigins []string, 
 		}
 		http.ServeContent(w, r, aa.Filename, modTime, f)
 	}
+}
+
+// serveFileResolve looks up the attachment behind {id} and applies the checks
+// that make a file unservable regardless of who is asking. It returns nil once
+// it has written the response, so the caller only has to return.
+func serveFileResolve(w http.ResponseWriter, r *http.Request, database *db.DB, fileID string) *db.AttachmentAccess {
+	// Look up attachment metadata with channel context.
+	aa, err := database.GetAttachmentWithChannel(r.Context(), fileID)
+	if err != nil {
+		slog.Error("failed to look up attachment", "id", fileID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error:   "INTERNAL_ERROR",
+			Message: "internal server error",
+		})
+		return nil
+	}
+	if aa == nil {
+		http.NotFound(w, r)
+		return nil
+	}
+
+	// A soft-deleted message's attachments must stop being servable the
+	// moment the message is deleted — the client shows a tombstone, but
+	// without this check the file stays reachable by URL forever (no
+	// sweep can ever reclaim a linked row either, since the only reaper
+	// requires message_id IS NULL). Checked before the ACL branch so it
+	// also covers admins, matching the tombstone applying to everyone.
+	//
+	// Queried directly rather than through database.GetMessage: that
+	// wrapper's SELECT list carries every message column, and the
+	// `deleted` flag is the only one this check needs.
+	if aa.MessageID != nil {
+		var deleted bool
+		deletedErr := database.QueryRowContext(r.Context(),
+			`SELECT deleted FROM messages WHERE id = ?`, *aa.MessageID).Scan(&deleted)
+		switch {
+		case errors.Is(deletedErr, sql.ErrNoRows):
+			// No message row — leave ACL to decide (unlinked-shaped by now).
+		case deletedErr != nil:
+			slog.Error("failed to look up message for attachment", "id", fileID, "error", deletedErr)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "internal server error",
+			})
+			return nil
+		case deleted:
+			http.NotFound(w, r)
+			return nil
+		}
+	}
+
+	return aa
+}
+
+// serveFileAuthorize decides whether the caller may read aa. It returns false
+// once it has written the response, so the caller only has to return.
+func serveFileAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB, permSvc *service.PermissionService, aa *db.AttachmentAccess, fileID string) bool {
+	user, _ := r.Context().Value(UserKey).(*db.User)
+	role, _ := r.Context().Value(RoleKey).(*db.Role)
+
+	// ── Access control ──────────────────────────────────────────────
+	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
+
+	// DM participation is required of everyone, including admins — this
+	// matches every other DM read gate in the codebase (requireChannelRead,
+	// PermissionService.RequireChannelAccess, checkSendPermission), none of
+	// which have an admin bypass. Checked ahead of the `!isAdmin` block so
+	// the admin bypass below cannot skip it.
+	if aa.ChannelID != nil && aa.ChannelType == "dm" {
+		if user == nil {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "you do not have access to this file",
+			})
+			return false
+		}
+		ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
+		if dmErr != nil || !ok {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "you do not have access to this file",
+			})
+			return false
+		}
+	}
+
+	if !isAdmin {
+		if aa.ChannelID == nil {
+			// An unlinked attachment that some user's avatar points at is
+			// readable by every authenticated user: an avatar has to be
+			// visible to the people who see the messages it sits next to.
+			// The check is by the exact URL the column stores, so the file
+			// stops being public the instant the avatar is replaced.
+			isAvatar, avatarErr := database.IsAvatarFileURL(r.Context(), service.AvatarFileURL(fileID))
+			if avatarErr != nil {
+				slog.Error("failed to check avatar file", "id", fileID, "error", avatarErr)
+			}
+			switch {
+			case isAvatar:
+				// Public while in use — fall through to serving.
+			// Unlinked attachment — only the uploader may access.
+			// M-2: Legacy rows (NULL uploader_id) are now denied rather than
+			// served to any authenticated user.
+			case aa.UploaderID == nil:
+				slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", fileID)
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "you do not have access to this file",
+				})
+				return false
+			case user == nil || *aa.UploaderID != user.ID:
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "you do not have access to this file",
+				})
+				return false
+			}
+		} else if aa.ChannelType != "dm" {
+			// Linked attachment in a guild channel — check channel
+			// permissions. The DM case is handled unconditionally above.
+			if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "you do not have access to this file",
+				})
+				return false
+			}
+		}
+	}
+
+	return true
 }

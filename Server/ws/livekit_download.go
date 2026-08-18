@@ -140,32 +140,43 @@ func EnsureLiveKitBinary(ctx context.Context, dataDir, version string) (string, 
 		return "", fmt.Errorf("livekit archive checksum mismatch for %s: expected %s, got %s", asset, expectedHash, actual)
 	}
 
-	tmpBin := dest + ".tmp"
-	_ = os.Remove(tmpBin)
-	if strings.HasSuffix(asset, ".zip") {
-		err = extractLiveKitFromZip(f, size, tmpBin)
-	} else {
-		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
-			return "", fmt.Errorf("rewinding archive: %w", seekErr)
-		}
-		err = extractLiveKitFromTarGz(f, tmpBin)
-	}
-	if err != nil {
-		_ = os.Remove(tmpBin)
-		return "", fmt.Errorf("extracting %s: %w", asset, err)
-	}
-	if err := os.Chmod(tmpBin, 0o755); err != nil { //nolint:gosec // G302: must be executable
-		_ = os.Remove(tmpBin)
-		return "", fmt.Errorf("chmod binary: %w", err)
-	}
-	if err := os.Rename(tmpBin, dest); err != nil {
-		_ = os.Remove(tmpBin)
-		return "", fmt.Errorf("staging binary: %w", err)
+	if err := ensureLiveKitStageBinary(f, size, asset, dest); err != nil {
+		return "", err
 	}
 
 	cleanupOldLiveKitBinaries(dir, filepath.Base(dest))
 	slog.Info("livekit: download complete", "path", dest)
 	return dest, nil
+}
+
+// ensureLiveKitStageBinary extracts the already-verified archive f (asset's
+// suffix picks zip vs tar.gz) into a temp file beside dest, makes it
+// executable and renames it into place. Every failure removes the temp file.
+func ensureLiveKitStageBinary(f *os.File, size int64, asset, dest string) error {
+	tmpBin := dest + ".tmp"
+	_ = os.Remove(tmpBin)
+	var err error
+	if strings.HasSuffix(asset, ".zip") {
+		err = extractLiveKitFromZip(f, size, tmpBin)
+	} else {
+		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+			return fmt.Errorf("rewinding archive: %w", seekErr)
+		}
+		err = extractLiveKitFromTarGz(f, tmpBin)
+	}
+	if err != nil {
+		_ = os.Remove(tmpBin)
+		return fmt.Errorf("extracting %s: %w", asset, err)
+	}
+	if err := os.Chmod(tmpBin, 0o755); err != nil { //nolint:gosec // G302: must be executable
+		_ = os.Remove(tmpBin)
+		return fmt.Errorf("chmod binary: %w", err)
+	}
+	if err := os.Rename(tmpBin, dest); err != nil {
+		_ = os.Remove(tmpBin)
+		return fmt.Errorf("staging binary: %w", err)
+	}
+	return nil
 }
 
 // livekitBinaryEntry reports whether an archive entry name is the

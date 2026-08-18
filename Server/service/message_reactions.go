@@ -102,51 +102,9 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrBadRequest)
 	}
 
-	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
-	// lookup failure must not fall through to the non-DM permission branch
-	// below. That branch passes on the base role mask alone
-	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and requireDMNotBlocked entirely.
-	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	if chErr != nil || ch == nil {
-		return nil, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
-	}
-	isDM := ch.Type == "dm"
-
-	// Archived channels are read-only. handleReaction bypasses
-	// checkSendPermission (it runs its own DM/permission branch below), so it
-	// needs the shared gate directly — see requireChannelWritable in
-	// message_perms.go.
-	if err := requireChannelWritable(ch); err != nil {
+	participantIDs, isDM, err := s.reactionAudience(ctx, userID, msg.ChannelID)
+	if err != nil {
 		return nil, err
-	}
-
-	var participantIDs []int64
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
-		if dmErr != nil || !ok {
-			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
-		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
-			return nil, blkErr
-		}
-		// Resolve the fan-out audience before mutating anything. Participants
-		// are unaffected by the reaction itself, so failing here is cheap;
-		// fetching this after AddReaction/RemoveReaction commits (as this
-		// used to) risked a reaction persisted with no participant list to
-		// broadcast it to, which reactionV2Handler would then fan out to
-		// nobody while reporting success to the caller.
-		ids, pErr := s.st.GetDMParticipantIDs(ctx, msg.ChannelID)
-		if pErr != nil {
-			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
-			return nil, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)
-		}
-		participantIDs = ids
-	} else if !s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.AddReactions) {
-		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
-		// react in a channel they cannot read. Mirrors checkSendPermission,
-		// which requires ReadMessages|SendMessages for non-DM sends.
-		return nil, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
 	}
 
 	action := "add"
@@ -177,4 +135,62 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	}
 
 	return result, nil
+}
+
+// reactionAudience resolves the channel a message lives in and enforces the
+// channel-scoped gates on reacting in it — archived, DM participation, DM
+// block, and the non-DM READ_MESSAGES|ADD_REACTIONS check. The gates its
+// caller keeps (rate limit, message id, emoji validity, deleted message) stay
+// in handleReaction and still run first. It also returns the DM participant
+// ids, resolved here so they exist before anything is mutated. The order of
+// the checks is load-bearing and unchanged.
+func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID int64) ([]int64, bool, error) {
+	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
+	// lookup failure must not fall through to the non-DM permission branch
+	// below. That branch passes on the base role mask alone
+	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
+	// skipping both IsDMParticipant and requireDMNotBlocked entirely.
+	ch, chErr := s.st.GetChannel(ctx, channelID)
+	if chErr != nil || ch == nil {
+		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
+	}
+	isDM := ch.Type == "dm"
+
+	// Archived channels are read-only. handleReaction bypasses
+	// checkSendPermission (it runs its own DM/permission branch below), so it
+	// needs the shared gate directly — see requireChannelWritable in
+	// message_perms.go.
+	if err := requireChannelWritable(ch); err != nil {
+		return nil, false, err
+	}
+
+	var participantIDs []int64
+	if isDM {
+		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
+		if dmErr != nil || !ok {
+			return nil, false, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
+		}
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+			return nil, false, blkErr
+		}
+		// Resolve the fan-out audience before mutating anything. Participants
+		// are unaffected by the reaction itself, so failing here is cheap;
+		// fetching this after AddReaction/RemoveReaction commits (as this
+		// used to) risked a reaction persisted with no participant list to
+		// broadcast it to, which reactionV2Handler would then fan out to
+		// nobody while reporting success to the caller.
+		ids, pErr := s.st.GetDMParticipantIDs(ctx, channelID)
+		if pErr != nil {
+			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", channelID)
+			return nil, false, fmt.Errorf("%w: failed to resolve DM participants", ErrInternal)
+		}
+		participantIDs = ids
+	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.AddReactions) {
+		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
+		// react in a channel they cannot read. Mirrors checkSendPermission,
+		// which requires ReadMessages|SendMessages for non-DM sends.
+		return nil, false, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
+	}
+
+	return participantIDs, isDM, nil
 }

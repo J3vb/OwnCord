@@ -28,55 +28,11 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		span.End()
 	}()
 
-	// Rate limit.
-	ratKey := auth.Key("chat", p.UserID)
-	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
-		return nil, ErrRateLimited
-	}
-
-	if p.ChannelID <= 0 {
-		return nil, fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
-	}
-
-	ch, err := s.st.GetChannel(ctx, p.ChannelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-
-	isDM := ch.Type == "dm"
-
-	// Permission check. Also refuses a write against an archived channel — see
-	// requireChannelWritable in message_perms.go, the shared gate every
-	// message write sink routes through.
-	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
-		return nil, err
-	}
-
-	// Validate and sanitize content.
-	content, err := sanitizeContent(p.Content, len(p.AttachmentIDs) > 0)
+	ch, content, err := s.sendMessagePrecheck(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-
-	// Attachment permission (non-DM).
-	if !isDM && len(p.AttachmentIDs) > 0 {
-		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
-			return nil, fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
-		}
-	}
-
-	// Slow mode (non-DM only). Deliberately checked last, after content and
-	// attachment validation: Allow() below records the cooldown timestamp the
-	// instant it returns true, so a send that fails validation after this
-	// point must not have already spent the once-per-window token — that
-	// would lock the composer for up to ch.SlowMode seconds for a send that
-	// never actually posted anything.
-	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
-		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
-		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			return nil, fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
-		}
-	}
+	isDM := ch.Type == "dm"
 
 	// Resolve mentions against the sanitized content, before the insert, so the
 	// row and its mention set are written together. Unknown @words and an
@@ -93,51 +49,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	}
 	msgID := msg.ID
 
-	// Link attachments. Ownership is enforced atomically inside the link
-	// UPDATE itself (uploader match + still unlinked), so another user's
-	// upload, an already-linked attachment, or a nonexistent id is skipped by
-	// the statement — no check-then-link race and no N+1 pre-verification.
-	var attachments []db.AttachmentInfo
-	if len(p.AttachmentIDs) > 0 {
-		linked, linkErr := s.st.LinkAttachmentsToMessage(ctx, msgID, p.UserID, p.AttachmentIDs)
-		if linkErr != nil {
-			slog.Error("MessageService.SendMessage LinkAttachments", "err", linkErr, "msg_id", msgID)
-			// Cleanup: soft-delete the message. The compensating delete must run
-			// even when the link failed because the request ctx was canceled.
-			if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
-				slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
-			}
-			return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
-		}
-		if linked < int64(len(p.AttachmentIDs)) {
-			slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
-				"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
-		}
-		if linked == 0 && content == "" {
-			// sanitizeContent waived the empty-content check purely on the
-			// requested attachment count, before any link attempt. None of
-			// them actually linked (all missing, foreign, or already
-			// linked — e.g. a retry of a partially-completed send), so the
-			// row that just committed has no content and no attachments.
-			// Compensate the same way the linkErr path above does, rather
-			// than broadcasting a blank message.
-			if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
-				slog.Error("MessageService.SendMessage DeleteMessage (empty-after-link cleanup)", "err", delErr, "msg_id", msgID)
-			}
-			return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
-		}
-		if linked > 0 {
-			// Detached from ctx for the same reason as the compensating deletes
-			// above: the link already committed, so a request ctx canceled the
-			// instant it returns (sender disconnects right after) must not turn
-			// a successful attachment-only send into a blank broadcast bubble.
-			attMap, attErr := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{msgID})
-			if attErr != nil {
-				slog.Error("MessageService.SendMessage GetAttachments", "err", attErr)
-			} else {
-				attachments = attMap[msgID]
-			}
-		}
+	attachments, err := s.sendMessageLinkAttachments(ctx, p, msgID, content)
+	if err != nil {
+		return nil, err
 	}
 
 	// Advance the author's own read state past the message they just sent.
@@ -171,60 +85,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	}
 
 	// DM path: open DM for recipients.
-	if isDM {
-		// The message is already committed, so everything below must survive
-		// the sender's connection dropping the instant the write commits — the
-		// same reason the compensating deletes and applyMentionCounts below
-		// detach from ctx. Without WithoutCancel, a canceled request ctx here
-		// silently drops every recipient from the fan-out (ParticipantIDs
-		// stays nil), skips re-opening the recipient's dm_open_state, and
-		// degrades the payload shape — with no error surfaced to anyone: the
-		// sender sees chat_send_ok and the other participant never gets the
-		// message live.
-		bgCtx := context.WithoutCancel(ctx)
-		participantIDs, pErr := s.st.GetDMParticipantIDs(bgCtx, p.ChannelID)
-		if pErr != nil {
-			slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
-			return result, nil // Message saved, skip DM side effects.
-		}
-		result.ParticipantIDs = participantIDs
-
-		sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
-		result.SenderUser = sender
-
-		// Viewer-neutral (viewerID 0 matches nobody, so every status is
-		// broadcast-collapsed); the ws layer re-derives "who is the recipient"
-		// per addressee. A read failure is non-fatal — the message is already
-		// committed, and the caller falls back to the 1:1 shape.
-		if participants, partErr := s.st.GetDMParticipants(bgCtx, p.ChannelID, 0); partErr == nil {
-			result.DMParticipants = participants
-		} else {
-			slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
-		}
-		if isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID); gErr == nil {
-			result.DMIsGroup = isGroup
-		}
-
-		for _, pid := range participantIDs {
-			if pid == p.UserID {
-				continue
-			}
-			// OpenDM is INSERT OR IGNORE and idempotent: opened reports whether
-			// this call actually inserted the row. Only a genuine (re)open goes
-			// into OpenedDMFor — the ws layer emits a dm_channel_open per id in
-			// that slice, and each one bumps the hub's global visibility
-			// watermark, forcing every other connected client's next reconnect
-			// onto a full resync. An already-open DM must not pay that cost on
-			// every single message.
-			opened, openErr := s.st.OpenDM(bgCtx, pid, p.ChannelID)
-			if openErr != nil {
-				slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
-				continue
-			}
-			if opened {
-				result.OpenedDMFor = append(result.OpenedDMFor, pid)
-			}
-		}
+	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {
+		return result, nil // Message saved, skip DM side effects.
 	}
 
 	// Mention badges run off the send path: the message is already committed, so
@@ -243,6 +105,182 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
+}
+
+// sendMessagePrecheck runs every gate a send must clear before anything is
+// written: rate limit, channel lookup, send permission, content sanitization,
+// attachment permission and slow mode. It returns the resolved channel and the
+// sanitized content for the caller to persist.
+func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
+	// Rate limit.
+	ratKey := auth.Key("chat", p.UserID)
+	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
+		return nil, "", ErrRateLimited
+	}
+
+	if p.ChannelID <= 0 {
+		return nil, "", fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
+	}
+
+	ch, err := s.st.GetChannel(ctx, p.ChannelID)
+	if err != nil || ch == nil {
+		return nil, "", fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+
+	isDM := ch.Type == "dm"
+
+	// Permission check. Also refuses a write against an archived channel — see
+	// requireChannelWritable in message_perms.go, the shared gate every
+	// message write sink routes through.
+	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
+		return nil, "", err
+	}
+
+	// Validate and sanitize content.
+	content, err := sanitizeContent(p.Content, len(p.AttachmentIDs) > 0)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Attachment permission (non-DM).
+	if !isDM && len(p.AttachmentIDs) > 0 {
+		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
+			return nil, "", fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
+		}
+	}
+
+	// Slow mode (non-DM only). Deliberately checked last, after content and
+	// attachment validation: Allow() below records the cooldown timestamp the
+	// instant it returns true, so a send that fails validation after this
+	// point must not have already spent the once-per-window token — that
+	// would lock the composer for up to ch.SlowMode seconds for a send that
+	// never actually posted anything.
+	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
+		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
+		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
+			return nil, "", fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
+		}
+	}
+
+	return ch, content, nil
+}
+
+// sendMessageLinkAttachments links the requested uploads to the message row
+// that was just committed and returns the attachment data the broadcast needs.
+// Nothing requested is a no-op. A failed link, or a link that attached nothing
+// to a message with no content of its own, compensates by soft-deleting the
+// row and returns the error the caller surfaces to the sender.
+func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendMessageParams, msgID int64, content string) ([]db.AttachmentInfo, error) {
+	if len(p.AttachmentIDs) == 0 {
+		return nil, nil
+	}
+
+	// Link attachments. Ownership is enforced atomically inside the link
+	// UPDATE itself (uploader match + still unlinked), so another user's
+	// upload, an already-linked attachment, or a nonexistent id is skipped by
+	// the statement — no check-then-link race and no N+1 pre-verification.
+	var attachments []db.AttachmentInfo
+	linked, linkErr := s.st.LinkAttachmentsToMessage(ctx, msgID, p.UserID, p.AttachmentIDs)
+	if linkErr != nil {
+		slog.Error("MessageService.SendMessage LinkAttachments", "err", linkErr, "msg_id", msgID)
+		// Cleanup: soft-delete the message. The compensating delete must run
+		// even when the link failed because the request ctx was canceled.
+		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
+			slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
+		}
+		return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
+	}
+	if linked < int64(len(p.AttachmentIDs)) {
+		slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
+			"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
+	}
+	if linked == 0 && content == "" {
+		// sanitizeContent waived the empty-content check purely on the
+		// requested attachment count, before any link attempt. None of
+		// them actually linked (all missing, foreign, or already
+		// linked — e.g. a retry of a partially-completed send), so the
+		// row that just committed has no content and no attachments.
+		// Compensate the same way the linkErr path above does, rather
+		// than broadcasting a blank message.
+		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
+			slog.Error("MessageService.SendMessage DeleteMessage (empty-after-link cleanup)", "err", delErr, "msg_id", msgID)
+		}
+		return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+	}
+	if linked > 0 {
+		// Detached from ctx for the same reason as the compensating deletes
+		// above: the link already committed, so a request ctx canceled the
+		// instant it returns (sender disconnects right after) must not turn
+		// a successful attachment-only send into a blank broadcast bubble.
+		attMap, attErr := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{msgID})
+		if attErr != nil {
+			slog.Error("MessageService.SendMessage GetAttachments", "err", attErr)
+		} else {
+			attachments = attMap[msgID]
+		}
+	}
+	return attachments, nil
+}
+
+// sendMessageDMSideEffects fills in the DM-specific fields of result and
+// (re)opens the DM for every other participant. It reports false when the
+// participant lookup failed, which is the one case where the caller returns
+// the already-saved message without the remaining side effects.
+func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
+	// The message is already committed, so everything below must survive
+	// the sender's connection dropping the instant the write commits — the
+	// same reason the compensating deletes and applyMentionCounts below
+	// detach from ctx. Without WithoutCancel, a canceled request ctx here
+	// silently drops every recipient from the fan-out (ParticipantIDs
+	// stays nil), skips re-opening the recipient's dm_open_state, and
+	// degrades the payload shape — with no error surfaced to anyone: the
+	// sender sees chat_send_ok and the other participant never gets the
+	// message live.
+	bgCtx := context.WithoutCancel(ctx)
+	participantIDs, pErr := s.st.GetDMParticipantIDs(bgCtx, p.ChannelID)
+	if pErr != nil {
+		slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
+		return false
+	}
+	result.ParticipantIDs = participantIDs
+
+	sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
+	result.SenderUser = sender
+
+	// Viewer-neutral (viewerID 0 matches nobody, so every status is
+	// broadcast-collapsed); the ws layer re-derives "who is the recipient"
+	// per addressee. A read failure is non-fatal — the message is already
+	// committed, and the caller falls back to the 1:1 shape.
+	if participants, partErr := s.st.GetDMParticipants(bgCtx, p.ChannelID, 0); partErr == nil {
+		result.DMParticipants = participants
+	} else {
+		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
+	}
+	if isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID); gErr == nil {
+		result.DMIsGroup = isGroup
+	}
+
+	for _, pid := range participantIDs {
+		if pid == p.UserID {
+			continue
+		}
+		// OpenDM is INSERT OR IGNORE and idempotent: opened reports whether
+		// this call actually inserted the row. Only a genuine (re)open goes
+		// into OpenedDMFor — the ws layer emits a dm_channel_open per id in
+		// that slice, and each one bumps the hub's global visibility
+		// watermark, forcing every other connected client's next reconnect
+		// onto a full resync. An already-open DM must not pay that cost on
+		// every single message.
+		opened, openErr := s.st.OpenDM(bgCtx, pid, p.ChannelID)
+		if openErr != nil {
+			slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
+			continue
+		}
+		if opened {
+			result.OpenedDMFor = append(result.OpenedDMFor, pid)
+		}
+	}
+	return true
 }
 
 // EditMessage validates and persists a message edit.
@@ -283,26 +321,8 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	chanType := ch.Type
 	isDM := chanType == "dm"
 
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
-		if dmErr != nil || !ok {
-			return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-		}
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
-			return nil, blkErr
-		}
-	} else if permErr := s.checkSendPermission(ctx, userID, ch); permErr != nil {
-		// An edit injects new text into the channel and is fanned out to every
-		// reader, so it must clear the same gate as a send rather than
-		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
-		// channel (the panel's "Can access" toggle denies
-		// READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES intact) cannot
-		// rewrite its old posts, and the announcement rule so a demoted
-		// moderator cannot rewrite a trusted broadcast. Mirrors DeleteMessage,
-		// SetMessagePinned and handleReaction, which already require
-		// READ_MESSAGES. The reason is collapsed into this sink's single opaque
-		// error so the reply stays an ownership/permission non-oracle.
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	if accessErr := s.editMessageCheckAccess(ctx, userID, msg.ChannelID, ch, isDM); accessErr != nil {
+		return nil, accessErr
 	}
 
 	// EditMessage checks ownership internally and returns the updated row via
@@ -352,6 +372,34 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	slog.Debug("message edited", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	return result, nil
+}
+
+// editMessageCheckAccess gates an edit on the channel the message lives in:
+// participation plus the block check for a DM, the shared send gate for
+// everything else. isDM is the caller's already-computed ch.Type == "dm".
+func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID, channelID int64, ch *db.Channel, isDM bool) error {
+	if isDM {
+		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
+		if dmErr != nil || !ok {
+			return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+		}
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+			return blkErr
+		}
+	} else if permErr := s.checkSendPermission(ctx, userID, ch); permErr != nil {
+		// An edit injects new text into the channel and is fanned out to every
+		// reader, so it must clear the same gate as a send rather than
+		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
+		// channel (the panel's "Can access" toggle denies
+		// READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES intact) cannot
+		// rewrite its old posts, and the announcement rule so a demoted
+		// moderator cannot rewrite a trusted broadcast. Mirrors DeleteMessage,
+		// SetMessagePinned and handleReaction, which already require
+		// READ_MESSAGES. The reason is collapsed into this sink's single opaque
+		// error so the reply stays an ownership/permission non-oracle.
+		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	return nil
 }
 
 // DeleteMessage validates and soft-deletes a message.

@@ -86,33 +86,8 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		user, err := database.GetUserByID(r.Context(), challenge.UserID)
-		if err != nil || user == nil || user.TOTPSecret == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid or expired two-factor challenge",
-			})
-			return
-		}
-
-		// A ban can land inside the partial-token window; the login path
-		// refuses banned users right after the password compare, so the
-		// second factor must refuse them too.
-		if auth.IsEffectivelyBanned(user) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "your account has been suspended",
-			})
-			return
-		}
-
-		secret, decErr := auth.DecryptTOTPSecret(totpKey, *user.TOTPSecret)
-		if decErr != nil {
-			slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to verify two-factor code",
-			})
+		user, secret, ok := totpChallengeSecret(w, r, database, totpKey, challenge.UserID)
+		if !ok {
 			return
 		}
 
@@ -156,6 +131,43 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			User:        toUserResponse(user),
 		})
 	}
+}
+
+// totpChallengeSecret resolves the user behind a partial-auth challenge and
+// returns their decrypted TOTP secret. It writes its own refusal, so a false
+// third result means the response is already complete.
+func totpChallengeSecret(w http.ResponseWriter, r *http.Request, database *db.DB, totpKey []byte, challengeUserID int64) (*db.User, string, bool) {
+	user, err := database.GetUserByID(r.Context(), challengeUserID)
+	if err != nil || user == nil || user.TOTPSecret == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{
+			Error:   "UNAUTHORIZED",
+			Message: "invalid or expired two-factor challenge",
+		})
+		return nil, "", false
+	}
+
+	// A ban can land inside the partial-token window; the login path
+	// refuses banned users right after the password compare, so the
+	// second factor must refuse them too.
+	if auth.IsEffectivelyBanned(user) {
+		writeJSON(w, http.StatusForbidden, errorResponse{
+			Error:   "FORBIDDEN",
+			Message: "your account has been suspended",
+		})
+		return nil, "", false
+	}
+
+	secret, decErr := auth.DecryptTOTPSecret(totpKey, *user.TOTPSecret)
+	if decErr != nil {
+		slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{
+			Error:   "INTERNAL_ERROR",
+			Message: "failed to verify two-factor code",
+		})
+		return nil, "", false
+	}
+
+	return user, secret, true
 }
 
 func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLimiter) http.HandlerFunc {
