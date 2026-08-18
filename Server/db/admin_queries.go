@@ -383,25 +383,8 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path %q is not under safe root %q", absClean, absRoot)
 	}
 
-	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
-	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
-	// anything else is rejected to prevent SQL injection via the interpolated path.
-	for _, ch := range absClean {
-		switch {
-		case ch >= 'a' && ch <= 'z',
-			ch >= 'A' && ch <= 'Z',
-			ch >= '0' && ch <= '9',
-			ch == '/' || ch == '\\' || ch == '-' || ch == '_' || ch == '.' || ch == ' ' || ch == ':' || ch == '~':
-			// allowed (colon for Windows drive letters, tilde for temp paths)
-		default:
-			return fmt.Errorf("BackupToSafe: path contains forbidden character %q", string(ch))
-		}
-	}
-
-	// Reject SQL comment sequences that could break the VACUUM INTO statement,
-	// even though individual hyphens are allowed for filenames.
-	if strings.Contains(absClean, "--") {
-		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
+	if err := validateBackupPathChars(absClean); err != nil {
+		return err
 	}
 
 	// VACUUM INTO refuses to write over an existing destination on its own,
@@ -427,6 +410,34 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		// .db as a normal backup (OC-0212).
 		_ = os.Remove(absClean)
 		return fmt.Errorf("BackupToSafe: %w", err)
+	}
+	return nil
+}
+
+// validateBackupPathChars is the strict character gate BackupToSafe applies to
+// the destination before it is interpolated into VACUUM INTO. It is a separate
+// function only so the allowlist loop's branch count does not dominate its
+// caller; the rules and the messages are unchanged.
+func validateBackupPathChars(absClean string) error {
+	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
+	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
+	// anything else is rejected to prevent SQL injection via the interpolated path.
+	for _, ch := range absClean {
+		switch {
+		case ch >= 'a' && ch <= 'z',
+			ch >= 'A' && ch <= 'Z',
+			ch >= '0' && ch <= '9',
+			ch == '/' || ch == '\\' || ch == '-' || ch == '_' || ch == '.' || ch == ' ' || ch == ':' || ch == '~':
+			// allowed (colon for Windows drive letters, tilde for temp paths)
+		default:
+			return fmt.Errorf("BackupToSafe: path contains forbidden character %q", string(ch))
+		}
+	}
+
+	// Reject SQL comment sequences that could break the VACUUM INTO statement,
+	// even though individual hyphens are allowed for filenames.
+	if strings.Contains(absClean, "--") {
+		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 	return nil
 }
