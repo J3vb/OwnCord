@@ -26,70 +26,14 @@ func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
-	// Periodic session expiry check: every SessionCheckInterval messages,
-	// re-validate the session token. This catches sessions that are revoked or
-	// expire while the WebSocket connection is still open.
-	c.mu.Lock()
-	c.msgCount++
-	shouldCheck := c.msgCount >= SessionCheckInterval
-	if shouldCheck {
-		c.msgCount = 0
-	}
-	c.mu.Unlock()
-
-	if shouldCheck && c.tokenHash != "" {
-		result, dbErr := h.db.GetSessionWithBanStatus(c.ctx, c.tokenHash)
-		if dbErr != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
-			slog.Info("ws session expired, closing connection", "user_id", c.userID)
-			h.kickClient(c)
-			return
-		}
-		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
-		if auth.IsEffectivelyBanned(tempUser) {
-			slog.Info("ws user banned, closing connection", "user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
-			return
-		}
-	}
-
-	var env envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		c.mu.Lock()
-		c.invalidCount++
-		count := c.invalidCount
-		c.mu.Unlock()
-
-		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err, "invalid_count", count)
-		c.sendMsg(buildErrorMsg(ErrCodeInvalidJSON, "message must be valid JSON"))
-
-		if count >= 10 {
-			slog.Warn("ws too many invalid messages, closing connection", "user_id", c.userID, "invalid_count", count)
-			h.kickClient(c)
-		}
+	if h.handleMessageSessionRecheck(c) {
 		return
 	}
 
-	// Valid parse — reset consecutive invalid counter.
-	c.mu.Lock()
-	c.invalidCount = 0
-	c.mu.Unlock()
-
-	// Cap client-controlled fields before logging to prevent log injection
-	// and unbounded log entries.
-	msgType := env.Type
-	if len(msgType) > 64 {
-		msgType = msgType[:64]
+	env, msgType, reqID, ok := h.handleMessageDecode(c, raw)
+	if !ok {
+		return
 	}
-	reqID := env.ID
-	if len(reqID) > 64 {
-		reqID = reqID[:64]
-	}
-
-	// Correlation attrs (user_id/msg_type/req_id) are inlined at each log site
-	// below rather than bound via slog.With — the With clone allocated a new
-	// handler chain per message even when nothing ended up being logged.
-	slog.Debug("ws ← client message", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
 
 	// ── Typed command dispatch ───────────────────────────────────────────
 	// Every message type parses through its constructor into a typed Command,
@@ -155,6 +99,91 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 
+	h.handleMessageApply(c, env, result)
+}
+
+// handleMessageSessionRecheck performs handleMessage's periodic session
+// revalidation. It reports whether the connection was closed, in which case
+// the caller must stop processing the frame.
+func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
+	// Periodic session expiry check: every SessionCheckInterval messages,
+	// re-validate the session token. This catches sessions that are revoked or
+	// expire while the WebSocket connection is still open.
+	c.mu.Lock()
+	c.msgCount++
+	shouldCheck := c.msgCount >= SessionCheckInterval
+	if shouldCheck {
+		c.msgCount = 0
+	}
+	c.mu.Unlock()
+
+	if shouldCheck && c.tokenHash != "" {
+		result, dbErr := h.db.GetSessionWithBanStatus(c.ctx, c.tokenHash)
+		if dbErr != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+			slog.Info("ws session expired, closing connection", "user_id", c.userID)
+			h.kickClient(c)
+			return true
+		}
+		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
+		if auth.IsEffectivelyBanned(tempUser) {
+			slog.Info("ws user banned, closing connection", "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+			h.kickClient(c)
+			return true
+		}
+	}
+	return false
+}
+
+// handleMessageDecode parses handleMessage's inbound frame into an envelope,
+// maintaining the consecutive-invalid-JSON counter, and returns the capped
+// msg_type / req_id used for logging. It reports false when the frame was
+// rejected and the caller must stop.
+func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, string, bool) {
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		c.mu.Lock()
+		c.invalidCount++
+		count := c.invalidCount
+		c.mu.Unlock()
+
+		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err, "invalid_count", count)
+		c.sendMsg(buildErrorMsg(ErrCodeInvalidJSON, "message must be valid JSON"))
+
+		if count >= 10 {
+			slog.Warn("ws too many invalid messages, closing connection", "user_id", c.userID, "invalid_count", count)
+			h.kickClient(c)
+		}
+		return env, "", "", false
+	}
+
+	// Valid parse — reset consecutive invalid counter.
+	c.mu.Lock()
+	c.invalidCount = 0
+	c.mu.Unlock()
+
+	// Cap client-controlled fields before logging to prevent log injection
+	// and unbounded log entries.
+	msgType := env.Type
+	if len(msgType) > 64 {
+		msgType = msgType[:64]
+	}
+	reqID := env.ID
+	if len(reqID) > 64 {
+		reqID = reqID[:64]
+	}
+
+	// Correlation attrs (user_id/msg_type/req_id) are inlined at each log site
+	// below rather than bound via slog.With — the With clone allocated a new
+	// handler chain per message even when nothing ended up being logged.
+	slog.Debug("ws ← client message", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
+
+	return env, msgType, reqID, true
+}
+
+// handleMessageApply applies the client state mutations and side effects that a
+// successful V2 Result asks for.
+func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)

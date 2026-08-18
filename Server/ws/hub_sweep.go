@@ -160,17 +160,10 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 }
 
-// sweepStaleVoiceStates queries all voice_states rows and removes any that
-// don't match a connected client's voiceChID. This catches ghost users that
-// slip through the primary cleanup paths (registerNow, readPump defer,
-// LiveKit webhook).
-func (h *Hub) sweepStaleVoiceStates() {
-	if h.db == nil {
-		return
-	}
-	// Hub run-loop sweeper — no request tie.
-	ctx := context.Background()
-
+// sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
+// re-checks CONNECT_VOICE for every client currently in voice and evicts the
+// ones who no longer hold it.
+func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// Revocation must evict a live session, not merely block the next join.
 	// Nothing else in ws re-validates voice permissions for a connection that
 	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
@@ -216,6 +209,20 @@ func (h *Hub) sweepStaleVoiceStates() {
 			"user_id", c.userID, "channel_id", chID)
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
 	}
+}
+
+// sweepStaleVoiceStates queries all voice_states rows and removes any that
+// don't match a connected client's voiceChID. This catches ghost users that
+// slip through the primary cleanup paths (registerNow, readPump defer,
+// LiveKit webhook).
+func (h *Hub) sweepStaleVoiceStates() {
+	if h.db == nil {
+		return
+	}
+	// Hub run-loop sweeper — no request tie.
+	ctx := context.Background()
+
+	h.sweepStaleVoiceEvictRevoked(ctx)
 
 	allStates, err := h.db.GetAllVoiceStates(ctx)
 	if err != nil {

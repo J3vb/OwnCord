@@ -245,23 +245,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 			return []int64{}
 		}
 		if ch != nil && ch.Type == "dm" {
-			participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)
-			if err != nil {
-				slog.Error("ws: channelReadAudience GetDMParticipantIDs failed, denying",
-					"channel_id", channelID, "err", err)
-				return []int64{}
-			}
-			connected := make(map[int64]struct{}, len(userIDs))
-			for _, uid := range userIDs {
-				connected[uid] = struct{}{}
-			}
-			audience := make([]int64, 0, len(participantIDs))
-			for _, uid := range participantIDs {
-				if _, ok := connected[uid]; ok {
-					audience = append(audience, uid)
-				}
-			}
-			return audience
+			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
 	}
 
@@ -287,6 +271,30 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 			continue
 		}
 		if h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, uid, channelID, permissions.ReadMessages) {
+			audience = append(audience, uid)
+		}
+	}
+	return audience
+}
+
+// channelReadAudienceDM resolves the audience of a DM channel: the DM's
+// participants, intersected with the connected userIDs. Split verbatim out of
+// channelReadAudienceImpl; the reason a DM must not fall through to the role
+// scan is on the call site.
+func (h *Hub) channelReadAudienceDM(ctx context.Context, channelID int64, userIDs []int64) []int64 {
+	participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)
+	if err != nil {
+		slog.Error("ws: channelReadAudience GetDMParticipantIDs failed, denying",
+			"channel_id", channelID, "err", err)
+		return []int64{}
+	}
+	connected := make(map[int64]struct{}, len(userIDs))
+	for _, uid := range userIDs {
+		connected[uid] = struct{}{}
+	}
+	audience := make([]int64, 0, len(participantIDs))
+	for _, uid := range participantIDs {
+		if _, ok := connected[uid]; ok {
 			audience = append(audience, uid)
 		}
 	}
@@ -404,35 +412,6 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, permissions.ReadMessages)
 	}
 
-	// userCanSend mirrors channelCanSend (serve_ready.go) — the value the ready
-	// payload ships per channel — but expressed as per-user permission checks
-	// so it works in both the service and bare-hub branches without needing a
-	// resolved *db.Role. HasChannelPerm already bypasses for admins and fails
-	// closed on a lookup error, matching channelCanSend's own admin shortcut.
-	//
-	// Without this, can_send is only ever computed at connect time, so a role
-	// edit or override edit leaves every connected client's composer stuck on
-	// its stale connect-time verdict until the socket is rebuilt.
-	userCanSend := func(userID, roleID int64) bool {
-		has := func(perm int64) bool {
-			if h.perms != nil {
-				return h.perms.HasChannelPerm(ctx, userID, ch.ID, perm)
-			}
-			role, err := h.db.GetRoleByID(ctx, roleID)
-			if err != nil || role == nil {
-				return false
-			}
-			return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, perm)
-		}
-		if !has(permissions.ReadMessages) || !has(permissions.SendMessages) {
-			return false
-		}
-		if ch.Type == "announcement" {
-			return has(permissions.ManageMessages)
-		}
-		return true
-	}
-
 	for _, c := range clients {
 		if c.user == nil {
 			continue
@@ -486,7 +465,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			// Addressed per client so it can carry this recipient's own
 			// can_send verdict — the whole point of this fan-out is that a
 			// permission change just made those verdicts diverge.
-			live.sendMsg(buildChannelCreateFor(ch, userCanSend(c.user.ID, c.user.RoleID)))
+			live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityCanSend(ctx, ch, c.user.ID, c.user.RoleID)))
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
@@ -505,6 +484,35 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// an older seq cannot regress a watermark another writer already pushed
 	// higher.
 	h.bumpVisibilityWatermark()
+}
+
+// refreshChannelVisibilityCanSend mirrors channelCanSend (serve_ready.go) — the value the ready
+// payload ships per channel — but expressed as per-user permission checks
+// so it works in both the service and bare-hub branches without needing a
+// resolved *db.Role. HasChannelPerm already bypasses for admins and fails
+// closed on a lookup error, matching channelCanSend's own admin shortcut.
+//
+// Without this, can_send is only ever computed at connect time, so a role
+// edit or override edit leaves every connected client's composer stuck on
+// its stale connect-time verdict until the socket is rebuilt.
+func (h *Hub) refreshChannelVisibilityCanSend(ctx context.Context, ch *db.Channel, userID, roleID int64) bool {
+	has := func(perm int64) bool {
+		if h.perms != nil {
+			return h.perms.HasChannelPerm(ctx, userID, ch.ID, perm)
+		}
+		role, err := h.db.GetRoleByID(ctx, roleID)
+		if err != nil || role == nil {
+			return false
+		}
+		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, perm)
+	}
+	if !has(permissions.ReadMessages) || !has(permissions.SendMessages) {
+		return false
+	}
+	if ch.Type == "announcement" {
+		return has(permissions.ManageMessages)
+	}
+	return true
 }
 
 // RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every
