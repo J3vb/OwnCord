@@ -318,9 +318,11 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 }
 
 // mentionTargetColumn is the users column a mention-target lookup matches its
-// id list against. It is a closed named type rather than a bare string so the
-// column interpolated into the SELECT below can only ever be one of the two
-// constants declared here, never a caller-supplied value.
+// id list against. It is a named type rather than a bare string so that every
+// call site has to name one of the two constants below instead of passing an
+// arbitrary string into the SELECT. Go named types are not closed, so this is
+// a convention the type makes visible, not one it enforces: do not introduce a
+// mentionTargetColumn(x) conversion from a runtime value.
 type mentionTargetColumn string
 
 const (
@@ -345,7 +347,7 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	}
 
 	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation plus a closed-type column constant, not user input
+		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a named-type column constant, not user input
 			`SELECT id, status, role_id FROM users WHERE %s AND %s IN (%s)`,
 			notBannedClause, string(column), strings.Join(placeholders, ",")),
 		args...,

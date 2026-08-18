@@ -301,13 +301,14 @@ func setupApplyWizard(ctx context.Context, database *db.DB, wr *setupWizardReque
 
 // setupRestartAfterResponse hands the setup-wizard restart off to main.go.
 //
-// Restart after the response is written so the browser receives the
-// token and the reconnect URL. Mirrors handleRestoreBackup /
-// handleApplyUpdate: broadcast, then request the restart in a
-// goroutine — main.go drains the server and performs the handoff.
-// tryDirectRestartPending loses only to an already in-flight update
-// or restore, which will itself restart the process; skipping is
-// correct then (the response above is already written either way).
+// Called by handleSetup only after it has written its response, so the
+// browser receives the token and the reconnect URL before the process
+// goes away. Mirrors handleRestoreBackup / handleApplyUpdate: broadcast,
+// then request the restart in a goroutine — main.go drains the server and
+// performs the handoff. tryDirectRestartPending loses only to an already
+// in-flight update or restore, which will itself restart the process;
+// skipping is correct then, since the caller's response is written either
+// way.
 func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 	if !tryDirectRestartPending() {
 		slog.Warn("setup restart skipped: another restart-sensitive operation is already in progress")

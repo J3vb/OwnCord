@@ -141,8 +141,8 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
-		raw, mimeType, ok := readEmojiUpload(w, r)
-		if !ok {
+		raw, mimeType, readOK := readEmojiUpload(w, r)
+		if !readOK {
 			return
 		}
 

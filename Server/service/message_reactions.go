@@ -137,11 +137,13 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	return result, nil
 }
 
-// reactionAudience resolves the channel a message lives in, enforces every
-// gate on reacting in it, and reports whether it is a DM together with the
-// participant ids the result must fan out to. Splitting it out of
-// handleReaction keeps the gate chain in one place; the order of the checks
-// is load-bearing and unchanged.
+// reactionAudience resolves the channel a message lives in and enforces the
+// channel-scoped gates on reacting in it — archived, DM participation, DM
+// block, and the non-DM READ_MESSAGES|ADD_REACTIONS check. The gates its
+// caller keeps (rate limit, message id, emoji validity, deleted message) stay
+// in handleReaction and still run first. It also returns the DM participant
+// ids, resolved here so they exist before anything is mutated. The order of
+// the checks is load-bearing and unchanged.
 func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID int64) ([]int64, bool, error) {
 	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
 	// lookup failure must not fall through to the non-DM permission branch

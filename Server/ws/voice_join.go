@@ -446,8 +446,6 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 // subscription, key-holder election, the joiner's own voice_state fan-out, the
 // existing participants' states and E2EE keys, and voice_config.
 func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState) {
-	maxUsers := ch.VoiceMaxUsers
-
 	// Voice channel state itself was already set above (BUG-088), immediately
 	// after the DB row committed — which also means a concurrent eviction (the
 	// revocation sweep, a participant_left webhook, a moderator kick/move) can
@@ -508,6 +506,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 				"quality", q, "channel_id", channelID)
 		}
 	}
+	maxUsers := ch.VoiceMaxUsers
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))
 
