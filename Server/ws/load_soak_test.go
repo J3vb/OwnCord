@@ -112,6 +112,11 @@ func TestTheLoadTest(t *testing.T) {
 		stopDrain chan struct{}
 	}
 	anchors := make([]anchor, 0, numAnchors)
+	// Joined explicitly after the stopDrain channels close: closing `stop`
+	// only makes these goroutines runnable, it does not wait for them to be
+	// scheduled. Without the join, goleak's bounded retry races the scheduler
+	// and fails on a loaded runner even though the drains do exit.
+	var drainWG sync.WaitGroup
 	for i := range numAnchors {
 		u := seedOwnerUser(t, database, fmt.Sprintf("load-anchor-%d", i))
 		send := make(chan []byte, 1024)
@@ -122,7 +127,9 @@ func TestTheLoadTest(t *testing.T) {
 		// full-buffer auto-disconnect (BUG-124 behavior) — that disconnect is
 		// correct production behavior but not what this test means to probe.
 		stop := make(chan struct{})
+		drainWG.Add(1)
 		go func(ch chan []byte, stop chan struct{}) {
+			defer drainWG.Done()
 			for {
 				select {
 				case <-ch:
@@ -285,6 +292,7 @@ func TestTheLoadTest(t *testing.T) {
 	for _, a := range anchors {
 		close(a.stopDrain)
 	}
+	drainWG.Wait()
 
 	// SendMessage fires mention-count bookkeeping with a bare `go fn()` and
 	// deliberately does not wait for it (see MessageService.bg) — that is the
