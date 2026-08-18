@@ -205,16 +205,11 @@ func NewWAFMiddlewareCRS(paranoiaLevel int, crsMode string) func(http.Handler) h
 	return newWAFMiddleware(paranoiaLevel, crsMode, nil)
 }
 
-// newWAFMiddleware is the implementation behind NewWAFMiddlewareCRS.
-// onCRSMatch overrides the CRS match logger (used by tests to observe
-// detect-mode matches); nil means log via slog.
-func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.MatchedRule)) func(http.Handler) http.Handler {
-	if paranoiaLevel < 1 || paranoiaLevel > 4 {
-		paranoiaLevel = 2
-	}
-	crsMode = normalizeCRSMode(crsMode)
-
-	waf, err := coraza.NewWAF(
+// wafInlineEngine builds the long-standing inline-rules Coraza engine used by
+// newWAFMiddleware. Its rules keep their exact, test-pinned blocking behavior
+// regardless of the CRS mode.
+func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
+	return coraza.NewWAF(
 		coraza.NewWAFConfig().
 			WithDirectives(fmt.Sprintf(`
 				SecRuleEngine On
@@ -262,11 +257,12 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:900005,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 			`, paranoiaLevel)),
 	)
-	if err != nil {
-		slog.Error("waf: failed to create WAF engine, continuing without WAF", "error", err)
-		return func(next http.Handler) http.Handler { return next }
-	}
+}
 
+// wafCRSEngine builds the OWASP CRS layer for newWAFMiddleware. It returns the
+// CRS engine (nil when the layer is off or failed to load) and whether
+// detect-mode match logging is aggregated per request.
+func wafCRSEngine(paranoiaLevel int, crsMode string, onCRSMatch func(types.MatchedRule)) (coraza.WAF, bool) {
 	// OWASP CRS layer — a second engine so the inline rules above keep their
 	// exact blocking behavior in every CRS mode. If the CRS fails to load the
 	// server continues with the inline engine only (same failure philosophy
@@ -300,6 +296,124 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 			crsWAF = cw
 		}
 	}
+	return crsWAF, aggregateCRSLog
+}
+
+// wafInlineRequestHeaders feeds the connection, URI and request headers into
+// the inline engine and runs its phase 1. A non-nil interruption means the
+// request must be blocked.
+func wafInlineRequestHeaders(tx types.Transaction, r *http.Request) *types.Interruption {
+	tx.ProcessConnection(r.RemoteAddr, 0, "", 0)
+	tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
+	for name, values := range r.Header {
+		for _, value := range values {
+			tx.AddRequestHeader(name, value)
+		}
+	}
+	return tx.ProcessRequestHeaders()
+}
+
+// wafCRSRequestHeaders feeds the connection, URI and request headers into the
+// CRS engine and runs its phase 1. A non-nil interruption means the request
+// must be blocked.
+func wafCRSRequestHeaders(crsTx types.Transaction, r *http.Request) *types.Interruption {
+	crsTx.ProcessConnection(r.RemoteAddr, 0, "", 0)
+	crsTx.ProcessURI(r.URL.String(), r.Method, r.Proto)
+	for name, values := range r.Header {
+		for _, value := range values {
+			crsTx.AddRequestHeader(name, value)
+		}
+	}
+	// net/http promotes Host and Transfer-Encoding out of
+	// r.Header; re-add them like the official coraza http
+	// connector does, otherwise CRS rule 920280 ("Request
+	// Missing a Host Header", anomaly score 5) fires on every
+	// request. The inline engine is left as-is on purpose — its
+	// rules never look at these headers and its behavior is
+	// pinned by tests.
+	if r.Host != "" {
+		crsTx.AddRequestHeader("Host", r.Host)
+		crsTx.SetServerName(r.Host)
+	}
+	for _, te := range r.TransferEncoding {
+		crsTx.AddRequestHeader("Transfer-Encoding", te)
+	}
+	return crsTx.ProcessRequestHeaders()
+}
+
+// wafFeedCRSBody mirrors the inline engine's buffered request body into the
+// CRS engine so the body is only read from the wire once. A non-nil
+// interruption means the request must be blocked.
+func wafFeedCRSBody(tx, crsTx types.Transaction) *types.Interruption {
+	if reader, err := tx.RequestBodyReader(); err == nil && reader != nil {
+		if it, _, err := crsTx.ReadRequestBodyFrom(reader); it != nil {
+			return it
+		} else if err != nil {
+			slog.Debug("waf: error reading CRS request body", "error", err)
+		}
+	}
+	return nil
+}
+
+// wafInspectRequestBody buffers the request body through the inline engine,
+// runs its phase 2, mirrors the buffer into the CRS engine and hands the
+// buffered body to the downstream handler. A non-nil interruption means the
+// request must be blocked.
+func wafInspectRequestBody(r *http.Request, tx, crsTx types.Transaction) *types.Interruption {
+	it, written, err := tx.ReadRequestBodyFrom(r.Body)
+	if it != nil {
+		return it
+	} else if err != nil {
+		slog.Debug("waf: error reading request body", "error", err)
+	}
+
+	if it, err := tx.ProcessRequestBody(); it != nil {
+		return it
+	} else if err != nil {
+		slog.Debug("waf: error processing request body", "error", err)
+	}
+
+	// Feed the CRS engine from the inline engine's buffer so the
+	// body is only read from the wire once. written == 0 means the
+	// inline engine skipped buffering (requestBodyAccess turned
+	// off for this route, e.g. uploads) — the CRS engine excludes
+	// those routes too, so skip it as well and leave r.Body alone.
+	if written > 0 {
+		if crsTx != nil {
+			if it := wafFeedCRSBody(tx, crsTx); it != nil {
+				return it
+			}
+		}
+
+		// Replace body with buffered version so downstream handlers
+		// can read it. Only done when the inline engine actually
+		// buffered the body — replacing unconditionally would hand
+		// routes with body inspection disabled (uploads) an empty
+		// reader instead of the original stream.
+		reader, err := tx.RequestBodyReader()
+		if err == nil && reader != nil {
+			r.Body = io.NopCloser(reader)
+		}
+	}
+	return nil
+}
+
+// newWAFMiddleware is the implementation behind NewWAFMiddlewareCRS.
+// onCRSMatch overrides the CRS match logger (used by tests to observe
+// detect-mode matches); nil means log via slog.
+func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.MatchedRule)) func(http.Handler) http.Handler {
+	if paranoiaLevel < 1 || paranoiaLevel > 4 {
+		paranoiaLevel = 2
+	}
+	crsMode = normalizeCRSMode(crsMode)
+
+	waf, err := wafInlineEngine(paranoiaLevel)
+	if err != nil {
+		slog.Error("waf: failed to create WAF engine, continuing without WAF", "error", err)
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	crsWAF, aggregateCRSLog := wafCRSEngine(paranoiaLevel, crsMode, onCRSMatch)
 
 	slog.Info("waf: Coraza WAF enabled", "paranoia_level", paranoiaLevel, "crs_mode", crsMode)
 
@@ -331,15 +445,7 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 			}
 
 			// Process request headers
-			tx.ProcessConnection(r.RemoteAddr, 0, "", 0)
-			tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
-			for name, values := range r.Header {
-				for _, value := range values {
-					tx.AddRequestHeader(name, value)
-				}
-			}
-
-			if it := tx.ProcessRequestHeaders(); it != nil {
+			if it := wafInlineRequestHeaders(tx, r); it != nil {
 				handleWAFInterruption(w, it)
 				return
 			}
@@ -347,28 +453,7 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 			// CRS phase 1. In detect mode the engine never interrupts, so the
 			// returned interruption is only non-nil in block mode.
 			if crsTx != nil {
-				crsTx.ProcessConnection(r.RemoteAddr, 0, "", 0)
-				crsTx.ProcessURI(r.URL.String(), r.Method, r.Proto)
-				for name, values := range r.Header {
-					for _, value := range values {
-						crsTx.AddRequestHeader(name, value)
-					}
-				}
-				// net/http promotes Host and Transfer-Encoding out of
-				// r.Header; re-add them like the official coraza http
-				// connector does, otherwise CRS rule 920280 ("Request
-				// Missing a Host Header", anomaly score 5) fires on every
-				// request. The inline engine is left as-is on purpose — its
-				// rules never look at these headers and its behavior is
-				// pinned by tests.
-				if r.Host != "" {
-					crsTx.AddRequestHeader("Host", r.Host)
-					crsTx.SetServerName(r.Host)
-				}
-				for _, te := range r.TransferEncoding {
-					crsTx.AddRequestHeader("Transfer-Encoding", te)
-				}
-				if it := crsTx.ProcessRequestHeaders(); it != nil {
+				if it := wafCRSRequestHeaders(crsTx, r); it != nil {
 					handleWAFInterruption(w, it)
 					return
 				}
@@ -380,47 +465,9 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 			// skipped for them. The read is bounded by SecRequestBodyLimit inside
 			// Coraza. ContentLength == 0 (no body) still skips inspection.
 			if r.Body != nil && r.ContentLength != 0 {
-				it, written, err := tx.ReadRequestBodyFrom(r.Body)
-				if it != nil {
+				if it := wafInspectRequestBody(r, tx, crsTx); it != nil {
 					handleWAFInterruption(w, it)
 					return
-				} else if err != nil {
-					slog.Debug("waf: error reading request body", "error", err)
-				}
-
-				if it, err := tx.ProcessRequestBody(); it != nil {
-					handleWAFInterruption(w, it)
-					return
-				} else if err != nil {
-					slog.Debug("waf: error processing request body", "error", err)
-				}
-
-				// Feed the CRS engine from the inline engine's buffer so the
-				// body is only read from the wire once. written == 0 means the
-				// inline engine skipped buffering (requestBodyAccess turned
-				// off for this route, e.g. uploads) — the CRS engine excludes
-				// those routes too, so skip it as well and leave r.Body alone.
-				if written > 0 {
-					if crsTx != nil {
-						if reader, err := tx.RequestBodyReader(); err == nil && reader != nil {
-							if it, _, err := crsTx.ReadRequestBodyFrom(reader); it != nil {
-								handleWAFInterruption(w, it)
-								return
-							} else if err != nil {
-								slog.Debug("waf: error reading CRS request body", "error", err)
-							}
-						}
-					}
-
-					// Replace body with buffered version so downstream handlers
-					// can read it. Only done when the inline engine actually
-					// buffered the body — replacing unconditionally would hand
-					// routes with body inspection disabled (uploads) an empty
-					// reader instead of the original stream.
-					reader, err := tx.RequestBodyReader()
-					if err == nil && reader != nil {
-						r.Body = io.NopCloser(reader)
-					}
 				}
 			}
 
