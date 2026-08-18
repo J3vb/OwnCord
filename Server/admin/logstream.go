@@ -408,57 +408,70 @@ func categorizeSource(r slog.Record) string {
 	}
 }
 
+// logStreamAuthorize runs the log stream's authentication prologue: it redeems
+// the single-use ticket, resolves the principal behind it, and returns the
+// re-check closure the stream must call before every write. It writes the error
+// response itself and reports false when the caller must stop.
+func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB) (func() bool, bool) {
+	// Authenticate via single-use ticket.
+	ticket := r.URL.Query().Get("ticket")
+	entry, ok := logTickets.redeem(ticket)
+	if ticket == "" || !ok {
+		errResp, _ := json.Marshal(map[string]string{
+			"error":   "UNAUTHORIZED",
+			"message": "invalid or expired ticket",
+		})
+		http.Error(w, string(errResp), http.StatusUnauthorized)
+		return nil, false
+	}
+	// Stream lifetime == request lifetime, so all principal re-checks below
+	// use the stream request's context. The ticket's hash is resolved the
+	// same way adminAuthMiddleware resolves a bearer credential — login
+	// session first, then API token — so revoking either kind mid-stream
+	// cuts the stream.
+	ctx := r.Context()
+	user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
+	if err != nil || user == nil || role == nil {
+		errResp, _ := json.Marshal(map[string]string{
+			"error":   "UNAUTHORIZED",
+			"message": "invalid or expired session",
+		})
+		http.Error(w, string(errResp), http.StatusUnauthorized)
+		return nil, false
+	}
+	principalStillAuthorized := func() bool {
+		current, currentRole, _, resolveErr := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
+		if resolveErr != nil || current == nil || currentRole == nil {
+			return false
+		}
+		// A ban mid-stream must cut the stream, same as adminAuthMiddleware
+		// rejects a banned user on the request path.
+		if auth.IsEffectivelyBanned(current) {
+			return false
+		}
+		return permissions.HasAdmin(currentRole.Permissions)
+	}
+	if !principalStillAuthorized() {
+		errResp, _ := json.Marshal(map[string]string{
+			"error":   "FORBIDDEN",
+			"message": "administrator permission required",
+		})
+		http.Error(w, string(errResp), http.StatusForbidden)
+		return nil, false
+	}
+	return principalStillAuthorized, true
+}
+
 // handleLogStream serves an SSE endpoint that streams log entries in real-time.
 // Auth is via query param ?ticket= — a short-lived single-use ticket obtained
 // from POST /admin/api/logs/ticket (which requires normal admin auth).
 func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Authenticate via single-use ticket.
-		ticket := r.URL.Query().Get("ticket")
-		entry, ok := logTickets.redeem(ticket)
-		if ticket == "" || !ok {
-			errResp, _ := json.Marshal(map[string]string{
-				"error":   "UNAUTHORIZED",
-				"message": "invalid or expired ticket",
-			})
-			http.Error(w, string(errResp), http.StatusUnauthorized)
+		principalStillAuthorized, ok := logStreamAuthorize(w, r, database)
+		if !ok {
 			return
 		}
-		// Stream lifetime == request lifetime, so all principal re-checks below
-		// use the stream request's context. The ticket's hash is resolved the
-		// same way adminAuthMiddleware resolves a bearer credential — login
-		// session first, then API token — so revoking either kind mid-stream
-		// cuts the stream.
 		ctx := r.Context()
-		user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
-		if err != nil || user == nil || role == nil {
-			errResp, _ := json.Marshal(map[string]string{
-				"error":   "UNAUTHORIZED",
-				"message": "invalid or expired session",
-			})
-			http.Error(w, string(errResp), http.StatusUnauthorized)
-			return
-		}
-		principalStillAuthorized := func() bool {
-			current, currentRole, _, resolveErr := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
-			if resolveErr != nil || current == nil || currentRole == nil {
-				return false
-			}
-			// A ban mid-stream must cut the stream, same as adminAuthMiddleware
-			// rejects a banned user on the request path.
-			if auth.IsEffectivelyBanned(current) {
-				return false
-			}
-			return permissions.HasAdmin(currentRole.Permissions)
-		}
-		if !principalStillAuthorized() {
-			errResp, _ := json.Marshal(map[string]string{
-				"error":   "FORBIDDEN",
-				"message": "administrator permission required",
-			})
-			http.Error(w, string(errResp), http.StatusForbidden)
-			return
-		}
 
 		// Check that we can flush (required for SSE).
 		flusher, ok := w.(http.Flusher)

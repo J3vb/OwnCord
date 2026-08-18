@@ -85,6 +85,21 @@ var validVoiceQualities = map[string]struct{}{
 // be called BEFORE the owner account is created so a bad payload rejects the
 // whole request instead of leaving a half-configured server.
 func validateWizard(wr *setupWizardRequest) error {
+	if err := wizardValidateIdentity(wr); err != nil {
+		return err
+	}
+	if err := wizardValidateNetwork(wr); err != nil {
+		return err
+	}
+	if err := wizardValidateMedia(wr); err != nil {
+		return err
+	}
+	return nil
+}
+
+// wizardValidateIdentity checks and normalises the settings-table fields the
+// server reads live: the display name and the message of the day.
+func wizardValidateIdentity(wr *setupWizardRequest) error {
 	if wr.ServerName != nil {
 		name := strings.TrimSpace(setupSanitizer.Sanitize(*wr.ServerName))
 		if name == "" {
@@ -102,6 +117,12 @@ func validateWizard(wr *setupWizardRequest) error {
 		}
 		*wr.Motd = motd
 	}
+	return nil
+}
+
+// wizardValidateNetwork checks and normalises the listener and TLS fields,
+// including the cross-field rule that ACME issuance needs a domain.
+func wizardValidateNetwork(wr *setupWizardRequest) error {
 	if wr.Port != nil && (*wr.Port < 1 || *wr.Port > 65535) {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
@@ -125,6 +146,12 @@ func validateWizard(wr *setupWizardRequest) error {
 		(wr.TLSDomain == nil || *wr.TLSDomain == "") {
 		return fmt.Errorf("tls_domain is required when tls_mode is acme")
 	}
+	return nil
+}
+
+// wizardValidateMedia checks and normalises the upload-size cap and the voice
+// quality preset.
+func wizardValidateMedia(wr *setupWizardRequest) error {
 	if wr.UploadMaxSizeMB != nil && (*wr.UploadMaxSizeMB < 1 || *wr.UploadMaxSizeMB > maxUploadSizeMB) {
 		return fmt.Errorf("upload_max_size_mb must be between 1 and %d", maxUploadSizeMB)
 	}
