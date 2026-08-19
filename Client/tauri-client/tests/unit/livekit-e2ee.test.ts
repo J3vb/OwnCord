@@ -982,6 +982,88 @@ describe("E2EEManager", () => {
     }
   });
 
+  it("[OC-0155] shares the offer-pacing budget across back-to-back rotations instead of resetting it per call", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+    await mgr.setupKeyExchange(true, 1); // holder
+
+    // Seed 40 peers — under the server's 60-offer cap for a SINGLE rotation,
+    // but two back-to-back rotations of 40 each (80 offers total) blow
+    // through the server's shared per-second window if each rotation gets
+    // its own fresh pacing budget instead of sharing one.
+    for (let i = 0; i < 40; i++) {
+      mgr.peerPublicKeys.set(2000 + i, { type: `peer-${i}` } as unknown as CryptoKey);
+    }
+    ws.send.mockClear();
+
+    // A second keyed-peer leave lands while this rotation is conceptually
+    // in flight — drainPendingRotationOrArmTimer (livekitE2EE.ts:1256-1263)
+    // runs a second rotation immediately once this one finishes, exactly
+    // like handleParticipantLeft's wasKeyHolder branch does.
+    mgr.rotationPending = true;
+
+    vi.useFakeTimers();
+    try {
+      const rotationPromise = mgr.rotateKeyPeriodically();
+      // Let every microtask-bound send that doesn't need a real timer run —
+      // this covers BOTH rotations if neither individually hits the cap.
+      await vi.advanceTimersByTimeAsync(0);
+      const sentBeforePause = sendsOfType(ws, "voice_e2ee_offer").length;
+      // The combined 80 offers across both rotations must not all go out
+      // unpaced just because neither rotation's own 40-offer batch exceeds
+      // the 60 cap in isolation — the budget must be shared.
+      expect(sentBeforePause).toBeLessThanOrEqual(60);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await rotationPromise;
+
+      // Both rotations' offers (40 + 40) eventually go out.
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(80);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("[OC-0167] paces announce-driven offers through the same shared budget as rotation offers", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // 70 existing participants' announces are relayed to the future key
+    // holder before its own keypair is ready — exactly what voiceJoinComplete
+    // does for a joiner elected key holder in a large ongoing channel
+    // (Server/ws/voice_join.go:490-495). They queue.
+    for (let i = 0; i < 70; i++) {
+      await mgr.handleAnnounce(3000 + i, "cGVlcg==", "sig");
+    }
+    expect(mgr.pendingAnnounces).toHaveLength(70);
+
+    mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
+    ws.send.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      // setupKeyExchange generates the room key, then drains all 70 queued
+      // announces in a tight loop — each drained announce sends a
+      // voice_e2ee_offer directly (handleAnnounceInner), bypassing
+      // distributeRoomKey's pacing entirely.
+      const setupPromise = mgr.setupKeyExchange(true, 1);
+      await vi.advanceTimersByTimeAsync(0);
+      const sentBeforePause = sendsOfType(ws, "voice_e2ee_offer").length;
+      // Must not blow through all 70 announce-driven offers in one unpaced
+      // burst.
+      expect(sentBeforePause).toBeLessThan(70);
+      expect(sentBeforePause).toBeGreaterThan(0);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await setupPromise;
+
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(70);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // ── Ledger findings OC-0010 / OC-0011 ─────────────────────────────────
 
   it("[OC-0010] does not stand down a new session's key-holder role when a stale offer's setKey resolves after teardown+rejoin", async () => {
