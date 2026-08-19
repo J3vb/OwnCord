@@ -231,9 +231,12 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
     await expect(badge).toHaveClass(/unverified/);
+    // No identity key → no safety number, but the per-call session
+    // fingerprint is shown (labelled as not an identity) so there is still
+    // something to compare out of band (OC-0003).
     await expect(badge).toHaveAttribute(
       "title",
-      "Identity not verified — this participant published no key",
+      /^Identity not verified — this participant published no key\. Session fingerprint \(changes every call — not an identity\): ([0-9A-F]{4} ){7}[0-9A-F]{4}$/,
     );
     expect(await invokesOf(page, "store_identity_pin")).toHaveLength(0);
   });

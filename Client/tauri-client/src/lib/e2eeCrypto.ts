@@ -77,7 +77,13 @@ export async function importPublicKey(base64: string): Promise<CryptoKey> {
  */
 export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<string> {
   const raw = await crypto.subtle.exportKey("raw", publicKey);
-  const hash = await crypto.subtle.digest("SHA-256", raw);
+  return computeRawKeyFingerprint(new Uint8Array(raw));
+}
+
+/** Same fingerprint as computeKeyFingerprint, over the raw public-key bytes
+ *  (the form an announce carries) — no import needed. */
+export async function computeRawKeyFingerprint(raw: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", raw as Uint8Array<ArrayBuffer>);
   const hex = Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
     .join("");
@@ -204,51 +210,95 @@ export function roomKeyToBase64(key: Uint8Array): string {
 
 // ── Room key wrapping (ECDH + HKDF + AES-GCM) ──────────────────────────────
 
+/** Wire format version byte for `encrypted_key`. v1 prepends a header of
+ *  `0x01 ‖ epoch (u64 big-endian)` to the GCM ciphertext and binds that same
+ *  epoch as additional data, so a peer can tell a fresh room key from a
+ *  superseded one and the relay cannot alter the epoch unnoticed (OC-0001).
+ *  Blobs with no header are the pre-epoch format: unwrap still accepts them
+ *  for holders on the old build, reporting `epoch: null`. */
+const OFFER_FORMAT_V1 = 0x01;
+const OFFER_HEADER_BYTES = 9;
+
+function encodeOfferEpoch(epoch: number): Uint8Array<ArrayBuffer> {
+  if (!Number.isSafeInteger(epoch) || epoch < 0) {
+    throw new Error("E2EE: offer epoch must be a non-negative safe integer");
+  }
+  const header = new Uint8Array(OFFER_HEADER_BYTES);
+  header[0] = OFFER_FORMAT_V1;
+  new DataView(header.buffer).setBigUint64(1, BigInt(epoch));
+  return header;
+}
+
 /**
  * Wrap (encrypt) a room key for a specific peer.
  *
  * 1. ECDH(myPrivate, peerPublic) → raw shared secret
  * 2. HKDF-SHA256(shared, salt, info) → 256-bit AES wrapping key
- * 3. AES-GCM(wrappingKey, randomIV, roomKey) → ciphertext
+ * 3. AES-GCM(wrappingKey, randomIV, roomKey, aad=header) → ciphertext
+ * 4. encrypted_key = header ‖ ciphertext
  */
 export async function wrapRoomKey(
   myPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
   roomKey: Uint8Array,
+  epoch: number,
 ): Promise<{ encryptedKey: string; iv: string }> {
+  const header = encodeOfferEpoch(epoch);
   const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit GCM nonce
 
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv, additionalData: header },
     wrapKey,
     roomKey as Uint8Array<ArrayBuffer>,
   );
 
-  return {
-    encryptedKey: uint8ToBase64(new Uint8Array(ciphertext)),
-    iv: uint8ToBase64(iv),
-  };
+  const blob = new Uint8Array(OFFER_HEADER_BYTES + ciphertext.byteLength);
+  blob.set(header, 0);
+  blob.set(new Uint8Array(ciphertext), OFFER_HEADER_BYTES);
+  return { encryptedKey: uint8ToBase64(blob), iv: uint8ToBase64(iv) };
 }
 
 /**
  * Unwrap (decrypt) a room key received from a peer.
  *
  * Same ECDH + HKDF derivation as wrapRoomKey, but on the receiver's side.
+ * Returns the epoch the holder bound into the blob, or null for a legacy
+ * (pre-epoch) blob.
  */
 export async function unwrapRoomKey(
   myPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
   encryptedKeyBase64: string,
   ivBase64: string,
-): Promise<Uint8Array> {
+): Promise<{ roomKey: Uint8Array; epoch: number | null }> {
   const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = base64ToUint8(ivBase64);
-  const ciphertext = base64ToUint8(encryptedKeyBase64);
+  const blob = base64ToUint8(encryptedKeyBase64);
 
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, wrapKey, ciphertext);
+  // Legacy blob: exactly key + GCM tag, no header. A v1 blob is 9 bytes
+  // longer, so the two formats never collide on length.
+  // ponytail: compat for holders on the pre-epoch build — remove after the
+  // next release, then any non-v1 blob is rejected.
+  if (blob.byteLength === ROOM_KEY_BYTES + 16) {
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, wrapKey, blob);
+    return { roomKey: new Uint8Array(plaintext), epoch: null };
+  }
 
-  return new Uint8Array(plaintext);
+  if (blob.byteLength < OFFER_HEADER_BYTES || blob[0] !== OFFER_FORMAT_V1) {
+    throw new Error("E2EE: unknown wrapped-key format");
+  }
+  const header = blob.subarray(0, OFFER_HEADER_BYTES);
+  const epochBig = new DataView(blob.buffer, blob.byteOffset, OFFER_HEADER_BYTES).getBigUint64(1);
+  if (epochBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("E2EE: offer epoch out of range");
+  }
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv, additionalData: header },
+    wrapKey,
+    blob.subarray(OFFER_HEADER_BYTES),
+  );
+  return { roomKey: new Uint8Array(plaintext), epoch: Number(epochBig) };
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────

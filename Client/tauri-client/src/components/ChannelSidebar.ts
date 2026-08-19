@@ -71,10 +71,16 @@ function verifyPresentation(v: PeerVerification): {
     };
   }
   // "unverified" — the remaining status: peer published no identity key (legacy).
+  // No identity key means no safety number; the per-call session fingerprint
+  // is the only value that can be compared out of band (OC-0003).
   return {
     icon: "shield",
     color: "var(--text-muted, #949ba4)",
-    title: "Identity not verified — this participant published no key",
+    title:
+      "Identity not verified — this participant published no key." +
+      (v.sessionFingerprint !== null
+        ? ` Session fingerprint (changes every call — not an identity): ${v.sessionFingerprint}`
+        : ""),
   };
 }
 
@@ -456,6 +462,19 @@ function renderVoiceChannelItem(
         row.appendChild(muteIcon);
       }
 
+      // The local user's own session fingerprint (OC-0003): what a peer who
+      // sees us as unverified compares against, so show it where it can be
+      // read out. The local user is never in peerVerifications.
+      const currentUser = getCurrentUser();
+      const ownFingerprint = voiceStore.select((st) => st.localSessionFingerprint ?? null);
+      if (currentUser !== null && currentUser.id === user.userId && ownFingerprint !== null) {
+        const own = createElement("span", { class: "vu-verify vu-session-fp" });
+        own.style.color = "var(--text-muted, #949ba4)";
+        own.title = `Your session fingerprint (changes every call — not an identity): ${ownFingerprint}`;
+        own.appendChild(createIcon("shield", 14));
+        row.appendChild(own);
+      }
+
       // E2EE identity verification badge (F3 TOFU). Absent until the peer's
       // announce resolves; the local user is never in peerVerifications.
       const verification = getPeerVerification(user.userId);
@@ -484,7 +503,6 @@ function renderVoiceChannelItem(
       }
 
       // Right-click for per-user volume (skip for own user)
-      const currentUser = getCurrentUser();
       if (currentUser === null || currentUser.id !== user.userId) {
         row.addEventListener(
           "contextmenu",
@@ -915,7 +933,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     //      kills hover) and never pays a per-user querySelector.
     const unsubVoiceStructure = voiceStore.subscribeSelector(
       (state) => {
-        let structSig = String(state.currentChannelId ?? "");
+        let structSig = `${state.currentChannelId ?? ""}#${state.localSessionFingerprint ?? ""}`;
         for (const [chId, users] of state.voiceUsers) {
           structSig += `|${chId}`;
           for (const [uid, u] of users) {

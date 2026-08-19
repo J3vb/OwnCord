@@ -7,6 +7,7 @@ import {
   wrapRoomKey,
   unwrapRoomKey,
   computeKeyFingerprint,
+  computeRawKeyFingerprint,
   roomKeyToBase64,
   generateIdentityKeyPair,
   signEphemeralKey,
@@ -29,10 +30,16 @@ describe("e2eeCrypto", () => {
       const bob = await generateECDHKeyPair();
       const roomKey = generateRoomKey();
 
-      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey);
-      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
+      const { roomKey: unwrapped, epoch } = await unwrapRoomKey(
+        bob.privateKey,
+        alice.publicKey,
+        encryptedKey,
+        iv,
+      );
 
       expect(unwrapped).toEqual(roomKey);
+      expect(epoch).toBe(1);
     });
 
     it("produces a different ciphertext each call (fresh IV)", async () => {
@@ -40,8 +47,8 @@ describe("e2eeCrypto", () => {
       const bob = await generateECDHKeyPair();
       const roomKey = generateRoomKey();
 
-      const first = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey);
-      const second = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey);
+      const first = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
+      const second = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
 
       // The IVs should differ, making ciphertexts distinct
       expect(first.iv).not.toBe(second.iv);
@@ -56,14 +63,121 @@ describe("e2eeCrypto", () => {
       const bob = await generateECDHKeyPair();
       const roomKey = generateRoomKey();
 
-      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey);
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
 
-      // Decode, flip the first byte, re-encode
+      // Decode, flip the first ciphertext byte (after the 9-byte header), re-encode
       const bytes = Uint8Array.from(atob(encryptedKey), (c) => c.charCodeAt(0));
-      bytes[0] = bytes[0]! ^ 0xff;
+      bytes[9] = bytes[9]! ^ 0xff;
       const tampered = btoa(String.fromCharCode(...bytes));
 
       await expect(unwrapRoomKey(bob.privateKey, alice.publicKey, tampered, iv)).rejects.toThrow();
+    });
+  });
+
+  // ── epoch binding (OC-0001) ───────────────────────────────────────────────
+
+  describe("offer epoch binding", () => {
+    const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+    const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+    it("carries the epoch as a 0x01 version byte + u64 big-endian header", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { encryptedKey } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        generateRoomKey(),
+        0x0102030405,
+      );
+      const bytes = fromB64(encryptedKey);
+      expect(Array.from(bytes.subarray(0, 9))).toEqual([1, 0, 0, 0, 1, 2, 3, 4, 5]);
+      // 32-byte key + 16-byte GCM tag after the header
+      expect(bytes.byteLength).toBe(9 + 48);
+    });
+
+    it("rejects a blob whose epoch header was edited", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        generateRoomKey(),
+        3,
+      );
+      const bytes = fromB64(encryptedKey);
+      bytes[8] = 9; // epoch 3 -> 9, ciphertext untouched
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv),
+      ).rejects.toThrow();
+    });
+
+    it("rejects an unknown format version byte", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        generateRoomKey(),
+        3,
+      );
+      const bytes = fromB64(encryptedKey);
+      bytes[0] = 2;
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv),
+      ).rejects.toThrow();
+    });
+
+    it("rejects an epoch that is negative or not a safe integer", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      await expect(
+        wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), -1),
+      ).rejects.toThrow();
+      await expect(
+        wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), 2 ** 53),
+      ).rejects.toThrow();
+    });
+
+    it("still unwraps a legacy blob (no header, no additional data) and reports epoch null", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const roomKey = generateRoomKey();
+
+      // Build the pre-epoch wire format by hand: ECDH -> HKDF(salt, info) ->
+      // AES-GCM with no additional data, raw ciphertext in encrypted_key.
+      const shared = await crypto.subtle.deriveBits(
+        { name: "ECDH", public: bob.publicKey },
+        alice.privateKey,
+        256,
+      );
+      const hkdf = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+      const wrapKey = await crypto.subtle.deriveKey(
+        {
+          name: "HKDF",
+          hash: "SHA-256",
+          salt: new TextEncoder().encode("owncord-voice-e2ee-v1"),
+          info: new TextEncoder().encode("room-key-wrap"),
+        },
+        hkdf,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt"],
+      );
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        wrapKey,
+        roomKey as Uint8Array<ArrayBuffer>,
+      );
+
+      const result = await unwrapRoomKey(
+        bob.privateKey,
+        alice.publicKey,
+        b64(new Uint8Array(ct)),
+        b64(iv),
+      );
+      expect(result.roomKey).toEqual(roomKey);
+      expect(result.epoch).toBeNull();
     });
   });
 
@@ -87,6 +201,13 @@ describe("e2eeCrypto", () => {
       const fpB = await computeKeyFingerprint(keyB);
 
       expect(fpA).not.toBe(fpB);
+    });
+
+    it("computeRawKeyFingerprint over the exported raw bytes matches computeKeyFingerprint", async () => {
+      const { publicKey } = await generateECDHKeyPair();
+      const raw = new Uint8Array(await crypto.subtle.exportKey("raw", publicKey));
+
+      expect(await computeRawKeyFingerprint(raw)).toBe(await computeKeyFingerprint(publicKey));
     });
 
     it("formats the fingerprint as 8 space-separated 4-char hex groups", async () => {
@@ -117,8 +238,13 @@ describe("e2eeCrypto", () => {
 
       // The reimported key must be usable in a wrap/unwrap cycle
       const roomKey = generateRoomKey();
-      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, reimported, roomKey);
-      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, reimported, roomKey, 1);
+      const { roomKey: unwrapped } = await unwrapRoomKey(
+        bob.privateKey,
+        alice.publicKey,
+        encryptedKey,
+        iv,
+      );
       expect(unwrapped).toEqual(roomKey);
     });
   });

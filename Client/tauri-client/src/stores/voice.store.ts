@@ -62,6 +62,11 @@ export interface PeerVerification {
   /** Safety number (identity-key fingerprint) for out-of-band verification;
    *  null for legacy/unverified/mismatch/unknown peers. */
   readonly safetyNumber: string | null;
+  /** Fingerprint of the peer's ephemeral session key (OC-0003). Set whenever
+   *  the announce was accepted (verified or unverified), null when it was
+   *  rejected. Changes every call, so it is NOT an identity — it is the only
+   *  thing an unverified peer has that can be compared out of band. */
+  readonly sessionFingerprint: string | null;
 }
 
 export interface VoiceState {
@@ -106,6 +111,10 @@ export interface VoiceState {
    *  always sets it; optional only so the many inline VoiceState test fixtures
    *  need not restate it. */
   readonly peerVerifications?: ReadonlyMap<number, PeerVerification>;
+  /** Fingerprint of the local user's own ephemeral session key (OC-0003), so
+   *  it can be read out to a peer who sees us as unverified. Null outside a
+   *  voice session. Optional for the same fixture reason as peerVerifications. */
+  readonly localSessionFingerprint?: string | null;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -512,6 +521,15 @@ export function clearPeerVerification(userId: number): void {
     next.delete(userId);
     return { ...prev, peerVerifications: next };
   });
+}
+
+/** Publish (or clear, with null) the local user's own session fingerprint. */
+export function setLocalSessionFingerprint(fingerprint: string | null): void {
+  voiceStore.setState((prev) =>
+    (prev.localSessionFingerprint ?? null) === fingerprint
+      ? prev
+      : { ...prev, localSessionFingerprint: fingerprint },
+  );
 }
 
 /** Drop all peer verifications (on voice leave). */
