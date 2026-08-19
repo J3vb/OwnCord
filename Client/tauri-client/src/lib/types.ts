@@ -21,6 +21,20 @@ export type UserStatus = "online" | "idle" | "dnd" | "invisible" | "offline";
 /** Channel types supported by the server. */
 export type ChannelType = "text" | "voice" | "announcement" | "dm";
 
+/**
+ * True for channel types that carry a message history and a chat pane —
+ * "text" and "announcement". The server treats both identically for ready's
+ * unread_count/last_message_id and can_send (Server/ws/serve_ready.go), and
+ * the client renders both in the sidebar with a composer. Callers that pick
+ * an automatic/fallback active channel from a channel list must use this
+ * instead of a bare `type === "text"` check, or an announcement-only server
+ * (or a role that can only read announcement channels) lands on a blank pane
+ * even though a readable channel exists.
+ */
+export function isTextLikeChannel(ch: { readonly type: ChannelType }): boolean {
+  return ch.type === "text" || ch.type === "announcement";
+}
+
 /** Voice quality presets. */
 export type VoiceQuality = "low" | "medium" | "high";
 

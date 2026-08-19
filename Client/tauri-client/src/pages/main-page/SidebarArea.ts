@@ -6,6 +6,7 @@
  */
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -471,7 +472,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       return;
     }
     for (const ch of channelsStore.getState().channels.values()) {
-      if (ch.type === "text") {
+      if (isTextLikeChannel(ch)) {
         setActiveChannel(ch.id);
         break;
       }
@@ -562,7 +563,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
         if (current !== undefined && current.type !== "dm") return;
         for (const ch of channelsStore.getState().channels.values()) {
-          if (ch.type === "text") {
+          if (isTextLikeChannel(ch)) {
             setActiveChannel(ch.id);
             break;
           }

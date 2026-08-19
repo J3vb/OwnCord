@@ -68,6 +68,7 @@ import type { DmChannel } from "@stores/dm.store";
 import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
 import { setCustomEmoji } from "@stores/emoji.store";
 import type { DmChannelPayload } from "./types";
+import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { notifyIncomingMessage } from "./notifications";
@@ -335,7 +336,7 @@ export function wireDispatcher(
       // must NOT mark-read whatever the auto-select branch just picked.
       let activeChannelCleared = false;
       if (currentActive === null && payload.channels.length > 0) {
-        const firstText = payload.channels.find((ch) => ch.type === "text");
+        const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
         if (firstText !== undefined) {
           setActiveChannel(firstText.id);
         }
@@ -540,7 +541,7 @@ export function wireDispatcher(
           return;
         }
         const firstText = [...channelsStore.getState().channels.values()]
-          .filter((ch) => ch.type === "text")
+          .filter((ch) => isTextLikeChannel(ch))
           .toSorted((a, b) => a.position - b.position)[0];
         setActiveChannel(firstText?.id ?? null);
       });
@@ -713,7 +714,7 @@ export function wireDispatcher(
       if (payload.id === activeId) {
         const remaining = channelsStore.select((s) => s.channels);
         const sorted = [...remaining.values()]
-          .filter((ch) => ch.type === "text")
+          .filter((ch) => isTextLikeChannel(ch))
           .toSorted((a, b) => a.position - b.position);
         const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
         setActiveChannel(firstTextId);
