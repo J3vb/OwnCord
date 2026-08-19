@@ -2163,7 +2163,8 @@ ul.md-list-nested {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 5;
 }
-.message:hover .msg-actions-bar {
+.message:hover .msg-actions-bar,
+.message:focus-within .msg-actions-bar {
   opacity: 1;
   pointer-events: auto;
   animation: actionBarPop 0.1s ease;

@@ -114,6 +114,45 @@ func TestRegistry_LoadAll_RegistersDiscoveredPlugins(t *testing.T) {
 	}
 }
 
+// OC-0165: one malformed plugin directory must not blank the whole registry.
+// LoadAll must still install and activate every good plugin alongside a
+// broken one, matching installFromDisk's own per-plugin-failure policy a few
+// lines below (a bad plugin there just gets `slog.Warn` + `continue`).
+func TestRegistry_LoadAll_InstallsGoodPluginsDespiteOneBadDirectory(t *testing.T) {
+	r, store, dir := newRegistryWithDir(t)
+	ctx := context.Background()
+	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
+
+	// "broken" has a plugin.json that fails to parse — malformed JSON.
+	brokenDir := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(brokenDir, 0o750); err != nil {
+		t.Fatalf("mkdir %s: %v", brokenDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenDir, "plugin.json"), []byte(`{"name":"broken",}`), 0o600); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	if err := r.LoadAll(ctx); err != nil {
+		t.Fatalf("LoadAll: %v — a malformed plugin directory must not fail the whole load", err)
+	}
+
+	list := r.List()
+	if len(list) != 1 {
+		t.Fatalf("List() has %d entries after LoadAll, want 1 (alpha installed despite broken's failure); got %+v", len(list), list)
+	}
+	if list[0].Manifest.Name != "alpha" {
+		t.Errorf("List()[0].Manifest.Name = %q, want \"alpha\"", list[0].Manifest.Name)
+	}
+
+	rows, err := store.ListPlugins(ctx)
+	if err != nil {
+		t.Fatalf("ListPlugins: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("store has %d rows, want 1 — the good plugin must still be persisted", len(rows))
+	}
+}
+
 func TestRegistry_LoadAll_RemovesStaleStagingDirs(t *testing.T) {
 	r, _, dir := newRegistryWithDir(t)
 

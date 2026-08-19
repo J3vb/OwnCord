@@ -1215,6 +1215,47 @@ func TestLogin_OversizedUsernameRejectedBeforeRateLimiterKey(t *testing.T) {
 	}
 }
 
+// OC-0151: registerReadRequest ran the fixpoint sanitizer
+// (service.SanitizeText) over the raw username *before* auth.ValidateUsername
+// applies its 32-rune cap. The sanitizer loops sanitizePass to a fixpoint,
+// and nested HTML entities force roughly one extra pass per two nesting
+// levels, so the cost is quadratic in the attacker-controlled field length.
+// A 16 KB adversarial username measurably takes ~200ms to sanitize on this
+// tree (measured up to ~3.4s at 64 KB) — all of it spent before any bound on
+// the field is applied, and unauthenticated. The fix must reject an
+// oversized username on a cheap byte-length check *before* sanitizing, so
+// the rejection is near-instant regardless of payload size.
+func TestRegister_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	// Adversarial nested-entity payload (16 KB) — see service.sanitizeToFixpoint's
+	// doc comment for why this shape is quadratic to sanitize.
+	hugeUsername := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
+		"username":    hugeUsername,
+		"password":    "securePass1",
+		"invite_code": "whatever",
+	})
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Register oversized username status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends ~200ms in sanitizeToFixpoint on
+	// this payload before it ever reaches auth.ValidateUsername's length
+	// check. 150ms gives generous margin over noise while still being far
+	// below the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("Register oversized username took %v, want well under 150ms (raw field must be bounded before sanitizing, not after)", elapsed)
+	}
+}
+
 // ─── Rate limiting integration test ──────────────────────────────────────────
 
 func TestRegister_RateLimit(t *testing.T) {

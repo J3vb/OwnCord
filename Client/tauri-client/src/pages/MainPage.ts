@@ -20,7 +20,7 @@ import { logout } from "@lib/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
-import { createPresenceSender } from "@lib/presence";
+import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -131,6 +131,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // per producer instead cannot predict that shared, cross-surface budget
   // (OC-0210).
   const presenceSender = createPresenceSender(ws, limiters.presence);
+  // Publish this as the session's one PresenceSender so producers wired up
+  // outside MainPage — main.ts's tray "status-change" listener — share the
+  // same limiter token, coalescing retry, and optimistic update instead of
+  // opening a second budget the server doesn't know about (OC-0176). Cleared
+  // in this page's teardown, alongside presenceSender.destroy() below.
+  setActivePresenceSender(presenceSender);
 
   let container: Element | null = null;
   let root: HTMLDivElement | null = null;
@@ -360,7 +366,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // the dispatcher) — no point starting a countdown on a page that is
           // about to unmount.
           if (banner !== null && payload.reason !== "shutdown") {
-            banner.showRestart(payload.delay_seconds);
+            if (payload.delay_seconds <= 0) {
+              // A zero/negative delay is a cancel, not a countdown (e.g.
+              // "update_aborted" correcting an earlier restart announcement
+              // after the staged update failed to apply — the socket never
+              // actually dropped). Re-sync to the real connection status
+              // instead of letting showRestart's countdown fall straight
+              // through to a permanent "Reconnecting..." banner.
+              applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+            } else {
+              banner.showRestart(payload.delay_seconds);
+            }
           }
         } catch (err) {
           log.error("Server restart handler error", err);
@@ -802,6 +818,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       autoIdle?.destroy();
       autoIdle = null;
       presenceSender.destroy();
+      setActivePresenceSender(null);
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 

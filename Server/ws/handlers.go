@@ -262,7 +262,7 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
 			return
 		}
-	} else if ch != nil && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
+	} else if ch != nil && !ch.Archived && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
 		return
 	}
 	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))

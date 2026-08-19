@@ -6,6 +6,7 @@ import {
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -65,6 +66,8 @@ describe("SidebarDmSection", () => {
 
   beforeEach(() => {
     resetStores();
+    localStorage.clear();
+    invalidateMuteCache();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -327,6 +330,68 @@ describe("SidebarDmSection", () => {
 
       const badge = container.querySelector(".dm-header-unread-badge") as HTMLElement;
       expect(badge.style.display).toBe("none");
+
+      section.destroy();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Mention badge (OC-0189)
+  // -------------------------------------------------------------------------
+
+  describe("mention badge", () => {
+    it("shows a mention badge instead of the unread badge when mentionCount > 0", () => {
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 5, mentionCount: 2 }));
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const mentionBadge = container.querySelector(".dm-mention-badge");
+      expect(mentionBadge).not.toBeNull();
+      expect(mentionBadge!.textContent).toBe("2");
+
+      // The plain unread badge must not also render alongside it.
+      const unreadBadge = container.querySelector(".dm-unread-badge");
+      expect(unreadBadge).toBeNull();
+
+      section.destroy();
+    });
+
+    it("still shows the mention badge on a muted DM (a mute must never hide a mention)", () => {
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 5, mentionCount: 2 }));
+      muteChannel(100);
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const mentionBadge = container.querySelector(".dm-mention-badge");
+      expect(mentionBadge).not.toBeNull();
+      expect(mentionBadge!.textContent).toBe("2");
+
+      section.destroy();
+    });
+
+    it("counts a muted DM's mentions (not its raw unreads) toward the header badge", () => {
+      // Muted DM with a mention: the header must still surface the mention.
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 5, mentionCount: 2 }));
+      muteChannel(100);
+      // Muted DM with no mention: contributes nothing, same as before.
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+          unreadCount: 3,
+          mentionCount: 0,
+        }),
+      );
+      muteChannel(101);
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const badge = container.querySelector(".dm-header-unread-badge") as HTMLElement;
+      expect(badge.textContent).toBe("2");
+      expect(badge.style.display).not.toBe("none");
 
       section.destroy();
     });

@@ -45,30 +45,42 @@ export interface PresenceSender {
  */
 export function createPresenceSender(ws: WsClient, limiter: RateLimiter): PresenceSender {
   let retry: ReturnType<typeof setTimeout> | null = null;
+  // The custom_status a still-queued retry carries. A plain status change
+  // (customStatus === undefined) landing while that retry is pending does
+  // not mean "clear the custom status" — it means the caller simply didn't
+  // mention it — so send() below falls back to this instead of dropping it
+  // (OC-0156).
+  let pendingCustom: string | undefined;
 
   function send(status: UserStatus, customStatus?: string): void {
+    // A plain call inherits whatever custom_status is still queued behind
+    // the limiter; an explicit call always wins outright.
+    const effectiveCustom =
+      customStatus !== undefined ? customStatus : retry !== null ? pendingCustom : undefined;
     const userId = authStore.getState().user?.id ?? 0;
     if (userId !== 0) {
-      updatePresence(userId, status, customStatus);
+      updatePresence(userId, status, effectiveCustom);
     }
     if (retry !== null) {
       clearTimeout(retry);
       retry = null;
     }
     if (limiter.tryConsume()) {
-      if (customStatus === undefined) {
+      pendingCustom = undefined;
+      if (effectiveCustom === undefined) {
         ws.send({ type: "presence_update", payload: { status } });
       } else {
-        ws.send({ type: "presence_update", payload: { status, custom_status: customStatus } });
+        ws.send({ type: "presence_update", payload: { status, custom_status: effectiveCustom } });
       }
     } else {
       // The window is still closed from an earlier send (any producer's) —
       // retry once it reopens instead of dropping this one silently.
       // Re-reads loadUserStatus() at fire time so a burst of calls in
       // between coalesces onto a single retry carrying the latest value.
+      pendingCustom = effectiveCustom;
       retry = setTimeout(() => {
         retry = null;
-        send(loadUserStatus(), customStatus);
+        send(loadUserStatus(), effectiveCustom);
       }, limiter.getRemainingMs());
     }
   }
@@ -78,7 +90,33 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       clearTimeout(retry);
       retry = null;
     }
+    pendingCustom = undefined;
   }
 
   return { send, destroy };
+}
+
+// ---------------------------------------------------------------------------
+// Active-session registry
+// ---------------------------------------------------------------------------
+
+let activeSender: PresenceSender | null = null;
+
+/**
+ * Register the session's one `PresenceSender` so producers that are wired up
+ * before any session exists — main.ts's tray "status-change" listener, which
+ * is registered at module load, long before a login — can still route
+ * through the same shared limiter/retry/optimistic-update instead of
+ * sending `presence_update` raw and opening a second budget the server does
+ * not know about (OC-0176). MainPage.ts calls this right after constructing
+ * its `PresenceSender`, and again with `null` in its teardown.
+ */
+export function setActivePresenceSender(sender: PresenceSender | null): void {
+  activeSender = sender;
+}
+
+/** The current session's `PresenceSender`, or `null` when no session is
+ *  mounted (before login, or after logout/disconnect). */
+export function getActivePresenceSender(): PresenceSender | null {
+  return activeSender;
 }

@@ -477,9 +477,22 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
+	//
+	// OC-0172: this read is the ONLY place the server ever relays an existing
+	// participant's stored ECDH public key (voice_e2ee_announce) to a joiner
+	// — mid-call peers never counter-announce, they only answer an offer. A
+	// swallowed error here used to just `return`, leaving the joiner's own
+	// voice_state already broadcast to everyone (above) but the joiner
+	// itself blind to who else is in the channel and unable to complete the
+	// E2EE key exchange: it times out ~15s later with no explanation. Treat
+	// this the same as every other post-commit failure in this handler
+	// (rollbackVoiceJoin + an error frame), broadcasting the compensating
+	// voice_leave for the voice_state that already went out.
 	existing, err := h.db.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", err)
+		h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, true)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 		return
 	}
 	for _, vs := range existing {

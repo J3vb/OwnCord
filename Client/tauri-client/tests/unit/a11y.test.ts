@@ -165,6 +165,33 @@ describe("trapFocus", () => {
     expect(document.activeElement).toBe(visible);
     ac.abort();
   });
+
+  it("skips a disabled trailing control when wrapping — Tab from the last enabled control wraps instead of escaping", () => {
+    // Mirrors CreateChannelModal: the submit button is disabled while a
+    // request is in flight (and, being disabled, gets blurred by the
+    // browser first). The trap must treat the last *enabled* control as the
+    // wrap edge, not the disabled one that can never hold focus.
+    const ac = new AbortController();
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    const first = document.createElement("button");
+    first.textContent = "first";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "cancel";
+    const submitBtn = document.createElement("button");
+    submitBtn.textContent = "submit";
+    submitBtn.disabled = true;
+    dialog.append(first, cancelBtn, submitBtn);
+    container.appendChild(dialog);
+    trapFocus(dialog, ac.signal);
+
+    cancelBtn.focus();
+    const forward = tab(cancelBtn);
+
+    expect(forward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+    ac.abort();
+  });
 });
 
 describe("focusDialog", () => {
@@ -228,5 +255,19 @@ describe("focusDialog", () => {
     focusDialog(dialog);
 
     expect(document.activeElement).toBe(visible);
+  });
+
+  it("skips a disabled control that is earlier in DOM order than the first enabled one", () => {
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    const disabledBtn = document.createElement("button");
+    disabledBtn.disabled = true;
+    const enabledBtn = document.createElement("button");
+    dialog.append(disabledBtn, enabledBtn);
+    container.appendChild(dialog);
+
+    focusDialog(dialog);
+
+    expect(document.activeElement).toBe(enabledBtn);
   });
 });

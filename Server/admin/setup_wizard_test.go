@@ -215,6 +215,41 @@ func TestSetupWizard_NoRestartWhenValuesMatchRunning(t *testing.T) {
 	}
 }
 
+// TestSetupWizard_IdentityFieldsStoredRawNotEscaped pins OC-0173: the wizard
+// must store server_name/motd the same way handlePatchSettings does later
+// (raw survivors, not HTML-entity-escaped), so a name set at first run and
+// the identical name set afterwards through the admin Settings page produce
+// the same stored value. Before the fix, wizardValidateIdentity ran these
+// fields through the bare bluemonday sanitizer, which HTML-escapes
+// survivors (' -> &#39;, " -> &#34;, & -> &amp;) — see service.SanitizeText's
+// doc comment, which the setup_handler.go username path already follows for
+// exactly this reason.
+func TestSetupWizard_IdentityFieldsStoredRawNotEscaped(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	restarted := make(chan string, 1)
+	handler := wizardHandler(t, database, cfgPath, restarted)
+
+	rr := doRequest(t, handler, "POST", "/setup", "", map[string]any{
+		"username": "owner",
+		"password": "SecurePass123!",
+		"wizard": map[string]any{
+			"server_name": "Bob's Place",
+			"motd":        `Say "hi" & relax`,
+		},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	if got, want := getSetting(t, database, "server_name"), "Bob's Place"; got != want {
+		t.Errorf("server_name = %q, want %q (stored HTML-escaped instead of raw)", got, want)
+	}
+	if got, want := getSetting(t, database, "motd"), `Say "hi" & relax`; got != want {
+		t.Errorf("motd = %q, want %q (stored HTML-escaped instead of raw)", got, want)
+	}
+}
+
 func TestSetupWizard_InvalidValuesRejectBeforeAccountCreation(t *testing.T) {
 	cases := map[string]map[string]any{
 		"port too low":         {"port": 0},

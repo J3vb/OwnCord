@@ -36,11 +36,21 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
+// Held in a mutable object (rather than baked into the factory literal) so
+// individual tests can simulate the store having a display_name set — e.g.
+// to reproduce the header/username desync in OC-0188.
+const mockAuthState = vi.hoisted(() => ({
+  user: {
+    id: 1,
+    username: "testuser",
+    totp_enabled: false,
+    display_name: null as string | null,
+  },
+}));
+
 vi.mock("@stores/auth.store", () => ({
   authStore: {
-    getState: () => ({
-      user: { id: 1, username: "testuser", totp_enabled: false },
-    }),
+    getState: () => mockAuthState,
     subscribeSelector: vi.fn(() => () => {}),
   },
   updateUser: vi.fn(),
@@ -79,6 +89,7 @@ describe("SettingsOverlay", () => {
     document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
+    mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
   });
 
   afterEach(() => {
@@ -905,6 +916,51 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  // OC-0188: renaming the username must not stomp the profile card's
+  // header with the raw username when a display name is set — the header
+  // is a resolveDisplayName() slot, not a mirror of whichever field was
+  // last saved.
+  it("keeps the display name in the header after a username rename", async () => {
+    mockAuthState.user = {
+      id: 1,
+      username: "testuser",
+      totp_enabled: false,
+      display_name: "Alice Smith",
+    };
+
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    // Header starts out showing the display name, not the username.
+    const acName = container.querySelector(".account-header-name");
+    expect(acName?.textContent).toBe("Alice Smith");
+
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
+    editInput.value = "alice2";
+
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith({ username: "alice2" });
+    });
+
+    // The server merge leaves display_name untouched; the header must keep
+    // showing it rather than the raw username that was just saved.
+    await vi.waitFor(() => {
+      expect(acName?.textContent).toBe("Alice Smith");
+    });
+
+    overlay.destroy?.();
+  });
+
   // --- Status selector ---
 
   // Phase 6 flipped this: "invisible" is a real, settable status now (the
@@ -1071,5 +1127,81 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-overlay")).not.toBeNull();
     overlay.destroy?.();
     expect(container.querySelector(".settings-overlay")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OC-0181: mount() when the store already reports settingsOpen === true
+// ---------------------------------------------------------------------------
+//
+// ConnectPage creates the overlay lazily: it only calls mount() once
+// uiStore.settingsOpen is already true (the settings gear flips the store
+// first, and only then does ensureSettingsOverlay() run). So on the very
+// first open from the connect page, mount() runs its "sync initial state"
+// show() call synchronously inside mount() itself — before the caller has
+// had a chance to see `root` come back and attach it anywhere.
+//
+// The module-level mock above pins settingsOpen to a permanent `false`, so
+// every other test in this file mounts into a closed overlay and only calls
+// open() afterward (root already attached by then). This block re-imports
+// the component fresh with settingsOpen already true at mount time, the one
+// path that exercises the bug.
+describe("SettingsOverlay - mount() with settingsOpen already true", () => {
+  afterEach(() => {
+    vi.doUnmock("@stores/ui.store");
+    vi.resetModules();
+  });
+
+  it("moves focus into the dialog when the store is already open at mount time", async () => {
+    vi.resetModules();
+    vi.doMock("@stores/ui.store", () => ({
+      uiStore: {
+        getState: () => ({ settingsOpen: true }),
+        subscribe: () => () => {},
+        subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
+      },
+      setTheme: vi.fn(),
+    }));
+
+    const { createSettingsOverlay: createReopenedOverlay } =
+      await import("@components/SettingsOverlay");
+
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+
+    const localContainer = document.createElement("div");
+    document.body.appendChild(localContainer);
+
+    const overlay = createReopenedOverlay({
+      onClose: vi.fn(),
+      onChangePassword: vi.fn().mockResolvedValue(undefined),
+      onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+      onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+      onLogout: vi.fn(),
+      onDeleteAccount: vi.fn().mockResolvedValue(undefined),
+      onStatusChange: vi.fn(),
+      onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
+      onConfirmTotp: vi.fn().mockResolvedValue(undefined),
+      onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    });
+
+    overlay.mount(localContainer);
+
+    // The overlay must actually be in the document by the time mount()
+    // returns, or nothing below it can matter.
+    expect(document.body.contains(localContainer.querySelector(".settings-overlay"))).toBe(true);
+
+    const panel = localContainer.querySelector(".settings-panel") as HTMLElement;
+    expect(panel).not.toBeNull();
+    // focusDialog() only succeeds once root is attached to the document;
+    // called against a detached subtree, .focus() is a silent no-op and
+    // activeElement never leaves the opener button.
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    overlay.destroy?.();
+    localContainer.remove();
+    opener.remove();
   });
 });

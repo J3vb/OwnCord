@@ -11,14 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
-
-// setupSanitizer strips all HTML from user input during setup.
-var setupSanitizer = bluemonday.StrictPolicy()
 
 // ownerRoleID is the role ID assigned to the first user (Owner).
 const ownerRoleID = 1
@@ -172,7 +169,15 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		return req, "", false
 	}
 
-	req.Username = strings.TrimSpace(setupSanitizer.Sanitize(req.Username))
+	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
+	// bluemonday.StrictPolicy().Sanitize call: bluemonday's bare Sanitize HTML-escapes
+	// survivors (' -> &#39;, & -> &amp;, " -> &#34;), so a name like "O'Brien"
+	// would be stored as "O&#39;Brien" — different from what handleLogin
+	// looks up later (which only trims), permanently locking the Owner out
+	// of their own account. Mirrors the registration path (auth_handler.go)
+	// and the profile-rename path (profile_handler.go), which canonicalize
+	// usernames the same way. See service.SanitizeText's doc comment.
+	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "username and password are required")
 		return req, "", false

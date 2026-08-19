@@ -15,9 +15,17 @@
  * the one who chose the certificate.
  */
 
+import { bracketBareIPv6Host } from "./ws";
+
 /** The admin-panel URL for `host`, deep-linked to `section` when given. */
 export function adminPanelUrl(host: string, section?: string): string {
-  const base = `https://${host}/admin`;
+  // A bare (unbracketed) IPv6 host is a valid, accepted server address
+  // (hostValidation.ts, livekitSession.ts's ensureLiveKitProxy) but RFC 3986
+  // requires brackets around an IPv6 literal authority — without them this
+  // isn't a valid absolute URL at all (OC-0190). Reuse the same bracketing
+  // convention ws.ts's wss:// URL builder already uses.
+  const authority = bracketBareIPv6Host(host);
+  const base = `https://${authority}/admin`;
   return section === undefined || section === "" ? base : `${base}#${section}`;
 }
 

@@ -164,6 +164,79 @@ func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
 	}
 }
 
+// OC-0151: handleUpdateProfile is the same call in the same order as
+// registerReadRequest — service.SanitizeText (the fixpoint sanitizer) runs
+// on the raw username before auth.ValidateUsername's 32-rune cap. Since
+// sanitizeToFixpoint's cost is quadratic in input length, an authenticated
+// caller can still pin a core for hundreds of milliseconds (and much longer
+// at larger sizes) with one PATCH before any bound is applied. The fix must
+// reject an oversized username on a cheap byte-length check before
+// sanitizing, so the rejection is near-instant regardless of payload size.
+func TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "patchvictim", 4)
+
+	// Adversarial nested-entity payload (16 KB) — see service.sanitizeToFixpoint's
+	// doc comment for why this shape is quadratic to sanitize.
+	hugeUsername := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": hugeUsername,
+	})
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("UpdateProfile oversized username status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends ~200ms in sanitizeToFixpoint on
+	// this payload before it ever reaches auth.ValidateUsername's length
+	// check. 150ms gives generous margin over noise while still being far
+	// below the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("UpdateProfile oversized username took %v, want well under 150ms (raw field must be bounded before sanitizing, not after)", elapsed)
+	}
+}
+
+// OC-0180: the avatar branch must canonicalize with the same fixpoint
+// sanitizer (service.SanitizeText) as the username path above it, not the
+// bare bluemonday sanitizer.Sanitize — Sanitize's output is always
+// HTML-escaped, so a legitimate avatar URL with more than one query
+// parameter gets its "&" separators rewritten to "&amp;" and is persisted
+// (and later served to every client) as a broken URL.
+func TestUpdateProfile_AvatarQueryStringIsNotEscaped(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "avatarqsuser", 4)
+
+	const avatarURL = "https://www.gravatar.com/avatar/abc?s=256&d=identicon"
+
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "avatarqsuser",
+		"avatar":   avatarURL,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["avatar"] != avatarURL {
+		t.Errorf("avatar = %v, want %q (must not be HTML-escaped)", resp["avatar"], avatarURL)
+	}
+
+	u, err := database.GetUserByUsername(context.Background(), "avatarqsuser")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername: %v, %v", u, err)
+	}
+	if u.Avatar == nil || *u.Avatar != avatarURL {
+		t.Errorf("stored avatar = %v, want %q (must not be HTML-escaped)", u.Avatar, avatarURL)
+	}
+}
+
 func TestUpdateProfile_UsernameTaken(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)

@@ -1311,6 +1311,52 @@ describe("messages store", () => {
       expect(msgs).toHaveLength(2);
       expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("failed");
     });
+
+    it("keeps id/time order when another user's message commits while our send is still in flight", () => {
+      // Channel loaded with [id 100].
+      addMessage(makeChatPayload({ id: 100, user: TEST_USER_2, content: "seed" }));
+
+      // A types and sends -> optimistic pending row appended at the tail.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "mine",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+
+      // Before A's send commits server-side, B's message commits as id 101
+      // and is broadcast. Different author/content, so this cannot reconcile
+      // against the pending row — it must land as a genuine append, and it
+      // must land *before* the still-pending row, not after it, or the
+      // pending row (which will shortly outrank it in id/time) ends up
+      // sitting ahead of an older message.
+      addMessage(
+        makeChatPayload({
+          id: 101,
+          user: TEST_USER_2,
+          content: "bob's message",
+          timestamp: "2026-03-15T10:00:02Z",
+        }),
+      );
+
+      // A's chat_send_ok arrives with the real id, stamped in place.
+      confirmSend("c1", 102, "2026-03-15T10:00:03Z");
+
+      // A's own echo of the broadcast arrives and reconciles by real id.
+      addMessage(
+        makeChatPayload({
+          id: 102,
+          user: TEST_USER,
+          content: "mine",
+          timestamp: "2026-03-15T10:00:03Z",
+        }),
+      );
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual([100, 101, 102]);
+    });
   });
 
   describe("invalidateLoadedMessageWindows", () => {

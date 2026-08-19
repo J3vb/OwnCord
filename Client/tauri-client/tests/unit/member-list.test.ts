@@ -565,6 +565,33 @@ describe("MemberList", () => {
     expect(eveRow.classList.contains("offline")).toBe(false);
   });
 
+  it("opens the profile popup with live status after a presence-only patch", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    // Eve starts online; the presence flip to offline is presence-only, so
+    // it takes the patchPresence fast path (row identity preserved, no
+    // renderList/createMemberItem call).
+    updatePresence(5, "offline");
+    membersStore.flush();
+
+    const eveRow = container.querySelector('[data-testid="member-5"]') as HTMLDivElement;
+    expect(eveRow.classList.contains("offline")).toBe(true);
+
+    eveRow.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+
+    const popup = document.querySelector('[data-testid="user-profile-popup"]');
+    expect(popup).not.toBeNull();
+    const statusDot = popup!.querySelector(".upp-status-dot") as HTMLDivElement;
+    // Bug: createMemberItem's click handler closes over the render-time
+    // `member` snapshot, which patchPresence never replaces, so the popup
+    // still shows Eve as online instead of the live offline status.
+    expect(statusDot.title).toBe("Offline");
+
+    popup!.remove();
+    document.querySelector('[data-testid="user-profile-overlay"]')?.remove();
+  });
+
   it("still fully rebuilds when a member's role changes", () => {
     setTestMembers(testMembers);
     memberList.mount(container);

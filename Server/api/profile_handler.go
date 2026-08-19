@@ -176,8 +176,21 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		// Use the fixpoint sanitizer (service.SanitizeText), not the bare
-		// sanitizer.Sanitize below — Sanitize's output is always
+		// OC-0151: bound the raw field before it ever reaches the fixpoint
+		// sanitizer below, for the same reason as the register path
+		// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
+		// cost is quadratic in input length, and nothing bounds this field
+		// before it runs. This is a cheap byte-length pre-check — *4 still
+		// admits any legitimate 32-rune UTF-8 username.
+		if len(req.Username) > maxLoginUsernameLen*4 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: "username is too long",
+			})
+			return
+		}
+
+		// Use the fixpoint sanitizer (service.SanitizeText), not a bare
+		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always
 		// HTML-escaped, so a plain apostrophe would be persisted as &#39;
 		// and login (which never re-escapes) would look the account up
 		// under a name that no longer matches. See service.SanitizeText's
@@ -197,9 +210,14 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		// Sanitize and validate avatar if provided.
+		// Sanitize and validate avatar if provided. Use the fixpoint
+		// sanitizer (service.SanitizeText), not a bare
+		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped, so a URL with more
+		// than one query parameter would have its "&" separators rewritten
+		// to "&amp;" and be persisted (and served) broken. Same reasoning as
+		// the username path above.
 		if req.Avatar != nil {
-			trimmed := strings.TrimSpace(sanitizer.Sanitize(*req.Avatar))
+			trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 			if err := validateAvatarURL(trimmed); err != nil {
 				writeJSON(w, http.StatusBadRequest, errorResponse{
 					Error: "INVALID_INPUT", Message: err.Error(),

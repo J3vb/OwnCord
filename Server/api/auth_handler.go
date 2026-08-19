@@ -12,15 +12,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 )
-
-// sanitizer strips all HTML from user-supplied strings before storage.
-var sanitizer = bluemonday.StrictPolicy()
 
 // maxLoginUsernameLen bounds the username accepted by handleLogin, mirroring
 // auth.ValidateUsername's 32-rune cap on registered usernames. Enforced
@@ -276,8 +272,25 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 		return req, false
 	}
 
-	// F: use the fixpoint sanitizer (service.SanitizeText), not the bare
-	// sanitizer.Sanitize below — Sanitize's output is always HTML-escaped
+	// OC-0151: bound the raw field before it ever reaches the fixpoint
+	// sanitizer below. sanitizeToFixpoint's cost is quadratic in input
+	// length (nested HTML entities force roughly one extra pass per two
+	// nesting levels), so an unauthenticated caller could otherwise pin a
+	// core for minutes with one oversized username, all before
+	// auth.ValidateUsername's 32-rune cap ever runs. This is a cheap
+	// byte-length pre-check — *4 still admits any legitimate 32-rune UTF-8
+	// username — mirroring sanitizeContent's raw-length bound in
+	// service/message.go and loginReadRequest's username bound below.
+	if len(req.Username) > maxLoginUsernameLen*4 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INVALID_INPUT",
+			Message: "username is too long",
+		})
+		return req, false
+	}
+
+	// F: use the fixpoint sanitizer (service.SanitizeText), not a bare
+	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped
 	// (' -> &#39;, & -> &amp;, " -> &#34;), so a plain call here would store
 	// a different string than what handleLogin looks up (which only
 	// trims), permanently locking out any username containing one of

@@ -88,12 +88,16 @@ test.describe("Voice Widget", () => {
     const usersBefore = await page.locator(".voice-user-item").count();
 
     // Another user joins the voice channel (id 4 — NOT already in
-    // MOCK_VOICE_STATE, so this is a genuine join, not an in-place update)
+    // MOCK_VOICE_STATE, so this is a genuine join, not an in-place update).
+    // The username must match id 4's record in MOCK_MEMBERS_MULTI_ROLE
+    // ("member2"): the roster resolves identity through membersStore so a
+    // nickname shows the same everywhere, and a real server never sends a
+    // voice_state whose username disagrees with the member of that id.
     await emitWsMessage(page, {
       type: "voice_state",
       payload: {
         user_id: 4,
-        username: "newvoiceuser",
+        username: "member2",
         channel_id: 10,
         muted: false,
         deafened: false,
@@ -104,7 +108,7 @@ test.describe("Voice Widget", () => {
     });
 
     // New user should appear in the sidebar voice-users-list (not the widget)
-    const newUser = page.locator(".voice-user-item .vu-name", { hasText: "newvoiceuser" });
+    const newUser = page.locator(".voice-user-item .vu-name", { hasText: "member2" });
     await expect(newUser).toBeVisible({ timeout: 5_000 });
     const usersAfter = await page.locator(".voice-user-item").count();
     expect(usersAfter).toBeGreaterThan(usersBefore);

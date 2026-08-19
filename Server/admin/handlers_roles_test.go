@@ -405,6 +405,33 @@ func TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts(t *testing.T) {
 	}
 }
 
+// ─── broadcast fan-out must survive request cancellation ────────────────────
+
+// TestBroadcastRoles_SurvivesCanceledRequestContext pins OC-0170:
+// broadcastRoles re-reads the role list with r.Context() AFTER the mutation
+// (create/update/delete/reorder) has already committed. If the admin's
+// request is aborted (tab closed, deadline fired) in that window, the re-read
+// must not ride the same now-canceled context, or the roles_update broadcast
+// is silently skipped and every connected client keeps the stale role list.
+// This mirrors OC-0139's fix for broadcastEmojiSet in api/emoji_handler.go
+// and the analogous fix for broadcastDMOpen in api/dm_handler.go.
+func TestBroadcastRoles_SurvivesCanceledRequestContext(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the request was already aborted by the time the commit lands
+
+	admin.BroadcastRolesForTest(ctx, database, hub)
+
+	if len(hub.rolesUpdates) != 1 {
+		t.Fatalf("roles_update broadcasts = %d, want 1 (fan-out must survive a canceled request context)", len(hub.rolesUpdates))
+	}
+	if len(hub.rolesUpdates[0]) != 3 {
+		t.Errorf("broadcast carried %d roles, want the seeded 3", len(hub.rolesUpdates[0]))
+	}
+}
+
 func TestAdminAPI_ReorderRoles_PartialListRefused(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler, hub, _, token := newRolesHandler(t, database)

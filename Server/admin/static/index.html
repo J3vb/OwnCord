@@ -1158,22 +1158,35 @@ async function clearPermOverride(){
 async function saveChannelPerms(){
   const pc=state.permChannel;if(!pc)return;
   try{
-    /* Quick toggles first: same masks this panel has always written. */
+    /* Quick toggles first: same masks this panel has always written. Track
+       which roles this loop actually wrote — the override matrix below reads
+       its radios from the pre-save snapshot, so if its target is one of
+       these roles that snapshot is already stale and must not be trusted. */
+    const touchedRoles=new Set();
     for(const role of pc.roles){
       if((role.permissions&ADMIN_BIT)!==0)continue;
       const box=document.getElementById('permRole'+role.role_id);
       if(!box)continue;
       const wasHidden=(role.deny&0x2)!==0;
-      if(!box.checked)await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});
-      else if(wasHidden)await api('DELETE','/channels/'+pc.id+'/permissions/'+role.role_id);
+      if(!box.checked){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}
+      else if(wasHidden){await api('DELETE','/channels/'+pc.id+'/permissions/'+role.role_id);touchedRoles.add(role.role_id)}
     }
-    /* Then the matrix, if a target is selected. An all-inherit row is a delete:
-       storing (0,0) would leave a row that resolves to nothing. */
-    const path=permTargetPath();
-    if(path){
-      const masks=collectOverrideMasks();
-      if(masks.allow===0&&masks.deny===0)await api('DELETE',path);
-      else await api('PUT',path,masks);
+    /* Then the matrix, if a target is selected — unless the quick-toggle loop
+       above just wrote that exact role's override row. Its radios reflect
+       state from before that write, so collecting them now would silently
+       undo the toggle (e.g. write back an all-inherit row that DELETEs what
+       was just PUT). An all-inherit row is itself a delete: storing (0,0)
+       would leave a row that resolves to nothing. */
+    const sel=document.getElementById('permTarget');
+    const targetVal=sel?sel.value:'';
+    const targetIsTouchedRole=targetVal.charAt(0)==='r'&&touchedRoles.has(parseInt(targetVal.slice(2),10));
+    if(!targetIsTouchedRole){
+      const path=permTargetPath();
+      if(path){
+        const masks=collectOverrideMasks();
+        if(masks.allow===0&&masks.deny===0)await api('DELETE',path);
+        else await api('PUT',path,masks);
+      }
     }
     closeModal();showToast('Channel permissions updated');renderContent();
   }catch(e){showToast(e.message,'error')}

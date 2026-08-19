@@ -804,10 +804,25 @@ export class E2EEManager {
           });
           return;
         }
-        this.deps.getWs()?.send({
-          type: "voice_e2ee_offer",
-          payload: { target_user_id: userId, encrypted_key: encryptedKey, iv },
-        });
+        // Routed through the shared sendOfferPaced budget (OC-0167) rather
+        // than sent directly — setupKeyExchange's queued-announce drain can
+        // call this once per existing participant in an uninterrupted loop
+        // (a key holder joining a large ongoing call), and those sends must
+        // draw from the same per-second budget as rotation offers instead of
+        // bypassing pacing entirely.
+        const sent = await this.sendOfferPaced(
+          userId,
+          encryptedKey,
+          iv,
+          () => this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair,
+        );
+        if (!sent) {
+          log.info(
+            "E2EE: discarding stale announce-offer (epoch or keypair changed during pacing pause)",
+            { userId, epochBefore, epochNow: this._e2eeEpoch },
+          );
+          return;
+        }
         log.info("E2EE: sent room key offer to peer", { userId });
       }
     } catch (err) {
@@ -948,11 +963,74 @@ export class E2EEManager {
    *  Stay under it with margin rather than reading the limit back from the
    *  server. */
   private static readonly OFFER_RATE_LIMIT_PER_SEC = 60;
-  /** ponytail: fixed batch+sleep pacing, not a token bucket — the server
-   *  window is a flat per-second cap, so "send 60, wait a bit over a
-   *  second" is the whole algorithm needed. Upgrade if the cap ever becomes
-   *  variable or sub-second. */
+  /** Sliding-window length. The server window is a flat per-second cap, so
+   *  "at most LIMIT sends inside any WINDOW_MS-wide slice" is the whole
+   *  algorithm needed. Upgrade if the cap ever becomes variable or
+   *  sub-second. */
   private static readonly OFFER_RATE_WINDOW_MS = 1_100;
+  /** Timestamps (Date.now()) of every voice_e2ee_offer sent within the
+   *  current OFFER_RATE_WINDOW_MS window — an INSTANCE-level sliding-window
+   *  budget shared by every offer-send path (rotation, become-holder, its H3
+   *  late-arrival pass, AND announce-driven offers), never a per-call
+   *  counter. A per-call counter (the original OC-0005 fix) resets to zero
+   *  on every distributeRoomKey invocation, so two back-to-back rotations —
+   *  the second one run immediately by drainPendingRotationOrArmTimer —
+   *  each got their own fresh budget and together could blow through the
+   *  server's single per-second window (OC-0155); handleAnnounceInner's
+   *  drain-time offer send bypassed the budget altogether (OC-0167). Reset
+   *  in clearState(). */
+  private _offerSendTimes: number[] = [];
+
+  /** Drop timestamps that have aged out of the current pacing window. */
+  private pruneOfferSendTimes(): void {
+    const cutoff = Date.now() - E2EEManager.OFFER_RATE_WINDOW_MS;
+    while (this._offerSendTimes.length > 0 && (this._offerSendTimes[0] ?? Infinity) <= cutoff) {
+      this._offerSendTimes.shift();
+    }
+  }
+
+  /**
+   * Send one voice_e2ee_offer, pacing under the server's per-(sender,
+   * channel) sliding-window rate limit (OC-0005/OC-0155/OC-0167;
+   * Server/ws/voice_e2ee.go voiceE2EEOfferRateLimit=64/1s). Prunes this
+   * instance's send timestamps older than OFFER_RATE_WINDOW_MS, and if
+   * OFFER_RATE_LIMIT_PER_SEC sends already fall inside the window, waits for
+   * the oldest of them to age out before sending — so every offer-send path
+   * draws from ONE shared budget instead of each resetting its own.
+   *
+   * `isStale`, when given, is re-checked after any pacing wait (never
+   * before) so a keypair/room-key/epoch swap that lands during the wait is
+   * caught right before the send — the same protection distributeRoomKey and
+   * handleAnnounceInner already apply around the wrap itself (findings v045,
+   * v101). Returns false (and sends nothing) when `isStale` reports true
+   * post-wait.
+   */
+  private async sendOfferPaced(
+    targetUserId: number,
+    encryptedKey: string,
+    iv: string,
+    isStale?: () => boolean,
+  ): Promise<boolean> {
+    this.pruneOfferSendTimes();
+    if (this._offerSendTimes.length >= E2EEManager.OFFER_RATE_LIMIT_PER_SEC) {
+      // Guarded by the length check above — the array is non-empty here.
+      const oldest = this._offerSendTimes[0] as number;
+      const waitMs = oldest + E2EEManager.OFFER_RATE_WINDOW_MS - Date.now();
+      if (waitMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+      }
+      this.pruneOfferSendTimes();
+      if (isStale?.()) {
+        return false;
+      }
+    }
+    this._offerSendTimes.push(Date.now());
+    this.deps.getWs()?.send({
+      type: "voice_e2ee_offer",
+      payload: { target_user_id: targetUserId, encrypted_key: encryptedKey, iv },
+    });
+    return true;
+  }
 
   /**
    * Wrap the room key for each peer and send an offer, one at a time. Bails
@@ -963,36 +1041,23 @@ export class E2EEManager {
    * next rotation (finding v045). Shared by the become-holder distribution,
    * its late-arrival (H3) pass, and the periodic rotation loop.
    *
-   * Paces sends at OFFER_RATE_LIMIT_PER_SEC per OFFER_RATE_WINDOW_MS to stay
-   * under the server's per-(sender,channel) rate limit (OC-0005) — without
-   * this, a rotation in a large channel silently drops every offer past the
-   * cap, and the same tail peers stay stranded on the old key forever.
+   * Sends go through sendOfferPaced's shared instance-level budget to stay
+   * under the server's per-(sender,channel) rate limit (OC-0005/OC-0155) —
+   * without this, a rotation (or two back-to-back rotations) in a large
+   * channel silently drops every offer past the cap, and the same tail peers
+   * stay stranded on the old key forever.
    */
   private async distributeRoomKey(
     keypair: CryptoKeyPair,
     roomKey: Uint8Array,
     peers: Iterable<[number, CryptoKey]>,
   ): Promise<void> {
-    let sentInWindow = 0;
     for (const [peerId, peerKey] of peers) {
       if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
         log.warn("E2EE: aborting key distribution — keypair/room key changed mid-loop", {
           peerId,
         });
         return;
-      }
-      if (sentInWindow >= E2EEManager.OFFER_RATE_LIMIT_PER_SEC) {
-        await new Promise<void>((resolve) => setTimeout(resolve, E2EEManager.OFFER_RATE_WINDOW_MS));
-        sentInWindow = 0;
-        if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
-          log.info(
-            "E2EE: aborting key distribution — keypair/room key changed during pacing pause",
-            {
-              peerId,
-            },
-          );
-          return;
-        }
       }
       const { encryptedKey, iv } = await wrapRoomKey(keypair.privateKey, peerKey, roomKey);
       if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
@@ -1001,11 +1066,19 @@ export class E2EEManager {
         });
         return;
       }
-      this.deps.getWs()?.send({
-        type: "voice_e2ee_offer",
-        payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
-      });
-      sentInWindow++;
+      const sent = await this.sendOfferPaced(
+        peerId,
+        encryptedKey,
+        iv,
+        () => this._ecdhKeyPair !== keypair || this._roomKey !== roomKey,
+      );
+      if (!sent) {
+        log.info(
+          "E2EE: discarding stale room-key offer (keypair/room key changed during pacing pause)",
+          { peerId },
+        );
+        return;
+      }
     }
   }
 
@@ -1280,6 +1353,10 @@ export class E2EEManager {
     this._rotationPending = false;
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
+    // The server's offer rate limit is scoped per (sender, channel) — a
+    // fresh channel gets a fresh bucket server-side, so stale timestamps
+    // from the old channel must not throttle the new one.
+    this._offerSendTimes.length = 0;
     this.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a

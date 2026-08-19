@@ -239,15 +239,20 @@ function createMemberItem(
       const currentUserId = authStore.getState().user?.id ?? 0;
       const isSelf = member.id === currentUserId;
       const onMessageUser = opts.onMessageUser;
+      // `member` is the row's render-time snapshot; a presence-only update
+      // (see patchPresence) recolors the dot in place without rebuilding the
+      // row, so that snapshot's `status` can be stale. Re-resolve against the
+      // live store so the popup always agrees with the dot it was opened from.
+      const live = membersStore.getState().members.get(member.id) ?? member;
       activePopup = createUserProfilePopup({
         user: {
-          id: member.id,
-          username: member.username,
-          avatar: member.avatar,
-          role: member.role,
-          status: member.status,
-          displayName: member.displayName,
-          customStatus: member.customStatus,
+          id: live.id,
+          username: live.username,
+          avatar: live.avatar,
+          role: live.role,
+          status: live.status,
+          displayName: live.displayName,
+          customStatus: live.customStatus,
         },
         anchorX: e.clientX,
         anchorY: e.clientY,

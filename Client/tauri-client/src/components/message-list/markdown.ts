@@ -96,7 +96,7 @@ function urlEnd(src: string, i: number): number {
       end -= run[0].length;
       continue;
     }
-    if (end > min && src[end - 1] === "*") {
+    if (end > min && (src[end - 1] === "*" || src[end - 1] === "_")) {
       end--;
       continue;
     }

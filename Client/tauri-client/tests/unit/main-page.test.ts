@@ -678,3 +678,52 @@ describe("MainPage — presence", () => {
     });
   });
 });
+
+describe("MainPage — server restart banner", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    page?.destroy?.();
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it("re-syncs to the real (connected) status instead of counting down to a fake Reconnecting on an update_aborted cancel (OC-0164)", () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    // Server announces a real restart countdown.
+    ws.emit("server_restart", { reason: "update", delay_seconds: 5 });
+
+    const banner = container.querySelector(".reconnecting-banner") as HTMLElement;
+    expect(banner.classList.contains("visible")).toBe(true);
+    expect(banner.textContent).toBe("Server restarting in 5 seconds...");
+
+    // The staged update then fails to swap; the server cancels the countdown
+    // it already announced with a zero-delay update_aborted broadcast
+    // (Server/admin/update_handlers.go:181). The socket never actually
+    // dropped — uiStore.connectionStatus is still "connected".
+    expect(uiStore.getState().connectionStatus).toBe("connected");
+    ws.emit("server_restart", { reason: "update_aborted", delay_seconds: 0 });
+
+    // The banner must re-sync to the real (connected) status — hidden — not
+    // count down to a permanent "Reconnecting..." over a healthy connection.
+    expect(banner.classList.contains("visible")).toBe(false);
+
+    // And nothing left running should later flip it to Reconnecting either
+    // (the buggy path fed 0 into showRestart's setInterval, which falls
+    // through remaining<=0 into showReconnecting on the very next tick).
+    vi.advanceTimersByTime(2000);
+    expect(banner.textContent).not.toBe("Reconnecting...");
+    expect(banner.classList.contains("visible")).toBe(false);
+  });
+});

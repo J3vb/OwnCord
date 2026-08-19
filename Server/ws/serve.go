@@ -32,6 +32,24 @@ const (
 	maxColdReplay = 5000
 )
 
+// handshakeWrite writes one handshake-phase message (auth_ok, ready, or a
+// replay event) under writeTimeout, instead of the bare ctx every caller here
+// otherwise has on hand.
+//
+// Every handshake write runs against ctx = r.Context() from ServeWS.
+// websocket.Accept hijacks the connection, which stops net/http's own
+// mechanism for cancelling that context on client disconnect, so without this
+// wrapper ctx is never cancelled while the handler is blocked inside
+// conn.Write — a peer that stops reading (or whose receive window closes)
+// pins the write, the handler goroutine, and the socket forever (OC-0152).
+// writePumpWrite (serve_pumps.go) already bounds its writes the same way;
+// this brings the handshake writes in serve.go up to the same guarantee.
+func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error {
+	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	return conn.Write(wCtx, websocket.MessageText, msg)
+}
+
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
 // then drives the client's read/write loops.
 // Do not wrap with AuthMiddleware — WS does its own auth.
@@ -510,14 +528,14 @@ func (h *Hub) reconnectWriteReplay(
 	// is included in the payload so the client can attribute reconnect
 	// behaviour without separate metric scraping.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, replaySource)); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return false
 	}
 	for _, evt := range events {
-		if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
+		if err := handshakeWrite(ctx, conn, evt); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -745,7 +763,7 @@ func (h *Hub) handleFreshConnect(
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -753,7 +771,7 @@ func (h *Hub) handleFreshConnect(
 	}
 	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
-		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
+		if err := handshakeWrite(ctx, conn, ready); err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -761,8 +779,7 @@ func (h *Hub) handleFreshConnect(
 		}
 	} else {
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
-		_ = conn.Write(ctx, websocket.MessageText,
-			buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
 		return readyErr

@@ -98,6 +98,44 @@ func TestSetup_CreatesOwner(t *testing.T) {
 	}
 }
 
+// TestSetup_UsernameNotHTMLEscaped pins OC-0153: handleSetup must not persist
+// an HTML-escaped owner username. setupPrecheck canonicalized the username
+// with a bare bluemonday.StrictPolicy().Sanitize call, which HTML-escapes
+// survivors (' -> &#39;, & -> &amp;, " -> &#34;), so a name like "O'Brien"
+// was stored as "O&#39;Brien" — different from what the owner typed and from
+// what handleLogin looks up later (which only trims). That permanently locks
+// the Owner out of their own account. Mirrors the already-fixed sibling in
+// Server/api/auth_handler_test.go (TestRegister_UsernameNotHTMLEscaped).
+func TestSetup_UsernameNotHTMLEscaped(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+
+	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
+		"username": "O'Brien",
+		"password": "SecurePass123!",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Username != "O'Brien" {
+		t.Errorf("setup response username = %q, want %q (must not be HTML-escaped)", resp.Username, "O'Brien")
+	}
+
+	// The username handleLogin will look up (raw, only trimmed) must match
+	// what setup stored, or the owner is locked out of their own account.
+	stored, err := database.GetUserByUsername(context.Background(), "O'Brien")
+	if err != nil || stored == nil {
+		t.Fatalf("GetUserByUsername(%q) = (%v, %v), want a match", "O'Brien", stored, err)
+	}
+}
+
 func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))

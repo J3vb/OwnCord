@@ -1,7 +1,10 @@
 package admin
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,6 +12,14 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
+
+// BroadcastRolesForTest exposes broadcastRoles for external tests. It builds
+// a bare *http.Request carrying ctx, since broadcastRoles's only use of its
+// *http.Request argument is r.Context().
+func BroadcastRolesForTest(ctx context.Context, database *db.DB, hub HubBroadcaster) {
+	r := httptest.NewRequest(http.MethodPost, "/roles", nil).WithContext(ctx)
+	broadcastRoles(r, database, hub)
+}
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
 // *auth.RateLimiter it creates for the /setup endpoint. NewAdminAPI returns
@@ -36,6 +47,17 @@ func SetSetupLimiterReapTiming(interval, maxWindow time.Duration) (restore func(
 // SetBackupBaseDir overrides backupBaseDir so tests can point backup handlers
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
+
+// SetPatchChannelPostCommitHook installs h to run synchronously right after
+// handlePatchChannel's AdminUpdateChannel commit, before the post-commit
+// re-read and hub fan-out — the only way to deterministically land a caller
+// cancellation in that exact window (OC-0158) instead of racing wall-clock
+// timing.
+func SetPatchChannelPostCommitHook(h func()) (restore func()) {
+	prev := patchChannelPostCommitHook
+	patchChannelPostCommitHook = h
+	return func() { patchChannelPostCommitHook = prev }
+}
 
 // StubCopyBackup swaps the restore path's file-copy hook so tests can inject
 // mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest

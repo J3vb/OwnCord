@@ -119,6 +119,13 @@ fn set_with(
     fallback_set: impl FnOnce(&str, &str) -> Result<(), String>,
     fallback_clear: impl FnOnce(&str),
 ) -> Result<Backend, String> {
+    // Set only when the keyring write itself failed and a stale prior entry
+    // needs to be purged — but not until the fallback write below has proven
+    // it actually committed a replacement copy. Deleting eagerly here would,
+    // if the fallback write also fails, destroy the only good copy of the
+    // secret and leave nothing anywhere for it to hand off to.
+    let mut purge_stale_keyring_after_fallback_commits = false;
+
     match keyring_set(account, secret) {
         Ok(()) => match keyring_get(account) {
             // The normal path: written and read back byte-for-byte.
@@ -160,17 +167,26 @@ fn set_with(
             // successful write. get() reads the keyring first, so leaving
             // that stale entry in place would shadow the fresh secret parked
             // in the fallback below — mirrors the read-back-mismatch arm
-            // above, which purges for the same reason.
-            if let Err(de) = keyring_delete(account) {
-                log::warn!(
-                    "{SERVICE}: could not remove a stale keyring entry for '{account}' after a \
-                     failed write: {de}"
-                );
-            }
+            // above, which purges for the same reason. But the purge must
+            // wait until fallback_set below has actually committed the
+            // replacement: deleting now, before that write is known to
+            // succeed, risks erasing the last good copy of the secret if the
+            // fallback write fails too.
+            purge_stale_keyring_after_fallback_commits = true;
         }
     }
 
     fallback_set(account, secret)?;
+
+    if purge_stale_keyring_after_fallback_commits {
+        if let Err(de) = keyring_delete(account) {
+            log::warn!(
+                "{SERVICE}: could not remove a stale keyring entry for '{account}' after a \
+                 failed write: {de}"
+            );
+        }
+    }
+
     log::warn!(
         "{SERVICE}: account '{account}' is stored in the encrypted fallback file, not the OS \
          credential store. See docs/credential-storage.md"
@@ -558,6 +574,37 @@ mod tests {
         assert!(
             delete_called.get(),
             "a failed keyring write must delete any stale prior entry before falling back"
+        );
+    }
+
+    #[test]
+    fn set_with_keeps_the_stale_keyring_entry_when_the_write_and_fallback_both_fail() {
+        // The bug: a failed keyring write must not delete the existing
+        // keyring entry before the fallback write it is handing off to has
+        // actually committed. If the fallback write also fails, deleting
+        // first destroys the only good copy of the secret and the caller
+        // (e.g. save_identity_key) gets an Err with nothing left anywhere —
+        // the next get() then returns Ok(None), indistinguishable from
+        // first login.
+        use std::cell::Cell;
+        let delete_called = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "new-secret",
+            |_, _| Err("write failed".to_string()),
+            |_| panic!("keyring_get must not run after a failed write"),
+            |_| {
+                delete_called.set(true);
+                Ok(())
+            },
+            |_, _| Err("fallback failed too".to_string()),
+            |_| {},
+        );
+        assert!(result.is_err());
+        assert!(
+            !delete_called.get(),
+            "a failed keyring write must not delete the existing entry until the fallback \
+             write has actually committed a replacement copy"
         );
     }
 

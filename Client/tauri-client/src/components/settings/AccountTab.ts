@@ -1148,7 +1148,18 @@ export function buildAccountTab(
       void options
         .onUpdateProfile({ username: newName })
         .then(() => {
-          setText(headerName, newName);
+          // The header shows the resolved display name, not the raw
+          // username — mirror buildProfileFields' onSaved callback so the
+          // two writers of `.account-header-name` agree (OC-0188). The
+          // store is already updated by the time this resolves, so read it
+          // fresh rather than assuming the username *is* the display name.
+          setText(
+            headerName,
+            resolveDisplayName({
+              username: newName,
+              displayName: authStore.getState().user?.display_name ?? null,
+            }),
+          );
           setText(usernameValue, newName);
           editForm.style.display = "none";
         })

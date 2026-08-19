@@ -25,8 +25,11 @@ let mockCurrentChannelId: number | null = null;
 let mockLocalMuted = false;
 let mockLocalDeafened = false;
 let mockPttGated = false;
+let mockPttPollingLive = false;
 const mockSetPttGated = vi.fn();
-const mockSetPttPollingLive = vi.fn();
+const mockSetPttPollingLive = vi.fn((live: boolean) => {
+  mockPttPollingLive = live;
+});
 
 /** Captures the listener passed to voiceStore.subscribe() so tests can fire
  *  a simulated store notification (real createStore() batches these via
@@ -69,7 +72,8 @@ vi.mock("@stores/voice.store", () => ({
     subscribe: (listener: (state: { localMuted: boolean }) => void) => mockSubscribeStore(listener),
   },
   setPttGated: (...args: unknown[]) => mockSetPttGated(...args),
-  setPttPollingLive: (...args: unknown[]) => mockSetPttPollingLive(...args),
+  setPttPollingLive: (live: boolean) => mockSetPttPollingLive(live),
+  isPttPollingLive: () => mockPttPollingLive,
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -103,8 +107,12 @@ function resetAll(): void {
   mockLocalMuted = false;
   mockLocalDeafened = false;
   mockPttGated = false;
+  mockPttPollingLive = false;
   mockSetPttGated.mockReset();
   mockSetPttPollingLive.mockReset();
+  mockSetPttPollingLive.mockImplementation((live: boolean) => {
+    mockPttPollingLive = live;
+  });
   mockInvoke.mockReset();
   mockListen.mockReset();
   mockSubscribeStore.mockReset();
@@ -497,6 +505,107 @@ describe("updatePttKey", () => {
     // which in turn calls ptt_set_key (again) and ptt_start
     const startCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ptt_start");
     expect(startCalls.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: updatePttKey gates an already-hot mic when bound mid-call (OC-0162)
+// ---------------------------------------------------------------------------
+
+describe("updatePttKey gates the mic when binding a key mid-call (OC-0162)", () => {
+  beforeEach(async () => {
+    resetAll();
+    // The module-level `listening` flag is not reset by resetAll() (it lives
+    // in ptt.ts, not in the mocks) and earlier describe blocks may leave it
+    // true — drain it so each test here starts from the same "no key bound
+    // yet" state the finding's repro assumes.
+    await stopPtt();
+    mockInvoke.mockClear();
+  });
+
+  it("gates and mutes the mic when a key is bound while already in a voice call", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    // Already in a voice call, joined with no PTT key bound — the mic was
+    // published ungated (pttArmed was false at join time).
+    mockCurrentChannelId = 7;
+    mockPttGated = false;
+    mockLocalMuted = false;
+    mockLocalDeafened = false;
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    // The user now binds a PTT key from Settings -> Keybinds.
+    await updatePttKey(0x20);
+
+    // Without the fix, updatePttKey only starts the poller (initPtt) and
+    // never applies the gate — the idle key produces no ptt-state transition
+    // (see src-tauri/src/ptt.rs ptt_transition), so the mic stays hot forever
+    // until the user's first physical press+release.
+    expect(mockSetPttGated).toHaveBeenCalledWith(true);
+    await vi.waitFor(() => {
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+    });
+  });
+
+  it("does not gate the mic when binding a key while not in a voice call", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = null; // not in a call
+    mockPttGated = false;
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    await updatePttKey(0x20);
+
+    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetMuted).not.toHaveBeenCalledWith(true);
+  });
+
+  it("does not gate the mic when the backend cannot actually observe key state", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7; // in a call
+    mockPttGated = false;
+    // ptt_polling_supported === false: macOS is_key_down stub / Wayland — no
+    // ptt-state event can ever arrive, so gating here would strand the mic
+    // muted forever with no press able to lift it.
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? false : undefined),
+    );
+
+    await updatePttKey(0x20);
+
+    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockSetMuted).not.toHaveBeenCalledWith(true);
+  });
+
+  it("does not re-gate when the mic is already PTT-gated", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7;
+    mockPttGated = true; // already gated (e.g. join-time gate already armed)
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+    );
+
+    await updatePttKey(0x20);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+    expect(mockSetMuted).not.toHaveBeenCalledWith(true);
   });
 });
 

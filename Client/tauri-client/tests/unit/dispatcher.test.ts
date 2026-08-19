@@ -1004,6 +1004,22 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBe(7);
   });
 
+  it("ready auto-selects an announcement channel when no text channel is visible", () => {
+    // Announcement channels are full message channels everywhere else (the
+    // server ships unread_count/can_send for them, the sidebar renders them,
+    // ChannelController gives them a composer) — a user whose only readable
+    // channel is an announcement channel must still land on it, not a blank
+    // pane, on first ready.
+    mock.dispatch("ready", {
+      channels: [{ id: 9, name: "news", type: "announcement", category: null, position: 0 }],
+      members: [],
+      voice_states: [],
+      roles: [],
+    });
+
+    expect(channelsStore.getState().activeChannelId).toBe(9);
+  });
+
   it("ready does NOT change active channel when it is still present in the payload", () => {
     // Regression guard for the auto-select branch: an already-active channel
     // that is STILL in the new snapshot must not be reassigned to the first
@@ -2048,6 +2064,51 @@ describe("WS Dispatcher", () => {
     mock.dispatch("channel_delete", { id: 10 });
 
     expect(channelsStore.getState().activeChannelId).toBeNull();
+  });
+
+  it("wires channel_delete and redirects to an announcement channel when no text channels remain", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(10, {
+        id: 10,
+        name: "active-ch",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      ch.set(30, {
+        id: 30,
+        name: "news",
+        type: "announcement" as const,
+        category: null,
+        position: 1,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: false,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 10 };
+    });
+
+    mock.dispatch("channel_delete", { id: 10 });
+
+    // The only remaining channel is an announcement channel — a readable,
+    // full message channel — not a blank pane.
+    expect(channelsStore.getState().activeChannelId).toBe(30);
   });
 
   it("wires member_update to update role", () => {
@@ -3459,6 +3520,49 @@ describe("WS Dispatcher", () => {
       mock.dispatch("dm_channel_close", { channel_id: 50 });
 
       expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
+    it("falls back to an announcement channel when the closed DM was active, no DMs remain, and there is no text channel", () => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            participants: [],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(30, {
+          id: 30,
+          name: "news",
+          type: "announcement" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: false,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        return { ...prev, channels: ch, activeChannelId: 50 };
+      });
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(30);
     });
 
     it("does not change the active channel when the closed DM was not active", () => {

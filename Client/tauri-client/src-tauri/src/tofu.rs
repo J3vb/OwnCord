@@ -288,8 +288,24 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
 /// parsed on the TS side, which lowercases) — without folding case here, two
 /// callers with the same server in different case would pin/read different
 /// entries, opening a second, unpinned proxy tunnel.
+///
+/// Also strips brackets from a *portless* bracketed IPv6 literal ("[::1]" →
+/// "::1"), after the `:443` strip above runs (so "[::1]:443" also unwraps).
+/// The ws proxy computes this key from a bracketed `wss://[::1]/...`
+/// authority (ws.ts's `bracketBareIPv6Host` has to bracket a bare IPv6 host
+/// for the URL to parse at all — see OC-0163), while the http/livekit proxies
+/// may see the bare or default-port-bracketed form of the very same server —
+/// without unwrapping here those resolve to different keys and the same
+/// server's certificate gets pinned (and re-confirmed by the user) twice. A
+/// *non-default* port keeps its brackets: "[::1]:8443" stays its own distinct
+/// key, matching how a plain "host:8443" is never collapsed into "host".
 pub(crate) fn cert_store_key(host: &str) -> String {
-    host.strip_suffix(":443").unwrap_or(host).to_ascii_lowercase()
+    let stripped = host.strip_suffix(":443").unwrap_or(host);
+    let unbracketed = stripped
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(stripped);
+    unbracketed.to_ascii_lowercase()
 }
 
 /// Extract the host (with any non-default port) from a `wss://` URL.
@@ -393,6 +409,26 @@ mod tests {
         assert_eq!(cert_store_key("example.com:443"), "example.com");
         assert_eq!(cert_store_key("example.com"), "example.com");
         assert_eq!(cert_store_key("example.com:8443"), "example.com:8443");
+    }
+
+    // OC-0163: ws_connect (via extract_host on a bracketed "wss://[::1]/..."
+    // URL, once ws.ts brackets a bare IPv6 host to make it parse) and
+    // start_http_proxy/start_livekit_proxy (which see the bare or
+    // livekit-bracketed form of the SAME server) must resolve to the SAME
+    // pin, or the user is prompted to accept the first-use certificate twice
+    // for one server. A bracketed literal with a non-default port keeps its
+    // own distinct key, matching the un-bracketed "host:port" behavior above.
+    #[test]
+    fn cert_store_key_treats_bracketed_and_bare_ipv6_as_the_same_host() {
+        assert_eq!(cert_store_key("[2001:db8::1]"), cert_store_key("2001:db8::1"));
+        assert_eq!(cert_store_key("2001:db8::1"), "2001:db8::1");
+        assert_eq!(cert_store_key("[2001:db8::1]"), "2001:db8::1");
+        // The default-port livekit form ("[host]:443") also collapses to the
+        // same key as the portless forms above.
+        assert_eq!(cert_store_key("[2001:db8::1]:443"), "2001:db8::1");
+        // A non-default port keeps the brackets — it is a genuinely distinct
+        // key from the default-port host, same as the plain "host:port" case.
+        assert_eq!(cert_store_key("[2001:db8::1]:8443"), "[2001:db8::1]:8443");
     }
 
     // DNS names are case-insensitive, but a raw host string (a profile-entered

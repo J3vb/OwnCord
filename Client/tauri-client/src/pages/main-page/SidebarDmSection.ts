@@ -94,7 +94,20 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       });
       const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
       const parts: Element[] = [statusDot, name];
-      if (dm.unreadCount > 0) {
+      // A mention badge outranks the plain unread badge, and a mute never
+      // dims or suppresses it: a mute silences chatter, never something
+      // addressed to the reader directly (see lib/channel-mutes.ts).
+      if (dm.mentionCount > 0) {
+        const mentionBadge = createElement(
+          "span",
+          {
+            class: "dm-mention-badge",
+            style: `margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
+          },
+          String(dm.mentionCount),
+        );
+        parts.push(mentionBadge);
+      } else if (dm.unreadCount > 0) {
         // Muted: the count still increments (it is a fact about the channel),
         // it just stops shouting. Only the colour changes.
         const badge = createElement(
@@ -124,9 +137,11 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
     // Update total unread badge on the DM header. Muted conversations are
     // excluded: the header badge is an interrupt, and a muted DM asked not to
-    // be one. Its own row still shows its dimmed count.
+    // be one. Its own row still shows its dimmed count. A mention is the one
+    // thing a mute must never swallow, so a muted channel still contributes
+    // its mentionCount (never its raw unreadCount) to the total.
     const totalUnread = dmChannels.reduce(
-      (sum, c) => sum + (isChannelMuted(c.channelId) ? 0 : c.unreadCount),
+      (sum, c) => sum + (isChannelMuted(c.channelId) ? c.mentionCount : c.unreadCount),
       0,
     );
     if (totalUnread > 0) {

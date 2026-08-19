@@ -4,6 +4,7 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "./logger";
 import { ensureHttpProxy } from "./httpProxy";
+import { isValidHost } from "./hostValidation";
 import type {
   AuthResponse,
   RegisterResponse,
@@ -77,22 +78,6 @@ const log = createLogger("api");
 
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
-  // oxlint-disable-next-line consistent-function-scoping -- co-located with createApiClient for encapsulation
-  function isValidHost(host: string): boolean {
-    if (host.length > 253) return false;
-    // Bracketed IPv6 literal ("[::1]" or "[::1]:8443") — same convention as
-    // livekitSession.ts's ensureLiveKitProxy and http_proxy.rs /
-    // livekit_proxy.rs's validate_remote_host + parse_server_name.
-    if (/^\[[0-9A-Fa-f:.]+\](:\d+)?$/.test(host)) return true;
-    // Bare (unbracketed) IPv6 literal, e.g. "2001:db8::1" or "::1". More than
-    // one colon means the whole string is the address — a single colon is
-    // reserved for the host:port separator below, matching how
-    // ensureLiveKitProxy tells "[::1]:port" apart from "host:port".
-    if ((host.match(/:/g) ?? []).length > 1 && /^[0-9A-Fa-f:.]+$/.test(host)) return true;
-    // DNS name or IPv4 literal, optionally with a port.
-    return /^[\w.-]+(:\d+)?$/.test(host);
-  }
-
   let config = { ...initialConfig };
 
   // REST traffic is tunneled through the Rust HTTP TOFU proxy: instead of
@@ -124,6 +109,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
+    opts?: { skipUnauthorized?: boolean },
   ): Promise<T> {
     const url = `${urlBase}${path}`;
     const init: RequestInit = {
@@ -153,7 +139,17 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     log.debug(`${label} ←`, { method, path, status: res.status });
 
     if (res.status === 401) {
-      onUnauthorized?.();
+      // Most 401s mean "the session is no longer valid" — the global sink
+      // (onUnauthorized) reacts by logging the user out and, for a
+      // remembered host, deleting the saved credential. A handful of
+      // endpoints instead use 401 as an ordinary per-call verdict (e.g.
+      // "invalid two-factor code" on totp/confirm) while the caller's
+      // session stays perfectly valid; those callers opt out via
+      // `skipUnauthorized` so a wrong answer there doesn't sign the user
+      // out and erase their stored credential.
+      if (!opts?.skipUnauthorized) {
+        onUnauthorized?.();
+      }
       const err = await parseError(res);
       throw new ApiClientError(401, err.error, err.message);
     }
@@ -186,8 +182,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
+    opts?: { skipUnauthorized?: boolean },
   ): Promise<T> {
-    return doFetch<T>("API", await baseUrl(), method, path, body, signal);
+    return doFetch<T>("API", await baseUrl(), method, path, body, signal, opts);
   }
 
   async function adminRequest<T>(
@@ -393,7 +390,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     confirmTotp(password: string, code: string, signal?: AbortSignal): Promise<void> {
-      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal);
+      // Unlike every other endpoint on this client, a wrong answer here
+      // (an invalid enrollment code) is reported as 401 UNAUTHORIZED rather
+      // than 400/403 — see doFetch's `skipUnauthorized`. Without this the
+      // global session-expiry sink would fire on a mistyped code, signing
+      // the user out and deleting their stored credential for a session
+      // that was never actually invalid.
+      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal, {
+        skipUnauthorized: true,
+      });
     },
 
     disableTotp(password: string, signal?: AbortSignal): Promise<void> {

@@ -3,23 +3,30 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 let storeCallback: (() => void) | null = null;
 let typingUsers: Array<{ id: number; username: string }> = [];
 
-vi.mock("@stores/members.store", () => ({
-  membersStore: {
-    subscribe: vi.fn((cb: () => void) => {
-      storeCallback = cb;
-      return () => {
-        storeCallback = null;
-      };
-    }),
-    subscribeSelector: vi.fn((_sel: unknown, listener: () => void) => {
-      storeCallback = listener;
-      return () => {
-        storeCallback = null;
-      };
-    }),
-  },
-  getTypingUsers: vi.fn(() => typingUsers),
-}));
+vi.mock("@stores/members.store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stores/members.store")>();
+  return {
+    membersStore: {
+      subscribe: vi.fn((cb: () => void) => {
+        storeCallback = cb;
+        return () => {
+          storeCallback = null;
+        };
+      }),
+      subscribeSelector: vi.fn((_sel: unknown, listener: () => void) => {
+        storeCallback = listener;
+        return () => {
+          storeCallback = null;
+        };
+      }),
+    },
+    getTypingUsers: vi.fn(() => typingUsers),
+    // Real implementation, not a stub: TypingIndicator renders through this
+    // helper, and the fixtures below (id/username only, no displayName) must
+    // fall through to `username` exactly as production members do.
+    memberDisplayName: actual.memberDisplayName,
+  };
+});
 
 import { createTypingIndicator } from "@components/TypingIndicator";
 

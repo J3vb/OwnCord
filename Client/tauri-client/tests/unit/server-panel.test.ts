@@ -908,6 +908,44 @@ describe("ServerPanel", () => {
       expect(onAddProfile).toHaveBeenCalledWith("Port-less", "myserver.example.com");
     });
 
+    it("accepts a bracketed IPv6 host with port (OC-0187)", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "v6";
+      inputs[1]!.value = "[::1]:8443";
+
+      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
+      saveBtn.click();
+
+      expect(onAddProfile).toHaveBeenCalledWith("v6", "[::1]:8443");
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+    });
+
+    it("accepts a bare (unbracketed) IPv6 host without port (OC-0187)", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "v6-bare";
+      inputs[1]!.value = "2001:db8::1";
+
+      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
+      saveBtn.click();
+
+      expect(onAddProfile).toHaveBeenCalledWith("v6-bare", "2001:db8::1");
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+    });
+
     it("submits on Enter key in host input", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);

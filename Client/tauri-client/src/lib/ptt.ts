@@ -5,7 +5,7 @@
  */
 
 import { loadPref, savePref } from "@components/settings/helpers";
-import { voiceStore, setPttGated, setPttPollingLive } from "@stores/voice.store";
+import { voiceStore, setPttGated, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "./logger";
 
 const log = createLogger("ptt");
@@ -268,6 +268,23 @@ export async function updatePttKey(vk: number): Promise<void> {
     await invoke("ptt_set_key", { vkCode: vk });
     if (!listening && vk !== 0) {
       await initPtt();
+      // Binding a key while a call is already up: the Rust poller only
+      // emits 'ptt-state' on a press/release TRANSITION (ptt_transition
+      // returns None while the key stays idle — see src-tauri/src/ptt.rs),
+      // so an idle key produces no event to gate the freshly-armed mic.
+      // Mirror livekitSession's join-time computation (restoreLocalVoiceState)
+      // here so the mic doesn't stay hot until the user's first press+release.
+      const { currentChannelId, pttGated, localMuted } = voiceStore.getState();
+      if (currentChannelId !== null && isPttPollingLive() && pttGated !== true) {
+        setPttGated(true);
+        // Muting is always safe (mirrors the ptt-state release handler
+        // below) — record whether this is what muted the mic so the next
+        // press may lift it (v006: never lift a mute the user asked for).
+        void import("./livekitSession")
+          .then(({ setMuted }) => setMuted(true))
+          .catch((e) => log.warn("Failed to gate mic after binding PTT key mid-call", e));
+        pttOwnsMute = !localMuted;
+      }
     }
     if (vk === 0) {
       await stopPtt();

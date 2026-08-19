@@ -526,6 +526,42 @@ describe("ChannelSidebar", () => {
     expect(userName?.textContent).toBe("Alice");
   });
 
+  it("shows the member's display name (nickname), not the raw username, in the voice roster", () => {
+    setChannels(testChannels);
+    // Member has a nickname set — every other identity surface (member list,
+    // message rows, DM sidebar) renders it instead of the raw username.
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "Bob",
+            displayName: "Bobby",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 10,
+      username: "Bob",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const userName = container.querySelector(".voice-user-item .vu-name");
+    expect(userName?.textContent).toBe("Bobby");
+  });
+
   it("highlights voice channel as active when user is joined", () => {
     setChannels(testChannels);
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));

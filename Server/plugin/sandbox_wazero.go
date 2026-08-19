@@ -84,7 +84,18 @@ func platformInit(cfg Config) (any, func(context.Context) error, error) {
 	if memMB <= 0 {
 		memMB = 64 // default 64 MiB per plugin runtime
 	}
-	memPages := uint32(memMB) * 1024 * 1024 / wazeroPageBytes
+	// Compute the byte count in 64-bit before dividing down to pages: doing
+	// the multiplication in uint32 wraps at 4 GiB, so a configured
+	// max_memory_mb at or above 4096 would silently truncate (or zero out)
+	// the limit actually installed. wazero's own ceiling is 65536 pages
+	// (4 GiB, wasm32's addressable maximum; WithMemoryLimitPages panics
+	// above it), so clamp to that after computing in 64-bit.
+	const wazeroMaxPages = 65536
+	pages := uint64(memMB) * 1024 * 1024 / wazeroPageBytes
+	if pages > wazeroMaxPages {
+		pages = wazeroMaxPages
+	}
+	memPages := uint32(pages)
 
 	rt := wazero.NewRuntimeWithConfig(ctx,
 		wazero.NewRuntimeConfig().
