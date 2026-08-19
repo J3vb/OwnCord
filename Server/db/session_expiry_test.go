@@ -79,42 +79,55 @@ func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 	}
 }
 
-// TestMigration031_NormalizesLegacyFormats verifies the one-time UPDATE pass:
-// space-separated and Z-less rows become the RFC3339-Z layout.
+// TestMigration031_NormalizesLegacyFormats drives the real migration file:
+// it builds the pre-031 schema with migrationCutoffFS, seeds legacy
+// space-separated and Z-less expires_at rows on it, then applies the full
+// chain so migration 031's one-time UPDATE pass is what normalizes them.
 func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
+	database := openMemory(t)
 	ctx := context.Background()
+
+	if err := db.MigrateFS(database, migrationCutoffFS{underlying: migrations.FS, cutoff: "031_"}); err != nil {
+		t.Fatalf("MigrateFS building pre-031 schema: %v", err)
+	}
+	var idx int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sessions_expires_at'`).Scan(&idx); err != nil {
+		t.Fatal(err)
+	}
+	if idx != 0 {
+		t.Fatal("idx_sessions_expires_at exists before 031 ran — cutoff FS leaked the migration")
+	}
+
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'u', 'x', 1)`); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	// Simulate pre-031 rows, then re-run the normalization statements the
-	// migration contains (the migration itself already ran on the empty DB).
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO sessions (user_id, token, expires_at) VALUES (1, 'legacy', '2030-05-01 10:00:00')`); err != nil {
-		t.Fatal(err)
+	cases := []struct{ token, stored, want string }{
+		{"legacy_space", "2030-05-01 10:00:00", "2030-05-01T10:00:00Z"},
+		{"legacy_no_z", "2030-06-02T11:22:33", "2030-06-02T11:22:33Z"},
+		{"already_normalized", "2030-07-03T12:34:56Z", "2030-07-03T12:34:56Z"},
 	}
-	if _, err := database.ExecContext(ctx,
-		`UPDATE sessions SET expires_at = replace(expires_at, ' ', 'T') WHERE instr(expires_at, ' ') > 0`); err != nil {
-		t.Fatal(err)
+	for _, tc := range cases {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO sessions (user_id, token, expires_at) VALUES (1, ?, ?)`, tc.token, tc.stored); err != nil {
+			t.Fatalf("seed session %s: %v", tc.token, err)
+		}
 	}
-	if _, err := database.ExecContext(ctx,
-		`UPDATE sessions SET expires_at = expires_at || 'Z' WHERE length(expires_at) = 19`); err != nil {
-		t.Fatal(err)
+
+	// Only 031 is left to apply, so any change below is its doing.
+	if err := db.MigrateFS(database, migrations.FS); err != nil {
+		t.Fatalf("MigrateFS applying 031: %v", err)
 	}
-	var got string
-	if err := database.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions WHERE token = 'legacy'`).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != "2030-05-01T10:00:00Z" {
-		t.Fatalf("normalized expires_at = %q, want 2030-05-01T10:00:00Z", got)
+
+	for _, tc := range cases {
+		var got string
+		if err := database.QueryRowContext(ctx,
+			`SELECT expires_at FROM sessions WHERE token = ?`, tc.token).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", tc.token, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: expires_at = %q, want %q", tc.token, got, tc.want)
+		}
 	}
 }
