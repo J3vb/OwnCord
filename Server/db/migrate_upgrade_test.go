@@ -10,8 +10,9 @@ package db_test
 //  2. A database that was created at an older schema point (migrations
 //     001..019 only, before any of the phase 2-6 additions) and already has
 //     data in it can be upgraded by applying the remaining migrations
-//     (020..028) without error, and every pre-existing row survives with sane
-//     defaults for the newly added columns.
+//     (020..head) without error, and every pre-existing row survives with sane
+//     defaults for the newly added columns — including the attachments rows
+//     that migration 030 copies through a DROP/RENAME table rebuild.
 //
 // TestMigrate_022SeedsMentionEveryone and TestMigrate_022CreatesMentionSchema
 // in migrate_test.go already lock the mention-specific pieces in isolation;
@@ -145,14 +146,19 @@ func TestMigrate_FullChainSchemaIsCoherent(t *testing.T) {
 // TestMigrate_UpgradeFromMigration019PreservesData simulates upgrading a
 // database that was last migrated at 019_perf_indexes.sql: it builds that
 // schema via a filtered view of the real embedded migrations, inserts a row
-// each into users/roles/channels/messages/voice_states/emoji (the tables the
-// 020..028 migrations touch), then applies the full chain and asserts:
+// each into users/roles/channels/messages/voice_states/emoji/attachments (the
+// tables the 020..head migrations touch), then applies the full chain and
+// asserts:
 //
 //   - the upgrade completes without error,
-//   - the pre-existing rows are all still present (by primary key), and
+//   - the pre-existing rows are all still present (by primary key),
 //   - the new columns those rows gained have the migration's stated defaults
 //     (0/NULL), not some other value — i.e. old data is not silently
-//     backfilled with something other than the documented default.
+//     backfilled with something other than the documented default, and
+//   - the attachments row survives migration 030's INSERT…SELECT + DROP +
+//     RENAME rebuild with every column value intact. 030 is the only
+//     migration that destroys and recreates a table holding user data, so it
+//     is the only one whose data copy can silently lose or reorder columns.
 func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
@@ -202,6 +208,16 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 		`INSERT INTO emoji (id, shortcode, filename, uploaded_by) VALUES (1, 'partyparrot', 'stored-uuid', 1)`); err != nil {
 		t.Fatalf("seed emoji: %v", err)
 	}
+	// Every attachments column populated (no NULLs, no defaults) so migration
+	// 030's rebuild has something to lose in each of the ten positions it
+	// copies.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type,
+		                          size, uploaded_at, width, height, uploader_id)
+		 VALUES ('att-1', 1, 'cat.png', 'stored-cat-uuid', 'image/png',
+		         4242, '2024-01-02 03:04:05', 640, 480, 1)`); err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
 
 	// Apply the remaining migrations (020..028) via the real production path.
 	if err := db.Migrate(database); err != nil {
@@ -220,6 +236,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 		{"SELECT 1 FROM messages WHERE id = ?", []any{1}, "message"},
 		{"SELECT 1 FROM voice_states WHERE user_id = ?", []any{1}, "voice_states"},
 		{"SELECT 1 FROM emoji WHERE id = ?", []any{1}, "emoji"},
+		{"SELECT 1 FROM attachments WHERE id = ?", []any{"att-1"}, "attachment"},
 	} {
 		var one int
 		if err := database.QueryRowContext(ctx, tc.query, tc.args...).Scan(&one); err != nil {
@@ -269,6 +286,41 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 		t.Errorf("emoji.mime_type = %q for pre-existing row, want the migration's documented default %q", mimeType, "image/png")
 	}
 
+	// Migration 030 rebuilds attachments (INSERT…SELECT into attachments_v030,
+	// DROP, RENAME) to swap message_id's FK action to ON DELETE SET NULL. The
+	// copy lists ten columns twice, so a dropped, added or reordered column
+	// silently corrupts every pre-existing row — assert all ten came through
+	// unchanged, message_id still bound to the seeded message.
+	var (
+		attMessageID, attSize, attWidth, attHeight, attUploaderID int64
+		attFilename, attStoredAs, attMimeType, attUploadedAt      string
+	)
+	if err := database.QueryRowContext(ctx,
+		`SELECT message_id, filename, stored_as, mime_type, size, uploaded_at, width, height, uploader_id
+		 FROM attachments WHERE id = 'att-1'`,
+	).Scan(&attMessageID, &attFilename, &attStoredAs, &attMimeType, &attSize,
+		&attUploadedAt, &attWidth, &attHeight, &attUploaderID); err != nil {
+		t.Fatalf("reading upgraded attachment: %v", err)
+	}
+	for _, tc := range []struct {
+		column    string
+		got, want any
+	}{
+		{"message_id", attMessageID, int64(1)},
+		{"filename", attFilename, "cat.png"},
+		{"stored_as", attStoredAs, "stored-cat-uuid"},
+		{"mime_type", attMimeType, "image/png"},
+		{"size", attSize, int64(4242)},
+		{"uploaded_at", attUploadedAt, "2024-01-02 03:04:05"},
+		{"width", attWidth, int64(640)},
+		{"height", attHeight, int64(480)},
+		{"uploader_id", attUploaderID, int64(1)},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("attachments.%s = %v after migration 030's rebuild, want %v", tc.column, tc.got, tc.want)
+		}
+	}
+
 	var mentionsEveryone int
 	if err := database.QueryRowContext(ctx,
 		`SELECT mentions_everyone FROM messages WHERE id = 1`).Scan(&mentionsEveryone); err != nil {
@@ -298,7 +350,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 
 	// Every migration file, old and new, must be recorded — this is the
 	// upgrade path's real contract: 001..019 came from the seed/normal path
-	// during the first MigrateFS call, 020..028 from the second.
+	// during the first MigrateFS call, 020..head from the second.
 	all, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		t.Fatalf("reading embedded migrations dir: %v", err)
