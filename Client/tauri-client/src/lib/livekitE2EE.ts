@@ -16,6 +16,7 @@ import {
   verifyEphemeralKeySignature,
   importIdentityPublicKey,
   computeKeyFingerprint,
+  computeRawKeyFingerprint,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -25,6 +26,7 @@ import {
   setPeerVerification,
   clearPeerVerification,
   clearPeerVerifications,
+  setLocalSessionFingerprint,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 
@@ -173,6 +175,7 @@ export class E2EEManager {
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
     const myPubKeyBase64 = await exportPublicKey(ecdhKeyPair.publicKey);
+    const myFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(myPubKeyBase64));
     // Build the signed announce up front — this loads the identity key from
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
@@ -228,6 +231,7 @@ export class E2EEManager {
     // that arrived during the awaits above was queued (not silently
     // processed with no offer sent) and gets its offer sent below.
     this._ecdhKeyPair = ecdhKeyPair;
+    setLocalSessionFingerprint(myFingerprint);
 
     if (this._isKeyHolder) {
       // Announce our (signed) key BEFORE draining queued announces. The
@@ -354,6 +358,12 @@ export class E2EEManager {
       await this.keyProvider.setKey(roomKeyToBase64(this._roomKey));
     }
     const reconnectPubKey = await exportPublicKey(pair.publicKey);
+    const reconnectFingerprint = await computeRawKeyFingerprint(
+      this.rawFromBase64(reconnectPubKey),
+    );
+    if (this._ecdhKeyPair === pair) {
+      setLocalSessionFingerprint(reconnectFingerprint);
+    }
     const reconnectAnnounce = await this.buildAnnouncePayload(reconnectPubKey);
     // Re-check ownership right before the send too: buildAnnouncePayload can
     // itself await a keyring round trip, another window for clearState() (or
@@ -512,6 +522,7 @@ export class E2EEManager {
         userId,
         status: "unknown",
         safetyNumber: null,
+        sessionFingerprint: null,
       });
       log.error("E2EE: identity pin store unreadable — rejecting announce (fail closed)", {
         userId,
@@ -528,12 +539,18 @@ export class E2EEManager {
         userId,
         status: "mismatch",
         safetyNumber: null,
+        sessionFingerprint: null,
       });
       log.error("E2EE: pinned peer identity key missing/changed — blocking (identity-tofu)", {
         userId,
       });
       return false;
     }
+
+    // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
+    // accepted peer gets one — for an unverified peer it is the only value
+    // that can be compared out of band, since there is no identity key.
+    const sessionFingerprint = await computeRawKeyFingerprint(this.rawFromBase64(publicKeyBase64));
 
     // Genuine legacy peer: never pinned AND no published identity key — accept
     // but mark unverified (pin-pending). This is the only case the compatibility
@@ -543,6 +560,7 @@ export class E2EEManager {
         userId,
         status: "unverified",
         safetyNumber: null,
+        sessionFingerprint,
       });
       log.warn("E2EE: peer has no identity key — accepting as unverified (legacy)", { userId });
       return true;
@@ -562,6 +580,7 @@ export class E2EEManager {
         userId,
         status: "mismatch",
         safetyNumber: null,
+        sessionFingerprint: null,
       });
       log.error("E2EE: peer announce signature invalid — rejecting (MITM?)", { userId });
       return false;
@@ -591,11 +610,17 @@ export class E2EEManager {
         userId,
         status: "unverified",
         safetyNumber: null,
+        sessionFingerprint,
       });
       return true; // still accept the announce — the write failure alone shouldn't block the call
     }
     const safetyNumber = await computeKeyFingerprint(identityKey);
-    this.setPeerVerificationIfCurrent(myGeneration, { userId, status: "verified", safetyNumber });
+    this.setPeerVerificationIfCurrent(myGeneration, {
+      userId,
+      status: "verified",
+      safetyNumber,
+      sessionFingerprint,
+    });
     return true;
   }
 
@@ -1392,6 +1417,7 @@ export class E2EEManager {
     this._retiredPeerKeys.clear();
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
+    setLocalSessionFingerprint(null);
     this._isKeyHolder = false;
     this._rotatingKey = false;
     this._rotationPending = false;

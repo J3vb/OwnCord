@@ -113,10 +113,11 @@ function setPeerVerif(
   userId: number,
   status: PeerVerification["status"],
   safetyNumber: string | null = null,
+  sessionFingerprint: string | null = null,
 ): void {
   voiceStore.setState((prev) => {
     const peerVerifications = new Map(prev.peerVerifications ?? []);
-    peerVerifications.set(userId, { userId, status, safetyNumber });
+    peerVerifications.set(userId, { userId, status, safetyNumber, sessionFingerprint });
     return { ...prev, peerVerifications };
   });
 }
@@ -1988,6 +1989,33 @@ describe("ChannelSidebar voice identity badge", () => {
     const badge = badgeFor(10);
     expect(badge).not.toBeNull();
     expect(badge!.classList.contains("unverified")).toBe(true);
+  });
+
+  it("shows the session fingerprint, labelled as not an identity, on an unverified badge", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "unverified", null, "5E55 1234 5678 9ABC");
+    sidebar.mount(container);
+
+    const title = badgeFor(10)!.getAttribute("title") ?? "";
+    expect(title).toContain("5E55 1234 5678 9ABC");
+    expect(title).toContain("not an identity");
+  });
+
+  it("shows the local user's own session fingerprint on their voice row", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "Me", avatar: null, role: "member", status: "online" } as never,
+      isAuthenticated: true,
+    }));
+    addVoiceUser(VOICE_CH, 7, "Me");
+    voiceStore.setState((prev) => ({ ...prev, localSessionFingerprint: "0123 4567 89AB CDEF" }));
+    sidebar.mount(container);
+
+    const own = container.querySelector(
+      `.voice-user-item[data-voice-uid="7"] .vu-session-fp`,
+    ) as HTMLElement | null;
+    expect(own).not.toBeNull();
+    expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
 
   it("shows a mismatch badge for a peer whose identity key changed", () => {

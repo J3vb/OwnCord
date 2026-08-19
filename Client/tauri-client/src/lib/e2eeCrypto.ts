@@ -77,7 +77,13 @@ export async function importPublicKey(base64: string): Promise<CryptoKey> {
  */
 export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<string> {
   const raw = await crypto.subtle.exportKey("raw", publicKey);
-  const hash = await crypto.subtle.digest("SHA-256", raw);
+  return computeRawKeyFingerprint(new Uint8Array(raw));
+}
+
+/** Same fingerprint as computeKeyFingerprint, over the raw public-key bytes
+ *  (the form an announce carries) — no import needed. */
+export async function computeRawKeyFingerprint(raw: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", raw as Uint8Array<ArrayBuffer>);
   const hex = Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
     .join("");

@@ -39,6 +39,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
     async () => ({ type: "id-public-imported" }) as unknown as CryptoKey,
   ),
   computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
+  computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
 }));
 
 vi.mock("@lib/identity", () => ({
@@ -66,6 +67,7 @@ vi.mock("@stores/voice.store", () => ({
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
+  setLocalSessionFingerprint: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -79,7 +81,11 @@ vi.mock("@lib/logger", () => ({
 
 // Now import
 import { E2EEManager } from "../../src/lib/livekitE2EE";
-import { setPeerVerification, clearPeerVerification } from "@stores/voice.store";
+import {
+  setPeerVerification,
+  clearPeerVerification,
+  setLocalSessionFingerprint,
+} from "@stores/voice.store";
 import {
   unwrapRoomKey,
   roomKeyToBase64,
@@ -1401,5 +1407,49 @@ describe("E2EEManager", () => {
     } finally {
       vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
     }
+  });
+
+  // ── OC-0003: per-session fingerprint for every peer ───────────────────────
+
+  it("[OC-0003] publishes a session fingerprint of the ephemeral key for a legacy (unverified) peer while safetyNumber stays null", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    mockMembers.set(PEER_ID, { identityPublicKey: null });
+    await mgr.setupKeyExchange(true, 1);
+
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", undefined);
+
+    expect(setPeerVerification).toHaveBeenCalledWith({
+      userId: PEER_ID,
+      status: "unverified",
+      safetyNumber: null,
+      sessionFingerprint: "5E55 1234 5678 9ABC",
+    });
+  });
+
+  it("[OC-0003] publishes the session fingerprint alongside the safety number for a verified peer", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    expect(setPeerVerification).toHaveBeenCalledWith({
+      userId: PEER_ID,
+      status: "verified",
+      safetyNumber: "AB12 CD34 EF56 7890",
+      sessionFingerprint: "5E55 1234 5678 9ABC",
+    });
+  });
+
+  it("[OC-0003] publishes the local session fingerprint on setup and clears it on teardown", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    await mgr.setupKeyExchange(true, 1);
+    expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith("5E55 1234 5678 9ABC");
+
+    mgr.clearState();
+    expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith(null);
   });
 });

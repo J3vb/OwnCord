@@ -118,6 +118,7 @@ vi.mock("@stores/voice.store", () => ({
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
+  setLocalSessionFingerprint: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 
@@ -181,6 +182,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
     async () => ({ type: "id-public-imported" }) as unknown as CryptoKey,
   ),
   computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
+  computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
 }));
 
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).

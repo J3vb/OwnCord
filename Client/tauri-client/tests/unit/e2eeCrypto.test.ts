@@ -7,6 +7,7 @@ import {
   wrapRoomKey,
   unwrapRoomKey,
   computeKeyFingerprint,
+  computeRawKeyFingerprint,
   roomKeyToBase64,
   generateIdentityKeyPair,
   signEphemeralKey,
@@ -200,6 +201,13 @@ describe("e2eeCrypto", () => {
       const fpB = await computeKeyFingerprint(keyB);
 
       expect(fpA).not.toBe(fpB);
+    });
+
+    it("computeRawKeyFingerprint over the exported raw bytes matches computeKeyFingerprint", async () => {
+      const { publicKey } = await generateECDHKeyPair();
+      const raw = new Uint8Array(await crypto.subtle.exportKey("raw", publicKey));
+
+      expect(await computeRawKeyFingerprint(raw)).toBe(await computeKeyFingerprint(publicKey));
     });
 
     it("formats the fingerprint as 8 space-separated 4-char hex groups", async () => {
