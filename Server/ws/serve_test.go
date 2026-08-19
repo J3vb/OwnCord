@@ -610,7 +610,17 @@ func TestHub_BroadcastChannelCreate_DeliversToAllClients(t *testing.T) {
 	hub.Register(c1)
 	waitRegistered(t, hub, c1)
 
-	ch := &db.Channel{ID: 77, Name: "announcements", Type: "text", Category: "News", Position: 1}
+	// Seed a real row: every production caller broadcasts a channel already
+	// committed to the DB, and channelReadAudience fails closed on a missing
+	// row (OC-0090) — a fabricated id would resolve to an empty audience.
+	chID, err := database.CreateChannel(context.Background(), "announcements", "text", "News", "", 1)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(context.Background(), chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: ch=%v err=%v", ch, err)
+	}
 	hub.BroadcastChannelCreate(ch)
 	// The receive select below blocks with its own timeout.
 
@@ -649,7 +659,15 @@ func TestHub_BroadcastChannelUpdate_DeliversToAllClients(t *testing.T) {
 	hub.Register(c1)
 	waitRegistered(t, hub, c1)
 
-	ch := &db.Channel{ID: 88, Name: "updated-channel", Type: "text", Category: "General", Position: 2}
+	// Seed a real row — see the channel_create test above (OC-0090).
+	chID, err := database.CreateChannel(context.Background(), "updated-channel", "text", "General", "", 2)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(context.Background(), chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: ch=%v err=%v", ch, err)
+	}
 	hub.BroadcastChannelUpdate(ch)
 	// The receive select below blocks with its own timeout.
 

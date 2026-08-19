@@ -440,4 +440,13 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	for _, vs := range states {
 		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
 	}
+
+	// Re-elect the key holder now that the room is torn down — every other
+	// removal path does this (finishVoiceLeave, the LiveKit webhook,
+	// registerNow, rollbackVoiceJoin, sweepStaleVoiceStates). All client
+	// voice states for this channel were cleared above, so this deletes the
+	// voiceKeyHolders entry; without it a deleted channel's entry lived for
+	// the process lifetime (OC-0012). No locks are held here, as
+	// updateKeyHolder requires.
+	h.updateKeyHolder(channelID)
 }

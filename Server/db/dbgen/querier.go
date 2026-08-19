@@ -76,10 +76,19 @@ type Querier interface {
 	// OC-0023), and a single user with both flags set must consume two of the N
 	// slots, not one (OC-0006) -- so both gates sum `vs2.camera + vs2.screenshare`
 	// across the channel's rows rather than counting rows where either is set.
-	// The enabling user's own bit is still 0 at gate time, so no self-exclusion
-	// term is needed.
+	// The enabling user's own bit for the flag being set CAN already be 1 at
+	// gate time (a client that lost track of the server-side flag retries the
+	// enable), so each gate excludes exactly that one bit from the count --
+	// see the per-query comments below (OC-0081).
+	// The channel-wide stream count excludes the requester's own camera flag
+	// (subtracted via the correlated outer-row reference), so re-enabling an
+	// already-set camera is idempotent at the cap instead of being refused
+	// against the requester's own stream (OC-0081). Their screenshare, and
+	// every other user's streams, still count.
 	EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error)
 	EnablePlugin(ctx context.Context, id int64) error
+	// Mirror of EnableCameraIfUnderLimit: the count excludes the requester's
+	// own screenshare flag so re-enable is idempotent at the cap (OC-0081).
 	EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error)
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
 	ForceLogoutUser(ctx context.Context, userID int64) error

@@ -234,6 +234,16 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 				"channel_id", channelID, "err", err)
 			return []int64{}
 		}
+		// Fail closed on a missing row too (OC-0090): GetChannel returns
+		// (nil, nil) for a deleted channel, and falling through would hand a
+		// channel with no override rows left to the role scan below — which
+		// resolves to every connected user with base READ_MESSAGES, leaking
+		// e.g. a closed group-DM's voice_leave server-wide. Callers that
+		// tear down voice union the room's participants and the leaver back
+		// in afterwards, so eviction/E2EE-teardown signals still arrive.
+		if ch == nil {
+			return []int64{}
+		}
 		// Archived channels are hidden from every client regardless of
 		// permissions, mirroring RefreshChannelVisibility and VisibleChannelIDs.
 		// Without this, an admin edit to an archived channel (or a voice
@@ -241,10 +251,10 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		// base role holds READ_MESSAGES, none of whom have the channel in their
 		// ready payload or sidebar. ignoreArchived opts a caller out of this
 		// specific check only — see channelReadAudienceIgnoringArchived.
-		if ch != nil && ch.Archived && !ignoreArchived {
+		if ch.Archived && !ignoreArchived {
 			return []int64{}
 		}
-		if ch != nil && ch.Type == "dm" {
+		if ch.Type == "dm" {
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
 	}
@@ -578,6 +588,32 @@ func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.BroadcastToAll(buildMemberBan(userID))
 	h.DisconnectUser(userID)
+}
+
+// BroadcastMemberUnban is the mirror of BroadcastMemberBan: member_ban
+// hard-deletes the row on every connected client, so an unban must re-add it
+// or clients connected through the ban permanently disagree with freshly
+// connecting ones. Fans out the same member_join a fresh connect would
+// (clients map it to addMember — no protocol change), satisfying the admin
+// package's memberUnbanBroadcaster capability; admin's hub_wiring_test.go
+// pins that at compile time. (OC-0058)
+func (h *Hub) BroadcastMemberUnban(userID int64) {
+	ctx := context.Background()
+	user, err := h.db.GetUserByID(ctx, userID)
+	if err != nil || user == nil {
+		slog.Error("hub: BroadcastMemberUnban GetUserByID failed", "user_id", userID, "err", err)
+		return
+	}
+	roleName := ""
+	if role, err := h.db.GetRoleForUser(ctx, userID); err == nil && role != nil {
+		roleName = role.Name
+	}
+	// The ban disconnected them and reconnecting was refused while banned,
+	// so they cannot be online at unban time — report offline regardless of
+	// the stale status the row carries (serve_ready's "no live connection is
+	// offline, whatever the row says" rule).
+	user.Status = "offline"
+	h.BroadcastToAll(buildMemberJoin(user, roleName))
 }
 
 // DisconnectUser forcibly disconnects the client identified by userID.
