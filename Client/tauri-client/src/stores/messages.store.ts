@@ -254,7 +254,23 @@ export function addMessage(payload: ChatMessagePayload): void {
     //    below the gap and must wait for "Jump to Present".
     if (prev.detachedChannels.has(channelId)) return prev;
 
-    let updatedMsgs = [...existing, message];
+    // Insert before any trailing unreconciled optimistic row(s) rather than
+    // blindly appending at the tail. An optimistic row (status !== "sent")
+    // has no real server id/timestamp yet — confirmSend will stamp it in
+    // place once its ack arrives — so a message that commits and broadcasts
+    // *while our own send is still in flight* must land ahead of it, or the
+    // eventually-stamped row (a later server id/timestamp) ends up rendered
+    // above an older message it should follow. Rows before the trailing
+    // unreconciled run are already "sent" and keep their position.
+    let insertAt = existing.length;
+    while (insertAt > 0 && existing[insertAt - 1]!.status !== "sent") {
+      insertAt--;
+    }
+    let updatedMsgs = [
+      ...existing.slice(0, insertAt),
+      message,
+      ...existing.slice(insertAt),
+    ];
     // Evict oldest messages if over the cap
     if (updatedMsgs.length > MAX_MESSAGES_PER_CHANNEL) {
       updatedMsgs = updatedMsgs.slice(updatedMsgs.length - MAX_MESSAGES_PER_CHANNEL);
