@@ -7,7 +7,7 @@
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
-import { membersStore, getTypingUsers } from "@stores/members.store";
+import { membersStore, getTypingUsers, memberDisplayName } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 
 export interface TypingIndicatorOptions {
@@ -16,11 +16,13 @@ export interface TypingIndicatorOptions {
 }
 
 function formatTypingText(users: readonly Member[]): string {
+  const name0 = users[0] ? memberDisplayName(users[0]) : undefined;
+  const name1 = users[1] ? memberDisplayName(users[1]) : undefined;
   if (users.length === 1) {
-    return `${users[0]?.username ?? "Someone"} is typing...`;
+    return `${name0 ?? "Someone"} is typing...`;
   }
   if (users.length === 2) {
-    return `${users[0]?.username ?? "Someone"} and ${users[1]?.username ?? "Someone"} are typing...`;
+    return `${name0 ?? "Someone"} and ${name1 ?? "Someone"} are typing...`;
   }
   return "Several people are typing...";
 }
