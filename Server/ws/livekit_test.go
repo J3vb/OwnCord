@@ -2,7 +2,10 @@ package ws_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1265,6 +1268,121 @@ func TestWebhookHandler_EmptyBody(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for missing auth, got %d", rec.Code)
+	}
+}
+
+// signedWebhookRequest builds the request LiveKit itself would send: the body
+// hashed with sha256, that hash carried as the token's sha256 claim, and the
+// token signed with the shared secret. bodyToSign is what the token commits
+// to; bodySent is what actually travels — passing different values simulates a
+// captured token replayed against a forged payload.
+func signedWebhookRequest(t *testing.T, apiKey, apiSecret, bodyToSign, bodySent string) *http.Request {
+	t.Helper()
+
+	sum := sha256.Sum256([]byte(bodyToSign))
+	token, err := auth.NewAccessToken(apiKey, apiSecret).
+		SetValidFor(5 * time.Minute).
+		SetSha256(base64.StdEncoding.EncodeToString(sum[:])).
+		ToJWT()
+	if err != nil {
+		t.Fatalf("minting webhook token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook", strings.NewReader(bodySent))
+	req.Header.Set("Authorization", token)
+	req.Header.Set("Content-Type", "application/webhook+json")
+	return req
+}
+
+// webhookBody renders the protojson payload LiveKit posts for a participant
+// event. pad is an unknown field the parser discards, used only to push the
+// body past the size cap.
+func webhookBody(event string, userID, channelID int64, joinToken, pad string) string {
+	return fmt.Sprintf(
+		`{"event":%q,"room":{"name":%q},"participant":{"identity":%q},"pad":%q}`,
+		event, ws.RoomName(channelID), participantIdentityFor(userID, joinToken), pad)
+}
+
+// TestWebhookHandler_SignedParticipantLeftDispatches is the only webhook test
+// that gets past ReceiveWebhookEvent: it mints a real LiveKit webhook token
+// over the real body and asserts the handler both dispatches the event (the
+// voice_states row is cleared) and answers 200. Without it, the 401 tests above
+// would all still pass if verification were changed to reject everything.
+func TestWebhookHandler_SignedParticipantLeftDispatches(t *testing.T) {
+	t.Parallel()
+
+	const apiKey, apiSecret = "webhook-signed-key", "webhook-signed-secret-0123456789"
+
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "webhook-signed-user")
+	chanID := seedVoiceChan(t, database, "webhook-signed-ch")
+
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v (nil=%v)", err, state == nil)
+	}
+
+	body := webhookBody("participant_left", user.ID, chanID, state.JoinedAt, "")
+	rec := httptest.NewRecorder()
+	hub.NewLiveKitWebhookHandler(apiKey, apiSecret)(rec,
+		signedWebhookRequest(t, apiKey, apiSecret, body, body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a correctly signed webhook, got %d (%s)",
+			rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	after, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after webhook: %v", err)
+	}
+	if after != nil {
+		t.Errorf("participant_left verified but never dispatched: voice state still present (channel %d)",
+			after.ChannelID)
+	}
+}
+
+// TestWebhookHandler_SignedRequestRejections covers the two ways a request
+// carrying a genuinely signed token must still be refused: the token's
+// body-hash claim not matching the body it arrived with (a captured token
+// replayed against a forged payload), and a body past webhookMaxBodyBytes.
+func TestWebhookHandler_SignedRequestRejections(t *testing.T) {
+	t.Parallel()
+
+	const apiKey, apiSecret = "webhook-reject-key", "webhook-reject-secret-0123456789"
+
+	signed := webhookBody("participant_left", 7, 42, "tok", "")
+	// Same token, different body: only the sha256 claim binding catches this.
+	mutated := webhookBody("participant_left", 8, 42, "tok", "")
+	// Correctly signed, but larger than webhookMaxBodyBytes — only the
+	// MaxBytesReader cap catches this one.
+	oversize := webhookBody("participant_left", 7, 42, "tok", strings.Repeat("a", ws.WebhookMaxBodyBytesForTest))
+
+	tests := []struct {
+		name       string
+		bodyToSign string
+		bodySent   string
+	}{
+		{"token replayed against a mutated body", signed, mutated},
+		{"body over webhookMaxBodyBytes", oversize, oversize},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			hub := ws.NewHubForTest()
+			rec := httptest.NewRecorder()
+			hub.NewLiveKitWebhookHandler(apiKey, apiSecret)(rec,
+				signedWebhookRequest(t, apiKey, apiSecret, tt.bodyToSign, tt.bodySent))
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("expected 401, got %d", rec.Code)
+			}
+		})
 	}
 }
 
