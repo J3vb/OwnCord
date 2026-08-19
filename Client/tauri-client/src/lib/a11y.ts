@@ -10,7 +10,7 @@
 
 /** The elements a dialog's Tab cycle visits. */
 const FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Elements the app hides via inline `style.display = "none"` (the codebase's
@@ -21,6 +21,11 @@ const FOCUSABLE_SELECTOR =
  * or "last" focusable leaves .focus() a no-op and the Tab trap comparing
  * against an edge focus never actually reached — Tab then falls through to
  * the browser's native order and can walk out of the dialog entirely.
+ *
+ * A `disabled` control has the identical failure mode: it can never be
+ * `document.activeElement` (disabling a focused control blurs it to
+ * `document.body`, outside the container the trap listens on), so it is
+ * excluded at the selector level above rather than here.
  */
 function isFocusable(el: HTMLElement): boolean {
   return el.style.display !== "none" && el.style.visibility !== "hidden";
