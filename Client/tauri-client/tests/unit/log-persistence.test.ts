@@ -477,9 +477,16 @@ describe("log persistence", () => {
     });
 
     it("resolves immediately when no flush is active and no timer is pending", async () => {
+      const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
       const { clearPendingPersistedLogs } = await freshImport();
-      // Should complete instantly
+
+      // Should complete instantly, without cancelling a timer that was
+      // never scheduled or writing anything to disk.
       await clearPendingPersistedLogs();
+
+      expect(clearTimeoutSpy).not.toHaveBeenCalled();
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
+      clearTimeoutSpy.mockRestore();
     });
   });
 
