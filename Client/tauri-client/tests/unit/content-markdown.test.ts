@@ -559,6 +559,13 @@ describe("markdown with mentions", () => {
     expect(strong!.querySelector("a")?.getAttribute("href")).toBe("https://example.com/a_b");
   });
 
+  it("still italicises around a URL with single underscore delimiters", () => {
+    const el = message("_https://example.com/a_");
+    const em = el.querySelector("em");
+    expect(em).not.toBeNull();
+    expect(em!.querySelector("a.msg-link")?.getAttribute("href")).toBe("https://example.com/a");
+  });
+
   it("combines a heading, a list, a quote and a fence in one message", () => {
     const el = message("# Title\n- a\n- b\n> note\n```js\nlet x = 1\n```");
     expect(el.querySelector("h1")).not.toBeNull();
