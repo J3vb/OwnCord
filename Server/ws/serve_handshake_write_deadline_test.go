@@ -82,7 +82,7 @@ func TestServeWS_HandshakeWrite_TimesOutOnStalledPeer(t *testing.T) {
 	// trickle through the shrunk buffers below that it is still in flight
 	// well past writeTimeout — see the function doc for why this needs to
 	// be "slow enough to still be running at the deadline", not "infinite".
-	for i := 0; i < 4000; i++ {
+	for i := range 4000 {
 		if _, err := database.CreateUser(context.Background(), fmt.Sprintf("bulk-member-%d", i), "hash", 1); err != nil {
 			t.Fatalf("CreateUser(bulk-member-%d): %v", i, err)
 		}

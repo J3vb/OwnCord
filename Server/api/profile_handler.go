@@ -189,8 +189,8 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		// Use the fixpoint sanitizer (service.SanitizeText), not the bare
-		// sanitizer.Sanitize below — Sanitize's output is always
+		// Use the fixpoint sanitizer (service.SanitizeText), not a bare
+		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always
 		// HTML-escaped, so a plain apostrophe would be persisted as &#39;
 		// and login (which never re-escapes) would look the account up
 		// under a name that no longer matches. See service.SanitizeText's
@@ -211,8 +211,8 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 		}
 
 		// Sanitize and validate avatar if provided. Use the fixpoint
-		// sanitizer (service.SanitizeText), not the bare sanitizer.Sanitize
-		// — Sanitize's output is always HTML-escaped, so a URL with more
+		// sanitizer (service.SanitizeText), not a bare
+		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped, so a URL with more
 		// than one query parameter would have its "&" separators rewritten
 		// to "&amp;" and be persisted (and served) broken. Same reasoning as
 		// the username path above.

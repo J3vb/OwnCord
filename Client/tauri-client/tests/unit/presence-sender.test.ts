@@ -54,6 +54,7 @@ describe("createPresenceSender — custom_status survival across supersession (O
           } as never,
         ],
       ]),
+      typingUsers: new Map(),
     }));
   });
 
@@ -66,7 +67,7 @@ describe("createPresenceSender — custom_status survival across supersession (O
       motd: null,
       isAuthenticated: false,
     }));
-    membersStore.setState(() => ({ members: new Map() }));
+    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   });
 
   it("does not drop a queued custom_status when a later plain status change supersedes it before the retry fires", () => {

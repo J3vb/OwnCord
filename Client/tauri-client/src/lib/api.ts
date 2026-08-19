@@ -396,13 +396,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       // global session-expiry sink would fire on a mistyped code, signing
       // the user out and deleting their stored credential for a session
       // that was never actually invalid.
-      return request<void>(
-        "POST",
-        "/users/me/totp/confirm",
-        { password, code },
-        signal,
-        { skipUnauthorized: true },
-      );
+      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal, {
+        skipUnauthorized: true,
+      });
     },
 
     disableTotp(password: string, signal?: AbortSignal): Promise<void> {

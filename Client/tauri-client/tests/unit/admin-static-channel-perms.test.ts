@@ -134,7 +134,8 @@ describe("Server/admin/static/index.html — channel permissions save (OC-0154)"
     // it may delete that override back out. A DELETE here means the matrix
     // step, working off its pre-toggle (stale) snapshot, just reverted the
     // channel back to visible for Member.
-    const last = rolePermCalls[rolePermCalls.length - 1];
+    const last = rolePermCalls.at(-1);
+    if (!last) throw new Error("expected a /channels/42/permissions/5 call to assert on");
     expect(last.method).not.toBe("DELETE");
     expect((last.body as { deny: number }).deny & 0x2).toBe(0x2);
   });

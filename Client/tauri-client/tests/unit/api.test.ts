@@ -506,9 +506,7 @@ describe("API Client", () => {
       // still perfectly valid. Firing the global session-expiry sink here
       // would sign the user out and (via main.ts) delete their stored
       // credential over a mistyped enrollment code.
-      mockFetch.mockResolvedValue(
-        errorResponse(401, "UNAUTHORIZED", "invalid two-factor code"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "invalid two-factor code"));
       await expect(api.confirmTotp("pw", "000000")).rejects.toMatchObject({
         status: 401,
         code: "UNAUTHORIZED",

@@ -1163,9 +1163,8 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       setTheme: vi.fn(),
     }));
 
-    const { createSettingsOverlay: createReopenedOverlay } = await import(
-      "@components/SettingsOverlay"
-    );
+    const { createSettingsOverlay: createReopenedOverlay } =
+      await import("@components/SettingsOverlay");
 
     const opener = document.createElement("button");
     document.body.appendChild(opener);

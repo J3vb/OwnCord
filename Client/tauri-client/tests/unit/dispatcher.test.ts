@@ -1011,9 +1011,7 @@ describe("WS Dispatcher", () => {
     // channel is an announcement channel must still land on it, not a blank
     // pane, on first ready.
     mock.dispatch("ready", {
-      channels: [
-        { id: 9, name: "news", type: "announcement", category: null, position: 0 },
-      ],
+      channels: [{ id: 9, name: "news", type: "announcement", category: null, position: 0 }],
       members: [],
       voice_states: [],
       roles: [],

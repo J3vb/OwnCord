@@ -12,15 +12,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 )
-
-// sanitizer strips all HTML from user-supplied strings before storage.
-var sanitizer = bluemonday.StrictPolicy()
 
 // maxLoginUsernameLen bounds the username accepted by handleLogin, mirroring
 // auth.ValidateUsername's 32-rune cap on registered usernames. Enforced
@@ -293,8 +289,8 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 		return req, false
 	}
 
-	// F: use the fixpoint sanitizer (service.SanitizeText), not the bare
-	// sanitizer.Sanitize below — Sanitize's output is always HTML-escaped
+	// F: use the fixpoint sanitizer (service.SanitizeText), not a bare
+	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped
 	// (' -> &#39;, & -> &amp;, " -> &#34;), so a plain call here would store
 	// a different string than what handleLogin looks up (which only
 	// trims), permanently locking out any username containing one of

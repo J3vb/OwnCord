@@ -266,11 +266,7 @@ export function addMessage(payload: ChatMessagePayload): void {
     while (insertAt > 0 && existing[insertAt - 1]!.status !== "sent") {
       insertAt--;
     }
-    let updatedMsgs = [
-      ...existing.slice(0, insertAt),
-      message,
-      ...existing.slice(insertAt),
-    ];
+    let updatedMsgs = [...existing.slice(0, insertAt), message, ...existing.slice(insertAt)];
     // Evict oldest messages if over the cap
     if (updatedMsgs.length > MAX_MESSAGES_PER_CHANNEL) {
       updatedMsgs = updatedMsgs.slice(updatedMsgs.length - MAX_MESSAGES_PER_CHANNEL);
