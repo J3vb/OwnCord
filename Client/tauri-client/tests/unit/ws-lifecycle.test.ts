@@ -52,6 +52,36 @@ describe("WebSocket Client (Tauri proxy)", () => {
     });
   });
 
+  // OC-0163: a bare (unbracketed) IPv6 host is accepted by api.ts's
+  // isValidHost and successfully dials over REST (the Rust http proxy
+  // brackets it for the TCP dial target), but raw string interpolation here
+  // produced an unparseable authority ("wss://2001:db8::1/..." — host
+  // "2001", port "db8::1") that tokio-tungstenite's URL parser rejects,
+  // leaving the user logged in with a socket that can never open.
+  it("brackets a bare IPv6 host when building the ws_connect URL (OC-0163)", async () => {
+    client.connect({ host: "2001:db8::1", token: "test-token" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
+      url: "wss://[2001:db8::1]/api/v1/ws",
+    });
+  });
+
+  it("does not double-bracket a host already bracketed by the caller (OC-0163)", async () => {
+    client.connect({ host: "[2001:db8::1]:8443", token: "test-token" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
+      url: "wss://[2001:db8::1]:8443/api/v1/ws",
+    });
+  });
+
+  it("leaves a plain DNS host:port untouched (OC-0163 regression guard)", async () => {
+    client.connect({ host: "example.com:8443", token: "test-token" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
+      url: "wss://example.com:8443/api/v1/ws",
+    });
+  });
+
   it("sends auth message when Rust reports open", async () => {
     client.connect({ host: "localhost:8443", token: "test-token" });
     await vi.advanceTimersByTimeAsync(10);

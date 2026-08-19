@@ -390,6 +390,81 @@ describe("handleMessage size boundary", () => {
     emitTauriEvent("ws-message", smallMsg);
     expect(messages).toHaveLength(1);
   });
+
+  it("does not drop an oversized `ready` frame — the handshake payload has no seq and no retry path (OC-0160)", async () => {
+    const limit = 200;
+    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const readyMessages: unknown[] = [];
+    client.on("ready", (p) => readyMessages.push(p));
+
+    const msg = {
+      type: "ready",
+      payload: {
+        channels: [],
+        // Padding well past `limit` — a real `ready` grows unbounded with the
+        // server's member/channel/DM counts and carries no seq, so unlike a
+        // sequenced frame nothing ever re-requests it after a drop.
+        members: Array.from({ length: 20 }, (_, i) => ({ id: i, username: `user${i}` })),
+        voice_states: [],
+        roles: [],
+      },
+    };
+    const json = JSON.stringify(msg);
+    expect(json.length).toBeGreaterThan(limit);
+
+    emitTauriEvent("ws-message", json);
+    expect(readyMessages).toHaveLength(1);
+  });
+
+  it("does not drop an oversized `auth_ok` frame (handshake exempt from size limit, OC-0160)", async () => {
+    const limit = 100;
+    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const msg = {
+      type: "auth_ok",
+      payload: {
+        user: { id: 1, username: "a".repeat(limit), avatar: null, role: "admin" },
+        server_name: "S",
+        motd: "",
+      },
+    };
+    const json = JSON.stringify(msg);
+    expect(json.length).toBeGreaterThan(limit);
+
+    emitTauriEvent("ws-message", json);
+    expect(client.getState()).toBe("connected");
+  });
+
+  it("still drops an oversized regular (non-handshake) frame (OC-0160 regression guard)", async () => {
+    const limit = 100;
+    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const messages: unknown[] = [];
+    client.on("chat_message", (p) => messages.push(p));
+
+    const msg = {
+      type: "chat_message",
+      payload: {
+        id: 1,
+        channel_id: 1,
+        user: { id: 1, username: "a", avatar: null },
+        content: "x".repeat(limit),
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    };
+
+    emitTauriEvent("ws-message", JSON.stringify(msg));
+    expect(messages).toHaveLength(0);
+  });
 });
 
 describe("dispatch with no listeners for type", () => {

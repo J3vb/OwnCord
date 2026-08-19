@@ -127,6 +127,27 @@ export function normalizeHostForCertCompare(host: string): string {
   return host.replace(/:443$/, "").toLowerCase();
 }
 
+/**
+ * Wrap a bare (unbracketed) IPv6 literal in brackets so it can be embedded in
+ * a `wss://` authority, mirroring the detection api.ts's `isValidHost` and
+ * livekitSession.ts's `ensureLiveKitProxy` already use: more than one colon
+ * means the whole string is the address (a single colon is the host:port
+ * separator instead), and RFC 3986 gives a bare IPv6 literal no way to carry
+ * a port, so this never needs to split one off. A host that is already
+ * bracketed (or is a DNS name / IPv4 literal, with or without a port) is
+ * returned unchanged (OC-0163).
+ */
+export function bracketBareIPv6Host(host: string): string {
+  if (
+    !host.startsWith("[") &&
+    (host.match(/:/g) ?? []).length > 1 &&
+    /^[0-9A-Fa-f:.]+$/.test(host)
+  ) {
+    return `[${host}]`;
+  }
+  return host;
+}
+
 export function createWsClient() {
   let config: WsClientConfig | null = null;
   let state: ConnectionState = "disconnected";
@@ -238,11 +259,6 @@ export function createWsClient() {
   function handleMessage(raw: string): void {
     const maxSize = config?.maxMessageSizeBytes ?? DEFAULT_MAX_MESSAGE_SIZE;
 
-    if (raw.length > maxSize) {
-      log.warn("Message exceeds size limit, dropping", { size: raw.length });
-      return;
-    }
-
     let parsed: { type?: string; payload?: unknown; id?: string; seq?: number };
     try {
       parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string; seq?: number };
@@ -250,6 +266,21 @@ export function createWsClient() {
       // Log the size only — `raw` is the decrypted frame (chat plaintext,
       // usernames) and this line is persisted to the on-disk log.
       log.warn("Failed to parse WS message", { bytes: raw.length });
+      return;
+    }
+
+    // The size guard runs AFTER parsing (raw is already fully materialized
+    // in memory either way, so this costs nothing) and exempts the handshake
+    // frames: "ready" is the one server frame with no bound — it embeds every
+    // member/channel/DM the server knows about — and, unlike a sequenced
+    // frame, carries no seq, so nothing ever re-requests it. Dropping it
+    // (OC-0160) would leave a client that just flipped to "connected" sitting
+    // on empty stores with no error and no recovery path. "auth_ok" gets the
+    // same exemption since it can embed a long-username/motd payload and is
+    // equally unrecoverable if dropped — the client never even reaches
+    // "connected". Every other message type keeps the strict bound.
+    if (raw.length > maxSize && parsed.type !== "ready" && parsed.type !== "auth_ok") {
+      log.warn("Message exceeds size limit, dropping", { size: raw.length, type: parsed.type });
       return;
     }
 
@@ -537,7 +568,7 @@ export function createWsClient() {
       return;
     }
 
-    const wsUrl = `wss://${cfg.host}/api/v1/ws`;
+    const wsUrl = `wss://${bracketBareIPv6Host(cfg.host)}/api/v1/ws`;
     log.info("WebSocket connecting", {
       url: wsUrl,
       isReconnect: reconnectAttempt > 0,
