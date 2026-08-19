@@ -59,6 +59,16 @@ func SetPatchChannelPostCommitHook(h func()) (restore func()) {
 	return func() { patchChannelPostCommitHook = prev }
 }
 
+// SetCreateChannelPostCommitHook installs h to run synchronously right after
+// handleCreateChannel's AdminCreateChannel commit, before the post-commit
+// re-read and hub fan-out — the create-side twin of
+// SetPatchChannelPostCommitHook (OC-0158).
+func SetCreateChannelPostCommitHook(h func()) (restore func()) {
+	prev := createChannelPostCommitHook
+	createChannelPostCommitHook = h
+	return func() { createChannelPostCommitHook = prev }
+}
+
 // StubCopyBackup swaps the restore path's file-copy hook so tests can inject
 // mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest
 // is the real implementation, for stubs that only want to fail once.

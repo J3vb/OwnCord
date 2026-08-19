@@ -127,3 +127,41 @@ func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testin
 		t.Errorf("RefreshChannelVisibility calls = %d, want 1", len(hub.visibilityRefreshes))
 	}
 }
+
+// OC-0158, create side: handleCreateChannel commits AdminCreateChannel and
+// only afterwards re-reads the row to broadcast it. A caller cancellation
+// landing in that window (tab close, network blip) failed the re-read and
+// 500ed the request, leaving a durably created channel no connected client
+// was ever told about — the same shape already fixed in the PATCH and DELETE
+// siblings. The hook fires synchronously right after the commit so the window
+// is hit deterministically instead of by wall-clock timing.
+func TestAdminAPI_CreateChannel_SurvivesContextCancelAfterCommit(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	restore := admin.SetCreateChannelPostCommitHook(func() {
+		cancel()
+	})
+	defer restore()
+
+	body, _ := json.Marshal(map[string]any{"name": "create-cancel-race", "type": "text"})
+	req := httptest.NewRequest(http.MethodPost, "/channels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (create must survive a caller cancellation that arrives after the row already committed); body: %s", w.Code, w.Body.String())
+	}
+	if len(hub.channelCreates) != 1 {
+		t.Fatalf("BroadcastChannelCreate called %d times, want 1 — the row committed, so connected clients must be told", len(hub.channelCreates))
+	}
+	if hub.channelCreates[0].Name != "create-cancel-race" {
+		t.Errorf("broadcast channel name = %q, want create-cancel-race", hub.channelCreates[0].Name)
+	}
+}
