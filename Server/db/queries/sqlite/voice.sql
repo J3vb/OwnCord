@@ -99,18 +99,27 @@ UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?
 -- OC-0023), and a single user with both flags set must consume two of the N
 -- slots, not one (OC-0006) -- so both gates sum `vs2.camera + vs2.screenshare`
 -- across the channel's rows rather than counting rows where either is set.
--- The enabling user's own bit is still 0 at gate time, so no self-exclusion
--- term is needed.
+-- The enabling user's own bit for the flag being set CAN already be 1 at
+-- gate time (a client that lost track of the server-side flag retries the
+-- enable), so each gate excludes exactly that one bit from the count --
+-- see the per-query comments below (OC-0081).
 
 -- name: EnableCameraIfUnderLimit :execresult
+-- The channel-wide stream count excludes the requester's own camera flag
+-- (subtracted via the correlated outer-row reference), so re-enabling an
+-- already-set camera is idempotent at the cap instead of being refused
+-- against the requester's own stream (OC-0081). Their screenshare, and
+-- every other user's streams, still count.
 UPDATE voice_states SET camera = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) < sqlc.arg(max_video);
+  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) - voice_states.camera < sqlc.arg(max_video);
 
 -- name: EnableScreenshareIfUnderLimit :execresult
+-- Mirror of EnableCameraIfUnderLimit: the count excludes the requester's
+-- own screenshare flag so re-enable is idempotent at the cap (OC-0081).
 UPDATE voice_states SET screenshare = 1
 WHERE voice_states.user_id = ? AND voice_states.channel_id = ?
-  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) < sqlc.arg(max_video);
+  AND (SELECT COALESCE(SUM(vs2.camera), 0) + COALESCE(SUM(vs2.screenshare), 0) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) - voice_states.screenshare < sqlc.arg(max_video);
 
 -- name: ClearVoiceState :exec
 DELETE FROM voice_states WHERE user_id = ?;
