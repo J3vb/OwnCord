@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tetratelabs/wazero"
 )
 
 // addWASM is the bytes of a minimal (module (func (export "add") ... )).
@@ -497,5 +499,42 @@ func TestWazeroDeactivateClosesCompiledModule(t *testing.T) {
 	}
 	if inst.compiled != nil {
 		t.Error("deactivate leaked the CompiledModule — re-activation cycles retain every compile")
+	}
+}
+
+// memoryWASM is a minimal module containing only a memory section declaring
+// `(memory 1)` — a single required page, no export needed. wazero validates
+// a module's declared memory against the runtime's configured page limit at
+// CompileModule time (internal/wasm.Memory.Validate), so this is enough to
+// observe the effective page limit platformInit installed.
+var memoryWASM = []byte{
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+	0x05, 0x03, 0x01, 0x00, 0x01, // memory section: 1 memory, min-only, min=1 page
+}
+
+// TestPlatformInitPageCountDoesNotOverflowUint32 pins OC-0183:
+// `uint32(memMB) * 1024 * 1024 / wazeroPageBytes` computed the byte count in
+// uint32 before dividing, so it wraps at 4 GiB. A MaxMemoryMB of exactly 4096
+// (4 GiB) wraps the byte count to 0, so WithMemoryLimitPages(0) is installed
+// and every plugin whose WASM declares a memory section fails to compile —
+// even though 4096 MiB is a legitimate, in-range request (wazero's own
+// ceiling is 65536 pages = 4 GiB, i.e. exactly this value is allowed).
+func TestPlatformInitPageCountDoesNotOverflowUint32(t *testing.T) {
+	platform, closeFn, err := platformInit(Config{MaxMemoryMB: 4096})
+	if err != nil {
+		t.Fatalf("platformInit: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn(context.Background()) })
+
+	rt, ok := platform.(wazero.Runtime)
+	if !ok || rt == nil {
+		t.Fatal("platformInit did not return a usable wazero.Runtime")
+	}
+
+	ctx := context.Background()
+	if _, err := rt.CompileModule(ctx, memoryWASM); err != nil {
+		t.Fatalf("CompileModule with MaxMemoryMB=4096 should succeed (4096 MiB = 65536 pages, "+
+			"wazero's own ceiling) but got: %v — the byte-count math overflowed uint32 and wrapped "+
+			"the effective memory limit to (near) zero pages", err)
 	}
 }
