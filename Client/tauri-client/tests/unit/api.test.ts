@@ -500,6 +500,22 @@ describe("API Client", () => {
       await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(ApiClientError);
     });
 
+    it("confirmTotp does NOT call onUnauthorized on a wrong enrollment code, even though the server answers 401", async () => {
+      // Server contract: handleConfirmTOTP answers 401 UNAUTHORIZED /
+      // "invalid two-factor code" for a wrong code — the session itself is
+      // still perfectly valid. Firing the global session-expiry sink here
+      // would sign the user out and (via main.ts) delete their stored
+      // credential over a mistyped enrollment code.
+      mockFetch.mockResolvedValue(
+        errorResponse(401, "UNAUTHORIZED", "invalid two-factor code"),
+      );
+      await expect(api.confirmTotp("pw", "000000")).rejects.toMatchObject({
+        status: 401,
+        code: "UNAUTHORIZED",
+      });
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
     it("disableTotp throws ApiClientError when 2FA is required", async () => {
       mockFetch.mockResolvedValue(
         errorResponse(403, "TOTP_REQUIRED", "2FA is required by server policy"),
