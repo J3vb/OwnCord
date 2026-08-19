@@ -26,7 +26,7 @@ import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
-import { membersStore } from "@stores/members.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { roleHasPermission, canManageChannels } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
@@ -407,7 +407,14 @@ function renderVoiceChannelItem(
       avatar.style.background = pickAvatarColor(user.username);
       row.appendChild(avatar);
 
-      const nameEl = createElement("span", { class: "vu-name" }, user.username || "Unknown");
+      // Render the same identity a rename shows everywhere else (member list,
+      // message rows, DM sidebar) — memberDisplayName prefers the nickname,
+      // falling back to the username. Security-sensitive surfaces (the E2EE
+      // mismatch modal, the moderation menu below) intentionally keep
+      // rendering user.username instead, since a nickname is user-settable.
+      const member = membersStore.getState().members.get(user.userId);
+      const label = (member !== undefined ? memberDisplayName(member) : user.username) || "Unknown";
+      const nameEl = createElement("span", { class: "vu-name" }, label);
       row.appendChild(nameEl);
 
       if (user.camera) {
