@@ -30,6 +30,22 @@ describe("adminPanelUrl", () => {
   it("does not route through the local http proxy", () => {
     expect(adminPanelUrl("localhost:8443")).not.toContain("127.0.0.1");
   });
+
+  // A bare IPv6 host is a valid, accepted server address (hostValidation.ts,
+  // livekitSession.ts's ensureLiveKitProxy, ws.ts's bracketBareIPv6Host) but
+  // RFC 3986 requires brackets around an IPv6 literal authority — without
+  // them the string isn't a valid absolute URL at all (OC-0190).
+  it("brackets a bare IPv6 host", () => {
+    expect(adminPanelUrl("::1")).toBe("https://[::1]/admin");
+  });
+
+  it("brackets a bare IPv6 host with a deep-linked section", () => {
+    expect(adminPanelUrl("2001:db8::1", "audit")).toBe("https://[2001:db8::1]/admin#audit");
+  });
+
+  it("leaves an already-bracketed IPv6 host unchanged", () => {
+    expect(adminPanelUrl("[::1]:8443")).toBe("https://[::1]:8443/admin");
+  });
 });
 
 describe("openAdminPanel", () => {
