@@ -5,6 +5,7 @@ import { createElement, setText, appendChildren, clearChildren } from "@lib/dom"
 import { createIcon } from "@lib/icons";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
+import { isValidHost } from "@lib/hostValidation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -306,8 +307,11 @@ export function createServerPanel(
       const name = nameInput.value.trim();
       const addr = hostAddrInput.value.trim();
       if (!name || !addr) return;
-      // Validate address: must be a valid hostname:port — no paths, no special chars
-      if (!/^[\w.-]+(:\d+)?$/.test(addr)) {
+      // Validate address: must be a valid host or host:port (DNS name, IPv4,
+      // bracketed/bare IPv6) — no paths, no special chars. Shared with
+      // api.ts's setConfig so an address accepted here is also accepted by
+      // the actual connection path, and vice versa (OC-0187).
+      if (!isValidHost(addr)) {
         // Show inline validation error via the host input
         hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
         hostAddrInput.reportValidity();
