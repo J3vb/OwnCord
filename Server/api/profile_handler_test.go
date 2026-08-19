@@ -164,6 +164,43 @@ func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
 	}
 }
 
+// OC-0151: handleUpdateProfile is the same call in the same order as
+// registerReadRequest — service.SanitizeText (the fixpoint sanitizer) runs
+// on the raw username before auth.ValidateUsername's 32-rune cap. Since
+// sanitizeToFixpoint's cost is quadratic in input length, an authenticated
+// caller can still pin a core for hundreds of milliseconds (and much longer
+// at larger sizes) with one PATCH before any bound is applied. The fix must
+// reject an oversized username on a cheap byte-length check before
+// sanitizing, so the rejection is near-instant regardless of payload size.
+func TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "patchvictim", 4)
+
+	// Adversarial nested-entity payload (16 KB) — see service.sanitizeToFixpoint's
+	// doc comment for why this shape is quadratic to sanitize.
+	hugeUsername := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": hugeUsername,
+	})
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("UpdateProfile oversized username status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends ~200ms in sanitizeToFixpoint on
+	// this payload before it ever reaches auth.ValidateUsername's length
+	// check. 150ms gives generous margin over noise while still being far
+	// below the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("UpdateProfile oversized username took %v, want well under 150ms (raw field must be bounded before sanitizing, not after)", elapsed)
+	}
+}
+
 func TestUpdateProfile_UsernameTaken(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)

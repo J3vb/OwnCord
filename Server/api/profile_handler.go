@@ -176,6 +176,19 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
+		// OC-0151: bound the raw field before it ever reaches the fixpoint
+		// sanitizer below, for the same reason as the register path
+		// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
+		// cost is quadratic in input length, and nothing bounds this field
+		// before it runs. This is a cheap byte-length pre-check — *4 still
+		// admits any legitimate 32-rune UTF-8 username.
+		if len(req.Username) > maxLoginUsernameLen*4 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: "username is too long",
+			})
+			return
+		}
+
 		// Use the fixpoint sanitizer (service.SanitizeText), not the bare
 		// sanitizer.Sanitize below — Sanitize's output is always
 		// HTML-escaped, so a plain apostrophe would be persisted as &#39;
