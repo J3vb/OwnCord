@@ -18,6 +18,8 @@ import {
   setVoiceConfig,
   getChannelVoiceUsers,
   setVoiceStatus,
+  setPttPollingLive,
+  isPttPollingLive,
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
@@ -754,6 +756,29 @@ describe("voice store", () => {
       expect(state.listenOnly).toBe(false);
       expect(state.voiceUsers.size).toBe(0);
       expect(state.voiceConfigs.size).toBe(0);
+    });
+  });
+
+  describe("setPttPollingLive / isPttPollingLive", () => {
+    afterEach(() => {
+      // Module-level flag, not covered by resetStore() — restore the
+      // default so later tests in this file see a clean slate.
+      setPttPollingLive(false);
+    });
+
+    it("defaults to false", () => {
+      expect(isPttPollingLive()).toBe(false);
+    });
+
+    it("setPttPollingLive(true) flips isPttPollingLive() to true", () => {
+      setPttPollingLive(true);
+      expect(isPttPollingLive()).toBe(true);
+    });
+
+    it("resetVoiceStore() does not clear it — process-wide platform capability, not per-session voice state", () => {
+      setPttPollingLive(true);
+      resetVoiceStore();
+      expect(isPttPollingLive()).toBe(true);
     });
   });
 
