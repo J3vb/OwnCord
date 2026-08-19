@@ -37,6 +37,17 @@ func SetSetupLimiterReapTiming(interval, maxWindow time.Duration) (restore func(
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
 
+// SetPatchChannelPostCommitHook installs h to run synchronously right after
+// handlePatchChannel's AdminUpdateChannel commit, before the post-commit
+// re-read and hub fan-out — the only way to deterministically land a caller
+// cancellation in that exact window (OC-0158) instead of racing wall-clock
+// timing.
+func SetPatchChannelPostCommitHook(h func()) (restore func()) {
+	prev := patchChannelPostCommitHook
+	patchChannelPostCommitHook = h
+	return func() { patchChannelPostCommitHook = prev }
+}
+
 // StubCopyBackup swaps the restore path's file-copy hook so tests can inject
 // mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest
 // is the real implementation, for stubs that only want to fail once.

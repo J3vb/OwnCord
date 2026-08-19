@@ -196,6 +196,14 @@ func nsfwAuditSuffix(before, after bool) string {
 	return " (unmarked NSFW)"
 }
 
+// patchChannelPostCommitHook, when non-nil, runs synchronously right after
+// handlePatchChannel's AdminUpdateChannel commit, before the post-commit
+// re-read and hub fan-out. It exists so tests can deterministically simulate
+// a caller cancellation (browser tab close, network blip) landing in that
+// exact window — the race OC-0158 is about — instead of relying on
+// wall-clock timing to hit it.
+var patchChannelPostCommitHook func()
+
 func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		existing := getAdminChannel(database, w, r)
@@ -241,12 +249,27 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
+		// From here on the update has already committed. If the admin's
+		// browser goes away in this window (tab close, navigation, network
+		// blip), r.Context() cancels, and a GetChannel re-read that still
+		// used it would fail with context.Canceled — 500ing while leaving
+		// the commit (including a fresh archived=1) unbroadcast, its voice
+		// eviction and visibility fan-out skipped, and every connected
+		// client still showing the stale state until it reconnects
+		// (OC-0158). Run the rest of the handler on an uncancellable tail,
+		// matching handleDeleteChannel's delCtx (OC-0010).
+		tail := context.WithoutCancel(r.Context())
+
+		if patchChannelPostCommitHook != nil {
+			patchChannelPostCommitHook()
+		}
+
 		actor := actorFromContext(r)
 		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name, "nsfw", req.NSFW)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_update", "channel", id,
+		db.WriteAudit(tail, database, actor, "channel_update", "channel", id,
 			fmt.Sprintf("updated #%s%s", req.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW)))
 
-		updated, err := database.GetChannel(r.Context(), id)
+		updated, err := database.GetChannel(tail, id)
 		if err != nil || updated == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated channel")
 			return
