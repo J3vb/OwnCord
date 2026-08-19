@@ -628,6 +628,65 @@ mod tests {
         assert!(cleared.get(), "a recovered machine must clear any stale fallback copy");
     }
 
+    #[test]
+    fn set_with_purges_the_keyring_entry_when_the_read_back_returns_a_different_secret() {
+        // The bug: get() reads the keyring first, so a foreign value left in
+        // place would shadow the fallback copy written below — handing the
+        // caller an identity key whose public half was never published.
+        use std::cell::Cell;
+        let deleted = Cell::new(false);
+        let fallback_written = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "mine",
+            |_, _| Ok(()),
+            |_| Ok(Some("someone-elses-secret".to_string())),
+            |_| {
+                deleted.set(true);
+                Ok(())
+            },
+            |_, s| {
+                assert_eq!(s, "mine");
+                fallback_written.set(true);
+                Ok(())
+            },
+            |_| panic!("must not clear the fallback copy it just wrote"),
+        );
+        assert_eq!(result, Ok(FALLBACK_BACKEND));
+        assert!(
+            deleted.get(),
+            "a mismatched keyring entry must be purged, not left to shadow the fallback"
+        );
+        assert!(fallback_written.get(), "the secret must still land in the fallback");
+    }
+
+    #[test]
+    fn set_with_falls_back_when_the_read_back_reports_no_entry() {
+        // The shipped keyring-mock defect: set_password returns Ok(()) and the
+        // very next get_password returns nothing. A write that does not read
+        // back is not a write.
+        use std::cell::Cell;
+        let fallback_written = Cell::new(false);
+        let result = set_with(
+            "acct",
+            "secret",
+            |_, _| Ok(()),
+            |_| Ok(None),
+            |_| panic!("nothing round-tripped, so there is no entry to delete"),
+            |_, s| {
+                assert_eq!(s, "secret");
+                fallback_written.set(true);
+                Ok(())
+            },
+            |_| panic!("must not clear the fallback copy it just wrote"),
+        );
+        assert_eq!(result, Ok(FALLBACK_BACKEND));
+        assert!(
+            fallback_written.get(),
+            "a write that does not read back must land in the fallback"
+        );
+    }
+
     // -- delete_with: finding "delete must not report success while the
     //    fallback copy survives on disk to resurrect a deleted secret" --
 
