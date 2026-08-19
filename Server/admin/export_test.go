@@ -1,7 +1,10 @@
 package admin
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,6 +12,14 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
+
+// BroadcastRolesForTest exposes broadcastRoles for external tests. It builds
+// a bare *http.Request carrying ctx, since broadcastRoles's only use of its
+// *http.Request argument is r.Context().
+func BroadcastRolesForTest(ctx context.Context, database *db.DB, hub HubBroadcaster) {
+	r := httptest.NewRequest(http.MethodPost, "/roles", nil).WithContext(ctx)
+	broadcastRoles(r, database, hub)
+}
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
 // *auth.RateLimiter it creates for the /setup endpoint. NewAdminAPI returns

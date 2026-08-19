@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -255,11 +256,17 @@ func invalidateUsers(permInvalidator PermissionInvalidator, userIDs []int64) {
 // broadcastRoles re-reads the role list and pushes it to every client. Re-read
 // rather than patched locally so the broadcast always reflects committed state,
 // including any concurrent change.
+//
+// Called after the mutation has already committed, so the caller's request
+// context may be canceled by the time this runs (client aborted, deadline
+// fired) -- context.WithoutCancel detaches the re-read from that, matching
+// broadcastEmojiSet in api/emoji_handler.go and broadcastDMOpen in
+// api/dm_handler.go.
 func broadcastRoles(r *http.Request, database *db.DB, hub HubBroadcaster) {
 	if hub == nil || database == nil {
 		return
 	}
-	list, err := database.ListRoles(r.Context())
+	list, err := database.ListRoles(context.WithoutCancel(r.Context()))
 	if err != nil {
 		// The mutation already committed; clients converge on their next
 		// reconnect rather than seeing a failed request.
