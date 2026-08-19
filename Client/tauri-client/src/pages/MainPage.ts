@@ -360,7 +360,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // the dispatcher) — no point starting a countdown on a page that is
           // about to unmount.
           if (banner !== null && payload.reason !== "shutdown") {
-            banner.showRestart(payload.delay_seconds);
+            if (payload.delay_seconds <= 0) {
+              // A zero/negative delay is a cancel, not a countdown (e.g.
+              // "update_aborted" correcting an earlier restart announcement
+              // after the staged update failed to apply — the socket never
+              // actually dropped). Re-sync to the real connection status
+              // instead of letting showRestart's countdown fall straight
+              // through to a permanent "Reconnecting..." banner.
+              applyConnectionStatus(banner, uiStore.getState().connectionStatus);
+            } else {
+              banner.showRestart(payload.delay_seconds);
+            }
           }
         } catch (err) {
           log.error("Server restart handler error", err);
