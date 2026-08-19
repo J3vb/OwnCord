@@ -283,6 +283,12 @@ jobs:
       - name: Run Playwright tests
         run: npx playwright test --config=playwright.config.ts
 
+      # Browser-mode unit tests (tests/browser/): real AudioContext + WASM
+      # behind the same Chromium, so the noise-suppression pipeline has a
+      # test that actually runs somewhere (test-audit 2026-08-19, T-22).
+      - name: Run browser-mode unit tests
+        run: npm run test:browser
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
