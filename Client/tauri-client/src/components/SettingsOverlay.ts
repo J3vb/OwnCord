@@ -389,12 +389,17 @@ export function createSettingsOverlay(
       },
     );
 
+    // Attach before syncing initial state: show() moves focus into the panel
+    // via focusDialog(), and .focus() on a still-detached subtree is a
+    // silent no-op. Callers that mount while settingsOpen is already true
+    // (e.g. ConnectPage's lazy first-open path) would otherwise get a
+    // visible overlay whose focus trap never actually captures focus.
+    container.appendChild(root);
+
     // Sync initial state
     if (uiStore.getState().settingsOpen) {
       show();
     }
-
-    container.appendChild(root);
   }
 
   function destroy(): void {

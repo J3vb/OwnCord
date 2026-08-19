@@ -1129,3 +1129,80 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-overlay")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// OC-0181: mount() when the store already reports settingsOpen === true
+// ---------------------------------------------------------------------------
+//
+// ConnectPage creates the overlay lazily: it only calls mount() once
+// uiStore.settingsOpen is already true (the settings gear flips the store
+// first, and only then does ensureSettingsOverlay() run). So on the very
+// first open from the connect page, mount() runs its "sync initial state"
+// show() call synchronously inside mount() itself — before the caller has
+// had a chance to see `root` come back and attach it anywhere.
+//
+// The module-level mock above pins settingsOpen to a permanent `false`, so
+// every other test in this file mounts into a closed overlay and only calls
+// open() afterward (root already attached by then). This block re-imports
+// the component fresh with settingsOpen already true at mount time, the one
+// path that exercises the bug.
+describe("SettingsOverlay - mount() with settingsOpen already true", () => {
+  afterEach(() => {
+    vi.doUnmock("@stores/ui.store");
+    vi.resetModules();
+  });
+
+  it("moves focus into the dialog when the store is already open at mount time", async () => {
+    vi.resetModules();
+    vi.doMock("@stores/ui.store", () => ({
+      uiStore: {
+        getState: () => ({ settingsOpen: true }),
+        subscribe: () => () => {},
+        subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
+      },
+      setTheme: vi.fn(),
+    }));
+
+    const { createSettingsOverlay: createReopenedOverlay } = await import(
+      "@components/SettingsOverlay"
+    );
+
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+
+    const localContainer = document.createElement("div");
+    document.body.appendChild(localContainer);
+
+    const overlay = createReopenedOverlay({
+      onClose: vi.fn(),
+      onChangePassword: vi.fn().mockResolvedValue(undefined),
+      onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+      onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+      onLogout: vi.fn(),
+      onDeleteAccount: vi.fn().mockResolvedValue(undefined),
+      onStatusChange: vi.fn(),
+      onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
+      onConfirmTotp: vi.fn().mockResolvedValue(undefined),
+      onDisableTotp: vi.fn().mockResolvedValue(undefined),
+    });
+
+    overlay.mount(localContainer);
+
+    // The overlay must actually be in the document by the time mount()
+    // returns, or nothing below it can matter.
+    expect(document.body.contains(localContainer.querySelector(".settings-overlay"))).toBe(true);
+
+    const panel = localContainer.querySelector(".settings-panel") as HTMLElement;
+    expect(panel).not.toBeNull();
+    // focusDialog() only succeeds once root is attached to the document;
+    // called against a detached subtree, .focus() is a silent no-op and
+    // activeElement never leaves the opener button.
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    overlay.destroy?.();
+    localContainer.remove();
+    opener.remove();
+  });
+});
