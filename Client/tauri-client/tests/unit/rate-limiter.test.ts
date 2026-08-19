@@ -238,11 +238,16 @@ describe("Pre-configured limiters", () => {
     expect(limiter.tryConsume()).toBe(true);
   });
 
-  it("createVoiceLimiter: 20 per 1s", () => {
+  // createVoiceLimiter gates onMuteToggle/onDeafenToggle (VoiceCallbacks.ts),
+  // which send voice_mute / voice_deafen. The server caps each of those at
+  // 2/sec (Server/ws/voice_broadcast.go voiceMuteRateLimit/voiceDeafenRateLimit,
+  // docs/protocol.md). The client limit must not exceed that budget, or an
+  // over-budget toggle applies its optimistic local state before the server
+  // refuses the send.
+  it("createVoiceLimiter: 2 per 1s (matches the server's voice_mute/voice_deafen budget)", () => {
     const limiter = createVoiceLimiter();
-    for (let i = 0; i < 20; i++) {
-      expect(limiter.tryConsume()).toBe(true);
-    }
+    expect(limiter.tryConsume()).toBe(true);
+    expect(limiter.tryConsume()).toBe(true);
     expect(limiter.tryConsume()).toBe(false);
 
     vi.advanceTimersByTime(1_001);
