@@ -84,9 +84,18 @@ type KeyHolderChecker interface {
 // it live at dispatch time picks up the late wiring. MessageSvc gates channel
 // broadcasts through the same posting policy as a real message send.
 type PluginDeps struct {
-	Registry   func() *plugin.Registry
+	Registry   func() CommandDispatcher
 	MessageSvc *service.MessageService
 	Limiter    *auth.RateLimiter
+}
+
+// CommandDispatcher is the one method the chat_command handler needs from the
+// plugin registry; *plugin.Registry satisfies it. Taking the interface rather
+// than the concrete type is what makes the broadcast path testable: without
+// the wazero build tag a real registry has no runtime and can only ever answer
+// with a Reply, so the CanPost gate would otherwise be unreachable from a test.
+type CommandDispatcher interface {
+	DispatchCommand(ctx context.Context, userID, channelID int64, cmd string, args []string) (*plugin.CommandResult, bool)
 }
 
 // VoiceDeps holds dependencies for voice handlers.
