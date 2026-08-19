@@ -173,7 +173,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
   generateRoomKey: vi.fn(() => new Uint8Array(32)),
   roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
   wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
-  unwrapRoomKey: vi.fn(async () => new Uint8Array(32)),
+  unwrapRoomKey: vi.fn(async () => ({ roomKey: new Uint8Array(32), epoch: 0 })),
   // F3 TOFU identity signing/verification
   signEphemeralKey: vi.fn(async () => "mock-signature"),
   verifyEphemeralKeySignature: vi.fn(async () => true),

@@ -32,7 +32,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
   generateRoomKey: vi.fn(() => new Uint8Array(32)),
   roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
   wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
-  unwrapRoomKey: vi.fn(async () => new Uint8Array(32)),
+  unwrapRoomKey: vi.fn(async () => ({ roomKey: new Uint8Array(32), epoch: 0 })),
   signEphemeralKey: vi.fn(async () => "mock-signature"),
   verifyEphemeralKeySignature: vi.fn(async () => true),
   importIdentityPublicKey: vi.fn(
@@ -229,12 +229,12 @@ describe("E2EEManager", () => {
     // ordering guarantee); the second resolves immediately. Delivery order
     // must still win — otherwise the receiver ends on the first (dead) key.
     let releaseFirst!: () => void;
-    const firstUnwrap = new Promise<Uint8Array>((resolve) => {
-      releaseFirst = () => resolve(new Uint8Array(32).fill(1));
+    const firstUnwrap = new Promise<{ roomKey: Uint8Array; epoch: number | null }>((resolve) => {
+      releaseFirst = () => resolve({ roomKey: new Uint8Array(32).fill(1), epoch: 0 });
     });
     vi.mocked(unwrapRoomKey)
       .mockReturnValueOnce(firstUnwrap)
-      .mockResolvedValueOnce(new Uint8Array(32).fill(2));
+      .mockResolvedValueOnce({ roomKey: new Uint8Array(32).fill(2), epoch: 0 });
     vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
     try {
       const first = mgr.handleOffer(PEER_ID, "enc1", "iv1");
@@ -384,8 +384,8 @@ describe("E2EEManager", () => {
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
 
     // This offer's unwrap stalls — still in flight when the user leaves voice.
-    let releaseUnwrap!: (v: Uint8Array) => void;
-    const stalledUnwrap = new Promise<Uint8Array>((resolve) => {
+    let releaseUnwrap!: (v: { roomKey: Uint8Array; epoch: number | null }) => void;
+    const stalledUnwrap = new Promise<{ roomKey: Uint8Array; epoch: number | null }>((resolve) => {
       releaseUnwrap = resolve;
     });
     vi.mocked(unwrapRoomKey).mockReturnValueOnce(stalledUnwrap);
@@ -408,7 +408,7 @@ describe("E2EEManager", () => {
     mockSetKey.mockClear();
 
     // The stale session-1 offer now resolves.
-    releaseUnwrap(new Uint8Array(32).fill(9));
+    releaseUnwrap({ roomKey: new Uint8Array(32).fill(9), epoch: 0 });
     await offerPromise;
 
     // Must be discarded: epoch alone (0 === 0) would have let it through.
@@ -1291,6 +1291,115 @@ describe("E2EEManager", () => {
         async () => ({ type: "public" }) as unknown as CryptoKey,
       );
       vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+
+  // ── OC-0001: per-sender offer epoch high-water mark ───────────────────────
+
+  const unwrapAt = (epoch: number | null, fill = 1) =>
+    vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+      roomKey: new Uint8Array(32).fill(fill),
+      epoch,
+    });
+
+  async function holderWithPeer(): Promise<{
+    ws: { send: ReturnType<typeof vi.fn> };
+    mgr: E2EEManager;
+  }> {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    mockSetKey.mockClear();
+    vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
+    return { ws, mgr };
+  }
+
+  it("[OC-0001] wraps each offer with the sender's current epoch", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    expect(wrapRoomKey).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      mgr.epoch,
+    );
+
+    await mgr.rotateKeyPeriodically();
+    expect(wrapRoomKey).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      mgr.epoch,
+    );
+  });
+
+  it("[OC-0001] discards an offer carrying an older epoch than one already applied from that sender", async () => {
+    const { mgr } = await holderWithPeer();
+    try {
+      unwrapAt(3, 3);
+      await mgr.handleOffer(PEER_ID, "enc3", "iv3");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-3");
+
+      unwrapAt(2, 2);
+      await mgr.handleOffer(PEER_ID, "enc2", "iv2");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-3");
+      expect(mockSetKey).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+    }
+  });
+
+  it("[OC-0001] applies an offer at the same epoch as the last applied one (holder re-sends the current key)", async () => {
+    const { mgr } = await holderWithPeer();
+    try {
+      unwrapAt(3, 3);
+      await mgr.handleOffer(PEER_ID, "enc3", "iv3");
+      unwrapAt(3, 4);
+      await mgr.handleOffer(PEER_ID, "enc3b", "iv3b");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-4");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+    }
+  });
+
+  it("[OC-0001] resets the sender's high-water mark when they announce a fresh ephemeral key", async () => {
+    const { mgr } = await holderWithPeer();
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+    try {
+      unwrapAt(5, 5);
+      await mgr.handleOffer(PEER_ID, "enc5", "iv5");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-5");
+
+      // Peer rejoined: new ephemeral key, new (local) epoch counter from 1.
+      await mgr.handleAnnounce(PEER_ID, "bmV3", "sigB");
+      unwrapAt(1, 1);
+      await mgr.handleOffer(PEER_ID, "enc1", "iv1");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-1");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+
+  it("[OC-0001] still applies a legacy offer (no epoch) from a holder on the old build", async () => {
+    const { mgr } = await holderWithPeer();
+    try {
+      unwrapAt(null, 7);
+      await mgr.handleOffer(PEER_ID, "legacy", "iv");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-7");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
     }
   });
 });

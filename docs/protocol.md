@@ -1175,6 +1175,22 @@ The key holder wraps the room key for a specific participant:
 }
 ```
 
+`encrypted_key` is opaque to the server (base64 and length checks only). Its
+layout is:
+
+```
+0x01 ‖ epoch (u64 big-endian) ‖ AES-GCM ciphertext of the 32-byte room key
+```
+
+`epoch` is the holder's key-rotation counter, bound as GCM additional data so
+the relay cannot change it without failing authentication. A receiver applies
+an offer only if its epoch is at least the highest it has already applied from
+that sender (equal is allowed: the holder re-sends the current key when a peer
+re-announces); the mark resets when the sender announces a new ephemeral key.
+A blob with no header (exactly 48 bytes: key + GCM tag) is the pre-epoch
+format and is still accepted from holders on an older build; that
+compatibility path is scheduled for removal in the next release.
+
 ### voice_e2ee_offer (Server -> Client, relay to target)
 
 Delivered only to `target_user_id`, with the sender attached:
