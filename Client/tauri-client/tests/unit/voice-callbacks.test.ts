@@ -90,6 +90,8 @@ interface VoiceStateStub {
   localDeafened: boolean;
   localCamera: boolean;
   localScreenshare: boolean;
+  localServerMuted: boolean;
+  localServerDeafened: boolean;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -99,6 +101,8 @@ function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    localServerMuted: false,
+    localServerDeafened: false,
     ...overrides,
   };
 }
@@ -219,6 +223,26 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(mockSetDeafened).toHaveBeenCalledWith(true);
       expect(mockSetMuted).not.toHaveBeenCalled();
       expect(ws.send).toHaveBeenCalledWith({ type: "voice_deafen", payload: { deafened: true } });
+      expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    });
+
+    it("does not send voice_mute{muted:false} on undeafen while server-muted (OC-0179)", () => {
+      // Mirrors onMuteToggle's localServerMuted guard: a moderator-imposed
+      // mute is not ours to lift, so undeafening must not spend a doomed
+      // voice_mute round-trip that the server will refuse with SERVER_MUTED.
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localDeafened: true, localMuted: true, localServerMuted: true }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      // The deafen clear itself still goes through...
+      expect(mockSetDeafened).toHaveBeenCalledWith(false);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_deafen", payload: { deafened: false } });
+      // ...but the unmute must be suppressed while the server mute stands.
+      expect(mockSetMuted).not.toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
     });
   });

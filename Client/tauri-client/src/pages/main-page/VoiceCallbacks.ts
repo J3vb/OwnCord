@@ -93,8 +93,13 @@ export function createVoiceWidgetCallbacks(
       if (state.localDeafened) {
         voiceSessionSetDeafened(false);
         ws.send({ type: "voice_deafen", payload: { deafened: false } });
-        voiceSessionSetMuted(false);
-        ws.send({ type: "voice_mute", payload: { muted: false } });
+        // A moderator-imposed mute is not ours to lift; the server refuses
+        // the unmute, so don't spend the round-trip (same guard as
+        // onMuteToggle above).
+        if (state.localServerMuted !== true) {
+          voiceSessionSetMuted(false);
+          ws.send({ type: "voice_mute", payload: { muted: false } });
+        }
       } else {
         voiceSessionSetDeafened(true);
         ws.send({ type: "voice_deafen", payload: { deafened: true } });
