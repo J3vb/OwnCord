@@ -127,6 +127,25 @@ describe("e2eeCrypto", () => {
       ).rejects.toThrow();
     });
 
+    it("rejects a decoded header epoch above Number.MAX_SAFE_INTEGER", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        generateRoomKey(),
+        3,
+      );
+      const bytes = fromB64(encryptedKey);
+      // Overwrite the u64 epoch (bytes 1-8) with 0xFFFFFFFFFFFFFFFF, well
+      // above 2^53-1. The range check runs before decrypt, so the AAD
+      // mismatch this also creates never gets a chance to fire.
+      bytes.set([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 1);
+      await expect(unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv)).rejects.toThrow(
+        "E2EE: offer epoch out of range",
+      );
+    });
+
     it("rejects an epoch that is negative or not a safe integer", async () => {
       const alice = await generateECDHKeyPair();
       const bob = await generateECDHKeyPair();
