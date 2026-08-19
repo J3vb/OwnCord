@@ -9,6 +9,7 @@ import (
 
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
 
 // ─── SetupOptions ────────────────────────────────────────────────────────────
@@ -99,9 +100,17 @@ func validateWizard(wr *setupWizardRequest) error {
 
 // wizardValidateIdentity checks and normalises the settings-table fields the
 // server reads live: the display name and the message of the day.
+//
+// It uses the fixpoint sanitizer (service.SanitizeText), not the bare
+// setupSanitizer.Sanitize call: bluemonday's bare Sanitize HTML-escapes
+// survivors (' -> &#39;, & -> &amp;, " -> &#34;), which would store these
+// fields differently from how the admin Settings page's handlePatchSettings
+// stores the exact same keys (no sanitizer at all). See setup_handler.go's
+// identical treatment of the username field, and service.SanitizeText's doc
+// comment.
 func wizardValidateIdentity(wr *setupWizardRequest) error {
 	if wr.ServerName != nil {
-		name := strings.TrimSpace(setupSanitizer.Sanitize(*wr.ServerName))
+		name := strings.TrimSpace(service.SanitizeText(*wr.ServerName))
 		if name == "" {
 			return fmt.Errorf("server_name cannot be empty")
 		}
@@ -111,7 +120,7 @@ func wizardValidateIdentity(wr *setupWizardRequest) error {
 		*wr.ServerName = name
 	}
 	if wr.Motd != nil {
-		motd := strings.TrimSpace(setupSanitizer.Sanitize(*wr.Motd))
+		motd := strings.TrimSpace(service.SanitizeText(*wr.Motd))
 		if len(motd) > maxMotdLen {
 			return fmt.Errorf("motd must be at most %d characters", maxMotdLen)
 		}
