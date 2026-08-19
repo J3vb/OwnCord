@@ -234,6 +234,16 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 				"channel_id", channelID, "err", err)
 			return []int64{}
 		}
+		// Fail closed on a missing row too (OC-0090): GetChannel returns
+		// (nil, nil) for a deleted channel, and falling through would hand a
+		// channel with no override rows left to the role scan below — which
+		// resolves to every connected user with base READ_MESSAGES, leaking
+		// e.g. a closed group-DM's voice_leave server-wide. Callers that
+		// tear down voice union the room's participants and the leaver back
+		// in afterwards, so eviction/E2EE-teardown signals still arrive.
+		if ch == nil {
+			return []int64{}
+		}
 		// Archived channels are hidden from every client regardless of
 		// permissions, mirroring RefreshChannelVisibility and VisibleChannelIDs.
 		// Without this, an admin edit to an archived channel (or a voice
@@ -241,10 +251,10 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		// base role holds READ_MESSAGES, none of whom have the channel in their
 		// ready payload or sidebar. ignoreArchived opts a caller out of this
 		// specific check only — see channelReadAudienceIgnoringArchived.
-		if ch != nil && ch.Archived && !ignoreArchived {
+		if ch.Archived && !ignoreArchived {
 			return []int64{}
 		}
-		if ch != nil && ch.Type == "dm" {
+		if ch.Type == "dm" {
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
 	}
