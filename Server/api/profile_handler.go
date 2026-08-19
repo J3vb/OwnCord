@@ -210,9 +210,14 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		// Sanitize and validate avatar if provided.
+		// Sanitize and validate avatar if provided. Use the fixpoint
+		// sanitizer (service.SanitizeText), not the bare sanitizer.Sanitize
+		// — Sanitize's output is always HTML-escaped, so a URL with more
+		// than one query parameter would have its "&" separators rewritten
+		// to "&amp;" and be persisted (and served) broken. Same reasoning as
+		// the username path above.
 		if req.Avatar != nil {
-			trimmed := strings.TrimSpace(sanitizer.Sanitize(*req.Avatar))
+			trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 			if err := validateAvatarURL(trimmed); err != nil {
 				writeJSON(w, http.StatusBadRequest, errorResponse{
 					Error: "INVALID_INPUT", Message: err.Error(),

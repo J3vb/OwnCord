@@ -201,6 +201,42 @@ func TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
 	}
 }
 
+// OC-0180: the avatar branch must canonicalize with the same fixpoint
+// sanitizer (service.SanitizeText) as the username path above it, not the
+// bare bluemonday sanitizer.Sanitize — Sanitize's output is always
+// HTML-escaped, so a legitimate avatar URL with more than one query
+// parameter gets its "&" separators rewritten to "&amp;" and is persisted
+// (and later served to every client) as a broken URL.
+func TestUpdateProfile_AvatarQueryStringIsNotEscaped(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "avatarqsuser", 4)
+
+	const avatarURL = "https://www.gravatar.com/avatar/abc?s=256&d=identicon"
+
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "avatarqsuser",
+		"avatar":   avatarURL,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["avatar"] != avatarURL {
+		t.Errorf("avatar = %v, want %q (must not be HTML-escaped)", resp["avatar"], avatarURL)
+	}
+
+	u, err := database.GetUserByUsername(context.Background(), "avatarqsuser")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername: %v, %v", u, err)
+	}
+	if u.Avatar == nil || *u.Avatar != avatarURL {
+		t.Errorf("stored avatar = %v, want %q (must not be HTML-escaped)", u.Avatar, avatarURL)
+	}
+}
+
 func TestUpdateProfile_UsernameTaken(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
