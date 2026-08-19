@@ -1171,17 +1171,26 @@ describe("media.ts", () => {
     });
 
     it("cleans up document-level listeners on close", () => {
+      const addEventListenerSpy = vi.spyOn(document, "addEventListener");
+
       openImageLightbox("https://example.com/cleanup.png", "Cleanup");
+
+      // The document-level keydown listener is registered with the lightbox's
+      // AbortController signal; capture it to prove the controller is aborted
+      // on close (rather than just re-dispatching events and asserting nothing).
+      const keydownCall = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === "keydown" && typeof call[2] === "object" && call[2] !== null,
+      );
+      const signal = (keydownCall?.[2] as AddEventListenerOptions | undefined)?.signal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal!.aborted).toBe(false);
 
       const closeBtn = document.body.querySelector(".image-lightbox-close") as HTMLElement;
       closeBtn.click();
 
-      // After close, key events should not error or affect anything
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      document.dispatchEvent(
-        new MouseEvent("mousemove", { clientX: 100, clientY: 100, bubbles: true }),
-      );
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(signal!.aborted).toBe(true);
+
+      addEventListenerSpy.mockRestore();
     });
   });
 
