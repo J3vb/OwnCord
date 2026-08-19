@@ -10,12 +10,15 @@
    "why": "The ephemeral ECDH keypair is generated only in setupKeyExchange (:151) and reannounceForReconnect (:316); neither rotation site (:898, :996) regenerates it, so deriveWrappingKey returns identical output all session. HKDF salt/info are constants, wrapRoomKey passes no additionalData, and the wire payload carries no epoch. handleOfferInner installs whatever decrypts.",
    "repro": "Malicious server captures a voice_e2ee_offer, then replays it after a rotation. The recipient unwraps it successfully and installs the superseded key. Replayed to every peer, the room re-converges on a key a departed participant still holds, defeating membership forward secrecy. Aggravator at :783-789: accepting an offer sets _isKeyHolder=false and kills the rotation timer.",
    "evidence": "e2eeCrypto.ts:30-34 constant HKDF params; :259-286 deriveWrappingKey; livekitE2EE.ts:763 epoch guard is intra-call only; :772-773 unconditional install",
-   "status": "declined",
+   "status": "fixed",
    "found": "2026-08-09",
    "hunt": "voice-e2ee-2026-08-09",
    "lens": "crypto-primitives",
-   "fix": null,
-   "rationale": "Requires a protocol-level freshness field (epoch in voice_e2ee_offer via protocol-change across schema/server/client) plus a design decision on the scheme; a client-only patch cannot detect replay without a wire epoch. Architectural, not a single-file fix."
+   "fix": {
+    "commit": "84033139",
+    "test": "Client/tauri-client/tests/unit/livekit-e2ee.test.ts",
+    "revertProof": "pass"
+   }
   },
   {
    "id": "OC-0002",
@@ -47,12 +50,15 @@
    "why": "The !publishedIdentity branch accepts a peer as 'unverified' with safetyNumber: null. TOFU's designed compensation for first-contact risk is out-of-band safety-number comparison, and for exactly those peers the client renders no number to compare.",
    "repro": "A malicious server suppresses identity_public_key for one victim pairing in ready/member_join/user_update, then substitutes the ephemeral key. The peer shows a grey shield indistinguishable from a genuine legacy client, and the user has no fingerprint to verify out of band.",
    "evidence": "livekitE2EE.ts:473-481; the pinned-peer strip is already blocked at :458, so this branch is reachable only for never-pinned peers",
-   "status": "declined",
+   "status": "fixed",
    "found": "2026-08-09",
    "hunt": "voice-e2ee-2026-08-09",
    "lens": "tofu-trust-chain",
-   "fix": null,
-   "rationale": "A fallback safety number from the ephemeral key conflicts with the test-pinned contract that safetyNumber is null for legacy/unverified peers (livekit-session.test.ts), and substituting a weaker per-session fingerprint for the identity-based safety number is a product/security design decision, not a file-scoped fix."
+   "fix": {
+    "commit": "bf7612fb",
+    "test": "Client/tauri-client/tests/unit/livekit-e2ee.test.ts",
+    "revertProof": "pass"
+   }
   },
   {
    "id": "OC-0004",
