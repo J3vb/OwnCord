@@ -95,3 +95,28 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
 
   return { send, destroy };
 }
+
+// ---------------------------------------------------------------------------
+// Active-session registry
+// ---------------------------------------------------------------------------
+
+let activeSender: PresenceSender | null = null;
+
+/**
+ * Register the session's one `PresenceSender` so producers that are wired up
+ * before any session exists — main.ts's tray "status-change" listener, which
+ * is registered at module load, long before a login — can still route
+ * through the same shared limiter/retry/optimistic-update instead of
+ * sending `presence_update` raw and opening a second budget the server does
+ * not know about (OC-0176). MainPage.ts calls this right after constructing
+ * its `PresenceSender`, and again with `null` in its teardown.
+ */
+export function setActivePresenceSender(sender: PresenceSender | null): void {
+  activeSender = sender;
+}
+
+/** The current session's `PresenceSender`, or `null` when no session is
+ *  mounted (before login, or after logout/disconnect). */
+export function getActivePresenceSender(): PresenceSender | null {
+  return activeSender;
+}

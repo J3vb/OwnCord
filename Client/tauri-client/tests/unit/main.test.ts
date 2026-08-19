@@ -152,6 +152,8 @@ vi.mock("@lib/dispatcher", async () => {
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { clearAuth } from "@stores/auth.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
+import { createMainPage } from "@pages/MainPage";
+import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
 // ---------------------------------------------------------------------------
 // Import the module under test AFTER all mocks are registered. #app must
@@ -213,6 +215,33 @@ describe("main.ts tray status-change listener (OC-0037)", () => {
   });
 });
 
+describe("main.ts tray status-change routes through the shared PresenceSender (OC-0176)", () => {
+  afterEach(() => {
+    setActivePresenceSender(null);
+  });
+
+  it("sends the tray's chosen status through the session's registered PresenceSender, not a raw ws.send", () => {
+    // Stand in for the one PresenceSender MainPage.ts registers for the
+    // session (via setActivePresenceSender) — the shared limiter token, the
+    // coalescing retry, and the optimistic update all live inside it.
+    const fakeSender: PresenceSender = { send: vi.fn(), destroy: vi.fn() };
+    setActivePresenceSender(fakeSender);
+
+    emitTauriEvent("status-change", "dnd");
+
+    // Before the fix, main.ts calls ws.send({ type: "presence_update", ... })
+    // directly — bypassing this sender (and the shared rate-limit budget it
+    // enforces) entirely, so fakeSender.send is never called.
+    expect(fakeSender.send).toHaveBeenCalledExactlyOnceWith("dnd");
+  });
+
+  it("is a safe no-op (no throw) when no session's PresenceSender is registered", () => {
+    setActivePresenceSender(null);
+
+    expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
 describe("main.ts connected overlay (OC-0063)", () => {
   it("shows the auth_ok payload's server_name and motd, not the pre-handshake authStore snapshot", async () => {
     await loginAndReachAuthOk("192.168.1.10:8443", "alex", {
@@ -234,6 +263,70 @@ describe("main.ts connected overlay (OC-0063)", () => {
 
     const iconEl = overlay?.querySelector(".connected-srv-icon");
     expect(iconEl?.textContent).toBe("M"); // first letter of "My Guild", not "1" (host) or "" (blank auth)
+  });
+});
+
+describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
+  it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
+    await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
+      user: { id: 7, username: "casey", avatar: null, role: "member" },
+      server_name: "Mid Handshake Co",
+      motd: "",
+    });
+
+    // auth_ok landed: the overlay is mounted over #app while the router is
+    // still "connect" — it only moves to "main" from the overlay's own
+    // onReady, 800ms after the `ready` event arrives.
+    expect(document.querySelector('[data-testid="connected-overlay"]')).not.toBeNull();
+
+    // Simulate a session that ends here — a ban, an auth_error on an
+    // intervening reconnect, or a server shutdown — none of which the
+    // client ever receives `ready` for. dispatcher.ts's handlers for all
+    // three do `ws.disconnect(); clearAuth();` before `ready` can arrive.
+    clearAuth();
+    // authStore notifications are microtask-deferred (see store.ts).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Before the fix, the isAuthenticated subscriber's gate is
+    // `router.getCurrentPage() === "main"` — since the router never left
+    // "connect", the subscriber no-ops entirely and the overlay
+    // (position:fixed, opaque, z-index 200) is orphaned over the connect
+    // page forever; only an app restart clears it.
+    expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
+  });
+
+  it("cancels the overlay's armed onReady timer when the session ends inside the 800ms ready window", async () => {
+    const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
+
+    await loginAndReachAuthOk("wide-window.example:8443", "riley", {
+      user: { id: 8, username: "riley", avatar: null, role: "member" },
+      server_name: "Wide Window Co",
+      motd: "",
+    });
+
+    // `ready` arrives and arms the overlay's 800ms onReady timer (which
+    // would otherwise call router.navigate("main") on its own).
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+
+    // The ban/shutdown lands partway through that 800ms window — well after
+    // `ready`, well before the timer fires.
+    await vi.advanceTimersByTimeAsync(300);
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
+
+    // Advance past the timer's original 800ms deadline. Before the fix, the
+    // subscriber never called connectedOverlay.destroy() (its AbortController
+    // is what cancels the pending setTimeout — see ConnectedOverlay.ts), so
+    // the already-armed timer still fires onReady() -> router.navigate("main"),
+    // mounting MainPage on a cleared authStore and a disconnected socket even
+    // though the isAuthenticated subscriber already ran and won't run again.
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(vi.mocked(createMainPage).mock.calls.length).toBe(mainPageCallsBefore);
   });
 });
 

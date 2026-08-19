@@ -37,6 +37,7 @@ import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
 import { saveUserStatus } from "@lib/userStatus";
+import { getActivePresenceSender } from "@lib/presence";
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
@@ -250,8 +251,15 @@ void ws.startCertListener();
 // tray's choice never reaches loadUserStatus(), so notifications.ts's DND
 // gate, autoIdle's "never touch a manual DND/invisible" guard, and
 // restoreSavedPresence() on the next reconnect all silently disagree with
-// what the tray just set (OC-0037). ws.send is a safe no-op (logged) when
-// there is no live session, so no auth guard is needed here.
+// what the tray just set (OC-0037). The send itself goes through the
+// session's shared PresenceSender (registered by MainPage.ts via
+// setActivePresenceSender) rather than a raw ws.send: the server enforces a
+// single 1-update/10s budget per user regardless of which surface sent the
+// frame, and a raw send here would open a second, uncoordinated budget that
+// silently drops whichever frame the server sees second (OC-0176). When no
+// session is mounted the optional call is a no-op, matching the old raw
+// ws.send's "safe no-op when disconnected" behavior, so no auth guard is
+// needed here.
 void listen<string>("status-change", (e) => {
   const status = e.payload;
   if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
@@ -260,7 +268,7 @@ void listen<string>("status-change", (e) => {
     // doc comment) — the local pref and the wire message must agree.
     const mapped = status === "offline" ? "invisible" : status;
     saveUserStatus(mapped);
-    ws.send({ type: "presence_update", payload: { status: mapped } });
+    getActivePresenceSender()?.send(mapped);
   }
 });
 
@@ -760,7 +768,18 @@ router.onNavigate((pageId) => {
 authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
-    if (!isAuthenticated && router.getCurrentPage() === "main") {
+    // The router only reaches "main" from the connected overlay's own
+    // onReady, 800ms after `ready` arrives — so a session that ends between
+    // auth_ok and ready (a ban, an auth_error on an intervening reconnect,
+    // a server_restart shutdown) flips isAuthenticated false while the
+    // router is still "connect". Gate on connectedOverlay too so that case
+    // still tears down: otherwise the overlay (position:fixed, opaque,
+    // z-index 200, appended straight to #app in wirePostAuth's auth_ok
+    // handler) is orphaned over the connect page with no remaining owner —
+    // its only other teardown paths are its own onReady timer (never armed
+    // without `ready`), the next wirePostAuth, onAutoLoginCancel, and the
+    // invite deep-link handler, none of which this path takes (OC-0157).
+    if (!isAuthenticated && (router.getCurrentPage() === "main" || connectedOverlay !== null)) {
       // Leave voice channel before disconnecting so other clients see it
       // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
       // than the live voiceStore: clearAuth applies state (including this
@@ -777,6 +796,8 @@ authStore.subscribeSelector(
       dispatcherCleanup = null;
       sessionCleanup?.();
       sessionCleanup = null;
+      connectedOverlay?.destroy();
+      connectedOverlay = null;
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
