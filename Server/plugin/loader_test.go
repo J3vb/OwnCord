@@ -65,6 +65,47 @@ func TestRejectSymlinksUnderFindsNestedSymlink(t *testing.T) {
 	}
 }
 
+// OC-0165: a single malformed plugin directory must not blank out every
+// other, otherwise-valid plugin in the scan. scanPluginDirectory should skip
+// the bad directory (recording its error) and still return the good one.
+func TestScanPluginDirectory_SkipsBadPluginButReturnsGood(t *testing.T) {
+	root := t.TempDir()
+
+	// Good plugin: valid plugin.json + matching .wasm entrypoint.
+	goodDir := filepath.Join(root, "hello")
+	if err := os.MkdirAll(goodDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goodManifest := []byte(`{"name":"hello","version":"1.0.0","entrypoint":"hello.wasm"}`)
+	if err := os.WriteFile(filepath.Join(goodDir, "plugin.json"), goodManifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goodDir, "hello.wasm"), []byte("\x00asm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Broken plugin: malformed JSON (trailing comma).
+	brokenDir := filepath.Join(root, "broken")
+	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	brokenManifest := []byte(`{"name":"broken","version":"1.0.0","entrypoint":"broken.wasm",}`)
+	if err := os.WriteFile(filepath.Join(brokenDir, "plugin.json"), brokenManifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := scanPluginDirectory(root)
+	if err == nil {
+		t.Fatal("expected scanPluginDirectory to report an error for the broken plugin")
+	}
+	if len(found) != 1 {
+		t.Fatalf("scanPluginDirectory returned %d plugins, want 1 (the good one survived alongside the reported error); got %+v", len(found), found)
+	}
+	if found[0].Manifest.Name != "hello" {
+		t.Fatalf("scanPluginDirectory returned plugin %q, want \"hello\"", found[0].Manifest.Name)
+	}
+}
+
 func TestScanPluginDirectoryRejectsSymlinkEntrypoint(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated privileges on Windows")

@@ -168,9 +168,14 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 			}
 		}
 	}
+	// scanPluginDirectory reports a non-nil error whenever at least one
+	// plugin subdirectory failed to parse, but it still returns every
+	// plugin that scanned cleanly in `manifests`. Log-and-continue here
+	// rather than aborting: one malformed plugin directory must not take
+	// every other, otherwise-valid plugin down with it (OC-0165).
 	manifests, err := scanPluginDirectory(r.cfg.Directory)
 	if err != nil {
-		return fmt.Errorf("plugin: scan %q: %w", r.cfg.Directory, err)
+		slog.Warn("plugin: some plugin directories failed to scan and were skipped", "dir", r.cfg.Directory, "err", err)
 	}
 	for _, found := range manifests {
 		if err := r.installFromDisk(ctx, found); err != nil {

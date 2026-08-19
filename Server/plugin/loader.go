@@ -18,6 +18,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,8 +31,15 @@ type foundPlugin struct {
 }
 
 // scanPluginDirectory walks dir non-recursively and parses plugin.json from
-// every immediate subdirectory. Returns on the first error encountered;
-// partial results are not returned alongside errors.
+// every immediate subdirectory. A per-plugin failure (malformed manifest,
+// missing or symlinked entrypoint, a stray symlink anywhere in that plugin's
+// tree) is recorded and that one subdirectory is skipped — it does not stop
+// the scan. The returned error is non-nil whenever at least one subdirectory
+// was skipped, joining every such failure, but `found` still holds every
+// plugin that scanned cleanly. Callers that need the scan to be all-or-
+// nothing should check the returned error before using `found`; LoadAll
+// deliberately does not, so one bad plugin directory cannot disable every
+// other plugin (OC-0165).
 func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 	if dir == "" {
 		return nil, nil
@@ -45,6 +53,7 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		return nil, err
 	}
 	var found []foundPlugin
+	var scanErr error
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -54,7 +63,8 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		// Prefer plugin.toml (wazero build) over plugin.json.
 		manifest, ok, tomlErr := tryLoadPluginTOML(pluginDir)
 		if tomlErr != nil {
-			return nil, fmt.Errorf("plugin %q: %w", e.Name(), tomlErr)
+			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), tomlErr))
+			continue
 		}
 		if !ok {
 			// Fall back to plugin.json.
@@ -64,12 +74,14 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 				if os.IsNotExist(rdErr) {
 					continue
 				}
-				return nil, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr)
+				scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr))
+				continue
 			}
 			var parseErr error
 			manifest, parseErr = ParseManifest(raw)
 			if parseErr != nil {
-				return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
+				scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), parseErr))
+				continue
 			}
 		}
 		// Reject any symlinks anywhere in the plugin directory tree. The asset
@@ -80,13 +92,16 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		// check below so a symlink is detected instead of followed, even
 		// when its target is a valid .wasm file.
 		if err := rejectSymlinksUnder(pluginDir); err != nil {
-			return nil, fmt.Errorf("plugin %q: %w", e.Name(), err)
+			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), err))
+			continue
 		}
 		wasmPath := filepath.Join(pluginDir, manifest.Entrypoint)
 		if info, statErr := os.Lstat(wasmPath); statErr != nil {
-			return nil, fmt.Errorf("plugin %q: missing entrypoint %s: %w", e.Name(), manifest.Entrypoint, statErr)
+			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: missing entrypoint %s: %w", e.Name(), manifest.Entrypoint, statErr))
+			continue
 		} else if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("plugin %q: entrypoint %s is a symlink", e.Name(), manifest.Entrypoint)
+			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: entrypoint %s is a symlink", e.Name(), manifest.Entrypoint))
+			continue
 		}
 		found = append(found, foundPlugin{
 			Manifest: manifest,
@@ -94,7 +109,7 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 			WASMPath: wasmPath,
 		})
 	}
-	return found, nil
+	return found, scanErr
 }
 
 // rejectSymlinksUnder walks root and returns an error if any entry is a
