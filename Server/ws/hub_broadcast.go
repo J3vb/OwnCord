@@ -590,6 +590,32 @@ func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.DisconnectUser(userID)
 }
 
+// BroadcastMemberUnban is the mirror of BroadcastMemberBan: member_ban
+// hard-deletes the row on every connected client, so an unban must re-add it
+// or clients connected through the ban permanently disagree with freshly
+// connecting ones. Fans out the same member_join a fresh connect would
+// (clients map it to addMember — no protocol change), satisfying the admin
+// package's memberUnbanBroadcaster capability; admin's hub_wiring_test.go
+// pins that at compile time. (OC-0058)
+func (h *Hub) BroadcastMemberUnban(userID int64) {
+	ctx := context.Background()
+	user, err := h.db.GetUserByID(ctx, userID)
+	if err != nil || user == nil {
+		slog.Error("hub: BroadcastMemberUnban GetUserByID failed", "user_id", userID, "err", err)
+		return
+	}
+	roleName := ""
+	if role, err := h.db.GetRoleForUser(ctx, userID); err == nil && role != nil {
+		roleName = role.Name
+	}
+	// The ban disconnected them and reconnecting was refused while banned,
+	// so they cannot be online at unban time — report offline regardless of
+	// the stale status the row carries (serve_ready's "no live connection is
+	// offline, whatever the row says" rule).
+	user.Status = "offline"
+	h.BroadcastToAll(buildMemberJoin(user, roleName))
+}
+
 // DisconnectUser forcibly disconnects the client identified by userID.
 // No-op if the user is not currently connected.
 func (h *Hub) DisconnectUser(userID int64) {
