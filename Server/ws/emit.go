@@ -59,6 +59,23 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 				// Low priority: typing indicators are ephemeral.
 				h.broadcastExcludeLow(e.ChannelID(), e.ExcludeUserID(), e.Payload())
 			}
+		case PresenceSelfEvent:
+			// Normal priority, NOT the UserTargetedEvent default below (which
+			// PresenceSelfEvent also satisfies — this case must stay ordered
+			// before it so the type switch picks this one). Every other
+			// source of this same user's own presence — the visible
+			// presence_update path (PresenceEvent -> BroadcastToAll) and the
+			// connect/disconnect coalescer's private half
+			// (BroadcastPresence -> h.SendToUser) — already shares the
+			// normal-priority queue. Routing this one through
+			// h.SendToUserHigh instead split one user's own presence across
+			// two per-client FIFOs with different drain order: writePump
+			// always drains high strictly before normal, so a newer
+			// invisible self-frame on high could be delivered before an
+			// older visible-status frame still sitting on normal, leaving
+			// the owner's own client on a stale status — the same hazard
+			// OC-0003/OC-0214 fixed for the "others" half of presence.
+			h.SendToUser(e.TargetUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
 			// dm_channel_open is unsequenced and targeted, so replay can never
