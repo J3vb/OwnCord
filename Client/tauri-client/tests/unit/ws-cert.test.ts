@@ -150,6 +150,50 @@ describe("cert mismatch blocking", () => {
     expect(reconnectCalls).toHaveLength(0);
   });
 
+  it("blocks reconnect when a bracketed IPv6 profile host meets the Rust proxy's unbracketed event host", async () => {
+    // Regression for OC-0163's TS half: a profile may be saved bracketed
+    // ("[2001:db8::1]", a form hostValidation.ts's isValidHost accepts), and
+    // ws_connect embeds it verbatim in the wss:// authority — so the Rust
+    // side derives the pin key via tofu::cert_store_key, which unwraps a
+    // PORTLESS bracketed IPv6 literal and emits the bare host. Without the
+    // matching unwrap in normalizeHostForCertCompare, this guard never
+    // matches for an IPv6 server and the reconnect loop keeps re-handshaking
+    // the host whose certificate just changed.
+    client.connect({ host: "[2001:db8::1]", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Rust-normalized event host — brackets stripped by cert_store_key.
+    emitTauriEvent("cert-tofu", {
+      host: "2001:db8::1",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnectCalls).toHaveLength(0);
+  });
+
   it("should unblock after acceptCertFingerprint", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -494,6 +538,20 @@ describe("normalizeHostForCertCompare", () => {
     const evtHost = "example.com";
     const lastConnectHost = "Example.COM:443";
     expect(evtHost === normalizeHostForCertCompare(lastConnectHost)).toBe(true);
+  });
+
+  it("unwraps a portless bracketed IPv6 literal exactly as cert_store_key does", () => {
+    // Mirrors the Rust assertions in
+    // src-tauri/src/tofu.rs::cert_store_key_treats_bracketed_and_bare_ipv6_as_the_same_host.
+    // A profile saved as "[2001:db8::1]" reaches the proxies bracketed, and
+    // cert_store_key unwraps it (and its default-port form) before the
+    // cert-tofu event is emitted; this mirror has to land on the same string
+    // or main.ts's onAccept/onReject host guards silently never match.
+    expect(normalizeHostForCertCompare("[2001:db8::1]")).toBe("2001:db8::1");
+    expect(normalizeHostForCertCompare("[2001:DB8::1]:443")).toBe("2001:db8::1");
+    // A non-default port keeps its brackets — a genuinely distinct pin key,
+    // same as the plain "host:8443" case never collapsing to "host".
+    expect(normalizeHostForCertCompare("[2001:db8::1]:8443")).toBe("[2001:db8::1]:8443");
   });
 });
 
