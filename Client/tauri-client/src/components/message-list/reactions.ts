@@ -21,6 +21,7 @@ export function renderReactions(
       class: reaction.me ? "reaction-chip me" : "reaction-chip",
       // Focusable so the who-reacted tooltip is reachable without a pointer.
       tabindex: "0",
+      role: "button",
       "data-emoji": reaction.emoji,
     });
     // Reaction strings are free-form, so a custom reaction is stored as the
@@ -33,6 +34,7 @@ export function renderReactions(
     chip.appendChild(emoji);
     chip.appendChild(count);
     chip.addEventListener("click", () => opts.onReactionClick(msg.id, reaction.emoji), { signal });
+    addKeyActivation(chip, () => opts.onReactionClick(msg.id, reaction.emoji), signal);
     attachReactionTooltip(
       chip,
       {
@@ -45,8 +47,33 @@ export function renderReactions(
     );
     container.appendChild(chip);
   }
-  const addBtn = createElement("span", { class: "reaction-chip add-reaction" }, "+");
+  const addBtn = createElement(
+    "span",
+    { class: "reaction-chip add-reaction", tabindex: "0", role: "button" },
+    "+",
+  );
   addBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
+  addKeyActivation(addBtn, () => opts.onReactionClick(msg.id, ""), signal);
   container.appendChild(addBtn);
   return container;
+}
+
+/**
+ * A bare <span role="button"> gets no native key activation, unlike a real
+ * <button>. Mirror Enter/Space onto the same handler the click listener
+ * uses, so a chip is actually usable from the keyboard once it is reachable
+ * (mirrors QuickSwitchOverlay.ts's item/keydown pattern).
+ */
+function addKeyActivation(el: Element, onActivate: () => void, signal: AbortSignal): void {
+  el.addEventListener(
+    "keydown",
+    (e) => {
+      const key = (e as KeyboardEvent).key;
+      if (key === "Enter" || key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+    { signal },
+  );
 }
