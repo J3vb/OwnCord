@@ -231,13 +231,17 @@
    "why": "Every other removal path re-elects (finishVoiceLeave, the LiveKit webhook, registerNow, rollbackVoiceJoin, sweepStaleVoiceStates). Channel delete and archive do not, leaving h.voiceKeyHolders[channelID] populated.",
    "repro": "Delete a channel that had an elected holder. The map entry is never reachable and never freed — an unbounded per-deleted-channel leak for the process lifetime. On archive the next join's own updateKeyHolder overwrites it before any client can act, so there is no live desync.",
    "evidence": "Server/ws/hub_sweep.go:290-346; contrast Server/ws/voice_leave.go:102",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-09",
    "hunt": "voice-e2ee-2026-08-09",
    "lens": "keyholder-election",
-   "fix": null,
-   "rationale": "cross-cluster edit: shares Server/db/voice_queries.go with Server/db/queries/sqlite/voice.sql - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fix": {
+    "commit": "6f3485e7",
+    "test": "TestCleanupVoiceForChannel_ClearsKeyHolder",
+    "revertProof": "pass"
+   },
+   "fixed": "2026-08-19",
+   "note": "CleanupVoiceForChannel now re-elects via updateKeyHolder"
   },
   {
    "id": "OC-0013",
@@ -1386,16 +1390,20 @@
    "repro": "Admin bans user U: BroadcastMemberBan fans member_ban out, every connected client runs removeMember(U) and drops U from membersStore, and U's socket is kicked. Admin then unbans U via PATCH /api/v1/admin/users/{id} {\"banned\": false}. ModerationService.UnbanUser commits, then the `case !*req.Banned && hub != nil` branch type-asserts and silently does nothing. U is absent from the member list, from mention autocomplete and from getTypingUsers on every client that was connected during the ban, while any client that connects afterwards gets U in its ready payload — two clients side by side showing different rosters. It only converges for the stale clients if U reconnects (handleFreshConnect broadcasts member_join) or they reconnect themselves; an unbanned user who never comes back online stays missing indefinitely. admin/handlers_users_broadcast_test.go:51 asserts the call happens against a double that implements the interface, so the suite stays green.",
    "evidence": "case *req.Banned && hub != nil:\n\thub.BroadcastMemberBan(id)          // real method on *ws.Hub\ncase !*req.Banned && hub != nil:\n\tif mub, ok := hub.(memberUnbanBroadcaster); ok {\n\t\tmub.BroadcastMemberUnban(id)    // *ws.Hub has no such method — assertion always false\n\t}",
    "suggestedFix": "Implement `func (h *Hub) BroadcastMemberUnban(userID int64)` on *ws.Hub that loads the user and role from h.db and calls h.BroadcastToAll(buildMemberJoin(user, roleName)) — the client already maps member_join to addMember, so no protocol change is needed. Add a compile-time `var _ memberUnbanBroadcaster = (*ws.Hub)(nil)` where admin is wired to the real hub so the assertion cannot silently miss again.",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-12",
    "hunt": "general-2026-08-12",
    "lens": "state-desync",
    "finder": "opus",
    "round": 2,
    "confidence": "high",
-   "fix": null,
-   "rationale": "cross-cluster edit: shares Server/ws/hub_broadcast.go with the hub_broadcast cluster - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fix": {
+    "commit": "d2289560",
+    "test": "TestBroadcastMemberUnban_FansOutMemberJoin",
+    "revertProof": "pass"
+   },
+   "fixed": "2026-08-19",
+   "note": "BroadcastMemberUnban implemented on *ws.Hub; compile-time wiring assertion added in admin"
   },
   {
    "id": "OC-0059",
@@ -1965,16 +1973,20 @@
    "repro": "Channel with voice_max_video = 1. User A enables their camera: COUNT(camera=1)=0 < 1, row updated to camera=1. A's client-side localCamera then falls out of sync with the row while the row stays 1 — the confirmed enableCamera supersession gap (Client/tauri-client/src/lib/screenShare.ts:243) does exactly this: a disableCamera that lands during publishTrack resets localCamera to false but the server row keeps camera=1. A now presses the camera button (VoiceCallbacks.ts:110 computes next = !localCamera = true) and the server runs EnableCameraIfUnderLimit(A, ch, 1): the subquery counts A's own row, 1 < 1 is false, 0 rows affected, ok=false. A receives VIDEO_LIMIT \"maximum 1 video streams reached\" while being the only video publisher in the room, and every retry repeats it — there is no path that clears camera back to 0 except A sending voice_camera{enabled:false}, which the UI will not do because it believes the camera is already off.",
    "evidence": "Server/db/queries/sqlite/voice.sql:90-92 — `UPDATE voice_states SET camera = 1 WHERE voice_states.user_id = ? AND voice_states.channel_id = ? AND (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND vs2.camera = 1) < ?;` (no `AND vs2.user_id <> ?` exclusion, and no `AND camera = 0` on the outer UPDATE). Consumed at Server/ws/voice_controls.go:116 `ok, limitErr := d.DB.EnableCameraIfUnderLimit(ctx, userID, voiceChID, ch.VoiceMaxVideo)` with the refusal at voice_controls.go:121-126 returning ErrCodeVideoLimit.",
    "suggestedFix": "Exclude the requester's own row from the count in EnableCameraIfUnderLimit: change the subquery to `WHERE vs2.channel_id = ? AND vs2.camera = 1 AND vs2.user_id <> voice_states.user_id` (or bind userID again with `AND vs2.user_id <> ?`), then regenerate the sqlc layer via the db-change workflow. This makes re-enable idempotent while still refusing a genuinely new publisher at the cap.",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-12",
    "hunt": "general-2026-08-12",
    "lens": "hotspot-server-ws",
    "finder": "opus",
    "round": 6,
    "confidence": "high",
-   "fix": null,
-   "rationale": "cross-cluster edit: shares Server/db/voice_queries.go with Server/ws/hub_sweep.go - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fix": {
+    "commit": "6a5a3a7c",
+    "test": "TestVoice_EnableCameraIfUnderLimit_ReEnableIdempotentAtCap",
+    "revertProof": "pass"
+   },
+   "fixed": "2026-08-19",
+   "note": "own-flag exclusion in both Enable*IfUnderLimit gates; sqlc regenerated"
   },
   {
    "id": "OC-0082",
@@ -2088,16 +2100,20 @@
    "repro": "Voice channel V already holds several genuine ghost rows (e.g. after a server restart, or several crashed clients), so the `stale` loop has work to do and each iteration costs a channelReadAudience resolution plus a LiveKit RemoveParticipant with a 5s timeout.\n1. The 60s voiceSweepTicker fires. sweepStaleVoiceStates reads GetAllVoiceStates and takes the h.mu.RLock snapshot at T0.\n2. At T0, user X's voice_join has committed its row via JoinVoiceChannel (voice_join.go:196) but has not yet reached c.setVoiceState (voice_join.go:222) — one GetVoiceState round trip away. X's client still reports getVoiceChID() == 0, so X's row is appended to `stale`.\n3. X's join then completes normally: setVoiceState, Subscribe(VoiceTopic(V)), updateKeyHolder(V), broadcastVoiceEvent(voice_state) — every other client is told X joined, and X's client connects to the SFU.\n4. Seconds later the sweep reaches X's entry. LeaveVoiceChannelIfMatch(X, V, joinedAt) matches — it is literally the row X's join created — and deletes it. voice_leave is broadcast for X. RemoveParticipant(V, X, joinedAt) uses the same identity and kicks X out of the LiveKit room.\n5. Nothing clears X's in-memory state: c.voiceChID is still V and c.voiceJoinToken is still joinedAt, and X remains subscribed to VoiceTopic(V).\nOutcome: X is silently ejected from the SFU seconds after joining while the hub and X's own client both still believe X is in voice. updateKeyHolder(V) at line 245 scans h.clients, sees X's live voiceChID == V, and can elect X key holder for a room X is not in — every other participant's voice_e2ee_offer is then rejected with NOT_KEY_HOLDER. X's voice_mute/voice_camera writes hit zero rows and voiceStateBroadcast returns Result{} (state == nil), so the toggles silently no-op, and no later sweep can heal it because the sweep only iterates DB rows.",
    "evidence": "hub_sweep.go:202-249\n\th.mu.RLock()\n\tvar stale []struct{ userID, channelID int64; joinedAt string }\n\tfor _, vs := range allStates {\n\t\tc, ok := h.clients[vs.UserID]\n\t\tif !ok || c.getVoiceChID() != vs.ChannelID {   // <-- decided here, under one RLock\n\t\t\tstale = append(stale, ...)\n\t\t}\n\t}\n\th.mu.RUnlock()\n\n\tfor _, s := range stale {                        // <-- acted on here, seconds later, no re-check\n\t\tdeleted, err := h.db.LeaveVoiceChannelIfMatch(ctx, s.userID, s.channelID, s.joinedAt)\n\t\t...\n\t\th.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))\n\t\th.updateKeyHolder(s.channelID)\n\t\tif h.livekit != nil { _ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt) }\n\t}\n\ncontrast, same function, hub_sweep.go:181-187\n\t\t// The permission check is a DB round-trip; a voice_join to a\n\t\t// still-permitted channel may have committed while it ran. The\n\t\t// eviction is conditional on the client still being in the checked\n\t\t// channel — never on whatever channel it is in by now.\n\t\tif !h.handleVoiceLeaveIfStillIn(ctx, c, chID) { continue }\n\nthe window being raced, voice_join.go:196-222\n\t\tif err := h.db.JoinVoiceChannel(ctx, c.userID, channelID); ... // row committed\n\t\tstate, err := h.db.GetVoiceState(ctx, c.userID)                // still voiceChID == 0 here\n\t\t...\n\t\tc.setVoiceState(channelID, state.JoinedAt)                     // only now non-zero",
    "suggestedFix": "In the ghost-classification loop (hub_sweep.go:208-217), add the grace-period guard the codebase's own cross_batch note prescribes: parse vs.JoinedAt and `continue` for rows younger than a grace window (e.g. 2x the 60s sweep interval), so a just-committed join can never be classified as a ghost regardless of when c.setVoiceState lands.",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-12",
    "hunt": "general-2026-08-12",
    "lens": "hotspot-server-ws",
    "finder": "opus",
    "round": 7,
    "confidence": "high",
-   "fix": null,
-   "rationale": "cross-cluster edit: shares Server/db/voice_queries.go with Server/db/queries/sqlite/voice.sql - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fix": {
+    "commit": "b8b7a2a1",
+    "test": "TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow",
+    "revertProof": "covered-by-OC-0017"
+   },
+   "fixed": "2026-08-19",
+   "note": "already fixed on main by the OC-0017 pre-delete live-client re-check (PR #1374); verified against HEAD 2026-08-19"
   },
   {
    "id": "OC-0087",
@@ -2186,16 +2202,20 @@
    "repro": "Group DM #G with alice, bob, carol. bob and carol leave. alice is alone in #G and is in its voice call (voice_states row + hub voiceChID set). alice calls DELETE /api/v1/dms/G. service.CloseDM -> db.LeaveGroupDM removes the last dm_participants row and, with remaining == 0, deletes the channels row, returning ChannelDeleted=true. api/dm_handler.go:236 then calls hub.DisconnectFromVoiceInChannel(alice, G) -> handleVoiceLeaveIfStillIn -> finishVoiceLeave (Server/ws/voice_leave.go:76) -> h.channelReadAudience(ctx, G). GetChannel(G) now returns (nil, nil), the `ch.Type == \"dm\"` branch is skipped, and the loop at hub_broadcast.go:171-178 calls h.perms.HasChannelPerm(uid, G, ReadMessages) for every connected user — with no override rows left for G, every ordinary member passes. Each of them receives {\"type\":\"voice_leave\",\"payload\":{\"channel_id\":G,\"user_id\":alice}} for a private conversation they were never part of. The live-row form of exactly this leak is locked shut by Server/ws/voice_dm_access_test.go:179 (TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser); the nil-row branch bypasses it.",
    "evidence": "ch, err := h.db.GetChannel(ctx, channelID)\nif err != nil {\n    slog.Error(\"ws: channelReadAudience GetChannel failed, denying\", ...)\n    return []int64{}\n}\nif ch != nil && ch.Type == \"dm\" {   // <- nil (deleted) channel skips the DM audience entirely\n    participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)\n    ...\n    return audience\n}\n...\nfor _, uid := range userIDs {\n    if h.perms.HasChannelPerm(ctx, uid, channelID, permissions.ReadMessages) {\n        audience = append(audience, uid)\n    }\n}",
    "suggestedFix": "In channelReadAudience (Server/ws/hub_broadcast.go), fail closed on a missing row the same way the lookup-error branch does: after the `if err != nil` block, add `if ch == nil { return []int64{} }` before the `ch.Type == \"dm\"` check. This is safe for every caller: finishVoiceLeave (voice_leave.go:88-98) and CleanupVoiceForChannel (hub_sweep.go:333-342) both union the room's remaining participants and the leaver into the audience after the call, so eviction/E2EE-teardown signals still reach everyone entitled to them, while non-participants get nothing.",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-12",
    "hunt": "general-2026-08-12",
    "lens": "hotspot-server-ws",
    "finder": "opus",
    "round": 8,
    "confidence": "high",
-   "fix": null,
-   "rationale": "cross-cluster edit: shares Server/ws/hub_broadcast.go with Server/admin/handlers_users.go - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fix": {
+    "commit": "b22ad84d",
+    "test": "TestVoiceLeave_DeletedChannel_NotLeakedToNonParticipant",
+    "revertProof": "pass"
+   },
+   "fixed": "2026-08-19",
+   "note": "fail closed on a missing channel row in channelReadAudienceImpl"
   },
   {
    "id": "OC-0091",
@@ -2444,16 +2464,20 @@
    "why": "RefreshChannelVisibility delivers the visibility change as targeted, unsequenced channel_create/channel_delete frames to a snapshot of clients taken at line 252, and only calls bumpVisibilityWatermark() at line 365 after the whole per-client loop finishes. A client that reconnects while the loop is still running is in neither audience: it was not in the snapshot, and handleReconnect's mustFullResync check (serve.go:125) reads the still-unbumped watermark and admits it to the replay path, which by construction cannot carry an unsequenced targeted message. revokeUnreadableChannels has the identical gap via `defer h.bumpVisibilityWatermark()` at hub_broadcast.go:497.",
    "repro": "Server has N connected clients. Admin edits a channel_override on channel C (or edits a role, which drives RefreshAllChannelVisibility over every channel). RefreshChannelVisibility(C) snapshots h.clients at hub_broadcast.go:252-257, then loops lines 315-357 running 1-4 permission lookups plus a sendMsg + pubsub mutation per client. User U is offline at snapshot time (or drops immediately after) and reconnects mid-loop with last_seq = L, where L exceeds the previous watermark. handleReconnect evaluates mustFullResync(L) against the unbumped visibilityChangeSeq -> false -> U resumes from the ring buffer, never receives a ready payload, and never receives the targeted channel_create/channel_delete (it was not in the snapshot). Line 365 bumps the watermark only after U's handshake has already committed to replay. Revoked case: U's sidebar keeps rendering channel C forever, and clicking it is dead because registerNow's READ-gated re-subscribe correctly refused the topic. Granted case: U's computeAllowedChannels includes C so chat_message frames for C start arriving for a channel the client has no entry for. Neither converges until U reconnects with last_seq=0 or an unrelated visibility change pushes the watermark past L.",
    "evidence": "hub_broadcast.go:252 `h.mu.RLock(); clients := make([]*Client, 0, len(h.clients))` … loop 315-357 … 365 `h.bumpVisibilityWatermark()`  // comment at 359-364: \"Clients not connected right now missed the targeted sends above. Move the watermark so any resume from a seq at or before this point is forced onto the full-ready path\" — but the bump happens after, not before, the sends. Same shape at hub_broadcast.go:497 `defer h.bumpVisibilityWatermark()`.",
-   "status": "blocked",
+   "status": "fixed",
    "found": "2026-08-13",
    "hunt": "2026-08-13-postopt",
    "lens": "ws-hub",
    "finder": "opus",
    "confidence": "medium",
-   "fix": null,
+   "fix": {
+    "commit": "ea0430c5",
+    "test": "TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady",
+    "revertProof": "covered-by-OC-0206"
+   },
    "suggestedFix": "Bump before the audience is snapshotted instead of after it is served, in the one place each: in RefreshChannelVisibility move h.bumpVisibilityWatermark() from line 365 to immediately before the h.mu.RLock() snapshot at line 252; in revokeUnreadableChannels drop the `defer` on line 497 so the existing first-statement call runs eagerly (it already sits at the top, so early returns stay covered). That shrinks the hole from 'the whole fan-out loop' to the few instructions between the bump and the RLock. Residual, if you want it fully closed: re-check h.mustFullResync(lastSeq) inside the h.seqMu section right before h.registerNow in serve.go and fall back to full ready.",
-   "rationale": "cross-cluster edit: shares Server/ws/hub_broadcast.go with Server/admin/handlers_users.go - needs a human (agent edits saved in .superpowers/debris-2026-08-14.patch)",
-   "blockedDate": "2026-08-14"
+   "fixed": "2026-08-19",
+   "note": "already fixed on main by the OC-0206 early watermark bump in both fan-out paths (PR #1375); verified against HEAD 2026-08-19"
   },
   {
    "id": "OC-0102",
