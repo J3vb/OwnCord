@@ -112,9 +112,17 @@ func (d *DB) PluginKVDelete(ctx context.Context, pluginID int64, key string) err
 }
 
 func (d *DB) PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error) {
+	// A BINARY prefix comparison, not LIKE: LIKE treats '_'/'%' in prefix as
+	// wildcards and is ASCII-case-insensitive by default, which disagrees
+	// with the exact `key = ?` match used by PluginKVGet/Set/Delete on this
+	// same table. `key >= ?` keeps the (plugin_id, key) primary-key index
+	// usable for the seek; substr(key, 1, length(?)) = ? compares under the
+	// column's default BINARY collation, so no wildcards and no case-folding.
 	rows, err := d.reader.QueryContext(ctx,
-		`SELECT key, value FROM plugin_kv WHERE plugin_id = ? AND key LIKE ? ORDER BY key LIMIT ?`,
-		pluginID, prefix+"%", limit,
+		`SELECT key, value FROM plugin_kv
+		 WHERE plugin_id = ? AND key >= ? AND substr(key, 1, length(?)) = ?
+		 ORDER BY key LIMIT ?`,
+		pluginID, prefix, prefix, prefix, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("PluginKVScan: %w", err)

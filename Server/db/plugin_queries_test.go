@@ -321,6 +321,54 @@ func TestPluginKVScan(t *testing.T) {
 	}
 }
 
+// TestPluginKVScan_IsBinaryPrefixMatch pins that PluginKVScan is an exact,
+// case-sensitive BINARY prefix match — matching the exact-match semantics of
+// PluginKVGet/Set/Delete on the same table — rather than a SQL LIKE pattern
+// match, where '_' and '%' are wildcards and matching is ASCII
+// case-insensitive.
+func TestPluginKVScan_IsBinaryPrefixMatch(t *testing.T) {
+	database := newMigratedTestDB(t)
+	ctx := context.Background()
+	id := installTestPlugin(t, database, "hello")
+
+	for k, v := range map[string]string{
+		"cfg_a": "underscore-match",
+		"cfgXa": "not-a-prefix-match",
+		"Key1":  "capital-key",
+		"key1":  "lowercase-key",
+	} {
+		if err := database.PluginKVSet(ctx, id, k, []byte(v)); err != nil {
+			t.Fatalf("PluginKVSet(%s): %v", k, err)
+		}
+	}
+
+	// '_' in the prefix must be a literal underscore, not a LIKE
+	// single-character wildcard, so "cfgXa" must not be returned.
+	underscoreScan, err := database.PluginKVScan(ctx, id, "cfg_", 100)
+	if err != nil {
+		t.Fatalf("PluginKVScan cfg_: %v", err)
+	}
+	if _, ok := underscoreScan["cfgXa"]; ok {
+		t.Errorf("PluginKVScan(%q) = %v; '_' matched any character like a LIKE wildcard, but PluginKVGet treats \"cfg_a\" and \"cfgXa\" as distinct keys", "cfg_", underscoreScan)
+	}
+	if len(underscoreScan) != 1 || !bytes.Equal(underscoreScan["cfg_a"], []byte("underscore-match")) {
+		t.Errorf("PluginKVScan(%q) = %v, want exactly {cfg_a: underscore-match}", "cfg_", underscoreScan)
+	}
+
+	// Matching must be case-sensitive (BINARY), matching key = ? on the same
+	// table, so scanning "Key" must not return "key1".
+	caseScan, err := database.PluginKVScan(ctx, id, "Key", 100)
+	if err != nil {
+		t.Fatalf("PluginKVScan Key: %v", err)
+	}
+	if _, ok := caseScan["key1"]; ok {
+		t.Errorf("PluginKVScan(%q) = %v; LIKE's ASCII case-insensitivity matched \"key1\", but PluginKVGet/Delete treat \"Key1\" and \"key1\" as distinct keys", "Key", caseScan)
+	}
+	if len(caseScan) != 1 || !bytes.Equal(caseScan["Key1"], []byte("capital-key")) {
+		t.Errorf("PluginKVScan(%q) = %v, want exactly {Key1: capital-key}", "Key", caseScan)
+	}
+}
+
 func TestInstallPlugin_ReinstallReturnsCorrectID_AfterOtherWrites(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
