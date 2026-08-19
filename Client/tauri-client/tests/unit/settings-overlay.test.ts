@@ -36,11 +36,21 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
+// Held in a mutable object (rather than baked into the factory literal) so
+// individual tests can simulate the store having a display_name set — e.g.
+// to reproduce the header/username desync in OC-0188.
+const mockAuthState = vi.hoisted(() => ({
+  user: {
+    id: 1,
+    username: "testuser",
+    totp_enabled: false,
+    display_name: null as string | null,
+  },
+}));
+
 vi.mock("@stores/auth.store", () => ({
   authStore: {
-    getState: () => ({
-      user: { id: 1, username: "testuser", totp_enabled: false },
-    }),
+    getState: () => mockAuthState,
     subscribeSelector: vi.fn(() => () => {}),
   },
   updateUser: vi.fn(),
@@ -79,6 +89,7 @@ describe("SettingsOverlay", () => {
     document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
+    mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
   });
 
   afterEach(() => {
@@ -901,6 +912,51 @@ describe("SettingsOverlay", () => {
     saveBtn.click();
 
     expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith({ username: "AB" });
+
+    overlay.destroy?.();
+  });
+
+  // OC-0188: renaming the username must not stomp the profile card's
+  // header with the raw username when a display name is set — the header
+  // is a resolveDisplayName() slot, not a mirror of whichever field was
+  // last saved.
+  it("keeps the display name in the header after a username rename", async () => {
+    mockAuthState.user = {
+      id: 1,
+      username: "testuser",
+      totp_enabled: false,
+      display_name: "Alice Smith",
+    };
+
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    // Header starts out showing the display name, not the username.
+    const acName = container.querySelector(".account-header-name");
+    expect(acName?.textContent).toBe("Alice Smith");
+
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    const editInput = container.querySelector(
+      '[data-testid="username-edit-input"]',
+    ) as HTMLInputElement;
+    editInput.value = "alice2";
+
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith({ username: "alice2" });
+    });
+
+    // The server merge leaves display_name untouched; the header must keep
+    // showing it rather than the raw username that was just saved.
+    await vi.waitFor(() => {
+      expect(acName?.textContent).toBe("Alice Smith");
+    });
 
     overlay.destroy?.();
   });
