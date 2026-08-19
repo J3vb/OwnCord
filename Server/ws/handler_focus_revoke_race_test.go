@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
 )
@@ -167,5 +168,44 @@ func TestApplySetChannelID_TransientLookupError_KeepsFocus(t *testing.T) {
 	}
 	if got := ws.ClientChannelIDForTest(c); got != ch {
 		t.Errorf("client channelID = %d, want %d (focus must survive a transient lookup error)", got, ch)
+	}
+}
+
+// TestApplySetChannelID_ArchivedChannel_Unwinds pins OC-0175: the applier's
+// re-validation mirrors HandleChannelFocus's DM-participant and
+// READ_MESSAGES legs but never looks at ch.Archived, even though
+// HandleChannelFocus itself refuses an archived channel (service/channel.go,
+// OC-0070) and archiving is exactly the kind of visibility change the
+// revalidation exists to catch (OC-0024). A channel archived in the window
+// between the admission gate and the Subscribe call must not leave the
+// socket subscribed and focused forever, matching the deleted-channel case
+// above.
+func TestApplySetChannelID_ArchivedChannel_Unwinds(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedMemberUser(t, database, "focus-archived-user")
+	ch := seedTestChannel(t, database, "focus-archived-chan")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// Simulate the admin's archive having already committed before the
+	// applier runs: the admission gate (HandleChannelFocus) ran and passed
+	// before this, exactly as in the OC-0024 revoke-race test above.
+	if err := database.AdminUpdateChannel(context.Background(), ch, db.ChannelUpdate{
+		Name:     "focus-archived-chan",
+		Archived: true,
+	}); err != nil {
+		t.Fatalf("AdminUpdateChannel: %v", err)
+	}
+
+	hub.ApplySetChannelIDForTest(c, ch)
+
+	if hub.SubscribedToChannelTopicForTest(c, ch) {
+		t.Error("client must not stay subscribed to an archived channel's topic")
+	}
+	if got := ws.ClientChannelIDForTest(c); got != 0 {
+		t.Errorf("client channelID = %d, want 0 after focusing a channel archived mid-race", got)
 	}
 }
