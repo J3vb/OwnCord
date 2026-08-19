@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 	"testing"
+
+	"github.com/owncord/server/auth"
 )
 
 // Voice membership is gated on CONNECT_VOICE alone (voice_join), but the
@@ -106,5 +108,74 @@ func TestFinishVoiceLeave_EvictedUserAlwaysInAudience(t *testing.T) {
 		}
 	default:
 		t.Fatal("finishVoiceLeave enqueued nothing")
+	}
+}
+
+// Both DB-error branches of the READ-audience resolver must deny. The role
+// scan underneath them treats whatever channel it is handed as a readable
+// non-DM channel, so an unreadable channels row — or an unreadable DM
+// participant list — that fell through would resolve to every connected user
+// holding base READ_MESSAGES, fanning a private room's voice_state /
+// voice_leave out server-wide.
+func TestChannelReadAudience_GetChannelErrorDeniesEveryone(t *testing.T) {
+	ctx := context.Background()
+	database := newHarvestVoiceDB(t)
+	uid := seedHarvestVoiceUser(t, database, "audience-chan-err")
+	chID := mustCreateVoiceChannel(t, database, "audience-room")
+
+	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
+
+	// Precondition: the role scan really does grant this user READ on this
+	// channel, so an empty audience after the fault can only be the deny.
+	if got := h.channelReadAudience(ctx, chID); !slices.Contains(got, uid) {
+		t.Fatalf("precondition: user %d must be in the READ audience, got %v", uid, got)
+	}
+
+	// Make exactly GetChannel fail; roles and channel_overrides keep
+	// resolving, so the role scan would still return this user.
+	if _, err := database.ExecContext(ctx, `ALTER TABLE channels RENAME TO channels_offline`); err != nil {
+		t.Fatalf("rename channels: %v", err)
+	}
+
+	if got := h.channelReadAudience(ctx, chID); len(got) != 0 {
+		t.Errorf("channelReadAudience resolved %v for an unreadable channel row — an unresolvable channel must deny, not fall through to the role scan", got)
+	}
+}
+
+// The DM half of the same rule: a DM carries no channel_overrides rows, so its
+// participant list is the only membership evidence there is. When that read
+// fails there is nothing left to filter on and the audience must be empty.
+func TestChannelReadAudience_DMParticipantsErrorDeniesEveryone(t *testing.T) {
+	ctx := context.Background()
+	database := newHarvestVoiceDB(t)
+	alice := seedHarvestVoiceUser(t, database, "audience-dm-alice")
+	bob := seedHarvestVoiceUser(t, database, "audience-dm-bob")
+	mallory := seedHarvestVoiceUser(t, database, "audience-dm-mallory")
+	dm, _, err := database.GetOrCreateDMChannel(ctx, alice, bob)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	h := NewHub(database, auth.NewRateLimiter(), nil)
+	for _, uid := range []int64{alice, bob, mallory} {
+		h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
+	}
+
+	// Precondition: the DM resolves to its participants only — mallory is
+	// connected and holds base READ_MESSAGES, but is not in this DM.
+	if got := h.channelReadAudience(ctx, dm.ID); !slices.Contains(got, alice) ||
+		!slices.Contains(got, bob) || slices.Contains(got, mallory) {
+		t.Fatalf("precondition: DM audience must be exactly participants %d and %d, got %v", alice, bob, got)
+	}
+
+	// Make exactly GetDMParticipantIDs fail; the channels row still resolves
+	// as type "dm", so the resolver reaches the DM branch and nothing else.
+	if _, err := database.ExecContext(ctx, `ALTER TABLE dm_participants RENAME TO dm_participants_offline`); err != nil {
+		t.Fatalf("rename dm_participants: %v", err)
+	}
+
+	if got := h.channelReadAudience(ctx, dm.ID); len(got) != 0 {
+		t.Errorf("channelReadAudience resolved %v for a DM whose participant list could not be read — an unresolvable DM must deny", got)
 	}
 }
