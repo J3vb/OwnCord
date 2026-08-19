@@ -11,6 +11,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
 )
 
@@ -570,6 +571,54 @@ func TestVoiceMod_Move_ArchivedDestination_BadRequest(t *testing.T) {
 		t.Error("a refused move must leave the target in voice")
 	} else if state.ChannelID != fromID {
 		t.Errorf("target channel = %d, want %d (unchanged)", state.ChannelID, fromID)
+	}
+}
+
+// TestVoiceMod_Move_TargetCannotConnectToDestination_Forbidden locks the
+// destination gate that is evaluated against the TARGET's access, not the
+// moderator's: a move must not become a way to place someone in a channel they
+// could not join themselves. The actor keeps MUTE_MEMBERS and still outranks
+// the target, so only the target's missing CONNECT_VOICE can refuse this.
+func TestVoiceMod_Move_TargetCannotConnectToDestination_Forbidden(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-move-noconnect-from")
+	toID := seedVoiceChan(t, database, "vc-move-noconnect-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-move-noconnect", 2)
+	target := seedVoiceUserWithRole(t, database, "member-move-noconnect", 4)
+
+	// Destination denies CONNECT_VOICE to the target's role (Member, id 4).
+	if err := database.UpsertChannelOverride(
+		context.Background(), toID, 4, 0, permissions.ConnectVoice,
+	); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "FORBIDDEN" {
+		t.Fatalf("error code = %q, want FORBIDDEN", code)
+	}
+	if payload := receiveMsgOfType(targetSend, "voice_moved", 100*time.Millisecond); payload != nil {
+		t.Errorf("target must not receive voice_moved for a refused move, got %v", payload)
+	}
+	state, err := database.GetVoiceState(context.Background(), target.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state == nil {
+		t.Fatal("a refused move must leave the target in voice")
+	} else if state.ChannelID != fromID {
+		t.Errorf("target channel = %d, want %d (unchanged)", state.ChannelID, fromID)
+	}
+	if slices.Contains(auditActions(t, database), "voice_mod_move") {
+		t.Error("a refused move must not write a voice_mod_move audit entry")
 	}
 }
 
