@@ -3,6 +3,7 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -647,27 +648,47 @@ func TestVoice_Camera_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	}
 }
 
-// TestVoice_Camera_NoPermission: Member without USE_VIDEO gets FORBIDDEN.
-func TestVoice_Camera_NoPermission(t *testing.T) {
-	hub, _ := newVoiceHub(t)
+// assertStreamPermissionRefused fails unless msgs carry a FORBIDDEN error
+// naming perm. A bare "an error arrived" check is not enough here: the stream
+// handlers refuse an un-joined client with VOICE_ERROR "not in a voice channel"
+// long before the permission gate runs, which is exactly how the camera and
+// screenshare permission tests used to pass without ever reaching it.
+func assertStreamPermissionRefused(t *testing.T, msgs [][]byte, perm string) {
+	t.Helper()
+	for _, m := range msgs {
+		if extractCode(t, m) == ws.ErrCodeForbidden &&
+			strings.Contains(extractMessage(t, m), perm) {
+			return
+		}
+	}
+	got := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		got = append(got, extractType(t, m)+"/"+extractCode(t, m)+"/"+extractMessage(t, m))
+	}
+	t.Errorf("expected FORBIDDEN error naming %s, got %v", perm, got)
+}
 
-	// Client with no user set → hasChannelPerm returns false.
-	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 7001, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+// TestVoice_Camera_NoPermission: a member already in voice whose role lacks
+// USE_VIDEO is refused with FORBIDDEN and stays off camera.
+func TestVoice_Camera_NoPermission(t *testing.T) {
+	hub, database := newVoiceHub(t)
+
+	// Role 4 (Member) carries CONNECT_VOICE but neither USE_VIDEO nor
+	// SHARE_SCREEN, so voice_join succeeds and only the toggle is denied.
+	user := seedVoiceUserWithRole(t, database, "cam-noperm", 4)
+	chanID := seedVoiceChan(t, database, "vc-cam-noperm")
+	c, send := joinVoice(t, hub, user, chanID)
 
 	hub.HandleMessageForTest(c, voiceCameraMsg(true))
 
-	msgs := drainChanTimeout(send, 30*time.Millisecond)
-	found := false
-	for _, m := range msgs {
-		if extractType(t, m) == "error" {
-			found = true
-		}
+	assertStreamPermissionRefused(t, drainChanTimeout(send, 30*time.Millisecond), "USE_VIDEO")
+
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if !found {
-		t.Error("expected FORBIDDEN error for camera toggle without USE_VIDEO permission")
+	if state == nil || state.Camera {
+		t.Error("camera enabled despite the missing USE_VIDEO permission")
 	}
 }
 
@@ -834,27 +855,25 @@ func TestVoice_Screenshare_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	}
 }
 
-// TestVoice_Screenshare_NoPermission: client without SHARE_SCREEN gets FORBIDDEN.
+// TestVoice_Screenshare_NoPermission: a member already in voice whose role
+// lacks SHARE_SCREEN is refused with FORBIDDEN and publishes nothing.
 func TestVoice_Screenshare_NoPermission(t *testing.T) {
-	hub, _ := newVoiceHub(t)
+	hub, database := newVoiceHub(t)
 
-	// Client with no user set → hasChannelPerm returns false.
-	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 7002, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	user := seedVoiceUserWithRole(t, database, "ss-noperm", 4) // Member: no SHARE_SCREEN
+	chanID := seedVoiceChan(t, database, "vc-ss-noperm")
+	c, send := joinVoice(t, hub, user, chanID)
 
 	hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
 
-	msgs := drainChanTimeout(send, 30*time.Millisecond)
-	found := false
-	for _, m := range msgs {
-		if extractType(t, m) == "error" {
-			found = true
-		}
+	assertStreamPermissionRefused(t, drainChanTimeout(send, 30*time.Millisecond), "SHARE_SCREEN")
+
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
 	}
-	if !found {
-		t.Error("expected FORBIDDEN error for screenshare toggle without SHARE_SCREEN permission")
+	if state == nil || state.Screenshare {
+		t.Error("screenshare enabled despite the missing SHARE_SCREEN permission")
 	}
 }
 
