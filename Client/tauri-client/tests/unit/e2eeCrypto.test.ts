@@ -22,6 +22,37 @@ vi.mock("@lib/logger", () => ({
 }));
 
 describe("e2eeCrypto", () => {
+  // ── module-load WebCrypto guard ────────────────────────────────────────────
+
+  describe("WebCrypto availability check", () => {
+    async function importFresh(cryptoStub: unknown) {
+      vi.resetModules();
+      vi.stubGlobal("crypto", cryptoStub);
+      try {
+        return await import("@lib/e2eeCrypto");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+
+    it("throws on import when there is no crypto global", async () => {
+      await expect(importFresh(undefined)).rejects.toThrow(
+        "E2EE requires WebCrypto (crypto.subtle). Ensure the app is served over HTTPS or a secure context.",
+      );
+    });
+
+    it("throws on import when crypto exists but crypto.subtle does not", async () => {
+      await expect(importFresh({ getRandomValues: () => undefined })).rejects.toThrow(
+        /E2EE requires WebCrypto/,
+      );
+    });
+
+    it("imports cleanly in a secure context", async () => {
+      const mod = await importFresh(globalThis.crypto);
+      expect(typeof mod.generateECDHKeyPair).toBe("function");
+    });
+  });
+
   // ── wrap / unwrap round-trip ───────────────────────────────────────────────
 
   describe("wrapRoomKey / unwrapRoomKey", () => {
@@ -151,10 +182,60 @@ describe("e2eeCrypto", () => {
       const bob = await generateECDHKeyPair();
       await expect(
         wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), -1),
-      ).rejects.toThrow();
+      ).rejects.toThrow("E2EE: offer epoch must be a non-negative safe integer");
       await expect(
         wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), 2 ** 53),
-      ).rejects.toThrow();
+      ).rejects.toThrow("E2EE: offer epoch must be a non-negative safe integer");
+    });
+
+    it("accepts epoch 0 (the first epoch) at both ends", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const roomKey = generateRoomKey();
+
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 0);
+      expect(Array.from(fromB64(encryptedKey).subarray(0, 9))).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      expect(unwrapped.roomKey).toEqual(roomKey);
+      expect(unwrapped.epoch).toBe(0);
+    });
+
+    it("accepts an epoch of exactly Number.MAX_SAFE_INTEGER", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const roomKey = generateRoomKey();
+
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        roomKey,
+        Number.MAX_SAFE_INTEGER,
+      );
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      expect(unwrapped.roomKey).toEqual(roomKey);
+      expect(unwrapped.epoch).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
+    it("rejects a blob truncated below the header length", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), 3);
+
+      // A valid version byte but only 4 of the 9 header bytes.
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(new Uint8Array([1, 0, 0, 0])), iv),
+      ).rejects.toThrow("E2EE: unknown wrapped-key format");
+    });
+
+    it("rejects a non-base64 encrypted key with the base64 error", async () => {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, generateRoomKey(), 3);
+
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, "!!! not base64 !!!", iv),
+      ).rejects.toThrow("E2EE: invalid base64 input");
     });
 
     it("still unwraps a legacy blob (no header, no additional data) and reports epoch null", async () => {
@@ -227,6 +308,13 @@ describe("e2eeCrypto", () => {
       const raw = new Uint8Array(await crypto.subtle.exportKey("raw", publicKey));
 
       expect(await computeRawKeyFingerprint(raw)).toBe(await computeKeyFingerprint(publicKey));
+    });
+
+    it("matches a known SHA-256 vector, zero-padded and grouped", async () => {
+      // SHA-256 of bytes 00..09 is 1F825AA2F002…; the 0x02/0x0E/0x0D bytes only
+      // land in the right group if each byte is zero-padded to two hex chars.
+      const fp = await computeRawKeyFingerprint(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+      expect(fp).toBe("1F82 5AA2 F002 0EF7 CF91 DFA3 0DA4 668D");
     });
 
     it("formats the fingerprint as 8 space-separated 4-char hex groups", async () => {
@@ -375,6 +463,35 @@ describe("e2eeCrypto", () => {
       expect(ok).toBe(false);
     });
 
+    it("signs exactly ANNOUNCE_DOMAIN ‖ userId ‖ ephemeralPubRaw", async () => {
+      const { identity, ephemeralRaw, signature } = await fixture();
+      const domain = new TextEncoder().encode("owncord-voice-e2ee-announce-v1");
+      const idBytes = new TextEncoder().encode(String(userId));
+      const message = new Uint8Array(domain.length + idBytes.length + ephemeralRaw.length);
+      message.set(domain, 0);
+      message.set(idBytes, domain.length);
+      message.set(ephemeralRaw, domain.length + idBytes.length);
+
+      const ok = await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        identity.publicKey,
+        Uint8Array.from(atob(signature), (c) => c.charCodeAt(0)),
+        message,
+      );
+      expect(ok).toBe(true);
+    });
+
+    it("returns false (not true) when subtle.verify itself throws", async () => {
+      const { ephemeralRaw, signature } = await fixture();
+      // An ECDH public key imported with no key usages: subtle.verify rejects
+      // with InvalidAccessError rather than returning a boolean.
+      const ecdh = await generateECDHKeyPair();
+      const wrongKind = await importPublicKey(await exportPublicKey(ecdh.publicKey));
+
+      const ok = await verifyEphemeralKeySignature(wrongKind, userId, ephemeralRaw, signature);
+      expect(ok).toBe(false);
+    });
+
     it("fails against a different identity key (wrong signer)", async () => {
       const { ephemeralRaw, signature } = await fixture();
       const attacker = await generateIdentityKeyPair();
@@ -406,6 +523,9 @@ describe("e2eeCrypto", () => {
       expect(await verifyEphemeralKeySignature(restored.publicKey, 7, ephemeralRaw, sig)).toBe(
         true,
       );
+
+      // The restored private key stays extractable, so it can be re-persisted.
+      expect(await exportIdentityKeyPair(restored.privateKey)).toBe(blob);
 
       // Public key survives the round-trip identically (safety-number stability).
       const fpOriginal = await computeKeyFingerprint(original.publicKey);
