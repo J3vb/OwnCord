@@ -198,9 +198,13 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 			args = append(args, userID)
 
 			var adminCount int
-			if err := tx.QueryRowContext(ctx,
-				fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE role_id IN (%s) AND id != ? AND banned = 0`,
-					strings.Join(placeholders, ",")),
+			// notBannedClause is appended outside the Sprintf format string
+			// (rather than joined into it) because it contains strftime
+			// verbs like %Y and %H that fmt.Sprintf would otherwise try to
+			// parse as its own format directives.
+			query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE role_id IN (%s) AND id != ? AND `,
+				strings.Join(placeholders, ",")) + notBannedClause
+			if err := tx.QueryRowContext(ctx, query,
 				args...,
 			).Scan(&adminCount); err != nil {
 				return fmt.Errorf("DeleteAccount count admins: %w", err)
