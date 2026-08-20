@@ -321,9 +321,15 @@ test.describe("Voice E2EE identity verification (§7)", () => {
 
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeHidden();
     // The EXACT displayed key was pinned (TOCTOU-safe re-pin), and the
-    // mismatch block cleared — the badge disappears until the next announce
-    // re-verifies against the new pin.
-    await expect(badge).toHaveCount(0);
+    // mismatch block cleared. Re-pinning replays the announce that was
+    // blocked as a mismatch (OC-0212), which re-verifies against the pin just
+    // stored — so the peer lands in the verified state rather than losing its
+    // badge entirely. The badge must not simply disappear: a mid-call peer
+    // never re-announces on its own, so an empty badge would mean the peer
+    // stayed un-keyed for the rest of the call while the UI showed nothing.
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveClass(/verified/);
+    await expect(badge).toHaveAttribute("title", /^Identity verified · Safety number: /);
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
     expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
