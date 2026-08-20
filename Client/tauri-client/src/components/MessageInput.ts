@@ -126,6 +126,11 @@ const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
 const SEND_DEBOUNCE_MS = 200;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matches server limit
+// Server/ws/command.go rejects the whole chat_send frame (as a generic parse
+// error, not an attachment-specific one) once len(Attachments) > 10 -- cap
+// the queue client-side so we never upload an attachment doomed to be
+// orphaned by a send that can never succeed.
+const MAX_ATTACHMENTS = 10;
 const ALLOWED_TYPES = [
   "image/",
   "video/",
@@ -553,6 +558,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Validate file type — reject files with unknown/empty MIME type
     if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
       showUploadError(`${file.name} is not a supported file type`);
+      return;
+    }
+
+    // Cap the queue at the server's hard limit. Refusing here -- before the
+    // upload starts -- keeps the composer's state and the eventual send in
+    // sync with what the server will actually accept.
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+      showUploadError(`You can attach at most ${MAX_ATTACHMENTS} files to a message`);
       return;
     }
 

@@ -1162,6 +1162,36 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── Attachment count cap (server hard-rejects >10 attachments) ──
+
+  it("refuses to queue an 11th attachment instead of uploading it", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "http://x", filename: "x" }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    for (let i = 0; i < 11; i++) {
+      const file = new File(["data"], `file${i}.txt`, { type: "text/plain" });
+      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    // The server hard-rejects a chat_send with more than 10 attachments (as
+    // a parse error with no attachment-specific messaging), so the composer
+    // must never upload -- let alone queue -- an 11th one.
+    expect(onUploadFile).toHaveBeenCalledTimes(10);
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(10);
+
+    const error = container.querySelector(".attachment-upload-error");
+    expect(error).not.toBeNull();
+    expect(error!.textContent).toContain("10");
+
+    comp.destroy?.();
+  });
+
   // ── Toggling emoji picker closed ──
 
   it("clicking emoji button again closes the picker", () => {
