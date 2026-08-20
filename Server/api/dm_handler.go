@@ -72,7 +72,7 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
-		r.Post("/", handleCreateDM(svc))
+		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
 		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster))
@@ -117,7 +117,7 @@ type listDMsResponse struct {
 }
 
 // handleCreateDM creates or retrieves a DM channel with a recipient.
-func handleCreateDM(svc *service.Services) http.HandlerFunc {
+func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -139,6 +139,19 @@ func handleCreateDM(svc *service.Services) http.HandlerFunc {
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
+		}
+
+		// A brand-new 1:1 DM has dm_open_state pre-seeded for BOTH users by
+		// GetOrCreateDMChannel (db/dm_queries.go), so the recipient's first
+		// OpenDM call — fired later from the sender's first message — finds
+		// the row already present and reports opened=false. Without this,
+		// nothing ever tells the recipient the DM exists: no live event, and
+		// no visibility-watermark bump for a warm reconnect either. Only the
+		// creation path needs this — CreateDM re-opening an existing DM for
+		// the caller only touches the caller's own dm_open_state row, which
+		// the caller obviously already knows about.
+		if result.Created {
+			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
 
 		avatarStr := ""
