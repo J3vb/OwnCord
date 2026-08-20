@@ -18,6 +18,7 @@ import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stor
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
 import { acknowledgeNsfw, isNsfwAcknowledged } from "../../src/lib/nsfw-gate";
+import { addLogListener, type LogEntry } from "@lib/logger";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
@@ -272,6 +273,47 @@ describe("auth store", () => {
       clearAuth();
       await flushMicrotasks();
       expect(leaveVoice).toHaveBeenCalledWith(false);
+    });
+
+    // Boundary: a channel id can outlive the status settling back to idle
+    // (e.g. a leave that updated voiceStatus but hasn't cleared
+    // currentChannelId yet). clearAuth's guard is an AND of both conditions,
+    // not just "was a channel ever joined" — this pins that a set channel id
+    // alone must NOT trigger another leaveVoice call once already idle.
+    it("does NOT load livekitSession when the channel id is set but status is already idle", async () => {
+      joinVoiceChannel(7);
+      setVoiceStatus("idle");
+      clearAuth();
+      await flushMicrotasks();
+      expect(leaveVoice).not.toHaveBeenCalled();
+    });
+
+    // Boundary: the inverse — a non-idle status alone (no channel id) must
+    // also NOT trigger leaveVoice. Together with the case above, this pins
+    // that clearAuth requires BOTH currentChannelId set AND status !== idle,
+    // not either one alone.
+    it("does NOT load livekitSession when status is non-idle but no channel id is set", async () => {
+      setVoiceStatus("reconnecting");
+      clearAuth();
+      await flushMicrotasks();
+      expect(leaveVoice).not.toHaveBeenCalled();
+    });
+
+    it("logs a warning tagged with this module's component name when leaveVoice rejects", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const entries: LogEntry[] = [];
+      const unsub = addLogListener((e) => entries.push(e));
+      vi.mocked(leaveVoice).mockRejectedValueOnce(new Error("boom"));
+
+      joinVoiceChannel(7);
+      setVoiceStatus("connected");
+      clearAuth();
+      await flushMicrotasks();
+      unsub();
+
+      const warnEntry = entries.find((e) => e.level === "warn");
+      expect(warnEntry?.component).toBe("auth.store");
+      expect(warnEntry?.message).toBe("Failed to leave voice session during clearAuth");
     });
   });
 
