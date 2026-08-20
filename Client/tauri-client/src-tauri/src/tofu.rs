@@ -300,7 +300,17 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
 /// *non-default* port keeps its brackets: "[::1]:8443" stays its own distinct
 /// key, matching how a plain "host:8443" is never collapsed into "host".
 pub(crate) fn cert_store_key(host: &str) -> String {
-    let stripped = host.strip_suffix(":443").unwrap_or(host);
+    // Only strip a trailing ":443" when what's left is unambiguously a host
+    // (no remaining colon) or a bracketed IPv6 literal (ends in `]`, as in
+    // "[::1]:443"). Without this guard, a BARE IPv6 literal whose final
+    // hextet is "443" — e.g. "fd00::443" — would have that hextet eaten as
+    // if it were a port, truncating the address to "fd00:" and pinning the
+    // same server under a different key than the ws/livekit proxies use for
+    // the bracketed form of the same address (OC-0215).
+    let stripped = match host.strip_suffix(":443") {
+        Some(rest) if !rest.contains(':') || rest.ends_with(']') => rest,
+        _ => host,
+    };
     let unbracketed = stripped
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
@@ -429,6 +439,26 @@ mod tests {
         // A non-default port keeps the brackets — it is a genuinely distinct
         // key from the default-port host, same as the plain "host:port" case.
         assert_eq!(cert_store_key("[2001:db8::1]:8443"), "[2001:db8::1]:8443");
+    }
+
+    // OC-0215: a BARE (unbracketed) IPv6 literal whose final hextet happens to
+    // be "443" must NOT have that hextet eaten by the ":443" default-port
+    // strip — "fd00::443" is a whole address, not "fd00::" on port 443. The
+    // http proxy passes bare hosts verbatim (http_proxy::split_host_port has
+    // an explicit `!host.contains(':')` guard for exactly this reason), while
+    // the ws/livekit proxies see the bracketed form of the same address. All
+    // three MUST resolve to the same key or the same server's certificate is
+    // pinned (and re-confirmed by the user) under two different entries.
+    #[test]
+    fn cert_store_key_does_not_truncate_bare_ipv6_ending_in_443() {
+        assert_eq!(cert_store_key("fd00::443"), "fd00::443");
+        // Must agree with the bracketed forms the ws/livekit proxies derive
+        // for the very same server.
+        assert_eq!(cert_store_key("fd00::443"), cert_store_key("[fd00::443]"));
+        assert_eq!(
+            cert_store_key("fd00::443"),
+            cert_store_key("[fd00::443]:443")
+        );
     }
 
     // DNS names are case-insensitive, but a raw host string (a profile-entered
