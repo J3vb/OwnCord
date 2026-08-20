@@ -91,6 +91,12 @@ type Querier interface {
 	// own screenshare flag so re-enable is idempotent at the cap (OC-0081).
 	EnableScreenshareIfUnderLimit(ctx context.Context, arg EnableScreenshareIfUnderLimitParams) (sql.Result, error)
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
+	// The 1:1 DM channel between two users, if one exists. Mirrors the lookup
+	// inside GetOrCreateDMChannel (raw, transactional) without creating anything:
+	// the is_group clause keeps group DMs out, matching the block-enforcement
+	// boundary (blocks never gate group DMs). ORDER BY makes the row choice
+	// deterministic should duplicates ever exist.
+	FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelIDBetweenParams) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
 	// so a resolved row is always usable. Matches the sessions never-expiring

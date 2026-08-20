@@ -188,6 +188,24 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 	return ch, true, nil
 }
 
+// FindDMChannelIDBetween returns the id of the 1:1 DM channel the two users
+// share, or ok=false when none exists. It never creates anything, and group
+// DMs never match — blocks do not gate them, so side effects keyed off a
+// block (like voice eviction) must not reach a group call.
+func (d *DB) FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error) {
+	id, err := d.q.FindDMChannelIDBetween(ctx, dbgen.FindDMChannelIDBetweenParams{
+		UserID:   user1ID,
+		UserID_2: user2ID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("FindDMChannelIDBetween: %w", err)
+	}
+	return id, true, nil
+}
+
 // ─── GetUserDMChannels ──────────────────────────────────────────────────────
 
 // GetUserDMChannels returns all open DM channels for a user with the full

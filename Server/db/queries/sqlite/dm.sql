@@ -78,3 +78,15 @@ JOIN dm_participants dp ON dp.channel_id = dos.channel_id
 JOIN users u            ON u.id = dp.user_id
 WHERE dos.user_id = ?
 ORDER BY dp.channel_id ASC, u.id ASC;
+
+-- The 1:1 DM channel between two users, if one exists. Mirrors the lookup
+-- inside GetOrCreateDMChannel (raw, transactional) without creating anything:
+-- the is_group clause keeps group DMs out, matching the block-enforcement
+-- boundary (blocks never gate group DMs). ORDER BY makes the row choice
+-- deterministic should duplicates ever exist.
+-- name: FindDMChannelIDBetween :one
+SELECT dp1.channel_id FROM dm_participants dp1
+JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
+JOIN channels c ON c.id = dp1.channel_id
+WHERE dp1.user_id = ? AND dp2.user_id = ? AND c.type = 'dm' AND c.is_group = 0
+ORDER BY dp1.channel_id ASC;

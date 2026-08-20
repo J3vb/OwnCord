@@ -83,7 +83,7 @@ func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadca
 	r.Route("/api/v1/blocks", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListBlocks(svc))
-		r.Put("/{userId}", handleBlockUser(svc))
+		r.Put("/{userId}", handleBlockUser(svc, broadcaster))
 		r.Delete("/{userId}", handleUnblockUser(svc))
 	})
 }
@@ -381,7 +381,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 }
 
 // handleBlockUser blocks a user.
-func handleBlockUser(svc *service.Services) http.HandlerFunc {
+func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, _ := r.Context().Value(UserKey).(*db.User)
 		if user == nil {
@@ -398,6 +398,23 @@ func handleBlockUser(svc *service.Services) http.HandlerFunc {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+
+		// Revocation must evict a live session, not merely block the next
+		// join (the same invariant the voice sweep states): without this, a
+		// blocked user already in the pair's 1:1 DM voice call stays in it
+		// indefinitely — the block gate otherwise runs only on voice_join and
+		// voluntary voice_token_refresh, both of which the blocked client
+		// controls. Group DM calls are deliberately untouched, matching
+		// requireDMNotBlocked's group exemption.
+		if ve, evictable := broadcaster.(dmVoiceEvictor); evictable {
+			if chID, exists, err := svc.DMs.SharedOneToOneDM(r.Context(), user.ID, targetID); err != nil {
+				slog.Warn("block: shared-DM lookup for voice eviction failed",
+					"blocker_id", user.ID, "target_id", targetID, "err", err)
+			} else if exists {
+				ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), targetID, chID)
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
 	}
 }
