@@ -662,6 +662,17 @@ describe("syntax highlighting", () => {
     expect(resolveLanguage(null)).toBeNull();
   });
 
+  it("rejects Object.prototype property names as fence tags", () => {
+    expect(resolveLanguage("constructor")).toBeNull();
+    expect(resolveLanguage("toString")).toBeNull();
+    expect(resolveLanguage("valueOf")).toBeNull();
+    expect(resolveLanguage("hasOwnProperty")).toBeNull();
+    expect(resolveLanguage("isPrototypeOf")).toBeNull();
+    expect(resolveLanguage("propertyIsEnumerable")).toBeNull();
+    expect(resolveLanguage("toLocaleString")).toBeNull();
+    expect(resolveLanguage("__proto__")).toBeNull();
+  });
+
   it("returns one plain token for an unknown language", () => {
     expect(highlightCode("anything", null)).toEqual([{ text: "anything", cls: null }]);
   });
