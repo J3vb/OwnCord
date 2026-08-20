@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   blocksStore,
   setBlockedByMe,
+  setUserBlockedByMe,
   setUserBlockedByThem,
   clearBlockedByThem,
   dmComposerBlockReason,
@@ -78,6 +79,48 @@ describe("blocksStore", () => {
       const before = blocksStore.getState();
       clearBlockedByThem();
       expect(blocksStore.getState()).toBe(before);
+    });
+  });
+
+  // OC-0218: a ready-time GET /blocks and a user-initiated block/unblock can
+  // race. The GET is issued before the user's own action but its reply can
+  // land after — a stale full-set reply must not clobber a fresher per-user
+  // delta.
+  describe("setBlockedByMe staleness guard (OC-0218)", () => {
+    it("applies when no revision is given (direct/legacy caller)", () => {
+      setBlockedByMe([5]);
+      expect(dmComposerBlockReason(blocksStore.getState(), 5)).toBe(BLOCKED_BY_ME_REASON);
+    });
+
+    it("a reply carrying the revision observed before a fresher local delta must not re-add it", () => {
+      // Local user 42 starts blocked (seeded, as if from a previous ready).
+      setBlockedByMe([42]);
+      // A reconnect fires a fresh GET /blocks — the caller snapshots the
+      // revision it observed right before issuing the request. Real callers
+      // (dispatcher.ts) default the optional field to 0, exactly like
+      // setBlockedByMe's own internal comparison does.
+      const revBeforeFetch = blocksStore.getState().blockedByMeRev ?? 0;
+
+      // While that GET is in flight, the user clicks "Unblock" — this is the
+      // fresher, authoritative local truth.
+      setUserBlockedByMe(42, false);
+      expect(dmComposerBlockReason(blocksStore.getState(), 42)).toBeNull();
+
+      // The GET's reply lands late, still carrying the stale pre-unblock
+      // snapshot and the revision observed before the unblock. It must be
+      // ignored, not re-add 42.
+      setBlockedByMe([42], revBeforeFetch);
+
+      expect(dmComposerBlockReason(blocksStore.getState(), 42)).toBeNull();
+    });
+
+    it("a reply carrying the current revision still applies", () => {
+      setBlockedByMe([1]);
+      const rev = blocksStore.getState().blockedByMeRev;
+      // No local delta happened since — the snapshot is still current.
+      setBlockedByMe([1, 2], rev);
+      expect(dmComposerBlockReason(blocksStore.getState(), 1)).toBe(BLOCKED_BY_ME_REASON);
+      expect(dmComposerBlockReason(blocksStore.getState(), 2)).toBe(BLOCKED_BY_ME_REASON);
     });
   });
 });

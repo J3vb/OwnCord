@@ -9,6 +9,7 @@ import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
@@ -53,9 +54,22 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // Don't notify for own messages
   if (currentUser !== null && payload.user.id === currentUser.id) return;
 
-  // Don't notify if the window is focused AND the message is in the active channel
+  // Don't notify if the window is focused AND the message is in the active
+  // channel — UNLESS that channel is showing a detached around-window
+  // (OC-0204). "Active" only means this is the channel on screen; a jump to
+  // an old permalink/reply/search hit can leave it detached from the live
+  // tail (messages.store's detachedChannels), in which case the user is
+  // reading back-history and cannot see the new message at all — addMessage
+  // silently refuses to append it. Without this check that combination
+  // suppresses the one thing that would have told the user anything arrived.
   const activeChannelId = channelsStore.getState().activeChannelId;
-  if (isWindowFocused() && payload.channel_id === activeChannelId) return;
+  if (
+    isWindowFocused() &&
+    payload.channel_id === activeChannelId &&
+    !isWindowDetached(payload.channel_id)
+  ) {
+    return;
+  }
 
   const mentionInfo = {
     mentions: payload.mentions,

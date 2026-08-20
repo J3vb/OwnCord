@@ -21,18 +21,43 @@ export const BLOCKED_BY_THEM_REASON = "You can't message this user right now.";
 export interface BlocksState {
   readonly blockedByMe: ReadonlySet<number>;
   readonly blockedByThem: ReadonlySet<number>;
+  /**
+   * Bumped by every accepted setUserBlockedByMe delta (OC-0218). Optional —
+   * absent/undefined reads as revision 0 — so state literals that predate
+   * this field (tests, a full setState replace) do not need updating.
+   *
+   * Lets a ready-time GET /blocks snapshot the revision it observed just
+   * before issuing the request and pass it back to setBlockedByMe: if a
+   * setUserBlockedByMe delta landed (bumping the revision) while that fetch
+   * was in flight, the fetch's reply is answering a question that is no
+   * longer current and must not clobber the fresher local truth.
+   */
+  readonly blockedByMeRev?: number;
 }
 
 const INITIAL: BlocksState = {
   blockedByMe: new Set(),
   blockedByThem: new Set(),
+  blockedByMeRev: 0,
 };
 
 export const blocksStore = createStore<BlocksState>(INITIAL);
 
-/** Replace the blocked-by-me set (from GET /blocks). */
-export function setBlockedByMe(userIds: readonly number[]): void {
-  blocksStore.setState((prev) => ({ ...prev, blockedByMe: new Set(userIds) }));
+/**
+ * Replace the blocked-by-me set (from GET /blocks).
+ *
+ * `rev`, when given, must match the store's current blockedByMeRev — the
+ * revision the caller observed right before starting the fetch this reply
+ * answers (OC-0218). A mismatch means a fresher setUserBlockedByMe delta
+ * landed after the fetch was issued, so this reply is stale and is skipped
+ * rather than reverting that delta. Omit `rev` to always apply (existing
+ * direct callers, tests).
+ */
+export function setBlockedByMe(userIds: readonly number[], rev?: number): void {
+  blocksStore.setState((prev) => {
+    if (rev !== undefined && rev !== (prev.blockedByMeRev ?? 0)) return prev;
+    return { ...prev, blockedByMe: new Set(userIds) };
+  });
 }
 
 /** Mark (or unmark) a user as blocked by the local user (after PUT/DELETE /blocks). */
@@ -42,7 +67,7 @@ export function setUserBlockedByMe(userId: number, blocked: boolean): void {
     const next = new Set(prev.blockedByMe);
     if (blocked) next.add(userId);
     else next.delete(userId);
-    return { ...prev, blockedByMe: next };
+    return { ...prev, blockedByMe: next, blockedByMeRev: (prev.blockedByMeRev ?? 0) + 1 };
   });
 }
 

@@ -5,6 +5,7 @@ import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
+import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
@@ -151,6 +152,11 @@ describe("notifyIncomingMessage", () => {
       typingUsers: new Map(),
       roleRevision: 0,
     }));
+
+    // A channel marked detached by one test (viewing a back-history
+    // around-window) must not leak into another that expects the plain
+    // active-channel suppression.
+    messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
 
     // Ensure document.hasFocus returns false (simulating unfocused window)
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -1168,6 +1174,34 @@ describe("notifyIncomingMessage", () => {
 
       vi.spyOn(document, "hasFocus").mockReturnValue(false);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    // OC-0204: "active channel" is not the same thing as "the user is
+    // watching the live tail". A jump to an old permalink/reply/search hit
+    // in the active channel opens a detached around-window (messages.store's
+    // detachedChannels) — addMessage refuses to append a live broadcast onto
+    // it, and dispatcher.ts skips the unread bump because the channel is
+    // "active". If this guard also suppresses the notification, an @mention
+    // that arrives while the user reads back-history reaches them through
+    // literally nothing — not even a popup — even though the window is
+    // focused and they are looking at #general.
+    it("proceeds when window focused AND channel matches BUT the window is detached (reading back-history)", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([1]) }));
 
       testPrefs.set("desktopNotifications", true);
       testPrefs.set("flashTaskbar", false);
