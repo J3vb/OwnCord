@@ -730,30 +730,37 @@ describe("MessageList", () => {
       vi.useRealTimers();
     });
 
-    it("does not report success when renderWindow's own >30-in-2s breaker drops the rebuild", () => {
-      const many = Array.from({ length: 100 }, (_, i) => makeMessage({ id: i + 1 }));
-      setMessages(1, many);
-      msgList.mount(container); // mount's renderAll -> renderWindow: rebuild count = 1
+    // 30 synchronous full renderWindow rebuilds of a 100-row list can exceed
+    // vitest's default 5s on a loaded CI runner (audit-2026-08-19 F-5), so
+    // this test carries its own timeout.
+    it(
+      "does not report success when renderWindow's own >30-in-2s breaker drops the rebuild",
+      { timeout: 20_000 },
+      () => {
+        const many = Array.from({ length: 100 }, (_, i) => makeMessage({ id: i + 1 }));
+        setMessages(1, many);
+        msgList.mount(container); // mount's renderAll -> renderWindow: rebuild count = 1
 
-      // Every scrollToMessage call forces renderedStart = -1 and calls
-      // renderWindow() directly, bypassing renderAll's own (lower) rapid-fire
-      // limit. 29 more calls bring the shared renderWindow rebuild counter to
-      // 30 (still under the >30 breaker), each one landing normally.
-      for (let i = 0; i < 29; i++) {
-        expect(msgList.scrollToMessage(i + 1)).toBe(true);
-      }
+        // Every scrollToMessage call forces renderedStart = -1 and calls
+        // renderWindow() directly, bypassing renderAll's own (lower) rapid-fire
+        // limit. 29 more calls bring the shared renderWindow rebuild counter to
+        // 30 (still under the >30 breaker), each one landing normally.
+        for (let i = 0; i < 29; i++) {
+          expect(msgList.scrollToMessage(i + 1)).toBe(true);
+        }
 
-      // The 30th call pushes the counter to 31 and trips the breaker inside
-      // renderWindow: it returns before reassigning renderedStart/renderedEnd
-      // or touching the DOM, so the target (far outside the last rendered
-      // window) never actually renders.
-      const result = msgList.scrollToMessage(90);
+        // The 30th call pushes the counter to 31 and trips the breaker inside
+        // renderWindow: it returns before reassigning renderedStart/renderedEnd
+        // or touching the DOM, so the target (far outside the last rendered
+        // window) never actually renders.
+        const result = msgList.scrollToMessage(90);
 
-      // The rebuild did not happen — the row is not in the DOM — so this must
-      // be reported as a failed jump (matching the "false if the message is
-      // not in the loaded window" contract), not a false "true".
-      expect(container.querySelector('[data-testid="message-90"]')).toBeNull();
-      expect(result).toBe(false);
-    });
+        // The rebuild did not happen — the row is not in the DOM — so this must
+        // be reported as a failed jump (matching the "false if the message is
+        // not in the loaded window" contract), not a false "true".
+        expect(container.querySelector('[data-testid="message-90"]')).toBeNull();
+        expect(result).toBe(false);
+      },
+    );
   });
 });
