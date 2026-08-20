@@ -114,15 +114,22 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 					Message: "role not found",
 				})
 				return
-			case err != nil:
-				// ErrTokenNotFound or a wrapped DB error. A DB outage is not a bad
-				// token — log it so it's distinguishable from ordinary 401s.
-				if !errors.Is(err, auth.ErrTokenNotFound) {
-					slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
-				}
+			case errors.Is(err, auth.ErrTokenNotFound):
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "invalid or expired session",
+				})
+				return
+			case err != nil:
+				// A wrapped DB error, not one of the sentinels above. A DB outage
+				// is not a bad token: answering 401 here would make the client
+				// treat a live, valid session as expired — it clears auth,
+				// disconnects the WS, and deletes the stored credential. Log it
+				// and report the failure as a server-side fault instead.
+				slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
+				writeJSON(w, http.StatusServiceUnavailable, errorResponse{
+					Error:   "SERVICE_UNAVAILABLE",
+					Message: "authentication service temporarily unavailable",
 				})
 				return
 			}

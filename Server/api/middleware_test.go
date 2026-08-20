@@ -299,6 +299,43 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_DBErrorIsNotUnauthorized pins OC-0202: a transient DB
+// read error while resolving the bearer token (auth.ResolveTokenHash returns
+// it WRAPPED, never as a sentinel) must not be reported as 401 UNAUTHORIZED.
+// The desktop client treats every 401 as "session expired": it clears auth,
+// disconnects the WS, and deletes the stored OS-keyring credential. A DB
+// outage is not a bad token, so it must surface as a server-side failure
+// (503) instead of tearing down a perfectly valid session.
+func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "erin", "hash", 4)
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+
+	// Close the underlying DB so the next GetSessionByTokenHash call fails
+	// with a wrapped "database is closed" error rather than sql.ErrNoRows —
+	// standing in for a transient outage (locked DB, disk I/O error, a
+	// restore swapping the file underneath the running server).
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusUnauthorized {
+		t.Errorf("AuthMiddleware DB error status = %d, want non-401 (503)", rr.Code)
+	}
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("AuthMiddleware DB error status = %d, want 503", rr.Code)
+	}
+}
+
 // ─── RequirePermission tests ──────────────────────────────────────────────────
 
 func TestRequirePermission_Allowed(t *testing.T) {

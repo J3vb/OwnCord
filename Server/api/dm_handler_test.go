@@ -67,6 +67,22 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
+-- AuthMiddleware falls through to an API-token lookup whenever a bearer
+-- token matches no session (auth.ResolveTokenHash), so this table must exist
+-- even in DM-only fixtures — otherwise an ordinary "no such session" lookup
+-- for a garbage/unknown token hits GetActiveAPIToken and fails with a real
+-- "no such table" SQL error instead of the intended not-found sentinel.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    label        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    expires_at   TEXT,
+    revoked_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
