@@ -1472,6 +1472,44 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("onBack falls back to an announcement channel when no text channel remains (OC-0174)", () => {
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(5, {
+          id: 5,
+          name: "announcements",
+          type: "announcement",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: false,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        // No plain "text" channel exists — only an announcement one.
+        return { ...prev, channels: next };
+      });
+
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onBack();
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      expect(channelsStore.getState().activeChannelId).toBe(5);
+
+      cleanup(result);
+    });
+
     it("onBack keeps the current channel when DM mode was entered without recording channelBeforeDm (OC-0094: 'View all messages' bypass)", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
@@ -1617,6 +1655,51 @@ describe("SidebarArea", () => {
       lastCall.onCloseDm(100);
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
+
+      cleanup(result);
+    });
+
+    it("onCloseDm falls back to an announcement channel when the last DM closes with no text channel (OC-0174)", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      channelsStore.setState((prev) => {
+        const next = new Map(prev.channels);
+        next.set(5, {
+          id: 5,
+          name: "announcements",
+          type: "announcement",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: false,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        });
+        // channelBeforeDm was never recorded (DM channel added directly, not
+        // via selectDmConversation) and no plain "text" channel exists.
+        return { ...prev, channels: next, activeChannelId: 100 };
+      });
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onCloseDm(100);
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      expect(channelsStore.getState().activeChannelId).toBe(5);
 
       cleanup(result);
     });

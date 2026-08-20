@@ -2149,6 +2149,48 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
   });
 
+  // The user verifies the DISPLAYED fingerprint out of band, which takes human
+  // time. A malicious server can push a user_update during that window; if
+  // Trust re-read membersStore instead of using the captured key, the swapped
+  // key would get pinned (TOCTOU).
+  it("pins the displayed key, not one the server swapped in during the verification window", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    const trustBtn = await vi.waitFor(() => {
+      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      return btn;
+    });
+
+    // Server mutates the peer's key while the modal is open and the human is
+    // still comparing the fingerprint it displayed.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, { ...members.get(10)!, identityPublicKey: "attacker-swapped-key-b64" });
+      return { ...prev, members };
+    });
+
+    trustBtn.click();
+
+    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10, "alice-published-key-b64");
+    expect(mockRePinPeerIdentity).not.toHaveBeenCalledWith(10, "attacker-swapped-key-b64");
+  });
+
   it("does not re-pin when the fingerprint could not be computed (no blind accept)", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     membersStore.setState((prev) => {

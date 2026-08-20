@@ -37,10 +37,19 @@ describe("message handling edge cases", () => {
     emitTauriEvent("ws-state", "open");
 
     const messages: unknown[] = [];
-    // pong has no payload listeners, but we verify no crash
     client.on("chat_message", (p) => messages.push(p));
 
-    emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
+    // "pong" is not part of the ServerMessage union — the transport eats it
+    // before dispatch — so the registry has to be reached through a cast to
+    // prove nothing arrives. The frame carries a payload on purpose: a
+    // payload-less pong is also dropped by the "missing type or payload"
+    // guard further down, which would hide a broken early return.
+    const onPong = vi.fn();
+    (client.on as unknown as (t: string, l: () => void) => () => void)("pong", onPong);
+
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
+
+    expect(onPong).not.toHaveBeenCalled();
     expect(messages).toHaveLength(0);
   });
 
@@ -329,11 +338,13 @@ describe("handleMessage size boundary", () => {
       msg.payload.content = "x".repeat(padding);
     }
     const exactJson = JSON.stringify(msg);
-    // Ensure it is exactly at limit (not over)
-    expect(exactJson.length).toBeLessThanOrEqual(limit);
+    // Exactly ON the limit, not merely under it — the guard drops only what is
+    // strictly OVER, so a frame one byte short would pass either way and prove
+    // nothing about the boundary.
+    expect(exactJson.length).toBe(limit);
 
     emitTauriEvent("ws-message", exactJson);
-    expect(messages.length).toBeGreaterThanOrEqual(0); // should not crash
+    expect(messages).toHaveLength(1);
   });
 
   it("drops message one byte over size limit", async () => {

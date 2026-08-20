@@ -428,6 +428,52 @@ func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 	}
 }
 
+// TestRequirePermission_NoRoleInContext pins the fail-closed branch: the
+// server-wide authz chokepoint must deny when the request context carries no
+// usable *db.Role. Every other RequirePermission test composes AuthMiddleware,
+// which always installs a non-nil role, so without this the guard could be
+// rewritten to `if !ok { next.ServeHTTP(w, r); return }` and stay green.
+func TestRequirePermission_NoRoleInContext(t *testing.T) {
+	var nilRole *db.Role
+
+	tests := []struct {
+		name string
+		ctx  func(context.Context) context.Context
+	}{
+		{"missing key", func(ctx context.Context) context.Context { return ctx }},
+		{"typed nil role", func(ctx context.Context) context.Context {
+			return context.WithValue(ctx, api.RoleKey, nilRole)
+		}},
+		{"wrong type", func(ctx context.Context) context.Context {
+			return context.WithValue(ctx, api.RoleKey, "administrator")
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			downstream := false
+			h := api.RequirePermission(permissions.ManageServer)(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					downstream = true
+					ok(w, r)
+				}),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req = req.WithContext(tt.ctx(req.Context()))
+			rr := httptest.NewRecorder()
+
+			h.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("RequirePermission without role status = %d, want 403", rr.Code)
+			}
+			if downstream {
+				t.Error("RequirePermission without role ran the downstream handler")
+			}
+		})
+	}
+}
+
 // ─── RateLimitMiddleware tests ────────────────────────────────────────────────
 
 func TestRateLimitMiddleware_UnderLimit(t *testing.T) {

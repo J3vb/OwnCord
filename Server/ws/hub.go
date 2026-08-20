@@ -193,7 +193,15 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	// Phase C Step 9 — plugin slash commands. Registry is read live because
 	// SetPluginRegistry wires it after NewHub; MessageSvc gates broadcasts.
 	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
-		Registry:   func() *plugin.Registry { return h.pluginRegistry },
+		// A nil registry must yield a nil interface, not a typed-nil
+		// *plugin.Registry — the handler's "no plugins loaded" check is an
+		// interface comparison.
+		Registry: func() CommandDispatcher {
+			if h.pluginRegistry == nil {
+				return nil
+			}
+			return h.pluginRegistry
+		},
 		MessageSvc: h.messageSvc,
 		Limiter:    h.limiter,
 	})

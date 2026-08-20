@@ -454,4 +454,32 @@ mod tests {
             "two credential-store commands ran their critical section concurrently"
         );
     }
+
+    /// `with_credential_lock`'s doc comment promises that poisoning is
+    /// recovered from rather than propagated, so a panic inside one
+    /// credential command cannot permanently wedge every later credential
+    /// operation for the rest of the process. Prove it: panic while holding
+    /// the lock on a spawned thread (which poisons `CREDENTIAL_LOCK`), then
+    /// confirm a later `with_credential_lock` call still runs its closure
+    /// instead of panicking on the poisoned mutex.
+    #[test]
+    fn with_credential_lock_recovers_from_a_poisoned_guard() {
+        use std::thread;
+
+        let poisoning = thread::spawn(|| {
+            with_credential_lock(|| {
+                panic!("boom");
+            });
+        });
+        assert!(
+            poisoning.join().is_err(),
+            "expected the spawned thread to panic while holding the lock"
+        );
+
+        assert_eq!(
+            with_credential_lock(|| 42),
+            42,
+            "with_credential_lock must recover from a poisoned mutex, not propagate it"
+        );
+    }
 }

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
-	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 )
 
@@ -50,7 +49,7 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many commands"}}
 	}
 
-	var reg *plugin.Registry
+	var reg CommandDispatcher
 	if d.Registry != nil {
 		reg = d.Registry()
 	}

@@ -833,6 +833,31 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("truncates an over-long auth error to 200 chars plus ellipsis (anti-phishing cap)", async () => {
+    const onLogin = vi.fn().mockRejectedValue(new Error("x".repeat(500)));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "testuser";
+    passwordInput.value = "password123";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      const errorBanner = container.querySelector(".error-banner")!;
+      expect(errorBanner.textContent).toBe("x".repeat(200) + "...");
+      expect(errorBanner.textContent).toHaveLength(203);
+    });
+
+    page.destroy?.();
+  });
+
   // --- Empty username validation ---
 
   it("shows error when username is empty", async () => {

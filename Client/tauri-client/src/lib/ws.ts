@@ -118,18 +118,19 @@ function uuid(): string {
 }
 
 /** Normalize a host for comparison against the Rust proxies' cert-tofu event
- *  host, mirroring `tofu::cert_store_key`'s trailing-":443" strip, bracket
- *  unwrap, and lowercasing, IN THAT ORDER (src-tauri/src/tofu.rs). Profile/
- *  config hosts are stored verbatim (e.g. "Example.COM:443" or the bracketed
- *  IPv6 literal "[2001:db8::1]", both accepted by hostValidation.ts's
- *  isValidHost), but the proxies always emit the normalized (stripped,
- *  unbracketed, lowercased) form, so an un-normalized comparison here would
- *  silently miss the match (OC-0200). */
+ *  host, mirroring `tofu::cert_store_key`'s trailing-":443" strip, portless
+ *  bracketed-IPv6 unwrap and lowercasing (src-tauri/src/tofu.rs). Profile/
+ *  config hosts are stored verbatim (e.g. "Example.COM:443", or the
+ *  bracketed "[2001:db8::1]" that hostValidation.ts accepts), but the
+ *  proxies always emit the normalized form, so an un-normalized comparison
+ *  here would silently miss the match. Order matters and matches the Rust:
+ *  ":443" comes off first, so "[::1]:443" unwraps too, while a non-default
+ *  port keeps its brackets as its own distinct key (OC-0163). */
 export function normalizeHostForCertCompare(host: string): string {
-  const stripped = host.replace(/:443$/, "");
-  const unbracketed =
-    stripped.startsWith("[") && stripped.endsWith("]") ? stripped.slice(1, -1) : stripped;
-  return unbracketed.toLowerCase();
+  return host
+    .replace(/:443$/, "")
+    .replace(/^\[(.*)\]$/, "$1")
+    .toLowerCase();
 }
 
 /**

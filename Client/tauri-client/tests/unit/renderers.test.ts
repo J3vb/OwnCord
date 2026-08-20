@@ -549,7 +549,12 @@ describe("renderers", () => {
     });
 
     it("formats full date correctly for bare SQLite timestamp", () => {
-      const result = formatFullDate("2026-03-19 00:00:00");
+      // Midday UTC, not midnight: formatFullDate renders in the local zone, and
+      // a UTC-midnight fixture rolls back to the 18th in any zone west of UTC
+      // (e.g. America/New_York). Noon UTC stays on the 19th for every zone
+      // from UTC-11 to UTC+11, which covers every developer/CI machine zone
+      // (only the rare UTC+12..+14 Pacific zones roll it forward to the 20th).
+      const result = formatFullDate("2026-03-19 12:00:00");
       expect(result).toContain("2026");
       expect(result).toContain("March");
       expect(result).toContain("19");
@@ -1218,10 +1223,29 @@ describe("renderers", () => {
     });
   });
 
-  describe("formatMessageTimestamp — DST day boundaries", () => {
+  // Probe once, before the suite is even registered: `process.env.TZ`
+  // mutations only reach Date's local-time engine on the main thread/forks
+  // pool. A worker-thread pool (e.g. Stryker's vitest runner) spawns an
+  // isolate that never observes the change, even though the assignment
+  // itself succeeds. Skip the whole block there instead of failing on a pool
+  // limitation nothing in this file can fix; `npx vitest run` (forks, the
+  // documented way to run this suite) always honors the pin and runs it for
+  // real.
+  const dstProbeOriginalTZ = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  const dstTZPinHonored =
+    new Date(2026, 0, 15).getTimezoneOffset() === 300 &&
+    new Date(2026, 6, 15).getTimezoneOffset() === 240;
+  if (dstProbeOriginalTZ === undefined) {
+    delete process.env.TZ;
+  } else {
+    process.env.TZ = dstProbeOriginalTZ;
+  }
+
+  describe.skipIf(!dstTZPinHonored)("formatMessageTimestamp — DST day boundaries", () => {
     // These cases only exist in a DST-observing zone, so pin one for the
-    // duration of this block. Node honors runtime TZ changes on Linux; the
-    // precondition assertion in each test proves the pin took effect.
+    // duration of this block. The precondition assertion in each test is
+    // cheap insurance against the pin drifting mid-run.
     const originalTZ = process.env.TZ;
 
     beforeEach(() => {

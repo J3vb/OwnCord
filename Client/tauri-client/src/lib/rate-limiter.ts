@@ -159,9 +159,16 @@ export function createReactionLimiter(): RateLimiter {
   return createRateLimiter(5, 1_000);
 }
 
-/** Voice signaling: 20 per second. */
+/**
+ * Voice mute/deafen toggle: 2 per second — matches the server's per-message
+ * budget for voice_mute and voice_deafen (Server/ws/voice_broadcast.go
+ * voiceMuteRateLimit/voiceDeafenRateLimit; docs/protocol.md). Gates
+ * onMuteToggle/onDeafenToggle (VoiceCallbacks.ts), which apply optimistic
+ * local state before the send — a looser client cap would let an over-budget
+ * toggle apply locally before the server refuses it.
+ */
 export function createVoiceLimiter(): RateLimiter {
-  return createRateLimiter(20, 1_000);
+  return createRateLimiter(2, 1_000);
 }
 
 /** Voice camera / screenshare toggle: 2 per second. */

@@ -12,7 +12,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 }));
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
-import { createWsClient } from "../../src/lib/ws";
+import { createWsClient, bracketBareIPv6Host } from "../../src/lib/ws";
 import { addLogListener, type LogEntry } from "../../src/lib/logger";
 
 describe("WebSocket Client (Tauri proxy)", () => {
@@ -392,6 +392,38 @@ describe("heartbeat", () => {
     );
     expect(pingSends).toHaveLength(0);
   });
+
+  it("does not stack a second interval when auth_ok arrives twice", async () => {
+    // startHeartbeat() clears the previous interval before arming a new one.
+    // A resumed session can see two auth_ok frames (server replay, or an
+    // auth_ok racing a reconnect); if the old interval survived, every
+    // heartbeat window would fire N pings for N handshakes.
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const authOk = JSON.stringify({
+      type: "auth_ok",
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S",
+        motd: "",
+      },
+    });
+    emitTauriEvent("ws-message", authOk);
+    emitTauriEvent("ws-message", authOk);
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    const pingSends = mockInvoke.mock.calls.filter(
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"ping"'),
+    );
+    expect(pingSends).toHaveLength(1);
+  });
 });
 
 describe("setState deduplication", () => {
@@ -421,6 +453,22 @@ describe("setState deduplication", () => {
     // State is now "connecting". Count how many times "connecting" appeared.
     const connectingCount = states.filter((s) => s === "connecting").length;
     expect(connectingCount).toBe(1);
+  });
+
+  it("does not notify at all for a transition onto the state already held", () => {
+    // A fresh client is already "disconnected", and disconnect() runs
+    // setState("disconnected") on top of that. Only the `state !== newState`
+    // guard keeps that no-op silent — without it ui.store's connection banner
+    // re-renders (and flaps) on every redundant transition. The test above
+    // counts occurrences of a state that is only ever set once, so it cannot
+    // see the guard at all; this one drives a genuine no-op transition.
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+
+    client.disconnect();
+
+    expect(states).toEqual([]);
+    expect(client.getState()).toBe("disconnected");
   });
 
   it("notifies listeners when state actually changes", async () => {
@@ -927,11 +975,6 @@ describe("connect when Tauri APIs unavailable", () => {
   it("falls back to disconnected when ensureTauriApis fails", async () => {
     vi.useFakeTimers();
 
-    // Create a fresh client that will try to load Tauri APIs fresh
-    // The mock is already set up to resolve, so we need to simulate unavailability
-    // by making tauriInvoke null after ensureTauriApis
-    const origInvoke = mockInvoke;
-
     // Temporarily clear the mock module to simulate Tauri not available
     // We test this indirectly: if ws_connect is never called but state
     // goes back to disconnected, the guard worked
@@ -1195,5 +1238,38 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
 
     // Both non-throwing listeners should have received the message
     expect(received).toEqual(["hello", "fourth:hello"]);
+  });
+});
+
+describe("bracketBareIPv6Host (OC-0163)", () => {
+  // The URL-building half of OC-0163 (the cert-compare half is
+  // normalizeHostForCertCompare, covered in ws-cert.test.ts). Only a BARE
+  // IPv6 literal — more than one colon and nothing outside the IPv6 character
+  // set — may be bracketed; every other host has to come back byte-identical
+  // or the `wss://<host>/api/v1/ws` authority it is spliced into stops
+  // resolving. The connect() tests above cover the three headline cases; this
+  // table pins the edges each half of the guard exists for.
+  it.each([
+    ["2001:db8::1", "[2001:db8::1]"],
+    ["::1", "[::1]"],
+    // Already bracketed (with or without a port) — never double-bracket.
+    ["[2001:db8::1]", "[2001:db8::1]"],
+    ["[2001:db8::1]:8443", "[2001:db8::1]:8443"],
+    // No colon at all: DNS name or IPv4 literal.
+    ["example.com", "example.com"],
+    ["192.168.1.1", "192.168.1.1"],
+    // Exactly one colon is the host:port separator, never an IPv6 literal —
+    // this is why the colon count is `> 1` and not `>= 1`. The IPv4 case also
+    // passes the character-set test, so the colon count is the only thing
+    // keeping it unbracketed.
+    ["example.com:8443", "example.com:8443"],
+    ["192.168.1.1:8443", "192.168.1.1:8443"],
+    // Character-set test is anchored at both ends: a hex-looking prefix with
+    // a non-hex tail (zone id) and a non-hex head with a hex-looking tail are
+    // both rejected — neither is a literal that can sit in a URL authority.
+    ["fe80::1%eth0", "fe80::1%eth0"],
+    ["my-server:1:2", "my-server:1:2"],
+  ])("leaves %s as %s", (input, expected) => {
+    expect(bracketBareIPv6Host(input)).toBe(expected);
   });
 });

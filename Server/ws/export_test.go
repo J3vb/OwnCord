@@ -407,13 +407,27 @@ func (h *Hub) HandleWebhookParticipantLeftWithContextForTest(ctx context.Context
 // for external tests. identity and roomName are passed raw so a test can feed
 // malformed values through the same parse path a hostile webhook would.
 func (h *Hub) HandleWebhookParticipantJoinedForTest(identity, roomName string) {
+	h.HandleWebhookParticipantJoinedWithContextForTest(context.Background(), identity, roomName)
+}
+
+// HandleWebhookParticipantJoinedWithContextForTest is
+// HandleWebhookParticipantJoinedForTest with a caller-supplied context, so
+// external tests can simulate the webhook HTTP handler's request context
+// (e.g. already-cancelled, as it would be after the webhook sender hangs up)
+// instead of always running with context.Background(). Mirrors
+// HandleWebhookParticipantLeftWithContextForTest.
+func (h *Hub) HandleWebhookParticipantJoinedWithContextForTest(ctx context.Context, identity, roomName string) {
 	event := &livekit.WebhookEvent{
 		Event:       "participant_joined",
 		Participant: &livekit.ParticipantInfo{Identity: identity},
 		Room:        &livekit.Room{Name: roomName},
 	}
-	h.handleWebhookParticipantJoined(context.Background(), event)
+	h.handleWebhookParticipantJoined(ctx, event)
 }
+
+// WebhookMaxBodyBytesForTest exposes the webhook body cap so external tests can
+// build a body that is over it without hardcoding the constant twice.
+const WebhookMaxBodyBytesForTest = webhookMaxBodyBytes
 
 // HandleWebhookParticipantJoinedEventForTest exposes
 // handleWebhookParticipantJoined with a caller-built event so tests can cover
