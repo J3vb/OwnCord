@@ -137,6 +137,23 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		span.End()
 	}()
 
+	// OC-0192: bound the raw bytes before either reaches cleanText
+	// (sanitizeToFixpoint) below — its cost is quadratic in input length,
+	// and an adversarial nested-entity payload can sanitize down to
+	// something well under the rune-count bound while still costing seconds
+	// of CPU to get there, so the rune-count check alone never rejects it
+	// early. This is the same cheap byte-length pre-check the handler uses
+	// for username/avatar (profile_handler.go); *4 still admits any
+	// legitimate UTF-8 value at the rune bound. UpdateProfile is the one
+	// function every transport reaches (see ProfilePatch's doc comment), so
+	// the guard belongs here rather than only in the REST handler.
+	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
+		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
+	}
+	if patch.About != nil && len(*patch.About) > MaxAboutLen*4 {
+		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	}
+
 	if patch.DisplayName != nil && utf8.RuneCountInString(cleanText(*patch.DisplayName)) > MaxDisplayNameLen {
 		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
 	}
