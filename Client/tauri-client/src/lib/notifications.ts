@@ -12,6 +12,8 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
+import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveDisplayName } from "@lib/avatar";
 
 const log = createLogger("notifications");
 
@@ -87,6 +89,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
   const channelLabel = isDm ? channelName : `#${channelName}`;
 
+  // The name to show for the author, resolved the same way the message list
+  // resolves it (resolveAuthor prefers the live membersStore nickname over
+  // whatever was frozen into the payload; resolveDisplayName falls back to
+  // the username when no nickname is set). Without this the notification
+  // names the sender differently from the message row it points at.
+  const authorName = resolveDisplayName(resolveAuthor(payload.user));
+
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function sanitizeNotif(s: string, maxLen: number): string {
     // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
@@ -96,8 +105,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const title = sanitizeNotif(
     mentioned
-      ? `${payload.user.username} mentioned you in ${channelLabel}`
-      : `${payload.user.username} in ${channelLabel}`,
+      ? `${authorName} mentioned you in ${channelLabel}`
+      : `${authorName} in ${channelLabel}`,
     80,
   );
   const body = sanitizeNotif(payload.content, 100);

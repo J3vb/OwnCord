@@ -4,6 +4,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { membersStore } from "../../src/stores/members.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
@@ -142,6 +143,14 @@ describe("notifyIncomingMessage", () => {
     // (see dispatcher.ts) -- reset so a DM seeded by one test cannot leak
     // into another that expects the plain channelsStore fallback.
     dmStore.setState(() => ({ channels: [] }));
+
+    // Reset the member store so a nickname seeded by one test cannot leak
+    // into another that expects the plain-username title.
+    membersStore.setState(() => ({
+      members: new Map(),
+      typingUsers: new Map(),
+      roleRevision: 0,
+    }));
 
     // Ensure document.hasFocus returns false (simulating unfocused window)
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -715,6 +724,76 @@ describe("notifyIncomingMessage", () => {
         expect(sendNotification).toHaveBeenCalledWith({
           title: "bob in bob",
           body: "hey",
+        });
+      });
+    });
+
+    // OC-0233: the popup that tells you who wrote to you has to name them the
+    // same way the message row you click through to does. resolveAuthor
+    // (message-list/formatting.ts) prefers the live membersStore copy of the
+    // author's nickname over whatever was frozen into the payload.
+    it("titles the notification with the member store's nickname, not the raw username", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            2,
+            {
+              id: 2,
+              username: "a_martinez",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+              displayName: "Alice",
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 1,
+      }));
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      const payload = makePayload({
+        user: { id: 2, username: "a_martinez", avatar: null },
+        channel_id: 1,
+        content: "hi",
+      });
+      notifyIncomingMessage(payload);
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledWith({
+          title: "Alice in #general",
+          body: "hi",
+        });
+      });
+    });
+
+    // Same fix, payload-only path: the author has a display_name on the
+    // message but is not (yet) in the member store.
+    it("titles the notification with the payload's display_name when the author is not in the member store", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      const payload = makePayload({
+        user: { id: 2, username: "a_martinez", avatar: null, display_name: "Alice" },
+        channel_id: 1,
+        content: "hi",
+      });
+      notifyIncomingMessage(payload);
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledWith({
+          title: "Alice in #general",
+          body: "hi",
         });
       });
     });
