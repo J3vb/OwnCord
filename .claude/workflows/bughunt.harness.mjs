@@ -866,6 +866,7 @@ scenarios.s_coverage_blocks_stop = async () => {
   assert.deepEqual(result.rounds.map((r) => r.dryAfter), [1, 2, 3, 4])
   assert.deepEqual(result.runStats.coverage, { inventory: 60, preCovered: 10, covered: 60, uncoveredAtStop: 0 })
   assert.match(result.report, /CONVERGED/)
+  assert.match(result.report, /Coverage: 60\/60 files \(10 pre-covered/)
   const ep = (calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus') || {}).prompt || ''
   assert.match(ep, /error-path data loss/, 'explore lenses carry the distilled class checklist')
 }
@@ -946,6 +947,7 @@ scenarios.s_coverage_stall = async () => {
   assert.equal(result.rounds.length, 5, 'r1-3 families, then exactly 2 stalled adaptive rounds')
   assert.equal(result.runStats.coverage.uncoveredAtStop, 20)
   assert.ok(logs.some((l) => /Coverage stalled/.test(l)))
+  assert.match(result.report, /NOT converged - coverage stalled/)
 }
 
 // COV4 (spec §2 smart depth): once the sweep completes, the 5 bug-class lenses run once more

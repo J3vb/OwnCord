@@ -465,12 +465,14 @@ function seenBlock(seen) {
   const lines = seen.map((s) => `  - ${s.file}:${s.line} [${s.status}] ${s.title}`)
   return `\n--- KNOWN FINDINGS (already investigated - do NOT re-report; refuted means examined and rejected) ---\n${lines.join('\n')}\n`
 }
-function convergenceTable(stats, converged, stoppedOnBudget) {
+function convergenceTable(stats, converged, stoppedOnBudget, stalled) {
   const verdict = converged
     ? `CONVERGED after ${stats.length} round(s).`
-    : stoppedOnBudget
-      ? 'NOT converged - stopped on budget.'
-      : 'NOT converged - hit the round backstop.'
+    : stalled
+      ? 'NOT converged - coverage stalled.'
+      : stoppedOnBudget
+        ? 'NOT converged - stopped on budget.'
+        : 'NOT converged - hit the round backstop.'
   const rows = stats.map(
     (s) =>
       `| ${s.round} | ${s.family} | ${s.lenses} | ${s.candidates} | ${s.fresh} | ${s.confirmed} | ${s.refuted} | ${s.dryEligible ? 'yes' : 'NO'} | ${s.dryAfter} |`,
@@ -744,7 +746,7 @@ const converged = uncoveredCount() === 0 && !riskySweepPending() && dry >= DRY_T
 const RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 const confirmedSorted = confirmedAll.slice().sort((a, b) => RANK[a.severity] - RANK[b.severity])
 const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
-const table = convergenceTable(roundStats, converged, stoppedOnBudget)
+const table = convergenceTable(roundStats, converged, stoppedOnBudget, stalledCoverage)
 const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
 const runStats = {
   config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: BUDGET_TOTAL },
@@ -767,9 +769,11 @@ const runStats = {
 function buildReport() {
   const outcome = converged
     ? `CONVERGED after ${round} round(s).`
-    : stoppedOnBudget
-      ? `NOT converged - stopped on budget after ${round} round(s).`
-      : `NOT converged - hit the round backstop after ${round} round(s).`
+    : stalledCoverage
+      ? `NOT converged - coverage stalled after ${round} round(s).`
+      : stoppedOnBudget
+        ? `NOT converged - stopped on budget after ${round} round(s).`
+        : `NOT converged - hit the round backstop after ${round} round(s).`
   const sev = { critical: 0, high: 0, medium: 0, low: 0 }
   for (const f of confirmedSorted) sev[f.severity] = (sev[f.severity] || 0) + 1
   const lines = ['# Bug hunt report', '']
@@ -802,6 +806,13 @@ function buildReport() {
       `Agent failures: ${runStats.finderNull} finder null, ${runStats.finderEmpty} finder empty, ${runStats.verifierNull} verifier null.`,
     '',
   )
+  if (runStats.coverage)
+    lines.push(
+      `Coverage: ${runStats.coverage.covered}/${runStats.coverage.inventory} files ` +
+        `(${runStats.coverage.preCovered} pre-covered from ledger + live explored-clean); ` +
+        `${runStats.coverage.uncoveredAtStop} uncovered at stop.`,
+      '',
+    )
   lines.push('| round | spent | files (new) | suppressed ledger/run | finder null/empty | verifier null |')
   lines.push('|---|---|---|---|---|---|')
   for (const s of roundStats)
