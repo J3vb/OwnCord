@@ -16,7 +16,7 @@ reach a commit, an issue, or a PR body.
 ## 1. Hunt
 
 **Launch the hunt from a turn that carries a token-budget directive** (recommended:
-`+25M`, comfortably above a full 8-round run). The workflow's cost ceiling is gated
+`+25M`, comfortably above a full coverage run's ~8-12M). The workflow's cost ceiling is gated
 on `budget.total`, which is null without a directive — a directive-less run has **no
 ceiling at all**. The workflow's first log line echoes the state: `budget=25M` means
 armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
@@ -26,9 +26,19 @@ Before launching, in order:
 
 1. **Rebuild the graph** (stale coordinates aim the explore lens at moved code):
    `graphify update . --no-cluster` — local tree-sitter, zero LLM cost, ~10.7k nodes.
-2. **Rank explore targets**: `node .superpowers/rank-explore.mjs` — writes
-   `.superpowers/explore-ranking.json`, deprioritizing files recorded clean in
-   `.superpowers/explored-clean.json` and dropping files that no longer exist.
+2. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
+   `.superpowers/explore-ranking.json`: EVERY non-test source file (~419 rows), each with
+   `examined` (already carries a ledger finding or a LIVE explored-clean record → the hunt
+   pre-seeds its covered set), `risky` (top coupling ∪ past-bug clusters ∪ top churn,
+   capped at 40 → they get an extra pass through all 5 bug-class lenses), and `churn`.
+   Explored-clean records carry content hashes: editing a file expires its clean record,
+   so re-runs automatically re-hunt what changed. The hunt cannot stop while any inventory
+   file is uncovered, so a full run now takes ~10-20 rounds and ~8-12M tokens — the `+25M`
+   directive still covers it. Regenerate the inventory and read `known` from the ledger in
+   the SAME session step: both derive from `findings-ledger.json`, and every `known` file
+   must be `examined` in the inventory — a `known` file the inventory does not mark
+   examined can never be drawn (the seen-filter blocks it) nor covered, which would
+   strand `uncoveredCount()` above zero and block convergence.
 3. Read the ledger and pass every record in as `known`, so the hunt does not
    re-derive anything already found, fixed, declined, or refuted.
 
@@ -39,7 +49,7 @@ Workflow({
     known: <every record from findings-ledger.json, as {file, line, title, status}>,
     graph: <the rows of .superpowers/explore-ranking.json>,
     lenses: [ {key, prompt}, ... ],   // optional: scope the hunt to one subsystem
-    maxRounds: 8,
+    maxRounds: 30,   // safety backstop only - coverage + dry is the real stop
     dryThreshold: 2,
   },
 })
@@ -49,7 +59,27 @@ If `graph` is omitted or empty the hunt logs
 `explore: args.graph absent/empty - falling back to churn-based fresh eyes` and
 still runs — degraded targeting, never a smaller lens family.
 
+`converged: true` now means: every inventory file was covered by a completed
+explicit-file lens (or carries a verdict), the risky class sweep ran, and then
+`dryThreshold` consecutive eligible rounds confirmed nothing (a round where the
+lens family comes up empty with the pool drained counts as dry — family
+`exhausted`). Rows without the `examined` field fall back to the old
+quietness-only stop. Two new run outcomes: `stalledCoverage: true` means adaptive
+rounds stopped shrinking the uncovered pool (usually mass finder failures —
+investigate before re-running); a budget stop now reports
+`coverage.uncoveredAtStop` so the next run knows exactly what remains (re-run
+with the ledger as `known`; live explored-clean records pre-cover what was
+finished, so the sweep naturally continues where it stopped).
+
 Omit `lenses` for a general hunt across the rotating families.
+
+**Scoping a hunt while coverage mode is armed is a budget trap:** `lenses` only
+replaces round 1, and inventory rows with `examined` force the coverage stop
+rule — from round 2 the run sweeps the ENTIRE uncovered pool and the risky
+sweep before it may converge, at general-hunt cost. For a true scoped hunt,
+pass a subsystem-filtered inventory as `graph` (only the rows you want swept),
+or rows without the `examined` field to fall back to the legacy quietness-only
+stop.
 
 Each lens object is `{key, prompt}`. `key` must match `^[a-z0-9-]+$` —
 lowercase letters, digits, and hyphens only. Keys get interpolated into agent

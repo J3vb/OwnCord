@@ -15,7 +15,7 @@ const ARGS = (() => {
   }
   return args || {}
 })()
-const MAX_ROUNDS = ARGS.maxRounds || 8
+const MAX_ROUNDS = ARGS.maxRounds || 30
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
 // adaptive, so hotspot and explore coverage - and therefore convergence - still work.
@@ -281,17 +281,31 @@ const FLOW_LENSES = [
   },
 ]
 
+let riskySweepDone = false
+function riskySweepLenses() {
+  if (riskySweepDone || !HAS_INVENTORY || !RISKY_FILES.length || uncoveredCount() > 0) return null
+  riskySweepDone = true // consumed even if this round's finders die: same at-most-once semantics as cooldown
+  const list = RISKY_FILES.map((f) => `  - ${f}`).join('\n')
+  return BUGCLASS_LENSES.map((l) => ({
+    key: `risky-${l.key}`,
+    prompt: `${l.prompt}\n\nScope this sweep to ONLY these highest-risk files (read each one in full):\n${list}`,
+  }))
+}
+let currentFamilyName = 'surfaces'
 function lensesForRound(round) {
-  if (CUSTOM_LENSES) return round === 1 ? CUSTOM_LENSES : buildAdaptiveLenses(round)
-  if (round === 1) return SURFACE_LENSES
-  if (round === 2) return BUGCLASS_LENSES
-  if (round === 3) return FLOW_LENSES
-  return buildAdaptiveLenses(round)
+  const pick = (name, lenses) => { currentFamilyName = name; return lenses }
+  if (CUSTOM_LENSES) {
+    if (round === 1) return pick('custom', CUSTOM_LENSES)
+  } else {
+    if (round === 1) return pick('surfaces', SURFACE_LENSES)
+    if (round === 2) return pick('bug-classes', BUGCLASS_LENSES)
+    if (round === 3) return pick('flows', FLOW_LENSES)
+  }
+  const risky = riskySweepLenses()
+  if (risky) return pick('risky-sweep', risky)
+  return pick('adaptive', buildAdaptiveLenses(round))
 }
-function familyName(round) {
-  if (CUSTOM_LENSES) return round === 1 ? 'custom' : 'adaptive'
-  return ['surfaces', 'bug-classes', 'flows'][round - 1] || 'adaptive'
-}
+function familyName() { return currentFamilyName }
 // Directory granularity: the old two/three-segment cluster collapsed the whole TS client into
 // one bucket (35 of 82 findings), so the "top cluster" never changed for five straight rounds.
 function clusterOf(file) {
@@ -303,6 +317,17 @@ function clusterOf(file) {
 // args.graph: session-computed coupling ranking (rank-explore.mjs). The workflow only reads
 // .file - scoring already happened outside, where the filesystem is.
 const GRAPH_ROWS = (Array.isArray(ARGS.graph) ? ARGS.graph : []).filter((r) => r && typeof r.file === 'string')
+// ---------- coverage mode (spec 2026-08-20) ----------
+// Arms only when rows carry the `examined` flag (full inventory from rank-explore.mjs).
+// Legacy rows and the churn fallback leave all of this inert: covered stays empty,
+// uncoveredCount() is 0, and the loop condition reduces to the old dry-threshold rule.
+const HAS_INVENTORY = GRAPH_ROWS.some((r) => 'examined' in r)
+const INVENTORY = HAS_INVENTORY ? GRAPH_ROWS.map((r) => r.file) : []
+const covered = new Set(HAS_INVENTORY ? GRAPH_ROWS.filter((r) => r.examined).map((r) => r.file) : [])
+const PRE_COVERED = covered.size
+const RISKY_FILES = HAS_INVENTORY ? GRAPH_ROWS.filter((r) => r.risky).map((r) => r.file) : []
+const uncoveredCount = () => (HAS_INVENTORY ? INVENTORY.reduce((n, f) => n + (covered.has(f) ? 0 : 1), 0) : 0)
+if (HAS_INVENTORY) log(`coverage: inventory=${INVENTORY.length} preCovered=${PRE_COVERED} risky=${RISKY_FILES.length}`)
 const EXPLORE_FILES_PER_LENS = 10
 const exploreConsumed = new Set() // within-run consumption: never re-offer a file to a later round
 let exploreFallbackLogged = false
@@ -316,9 +341,18 @@ function drawExploreFiles() {
     }
     pool = churnFiles
   }
-  const files = pool
-    .filter((f) => !exploreConsumed.has(f) && !seen.some((s) => s.file === f))
-    .slice(0, EXPLORE_FILES_PER_LENS)
+  const avail = pool.filter((f) => !exploreConsumed.has(f) && !covered.has(f) && !seen.some((s) => s.file === f))
+  const files = []
+  while (files.length < EXPLORE_FILES_PER_LENS && avail.length) {
+    const head = avail.shift()
+    files.push(head)
+    const dir = clusterOf(head)
+    // pull same-directory siblings forward: one lens reading one module beats ten strangers
+    for (let i = 0; i < avail.length && files.length < EXPLORE_FILES_PER_LENS; ) {
+      if (clusterOf(avail[i]) === dir) files.push(avail.splice(i, 1)[0])
+      else i++
+    }
+  }
   for (const f of files) exploreConsumed.add(f)
   return files
 }
@@ -333,7 +367,12 @@ function exploreLens(i) {
       `single finding in them - either they are clean or every lens so far walked past them.`
   return {
     key: `explore-${i}`,
-    prompt: `${src} Read each one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
+    prompt: `${src} Read each one IN FULL with fresh eyes. Hunt every class: concurrency and ` +
+      `interleaving (races, TOCTOU, lock ordering, stale-closure writes after await); lifecycle and ` +
+      `teardown (unreleased acquires, use-after-close, missing disposal on error paths); state desync ` +
+      `(two sources of truth updated by different code paths); error-path data loss (swallowed errors, ` +
+      `partial writes, silent fallbacks); ordering and boundaries (off-by-one, pagination truncation, ` +
+      `sequence gaps, inclusive/exclusive disagreements).\n` +
       files.map((f) => `  - ${f}`).join('\n'),
     files,
   }
@@ -348,8 +387,10 @@ function buildAdaptiveLenses(round) {
     byCluster[cl].push(c)
   }
   // Explore-heavy schedule: measured hotspot yield flattened to 0.25 high+med/agent by round 6.
+  const sweeping = uncoveredCount() > 0
   const hotspotQuota = round <= 5 ? 2 : 1
-  const exploreQuota = round <= 5 ? 2 : 3
+  // sweep pace: 4 explore lenses x 10 files while inventory files remain uncovered
+  const exploreQuota = sweeping ? 4 : round <= 5 ? 2 : 3
   const hotKey = (cl) => ('hotspot ' + cl).toLowerCase().replace(/[^a-z0-9]+/g, '-')
   const picked = Object.entries(byCluster)
     .sort((a, b) => b[1].length - a[1].length)
@@ -370,7 +411,7 @@ function buildAdaptiveLenses(round) {
   if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} - trying explore backfill`)
   const explores = []
   for (let i = 1; i <= exploreQuota + shortfall; i++) {
-    if ((cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
+    if (!sweeping && (cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
     const lens = exploreLens(i)
     if (!lens) {
       log(`adaptive: explore pool exhausted after ${explores.length} lens(es)`)
@@ -424,12 +465,14 @@ function seenBlock(seen) {
   const lines = seen.map((s) => `  - ${s.file}:${s.line} [${s.status}] ${s.title}`)
   return `\n--- KNOWN FINDINGS (already investigated - do NOT re-report; refuted means examined and rejected) ---\n${lines.join('\n')}\n`
 }
-function convergenceTable(stats, converged, stoppedOnBudget) {
+function convergenceTable(stats, converged, stoppedOnBudget, stalled) {
   const verdict = converged
     ? `CONVERGED after ${stats.length} round(s).`
-    : stoppedOnBudget
-      ? 'NOT converged - stopped on budget.'
-      : 'NOT converged - hit the round backstop.'
+    : stalled
+      ? 'NOT converged - coverage stalled.'
+      : stoppedOnBudget
+        ? 'NOT converged - stopped on budget.'
+        : 'NOT converged - hit the round backstop.'
   const rows = stats.map(
     (s) =>
       `| ${s.round} | ${s.family} | ${s.lenses} | ${s.candidates} | ${s.fresh} | ${s.confirmed} | ${s.refuted} | ${s.dryEligible ? 'yes' : 'NO'} | ${s.dryAfter} |`,
@@ -494,6 +537,8 @@ const cleanStreak = {}
 let dry = 0
 let round = 0
 let stoppedOnBudget = false
+let coverageStall = 0
+let stalledCoverage = false
 
 function finderPrompt(lens, rnd) {
   return (
@@ -524,18 +569,35 @@ function verifyPrompt(lensKey, candidates) {
   )
 }
 
-while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
+const riskySweepPending = () => HAS_INVENTORY && RISKY_FILES.length > 0 && !riskySweepDone
+while ((uncoveredCount() > 0 || riskySweepPending() || dry < DRY_THRESHOLD) && round < MAX_ROUNDS) {
   if (BUDGET_TOTAL && remainingBudget() < ROUND_BUDGET_FLOOR) {
     stoppedOnBudget = true
     log(`Budget floor reached (${Math.round(remainingBudget() / 1000)}k left) - stopping before round ${round + 1}`)
     break
   }
   const family = lensesForRound(round + 1)
-  if (!family || !family.length) break // nothing to hunt != everything demoted
+  if (!family || !family.length) {
+    // Coverage mode with the pool drained and the risky sweep done: an empty family means
+    // hotspots are demoted/cooled and there is genuinely nothing left to hunt - that IS
+    // quietness. Count it as a dry round so a late confirm cannot strand a fully-covered
+    // run one dry round short of its earned convergence. Legacy mode keeps the hard stop:
+    // an empty family there means "nothing targetable" (no churn, no graph), not "done".
+    if (HAS_INVENTORY && uncoveredCount() === 0 && !riskySweepPending()) {
+      round++
+      dry++
+      roundStats.push({ round, family: 'exhausted', lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry, severity: { critical: 0, high: 0, medium: 0, low: 0 }, perLens: {}, filesTouched: 0, filesNew: 0, suppressedLedger: 0, suppressedRun: 0, finderNull: 0, finderEmpty: 0, verifierNull: 0, spentBefore: budget.spent(), spentAfter: budget.spent() })
+      log(`Round ${round}: nothing left to hunt - counts as a dry round (dry=${dry})`)
+      continue
+    }
+    break // nothing to hunt != everything demoted
+  }
   round++
+  const uncBefore = uncoveredCount()
   const spentBefore = budget.spent()
   const counts = { suppressedLedger: 0, suppressedRun: 0, finderNull: 0, finderEmpty: 0, verifierNull: 0 }
-  const lenses = family.filter((l) => (cleanStreak[l.key] || 0) < 2)
+  const sweepingNow = uncoveredCount() > 0
+  const lenses = family.filter((l) => (sweepingNow && /^explore-/.test(l.key)) || (cleanStreak[l.key] || 0) < 2)
   if (!lenses.length) {
     dry++
     roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry, severity: { critical: 0, high: 0, medium: 0, low: 0 }, perLens: {}, filesTouched: 0, filesNew: 0, ...counts, spentBefore, spentAfter: budget.spent() })
@@ -613,10 +675,13 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
     candCount += r.unionCount
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
-    if (r.finderFailed && r.lens.files) {
-      // a dead finder read nothing: un-consume its draw so later rounds can re-offer the
-      // files and the session does not record never-examined files as explored-clean
-      for (const f of r.lens.files) exploreConsumed.delete(f)
+    if (r.lens.files) {
+      // coverage credit (spec: only explicit-file lenses that ran to completion). A lens
+      // denied credit - dead finder OR candidates left unverified - returns its whole draw
+      // to the pool: consumed-but-uncovered files would otherwise strand uncoveredCount()
+      // above zero forever, and a partially-verified draw is not evidence of cleanliness.
+      if (!r.finderFailed && !r.unmatched.length) for (const f of r.lens.files) covered.add(f)
+      else for (const f of r.lens.files) exploreConsumed.delete(f)
     }
     let lensConfirmed = 0
     let lensRefuted = 0
@@ -627,6 +692,7 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
       if (seen.some((p) => isDup(rec, p))) { counts.suppressedRun++; continue } // cross-lens same-round duplicate
       seen.push(rec)
+      covered.add(rec.file) // any verdict proves the file was read (inert in legacy mode: seen already blocks re-draws)
       if (v.refuted) { newRefuted++; lensRefuted++ }
       else {
         newConfirmed++
@@ -654,9 +720,24 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   // ineligible zero-confirm round: dry unchanged - "we didn't fully look" is not "it's clean"
   roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry, severity: sevMix, perLens, filesTouched: filesTouched.size, filesNew: filesNew.size, ...counts, spentBefore, spentAfter: budget.spent() })
   log(`Round ${round} (${familyName(round)}): ${newConfirmed} confirmed, ${newRefuted} refuted, dry=${dry}${eligible ? '' : ' (ineligible)'}`)
+
+  // stalled coverage: an adaptive round that failed to shrink a non-empty uncovered pool
+  // AND confirmed nothing. Only adaptive rounds count - rounds 1-3 never draw explore
+  // files by design - and a round that confirmed a bug is never a stall: hotspot yield
+  // does not shrink the pool, and cutting off a still-productive hunt is the one thing
+  // a bug-finding tool must not do.
+  const uncAfter = uncoveredCount()
+  if (HAS_INVENTORY && familyName() === 'adaptive' && uncAfter > 0 && newConfirmed === 0) {
+    coverageStall = uncAfter < uncBefore ? 0 : coverageStall + 1
+    if (coverageStall >= 2) {
+      stalledCoverage = true
+      log(`Coverage stalled: uncovered=${uncAfter} did not shrink for 2 adaptive rounds - stopping`)
+      break
+    }
+  } else coverageStall = 0
 }
 
-const converged = dry >= DRY_THRESHOLD
+const converged = uncoveredCount() === 0 && !riskySweepPending() && dry >= DRY_THRESHOLD
 
 // ---------- report (deterministic) ----------
 // A report agent silently dropped findings (79 sections for 82 confirmed on 2026-08-12), so the
@@ -665,14 +746,16 @@ const converged = dry >= DRY_THRESHOLD
 const RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 const confirmedSorted = confirmedAll.slice().sort((a, b) => RANK[a.severity] - RANK[b.severity])
 const unverifiedFinal = unverified.filter((u) => !seen.some((p) => isDup(u, p)))
-const table = convergenceTable(roundStats, converged, stoppedOnBudget)
+const table = convergenceTable(roundStats, converged, stoppedOnBudget, stalledCoverage)
 const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
 const runStats = {
   config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: BUDGET_TOTAL },
+  coverage: HAS_INVENTORY ? { inventory: INVENTORY.length, preCovered: PRE_COVERED, covered: INVENTORY.length - uncoveredCount(), uncoveredAtStop: uncoveredCount() } : null,
   spentTotal: budget.spent(),
   rounds: roundStats.length,
   converged,
   stoppedOnBudget,
+  stalledCoverage,
   confirmed: confirmedSorted.length,
   refuted: sum('refuted'),
   unverified: unverifiedFinal.length,
@@ -686,9 +769,11 @@ const runStats = {
 function buildReport() {
   const outcome = converged
     ? `CONVERGED after ${round} round(s).`
-    : stoppedOnBudget
-      ? `NOT converged - stopped on budget after ${round} round(s).`
-      : `NOT converged - hit the round backstop after ${round} round(s).`
+    : stalledCoverage
+      ? `NOT converged - coverage stalled after ${round} round(s).`
+      : stoppedOnBudget
+        ? `NOT converged - stopped on budget after ${round} round(s).`
+        : `NOT converged - hit the round backstop after ${round} round(s).`
   const sev = { critical: 0, high: 0, medium: 0, low: 0 }
   for (const f of confirmedSorted) sev[f.severity] = (sev[f.severity] || 0) + 1
   const lines = ['# Bug hunt report', '']
@@ -721,6 +806,13 @@ function buildReport() {
       `Agent failures: ${runStats.finderNull} finder null, ${runStats.finderEmpty} finder empty, ${runStats.verifierNull} verifier null.`,
     '',
   )
+  if (runStats.coverage)
+    lines.push(
+      `Coverage: ${runStats.coverage.covered}/${runStats.coverage.inventory} files ` +
+        `(${runStats.coverage.preCovered} pre-covered from ledger + live explored-clean); ` +
+        `${runStats.coverage.uncoveredAtStop} uncovered at stop.`,
+      '',
+    )
   lines.push('| round | spent | files (new) | suppressed ledger/run | finder null/empty | verifier null |')
   lines.push('|---|---|---|---|---|---|')
   for (const s of roundStats)
@@ -729,4 +821,4 @@ function buildReport() {
 }
 const report = buildReport()
 
-return { converged, stoppedOnBudget, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, exploredFiles: [...exploreConsumed], report }
+return { converged, stoppedOnBudget, stalledCoverage, rounds: roundStats, confirmed: confirmedSorted, unverified: unverifiedFinal, runStats, exploredFiles: [...exploreConsumed], report }

@@ -73,6 +73,11 @@ export const finding = (n, over = {}) => ({
 })
 export const graphRows = (n) =>
   Array.from({ length: n }, (_, i) => ({ file: `Server/gen/g${i}.go`, score: 1 - i / (n + 1), degree: 10, cited: 5 }))
+export const inventoryRows = (n, over = () => ({})) =>
+  Array.from({ length: n }, (_, i) => ({
+    file: `Server/gen/g${i}.go`, degree: 10, cited: 5, score: 1 - i / (n + 1),
+    examined: false, risky: false, ...over(i),
+  }))
 export const confirmAll = (cands) => ({
   verdicts: cands.map((c) => ({
     title: c.title, file: c.file, line: c.line,
@@ -843,6 +848,193 @@ scenarios.s_explore_rewind_on_thrown_stage = async () => {
     assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
   assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
   assert.equal(result.rounds[3].dryEligible, false, 'a nulled lens result still makes the round ineligible')
+}
+
+// COV1 (spec §3): coverage mode may NOT stop on quietness while inventory files are uncovered.
+// 60 rows, 10 pre-examined -> 50 to sweep. Nothing is ever found, so dry passes the threshold
+// at round 2 - the old stop rule would have converged there. The new rule keeps going until
+// round 4's explore lenses (quota 4 + backfill 2 slots; 5 draw files, the 6th comes up empty)
+// cover all 50, then exits. Also locks the enriched explore prompt (class checklist).
+scenarios.s_coverage_blocks_stop = async () => {
+  const inv = inventoryRows(60, (i) => (i >= 50 ? { examined: true } : {}))
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 4, 'must run past the dry threshold (hit at r2) to sweep in r4')
+  assert.equal(result.converged, true)
+  assert.deepEqual(result.rounds.map((r) => r.dryAfter), [1, 2, 3, 4])
+  assert.deepEqual(result.runStats.coverage, { inventory: 60, preCovered: 10, covered: 60, uncoveredAtStop: 0 })
+  assert.match(result.report, /CONVERGED/)
+  assert.match(result.report, /Coverage: 60\/60 files \(10 pre-covered/)
+  const ep = (calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus') || {}).prompt || ''
+  assert.match(ep, /error-path data loss/, 'explore lenses carry the distilled class checklist')
+}
+
+// COV2 (spec §2+§4): a dead explore finder's files stay uncovered and get re-offered; the
+// run only converges after a LIVE lens covers them.
+scenarios.s_coverage_dead_finder = async () => {
+  const inv = inventoryRows(20)
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) => (round === 4 && key === 'explore-1' ? null : none),
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the pool')
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'dead lens files are re-offered next round')
+  assert.equal(result.rounds[3].dryEligible, false, 'dead finder keeps the round ineligible')
+  assert.equal(result.converged, true)
+  assert.deepEqual(result.runStats.coverage, { inventory: 20, preCovered: 0, covered: 20, uncoveredAtStop: 0 })
+}
+
+// COV7 (amendment 4): explore draws are directory-coherent - one lens reads one module,
+// not ten strangers. Cross-file classes (state desync, acquire/release pairs) need siblings
+// in one agent's context.
+scenarios.s_directory_coherent_draws = async () => {
+  const inv = inventoryRows(20, (i) => ({ file: i % 2 === 0 ? `Server/alpha/a${i}.go` : `Server/beta/b${i}.go` }))
+  const { calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  const p1 = (calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus') || {}).prompt || ''
+  assert.match(p1, /Server\/alpha\/a0\.go/)
+  assert.match(p1, /Server\/alpha\/a18\.go/, 'all ten alpha files ride in the first lens')
+  assert.doesNotMatch(p1, /Server\/beta\//, 'no stranger directories in a coherent draw')
+}
+
+// COV8 (Task 5 review finding): an explore lens whose candidates never get a verdict is
+// denied coverage credit - its draw must return to the pool and be re-offered, or the
+// consumed-but-uncovered files strand uncoveredCount() above zero and the run can never
+// converge (it would grind to the round backstop instead).
+scenarios.s_uncredited_draw_returns_to_pool = async () => {
+  const inv = inventoryRows(20)
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 4 && key === 'explore-1'
+          ? { findings: [finding(1, { file: 'Server/gen/g0.go', title: 'orphaned candidate one' })] }
+          : none,
+      verify: (round, key, cands) =>
+        round === 4 && key === 'explore-1' ? { verdicts: [] } : confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/)
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'uncredited draw is re-offered next round')
+  assert.equal(result.rounds[3].dryEligible, false, 'unverified candidates keep the round ineligible')
+  assert.equal(result.converged, true, 'the run must still converge once a later lens covers the files')
+  assert.deepEqual(result.runStats.coverage, { inventory: 20, preCovered: 0, covered: 20, uncoveredAtStop: 0 })
+  assert.equal(result.unverified.length, 1, 'the orphaned candidate stays reported unverified')
+}
+
+// COV3 (spec §4): finders dying every adaptive round -> uncovered never shrinks -> stop with
+// stalledCoverage after 2 stalled adaptive rounds instead of burning 26 more rounds.
+scenarios.s_coverage_stall = async () => {
+  const inv = inventoryRows(20)
+  const { result, logs } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) => (/^explore-/.test(key) ? null : none),
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  assert.equal(result.stalledCoverage, true)
+  assert.equal(result.converged, false)
+  assert.equal(result.rounds.length, 5, 'r1-3 families, then exactly 2 stalled adaptive rounds')
+  assert.equal(result.runStats.coverage.uncoveredAtStop, 20)
+  assert.ok(logs.some((l) => /Coverage stalled/.test(l)))
+  assert.match(result.report, /NOT converged - coverage stalled/)
+}
+
+// COV4 (spec §2 smart depth): once the sweep completes, the 5 bug-class lenses run once more
+// scoped to the risky files - then the run may converge.
+scenarios.s_risky_sweep = async () => {
+  const inv = inventoryRows(10, (i) => (i < 2 ? { risky: true } : {}))
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  const r5keys = [...new Set(calls.filter((c) => /^r5:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2]))]
+  assert.deepEqual(r5keys.sort(), ['risky-concurrency', 'risky-error-paths', 'risky-lifecycle', 'risky-ordering-boundary', 'risky-state-desync'])
+  const p = calls.find((c) => (c.opts.label || '') === 'r5:hunt:risky-concurrency:opus').prompt
+  assert.match(p, /Server\/gen\/g0\.go/)
+  assert.match(p, /Server\/gen\/g1\.go/)
+  assert.doesNotMatch(p, /Server\/gen\/g5\.go/, 'the sweep is scoped to risky files only')
+  assert.equal(result.rounds[4].family, 'risky-sweep')
+  assert.equal(result.converged, true)
+  assert.equal(result.rounds.length, 5, 'dry was already past threshold - the run ends right after the risky sweep')
+  assert.ok(!calls.some((c) => /^r6:hunt:risky-/.test(c.opts.label || '')), 'the risky sweep runs exactly once')
+}
+
+// COV5: legacy rows (no `examined` key) leave every new mechanism inert - old stop rule,
+// no coverage stats, no risky sweep.
+scenarios.s_legacy_rows_inert = async () => {
+  const { result, calls } = await run({
+    args: { graph: graphRows(30) },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 2, 'legacy mode still converges on the plain dry threshold')
+  assert.equal(result.converged, true)
+  assert.equal(result.runStats.coverage, null)
+  assert.equal(result.stalledCoverage, false)
+  assert.ok(!calls.some((c) => /risky-/.test(c.opts.label || '')))
+}
+
+// COV6 (amendment 1): a confirm on the sweep's last round resets dry to 0; hotspot rounds then
+// go clean, cooldown + an empty pool empty the family - in coverage mode that emptiness IS
+// quietness and must count dry rounds instead of stranding a fully-covered run at converged:false.
+scenarios.s_exhausted_counts_dry = async () => {
+  const inv = inventoryRows(10)
+  const { result } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 4 && key === 'explore-1'
+          ? { findings: [finding(1, { file: 'Server/gen/g0.go', title: 'late sweep bug one' })] }
+          : none,
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  assert.equal(result.converged, true, 'a fully-covered, fully-quiet run must converge')
+  assert.equal(result.rounds.length, 6)
+  assert.equal(result.rounds[5].family, 'exhausted')
+  assert.equal(result.rounds[5].dryAfter, 2)
+  assert.equal(result.confirmed.length, 1)
+}
+
+// COV9 (Task 6 review finding): a stuck pool must NOT stop a hunt that is still confirming.
+// Dead explore lenses pin uncovered at 20 while hotspot lenses confirm fresh bugs in rounds
+// 4 and 6 - each productive round resets the stall counter, so the run survives to round 8
+// and only then stops with stalledCoverage (without the productivity term it would have
+// stopped at round 5, mid-yield).
+scenarios.s_stall_deferred_while_productive = async () => {
+  const inv = inventoryRows(20)
+  const { result, logs } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug alpha one' })] }
+        if (round === 4 && key === 'hotspot-server-ws')
+          return { findings: [finding(2, { file: 'Server/ws/emit.go', title: 'adjacent bug beta two' })] }
+        if (round === 6 && key === 'hotspot-server-ws')
+          return { findings: [finding(3, { file: 'Server/ws/pubsub.go', title: 'adjacent bug gamma three' })] }
+        if (/^explore-/.test(key)) return null // dead explore finders: the pool never shrinks
+        return none
+      },
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  assert.equal(result.rounds.length, 8, 'productive rounds 4 and 6 must defer the stall to round 8')
+  assert.equal(result.stalledCoverage, true)
+  assert.equal(result.converged, false)
+  assert.equal(result.confirmed.length, 3)
+  assert.equal(result.runStats.coverage.uncoveredAtStop, 20)
+  assert.ok(logs.some((l) => /Coverage stalled/.test(l)))
 }
 
 // ---------- runner ----------
