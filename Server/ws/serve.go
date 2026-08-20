@@ -158,6 +158,13 @@ func (h *Hub) upgradeAndAuth(
 // for the analogous races elsewhere in this package (OC-0206).
 var handleReconnectPreRegisterRaceHook func()
 
+// freshConnectPreRegisterRaceHook, when non-nil, runs once inside
+// handleFreshConnect after refreshUserSnapshot has re-read the user row but
+// before registerNow. Test-only (nil in production); pins the
+// role-reassignment-vs-handshake window (audit-2026-08-19 F-2)
+// deterministically, same pattern as handleReconnectPreRegisterRaceHook.
+var freshConnectPreRegisterRaceHook func()
+
 // handleReconnect attempts to resume a client via replay. Its two return
 // values are independent signals for ServeWS:
 //   - handled reports whether this function owns the outcome of the
@@ -301,6 +308,18 @@ func (h *Hub) reconnectPrecheck(
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, false
 	}
+	// c.user is the auth-time snapshot; a role reassignment landing between
+	// authenticateConn and here would otherwise be resolved from the OLD
+	// RoleID for the rest of this socket's life — revokeUnreadableChannels
+	// cannot reach a mid-handshake socket (it early-returns when the user is
+	// not yet in h.clients), and nothing revalidates handshake-time
+	// subscriptions afterwards (audit-2026-08-19 F-2). Re-read the row so
+	// the permission set below is computed from the CURRENT role.
+	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
+		slog.Warn("ws handleReconnect: user re-read failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return nil, false
+	}
 	// Compute the set of channel IDs the reconnecting user can access so that
 	// channel-scoped replay events are filtered by current permissions (M3).
 	allowedChannelIDs, err := h.computeAllowedChannels(ctx, database, c.user)
@@ -310,6 +329,30 @@ func (h *Hub) reconnectPrecheck(
 		return nil, false
 	}
 	return allowedChannelIDs, true
+}
+
+// refreshUserSnapshot replaces c.user (and, when the role changed, c.roleName)
+// with a fresh read of the user row. Handshake paths call it before
+// registerNow, while c is still invisible to every other goroutine, so the
+// plain field writes are safe. Fail closed: callers must not proceed on the
+// stale snapshot when the re-read fails.
+func (h *Hub) refreshUserSnapshot(ctx context.Context, database *db.DB, c *Client) error {
+	user, err := database.GetUserByID(ctx, c.userID)
+	if err != nil {
+		return fmt.Errorf("refreshUserSnapshot GetUserByID: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("refreshUserSnapshot: user %d vanished", c.userID)
+	}
+	if user.RoleID != c.user.RoleID {
+		roleName := "member"
+		if role, roleErr := database.GetRoleByID(ctx, user.RoleID); roleErr == nil && role != nil {
+			roleName = strings.ToLower(role.Name)
+		}
+		c.roleName = roleName
+	}
+	c.user = user
+	return nil
 }
 
 // reconnectSelectReplay picks the tier that serves this resume — the ring
@@ -712,6 +755,17 @@ func (h *Hub) handleFreshConnect(
 		h.freshConnectCleanStaleVoice(ctx, database, c, vs)
 	}
 
+	// c.user is the auth-time snapshot — re-read it so the ready payload and
+	// any inherited subscriptions resolve from the user's CURRENT role, not
+	// the one they held when the auth frame was evaluated (audit-2026-08-19
+	// F-2; the resume path does the same in reconnectPrecheck). Fail closed
+	// like the role lookup below.
+	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
+		slog.Error("ws: user re-read failed, disconnecting", "user_id", c.userID, "err", err)
+		_ = conn.Close(websocket.StatusInternalError, "user lookup failed")
+		return err
+	}
+
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
@@ -755,7 +809,26 @@ func (h *Hub) handleFreshConnect(
 		c.channelID = 0
 		c.mu.Unlock()
 	}
+	if freshConnectPreRegisterRaceHook != nil {
+		freshConnectPreRegisterRaceHook()
+	}
 	h.registerNow(c, allowedChannelIDs)
+
+	// The re-read above and registerNow are not atomic: a role reassignment
+	// committing in between finds this socket absent from h.clients (so its
+	// revokeUnreadableChannels pass early-returns) yet builds our inherited
+	// subscriptions from the pre-change role. One PK re-read after
+	// registration makes the two orderings meet: a commit visible here is
+	// pruned by our own revoke pass, and a commit that is not yet visible
+	// necessarily runs its own revoke lookup after our registerNow and
+	// finds us.
+	// Scoped to the resume-fallback path — a pure fresh connect (lastSeq==0)
+	// inherits no subscriptions; channel_focus and voice_join re-check live.
+	if c.lastSeq > 0 {
+		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+			h.revokeUnreadableChannels(c.userID)
+		}
+	}
 
 	// Settle the session's status before buildReady reads the member list, so
 	// the ready payload and the presence broadcast below cannot disagree.
