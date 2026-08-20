@@ -282,7 +282,12 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 				"user_id", userID, "channel_id", channelID)
 			return ch, nil
 		}
-		_ = s.st.UpdateReadState(ctx, userID, channelID, latestID)
+		if wErr := s.st.UpdateReadState(ctx, userID, channelID, latestID); wErr != nil {
+			// Self-heals on the next focus, but a persistently failing write
+			// means unread badges never clear — it must not be invisible.
+			slog.Warn("channel_focus: read-state write failed",
+				"user_id", userID, "channel_id", channelID, "err", wErr)
+		}
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)
