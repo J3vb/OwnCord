@@ -495,6 +495,23 @@ describe("normalizeHostForCertCompare", () => {
     const lastConnectHost = "Example.COM:443";
     expect(evtHost === normalizeHostForCertCompare(lastConnectHost)).toBe(true);
   });
+
+  it("unwraps bracketed IPv6 literals to match tofu::cert_store_key's unwrapped event host (OC-0200)", () => {
+    // cert_store_key (src-tauri/src/tofu.rs) strips a trailing ":443", then
+    // unwraps a "[...]" bracket pair, then lowercases — in that order — so a
+    // profile host saved as "[2001:db8::1]" (portless, valid per
+    // hostValidation.ts's isValidHost) must normalize the same way here or
+    // every cert-tofu equality guard (ws.ts reconnect latch, main.ts
+    // accept/reject/first-use handlers) silently takes the "unrelated host"
+    // branch for every bracketed-IPv6 server.
+    expect(normalizeHostForCertCompare("[2001:db8::1]")).toBe("2001:db8::1");
+    // Also covers the ":443" bracketed case.
+    expect(normalizeHostForCertCompare("[2001:DB8::1]:443")).toBe("2001:db8::1");
+    // A non-default port must keep its brackets (only ":443" is stripped).
+    expect(normalizeHostForCertCompare("[2001:db8::1]:8443")).toBe(
+      "[2001:db8::1]:8443".toLowerCase(),
+    );
+  });
 });
 
 describe("cert-tofu non-mismatch statuses", () => {
