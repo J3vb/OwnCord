@@ -826,6 +826,7 @@ func (h *Hub) handleFreshConnect(
 	// inherits no subscriptions; channel_focus and voice_join re-check live.
 	if c.lastSeq > 0 {
 		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
 			h.revokeUnreadableChannels(c.userID)
 		}
 	}
