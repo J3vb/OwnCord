@@ -198,6 +198,64 @@ describe("startAutoIdle", () => {
     expect(loadUserStatusOrigin()).toBe("manual");
   });
 
+  it("stays armed after a firing that changed nothing, so a later external status change is still watched", () => {
+    // Regression for OC-0236: the timer callback used to leave `timer` at
+    // null forever after it fired once. That's invisible while the status
+    // stays untouched between firings, but a surface that writes
+    // saveUserStatus() directly instead of going through onActivity — the OS
+    // tray's Status submenu, which delivers no DOM event into the webview —
+    // can make the status eligible again (dnd -> online) without ever
+    // re-arming the watcher. Without re-arming, the user then stays broadcast
+    // as Online indefinitely.
+    saveUserStatus("dnd");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
+
+    // First firing: ineligible (dnd), apply(true) is a no-op.
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    // The tray writes the status directly — no DOM event, so onActivity/arm()
+    // never runs on this path.
+    saveUserStatus("online", "manual");
+
+    // A further full delay of continued inactivity should now flip to idle,
+    // exactly as it would have if "online" had been the status from the
+    // start. That requires the timer to still be armed.
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+    expect(loadUserStatus()).toBe("idle");
+    expect(loadUserStatusOrigin()).toBe("auto");
+  });
+
+  it("leaves no pending timer when destroy() is called synchronously from onStatusChange", () => {
+    // The re-arm added for OC-0236 runs after apply(true), which invokes
+    // onStatusChange synchronously. If that callback tears the page down and
+    // calls destroy() from inside it, `timer` is already null at that point
+    // (cleared before apply() ran), so destroy()'s own clearTimeout is a
+    // no-op. Without re-checking `destroyed` before the re-arm, destroy()
+    // would appear to work (no wrong status change ever fires, since the
+    // handler's own top-of-body check still catches it) while actually
+    // leaking a dangling timer that outlives the controller.
+    saveUserStatus("online");
+    const target = createTarget();
+    const onStatusChange = vi.fn(() => {
+      controller?.destroy();
+      controller = null;
+    });
+    // Baseline first: the environment (jsdom/vitest) may hold timers of its
+    // own that have nothing to do with this controller, so assert against a
+    // delta rather than an absolute count of 0.
+    const before = vi.getTimerCount();
+    controller = startAutoIdle({ onStatusChange, target });
+    expect(vi.getTimerCount()).toBe(before + 1);
+
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+    expect(vi.getTimerCount()).toBe(before);
+  });
+
   it("stops firing after destroy", () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();
