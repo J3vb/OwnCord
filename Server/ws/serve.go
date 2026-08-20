@@ -277,6 +277,15 @@ func (h *Hub) handleReconnect(
 		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
 	}
 
+	// Settle the session's status BEFORE the auth_ok write below, mirroring
+	// handleFreshConnect's ordering: reconnectWriteReplay reads c.user.Status
+	// to build auth_ok, so if this ran after that write the resumed client
+	// would be told its disconnect-time status (routinely "offline", since
+	// MarkUserDisconnected just rewrote it) instead of the status it is about
+	// to come online as and broadcast (OC-0222). Skips member_join — the user
+	// was already known.
+	applyConnectStatus(ctx, database, c)
+
 	if !h.reconnectWriteReplay(ctx, conn, c, lastSeq, events, replaySource) {
 		// startPumps=false: the teardown inside reconnectWriteReplay already ran
 		// in full. Starting readPump on this closed conn would hit an immediate
@@ -285,8 +294,6 @@ func (h *Hub) handleReconnect(
 		return true, false
 	}
 
-	// Update presence but skip member_join — user was already known.
-	applyConnectStatus(ctx, database, c)
 	h.announceConnectPresence(c)
 
 	return true, true
