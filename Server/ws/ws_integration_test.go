@@ -281,6 +281,89 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 	}
 }
 
+// TestAuthenticateConn_SessionLookupDBError_NotTerminal verifies OC-0196: a
+// transient DB error while looking up the session (GetSessionByTokenHash
+// returning a genuine error rather than sql.ErrNoRows) must NOT be reported
+// as the terminal auth_error frame. The client treats auth_error as
+// non-recoverable — it stops reconnecting and clears the user's stored
+// credentials (see Client/tauri-client/src/lib/ws.ts and dispatcher.ts) — so
+// collapsing "DB unreachable" into "bad token" force-logs-out every client
+// that reconnects during a sub-second SQLite hiccup even though its session
+// row is perfectly valid. A DB error must surface as a non-terminal error
+// frame instead, so the client's normal backoff/reconnect logic retries.
+func TestAuthenticateConn_SessionLookupDBError_NotTerminal(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter, nil)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser(context.Background(), "db-hiccup-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Simulate a transient DB outage AFTER the session/token above were
+	// written successfully: close the database so the next query
+	// (GetSessionByTokenHash, made when the auth frame below is processed)
+	// returns a genuine driver error instead of (nil, nil). The session row
+	// itself remains logically valid — this models momentary SQLite reader
+	// contention (WAL checkpoint, backup, busy_timeout), not a bad token.
+	if err := database.Close(); err != nil {
+		t.Fatalf("database.Close: %v", err)
+	}
+
+	authMsg := map[string]any{
+		"type":    "auth",
+		"payload": map[string]string{"token": token},
+	}
+	raw, _ := json.Marshal(authMsg)
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, respRaw, readErr := conn.Read(ctx)
+	if readErr != nil {
+		t.Fatalf("read: %v", readErr)
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(respRaw, &msg); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if msg["type"] == ws.MsgTypeAuthError {
+		t.Errorf("got terminal %q frame for a transient DB error — the client "+
+			"treats this as non-recoverable and clears stored credentials; a DB "+
+			"hiccup must surface as a retryable error instead", ws.MsgTypeAuthError)
+	}
+	if msg["type"] != ws.MsgTypeError {
+		t.Errorf("response type = %q, want %q (non-terminal error frame)", msg["type"], ws.MsgTypeError)
+	}
+}
+
 // TestServeWS_ValidAuth_FullHandshake verifies the complete happy path:
 // valid token → auth_ok + ready received, client counted in hub.
 func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
