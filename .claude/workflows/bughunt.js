@@ -719,10 +719,13 @@ while ((uncoveredCount() > 0 || riskySweepPending() || dry < DRY_THRESHOLD) && r
   roundStats.push({ round, family: familyName(round), lenses: lenses.length, candidates: candCount, fresh: freshCount, confirmed: newConfirmed, refuted: newRefuted, dryEligible: eligible, dryAfter: dry, severity: sevMix, perLens, filesTouched: filesTouched.size, filesNew: filesNew.size, ...counts, spentBefore, spentAfter: budget.spent() })
   log(`Round ${round} (${familyName(round)}): ${newConfirmed} confirmed, ${newRefuted} refuted, dry=${dry}${eligible ? '' : ' (ineligible)'}`)
 
-  // stalled coverage: an adaptive round that failed to shrink a non-empty uncovered pool.
-  // Only adaptive rounds count - rounds 1-3 never draw explore files by design.
+  // stalled coverage: an adaptive round that failed to shrink a non-empty uncovered pool
+  // AND confirmed nothing. Only adaptive rounds count - rounds 1-3 never draw explore
+  // files by design - and a round that confirmed a bug is never a stall: hotspot yield
+  // does not shrink the pool, and cutting off a still-productive hunt is the one thing
+  // a bug-finding tool must not do.
   const uncAfter = uncoveredCount()
-  if (HAS_INVENTORY && familyName() === 'adaptive' && uncAfter > 0) {
+  if (HAS_INVENTORY && familyName() === 'adaptive' && uncAfter > 0 && newConfirmed === 0) {
     coverageStall = uncAfter < uncBefore ? 0 : coverageStall + 1
     if (coverageStall >= 2) {
       stalledCoverage = true

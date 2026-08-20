@@ -1004,6 +1004,37 @@ scenarios.s_exhausted_counts_dry = async () => {
   assert.equal(result.confirmed.length, 1)
 }
 
+// COV9 (Task 6 review finding): a stuck pool must NOT stop a hunt that is still confirming.
+// Dead explore lenses pin uncovered at 20 while hotspot lenses confirm fresh bugs in rounds
+// 4 and 6 - each productive round resets the stall counter, so the run survives to round 8
+// and only then stops with stalledCoverage (without the productivity term it would have
+// stopped at round 5, mid-yield).
+scenarios.s_stall_deferred_while_productive = async () => {
+  const inv = inventoryRows(20)
+  const { result, logs } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) => {
+        if (round === 1 && key === 'ws-hub')
+          return { findings: [finding(1, { file: 'Server/ws/hub.go', title: 'seed bug alpha one' })] }
+        if (round === 4 && key === 'hotspot-server-ws')
+          return { findings: [finding(2, { file: 'Server/ws/emit.go', title: 'adjacent bug beta two' })] }
+        if (round === 6 && key === 'hotspot-server-ws')
+          return { findings: [finding(3, { file: 'Server/ws/pubsub.go', title: 'adjacent bug gamma three' })] }
+        if (/^explore-/.test(key)) return null // dead explore finders: the pool never shrinks
+        return none
+      },
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  assert.equal(result.rounds.length, 8, 'productive rounds 4 and 6 must defer the stall to round 8')
+  assert.equal(result.stalledCoverage, true)
+  assert.equal(result.converged, false)
+  assert.equal(result.confirmed.length, 3)
+  assert.equal(result.runStats.coverage.uncoveredAtStop, 20)
+  assert.ok(logs.some((l) => /Coverage stalled/.test(l)))
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
