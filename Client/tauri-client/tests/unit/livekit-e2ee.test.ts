@@ -1452,4 +1452,135 @@ describe("E2EEManager", () => {
     mgr.clearState();
     expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith(null);
   });
+
+  // ── Ledger findings OC-0209 / OC-0212 / OC-0213 ───────────────────────────
+
+  it("[OC-0209] rejects a replayed retired-key announce before it overwrites the peer's verification badge", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
+
+    // Make import/export round-trip faithfully on the announced base64
+    // string (the shared mock default returns a fixed constant regardless
+    // of input, which would mask this bug).
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+
+    const KEY_A = "b2xk";
+    const KEY_B = "bmV3";
+
+    try {
+      // Peer announces key A, then a genuine key change to B — A is now retired.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+      await mgr.handleAnnounce(PEER_ID, KEY_B, "sigB");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+
+      vi.mocked(setPeerVerification).mockClear();
+
+      // A malicious relay replays the old, still validly-signed announce for
+      // the retired key A. The replay guard must reject it BEFORE any
+      // verification write — a replay that reaches verifyPeerAnnounce first
+      // would overwrite the peer's badge (status + sessionFingerprint) with
+      // the retired key's, even though the guard then rejects the announce
+      // and _peerPublicKeys is left untouched.
+      await mgr.handleAnnounce(PEER_ID, KEY_A, "sigA");
+
+      expect(setPeerVerification).not.toHaveBeenCalled();
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY_B}` });
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+
+  it("[OC-0212] replays the blocked announce after a successful re-pin, restoring the peer instead of leaving them un-keyed with the badge cleared", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // holder in channel 1
+
+    const NEW_IDENTITY = "new-identity-key-b64";
+    mockMembers.set(PEER_ID, { identityPublicKey: NEW_IDENTITY });
+
+    // The peer reinstalled (new identity key). A still has them pinned to
+    // their OLD identity key, so the announce under the new identity is
+    // blocked as a TOFU mismatch.
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({
+      status: "pinned",
+      pin: "old-identity-key-b64",
+    });
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+    expect(setPeerVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+    );
+    vi.mocked(setPeerVerification).mockClear();
+
+    // The user confirms the fingerprint out of band and re-pins to the
+    // peer's new identity key.
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: NEW_IDENTITY });
+    const result = await mgr.rePinPeerIdentity(PEER_ID, NEW_IDENTITY);
+
+    expect(result).toBe(true);
+    // The blocked announce must be replayed against the new pin — not just
+    // discarded with the badge cleared — so the peer actually re-enters
+    // _peerPublicKeys and is offered the room key for the rest of the call.
+    expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+    expect(setPeerVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "verified" }),
+    );
+  });
+
+  it("[OC-0213] does not permanently retire a peer's key on a stale voice_leave when the peer is still listed as present in the channel roster", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // holder in channel 1
+
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+
+    const KEY = "b2xk";
+
+    try {
+      // The peer's rejoin announce (carrying a fresh key) arrives first —
+      // the OC-0213 repro's reordering, where the directly-published
+      // voice_e2ee_announce overtakes the still-queued voice_leave for the
+      // join instance it superseded.
+      await mgr.handleAnnounce(PEER_ID, KEY, "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+      // voice_state (the local roster) still lists the peer as present in
+      // the channel — this is what tells apart a stale, lagging leave for a
+      // superseded join instance from a genuine departure.
+      mockVoiceState.voiceUsers.set(1, new Map([[PEER_ID, {}]]));
+
+      // The stale voice_leave for the superseded join instance now arrives.
+      await mgr.handleParticipantLeft(PEER_ID);
+
+      // Removed from the live peer map (unchanged behavior)...
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // ...but the key must not be permanently retired: the peer's own,
+      // still-valid re-announce of the SAME key must be accepted again, not
+      // rejected as a replay of a "retired" key — otherwise the peer is
+      // stranded, un-re-announceable, for the rest of the call.
+      await mgr.handleAnnounce(PEER_ID, KEY, "sig");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY}` });
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
 });

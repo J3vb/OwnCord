@@ -94,6 +94,15 @@ export class E2EEManager {
     publicKeyBase64: string;
     signatureBase64?: string;
   }> = [];
+  /** Announce that verifyPeerAnnounce rejected as a TOFU pin mismatch, keyed
+   *  by userId — buffered so a subsequent successful rePinPeerIdentity can
+   *  replay it instead of leaving the recovery a no-op for the live call
+   *  (OC-0212): a mid-call peer never re-announces on its own, so nothing
+   *  else would re-run verification against the freshly-stored pin. At most
+   *  one entry per peer; a later mismatch (or a later legitimate announce)
+   *  simply overwrites the previous one. Cleared in clearState(). */
+  private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
+    new Map();
   /** Periodic key rotation timer — fires every KEY_ROTATION_INTERVAL_MS when key holder. */
   private _keyRotationTimer: ReturnType<typeof setTimeout> | null = null;
   /** Interval between periodic key rotations (5 minutes). */
@@ -535,6 +544,11 @@ export class E2EEManager {
     // Pinned peer whose delivered key is absent or differs from the pin —
     // possible server MITM. Block until the user re-pins.
     if (pin !== null && publishedIdentity !== pin) {
+      // Buffer this announce (OC-0212) so a successful rePinPeerIdentity can
+      // replay it: a mid-call peer never re-announces on its own, so without
+      // this, re-pinning writes a new pin that nothing ever verifies the
+      // peer's key against, leaving them un-keyed for the rest of the call.
+      this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
       this.setPeerVerificationIfCurrent(myGeneration, {
         userId,
         status: "mismatch",
@@ -671,7 +685,23 @@ export class E2EEManager {
       });
       return false;
     }
-    clearPeerVerification(userId);
+    // Replay the announce verifyPeerAnnounce buffered when it blocked this
+    // peer as a mismatch (OC-0212). Without this, the pin write above is a
+    // no-op for the live call: nothing else re-runs the peer's announce, so
+    // they never (re-)enter _peerPublicKeys — staying out of every offer and
+    // rotation for the rest of the call — and clearPeerVerification below
+    // would erase the badge entirely rather than showing the real (now
+    // hopefully "verified") outcome. handleAnnounce re-verifies against the
+    // pin just stored above and writes the real status itself, so it stands
+    // in for clearPeerVerification when a replay is available.
+    const pending = this._blockedAnnounces.get(userId);
+    if (pending) {
+      this._blockedAnnounces.delete(userId);
+      log.info("E2EE: replaying blocked announce after re-pin (TOFU recovery)", { userId });
+      await this.handleAnnounce(userId, pending.publicKeyBase64, pending.signatureBase64);
+    } else {
+      clearPeerVerification(userId);
+    }
     log.info("E2EE: re-pinned peer identity key (TOFU recovery)", { userId });
     return true;
   }
@@ -739,6 +769,20 @@ export class E2EEManager {
     // can be detected before this continuation writes into a session a newer
     // (or no) attempt now owns (finding B3-7).
     const myGeneration = this._sessionGeneration;
+    // Reject a replay of a key we've already retired for this peer BEFORE
+    // verifyPeerAnnounce runs (OC-0209). verifyPeerAnnounce writes the peer's
+    // displayed verification (status + sessionFingerprint, computed from
+    // THIS announce's key) on every branch it can take, including its
+    // success branches — so if the replay guard ran only after verification
+    // (as it used to, further below), a replayed announce would overwrite
+    // the peer's badge with the retired key's fingerprint/status before
+    // being rejected, even though _peerPublicKeys itself was never touched.
+    // This check is synchronous (no await), so it introduces no new window
+    // for a session to be superseded before it runs.
+    if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
+      log.error("E2EE: rejecting replayed peer key announce (previously retired)", { userId });
+      return;
+    }
     try {
       // ── F3 TOFU verification gate ──────────────────────────────────────
       // Resolve the peer's identity key and verify the announce signature
@@ -768,29 +812,14 @@ export class E2EEManager {
           isDuplicate = true;
           log.debug("E2EE: duplicate announce — will re-send offer if key holder", { userId });
         } else {
-          // Reject a replay of a key we've already retired for this peer. The
-          // signed announce message carries no channel/epoch/nonce (F3), so an
-          // old, validly-signed announce replays cleanly — without this check a
-          // malicious relay could re-emit a recorded announce and swap the live
-          // key back to one nobody holds anymore, silently blackholing the peer
-          // (OC-0011). A genuine peer never reuses an ephemeral key across
-          // sessions (freshly generated every join), so this never rejects a
-          // legitimate re-announce.
-          if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
-            log.error("E2EE: rejecting replayed peer key announce (previously retired)", {
-              userId,
-            });
-            return;
-          }
+          // The replay-of-a-retired-key check now runs up front (OC-0209),
+          // before verifyPeerAnnounce — see the comment there (was
+          // previously duplicated in both branches here).
           this.retirePeerKey(userId, existingB64);
           peerKey = await importPublicKey(publicKeyBase64);
           log.warn("E2EE: peer public key changed (reconnect?)", { userId });
         }
       } else {
-        if (this.isRetiredPeerKey(userId, publicKeyBase64)) {
-          log.error("E2EE: rejecting replayed peer key announce (previously retired)", { userId });
-          return;
-        }
         peerKey = await importPublicKey(publicKeyBase64);
       }
       // Re-check after the export/import awaits above: a clearState()+rejoin
@@ -1200,6 +1229,11 @@ export class E2EEManager {
     this._peerPublicKeys.delete(userId);
     this._peerOfferEpochs.delete(userId);
     clearPeerVerification(userId);
+
+    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
+    const state = voiceStore.getState();
+    const channelUsers = channelId ? state.voiceUsers.get(channelId) : undefined;
+
     // Retire the departing peer's key (OC-0020): _retiredPeerKeys is the only
     // defense against replay of a validly-signed announce (the signed
     // message carries no channel/epoch/nonce, F3) and handleAnnounceInner
@@ -1210,15 +1244,26 @@ export class E2EEManager {
     // whose private half no longer exists (blackholing them). A genuine
     // rejoin always mints a fresh ECDH pair (setupKeyExchange,
     // reannounceForReconnect), so this never rejects a legitimate re-announce.
-    if (departingKey) {
+    //
+    // BUT: voice_leave travels through the buffered hub broadcast queue while
+    // voice_e2ee_announce is published straight into the recipient's send
+    // queue from the sender's read-pump (Server/ws/hub_broadcast.go documents
+    // this as a reordering hazard) — a peer's rejoin announce can overtake
+    // the stale voice_leave for the join instance it superseded (OC-0213).
+    // If the local roster (voice_state, kept current by the server) still
+    // lists this peer as present in the channel, this IS that stale case:
+    // retiring their (in that case, still-live) key would have every later,
+    // genuine re-announce of it rejected as a replay, permanently stranding
+    // a peer who never actually left. Skip retirement in that case — the key
+    // is still removed from _peerPublicKeys above (and, below, this event
+    // still correctly excludes them from any resulting rotation) so nothing
+    // regresses for a genuine departure.
+    if (departingKey && !channelUsers?.has(userId)) {
       this.retirePeerKey(userId, await exportPublicKey(departingKey));
     }
 
-    const channelId = this._channelId ?? this.deps.getCurrentChannelId();
     if (!channelId) return;
 
-    const state = voiceStore.getState();
-    const channelUsers = state.voiceUsers.get(channelId);
     const myUserId = authStore.getState().user?.id ?? 0;
 
     // Elect key holder: lowest user_id among remaining participants. The
@@ -1423,6 +1468,7 @@ export class E2EEManager {
     this._rotationPending = false;
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
+    this._blockedAnnounces.clear();
     // The server's offer rate limit is scoped per (sender, channel) — a
     // fresh channel gets a fresh bucket server-side, so stale timestamps
     // from the old channel must not throttle the new one.
