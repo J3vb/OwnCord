@@ -567,17 +567,18 @@ export function wireDispatcher(
       const isOwnMessage = currentUserId !== null && payload.user.id === currentUserId;
 
       // Increment channel-level unread for non-active, non-own-message channels.
-      // Skip during reconnection replay to avoid inflating counts — the
-      // server's ready payload already contains accurate unread_count values.
-      // DM channel IDs are not in channelsStore (they use dmStore), so
-      // incrementUnread is a no-op for DMs, but the own-message guard is
+      // Replayed frames increment unread counts like live ones — the burst
+      // is exactly the messages missed while away (a full-ready resume sends
+      // no burst at all; ready's unread_count values are authoritative
+      // there). DM channel IDs are not in channelsStore (they use dmStore),
+      // so incrementUnread is a no-op for DMs, but the own-message guard is
       // applied here for defence-in-depth.
       const isMention = highlightsCurrentUser(payload.content, {
         mentions: payload.mentions,
         mentionsEveryone: payload.mentions_everyone,
       });
 
-      if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
+      if (payload.channel_id !== activeId && !isOwnMessage) {
         incrementUnread(payload.channel_id);
         // A mention is an unread too — the mention badge just outranks it.
         if (isMention) {
@@ -586,10 +587,10 @@ export function wireDispatcher(
       }
 
       // Update DM store last message if this message belongs to a DM channel.
-      // Skip unread increment for own messages, currently focused DM, and replay.
+      // Skip unread increment for own messages and the currently focused DM.
       if (isDm) {
         const isDmActive = payload.channel_id === activeId;
-        if (isOwnMessage || isDmActive || ws.isReplaying()) {
+        if (isOwnMessage || isDmActive) {
           // Update last message preview but don't increment unread count.
           updateDmLastMessagePreview(
             payload.channel_id,
@@ -609,13 +610,13 @@ export function wireDispatcher(
       }
 
       // Fire desktop notification, taskbar flash, and sound — but not for a
-      // reconnect's replayed burst. ws.isReplaying() cannot gate this the way
-      // it gates the unread counter above: ws.ts clears it as soon as auth_ok
-      // is processed, before the replay burst itself even arrives. A replay
-      // frame's timestamp instead predates the reconnect handshake that
-      // preceded it, unlike a genuinely new live message — compared in
-      // server-clock terms (see serverClockSkewMs above) so a lagging or
-      // skewed server clock cannot make a live message look like a replay.
+      // reconnect's replayed burst. No connection-state flag can gate this:
+      // the server writes auth_ok before the burst, so by the time replayed
+      // frames arrive the client is already "connected". A replay frame's
+      // timestamp instead predates the reconnect handshake that preceded it,
+      // unlike a genuinely new live message — compared in server-clock terms
+      // (see serverClockSkewMs above) so a lagging or skewed server clock
+      // cannot make a live message look like a replay.
       // The wall-clock window additionally bounds a cold (never-sampled)
       // skew's damage — see REPLAY_GATE_WINDOW_MS.
       const isReplayFrame =

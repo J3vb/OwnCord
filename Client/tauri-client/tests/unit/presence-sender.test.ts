@@ -24,7 +24,6 @@ function createMockWs(): WsClient {
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => "connected"),
-    isReplaying: vi.fn(() => false),
     _getWs: vi.fn(() => null),
   } as unknown as WsClient;
 }

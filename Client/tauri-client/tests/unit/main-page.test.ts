@@ -228,7 +228,6 @@ function fakeWs(): FakeWsClient {
     startCertListener: vi.fn(async () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "connected" as ConnectionState),
-    isReplaying: vi.fn(() => false),
     _getWs: vi.fn(() => null),
   };
 }

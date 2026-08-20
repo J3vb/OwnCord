@@ -159,11 +159,6 @@ export function createWsClient() {
   let proxyOpen = false;
   let lastSeq = 0;
 
-  // Deduplication cache for reconnection replay.
-  // Active when reconnecting (reconnectAttempt > 0) until auth_ok.
-  let replayDedup: Set<string> | null = null;
-  const MAX_DEDUP_SIZE = 1000;
-
   // Tauri event unsubscribe functions
   const eventUnsubs: Array<() => void> = [];
 
@@ -302,28 +297,6 @@ export function createWsClient() {
 
     log.debug("WS ←", { type: msg.type, id: msg.id });
 
-    // Deduplication during reconnection replay
-    if (
-      replayDedup !== null &&
-      msg.type !== "auth_ok" &&
-      msg.type !== "auth_error" &&
-      msg.type !== "ready"
-    ) {
-      const dedupKey = msg.id ?? `${msg.type}:${seq}`;
-      if (replayDedup.has(dedupKey)) {
-        log.debug("Dedup: skipping duplicate message", { type: msg.type, key: dedupKey });
-        return;
-      }
-      replayDedup.add(dedupKey);
-      if (replayDedup.size > MAX_DEDUP_SIZE) {
-        const targetSize = Math.floor(MAX_DEDUP_SIZE * 0.8);
-        for (const key of replayDedup) {
-          if (replayDedup.size <= targetSize) break;
-          replayDedup.delete(key);
-        }
-      }
-    }
-
     // auth_error — non-recoverable
     if (msg.type === "auth_error") {
       log.error("Authentication failed", { message: msg.payload.message });
@@ -354,8 +327,6 @@ export function createWsClient() {
       if (msg.payload.replay_source === "none") {
         lastSeq = 0;
       }
-      // Clear dedup cache — replay is complete
-      replayDedup = null;
       setState("connected");
       reconnectAttempt = 0;
       startHeartbeat();
@@ -459,10 +430,6 @@ export function createWsClient() {
           isReconnect: reconnectAttempt > 0,
           lastSeq,
         });
-        // Enable dedup during reconnection replay
-        if (reconnectAttempt > 0 && lastSeq > 0) {
-          replayDedup = new Set();
-        }
         setState("authenticating");
         if (config === null) return;
         // active_channel_id only matters on a resume (last_seq > 0); on a
@@ -781,11 +748,6 @@ export function createWsClient() {
 
     getState(): ConnectionState {
       return state;
-    },
-
-    /** True while processing reconnection replay messages (dedup active). */
-    isReplaying(): boolean {
-      return replayDedup !== null;
     },
 
     /** @internal for testing */
