@@ -176,7 +176,16 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 			// here and a literal comparison would ping them with @here — the one
 			// thing "appear offline" is meant to stop. Collapsing first makes
 			// @here agree with what everyone else can see of that reader.
-			if set.HereOnly && db.BroadcastStatus(r.Status) == db.StatusOffline {
+			//
+			// That column check alone is not enough: users.status keeps a
+			// *chosen* idle/dnd across a disconnect by design
+			// (MarkUserDisconnected only ever rewrites "online" -> "offline"),
+			// so a signed-out reader whose last status was idle/dnd would still
+			// read as non-offline here. s.online (nil-safe) applies the read
+			// path's "no live connection is offline, whatever the row says"
+			// rule (ws/serve_ready.go presentableMembers) to close that gap.
+			if set.HereOnly && (db.BroadcastStatus(r.Status) == db.StatusOffline ||
+				(s.online != nil && !s.online(r.UserID))) {
 				continue
 			}
 			recipients[r.UserID] = struct{}{}
