@@ -254,6 +254,31 @@ describe("permissionsForRole", () => {
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: MODERATOR_PERMS }]);
     expect(currentUserPermissions()).toBe(MODERATOR_PERMS);
   });
+
+  it("currentUserPermissions denies without throwing when nobody is signed in or the role field is a malformed null", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: MODERATOR_PERMS }]);
+
+    // No signed-in user at all: authStore.getState().user?.role is undefined.
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+    expect(currentUserPermissions()).toBe(0);
+
+    // Server payload with a malformed null role (bypasses the `string` type at
+    // runtime, same as untrusted JSON would): must still deny, not throw.
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "A", avatar: null, role: null as unknown as string },
+      serverName: "T",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    expect(currentUserPermissions()).toBe(0);
+  });
 });
 
 describe("roleHasPermission", () => {
@@ -375,5 +400,29 @@ describe("canManageChannels / canViewAuditLog", () => {
     signInAs("Curator");
     expect(canViewAuditLog()).toBe(false);
     expect(canManageChannels()).toBe(true);
+  });
+
+  it("falls back to the exact empty string (not merely 'no match') when nobody is signed in", () => {
+    // Pins the literal `?? ""` fallback: a role list that happens to include
+    // an entry literally named "" must be reachable through the
+    // no-signed-in-user path, proving the fallback really is "" and not some
+    // other placeholder value.
+    setRoles([
+      {
+        id: 20,
+        name: "",
+        color: null,
+        permissions: Permission.MANAGE_CHANNELS | Permission.VIEW_AUDIT_LOG,
+      },
+    ]);
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+    expect(canManageChannels()).toBe(true);
+    expect(canViewAuditLog()).toBe(true);
   });
 });
