@@ -553,6 +553,16 @@ describe("normalizeHostForCertCompare", () => {
     // same as the plain "host:8443" case never collapsing to "host".
     expect(normalizeHostForCertCompare("[2001:db8::1]:8443")).toBe("[2001:db8::1]:8443");
   });
+
+  it("strips :443 only as a trailing port, never mid-string", () => {
+    // cert_store_key strips the DEFAULT port and nothing else. An unanchored
+    // strip would eat the ":443" inside any other port that starts with it
+    // (":4430", ":4433"), leaving main.ts's `evt.host === normalize(host)`
+    // guard comparing against a host string the proxies never emit — so a
+    // rejected certificate's teardown would silently never fire.
+    expect(normalizeHostForCertCompare("example.com:443")).toBe("example.com");
+    expect(normalizeHostForCertCompare("example.com:4430")).toBe("example.com:4430");
+  });
 });
 
 describe("cert-tofu non-mismatch statuses", () => {
