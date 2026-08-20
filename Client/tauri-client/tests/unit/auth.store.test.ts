@@ -19,6 +19,7 @@ import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
 import { acknowledgeNsfw, isNsfwAcknowledged } from "../../src/lib/nsfw-gate";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
+import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
@@ -472,6 +473,26 @@ describe("auth store", () => {
       setChannels([]); // the next server's `ready` — no DMs of its own yet
 
       expect(channelsStore.getState().channels.has(999)).toBe(false);
+    });
+  });
+
+  // Regression: clearAuth() must also reset uiStore's sidebarMode and
+  // activeDmUserId, or a "dms" sidebar mode (and the previous server's DM
+  // peer id) survive a logout as module-global state and leak into the next
+  // signed-into server — SidebarArea.ts reads uiStore.getState().sidebarMode
+  // on initial mount, so the next server mounts the DM sidebar instead of its
+  // channel list even though nothing restated sidebarMode for the new session.
+  describe("clearAuth ui cleanup", () => {
+    it("resets sidebarMode to 'channels' and clears activeDmUserId on logout", () => {
+      setSidebarMode("dms");
+      setActiveDmUser(7);
+      expect(uiStore.getState().sidebarMode).toBe("dms");
+      expect(uiStore.getState().activeDmUserId).toBe(7);
+
+      clearAuth();
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      expect(uiStore.getState().activeDmUserId).toBeNull();
     });
   });
 });
