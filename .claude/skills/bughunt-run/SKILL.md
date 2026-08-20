@@ -16,7 +16,7 @@ reach a commit, an issue, or a PR body.
 ## 1. Hunt
 
 **Launch the hunt from a turn that carries a token-budget directive** (recommended:
-`+25M`, comfortably above a full 8-round run). The workflow's cost ceiling is gated
+`+25M`, comfortably above a full coverage run's ~8-12M). The workflow's cost ceiling is gated
 on `budget.total`, which is null without a directive — a directive-less run has **no
 ceiling at all**. The workflow's first log line echoes the state: `budget=25M` means
 armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
@@ -72,6 +72,14 @@ with the ledger as `known`; live explored-clean records pre-cover what was
 finished, so the sweep naturally continues where it stopped).
 
 Omit `lenses` for a general hunt across the rotating families.
+
+**Scoping a hunt while coverage mode is armed is a budget trap:** `lenses` only
+replaces round 1, and inventory rows with `examined` force the coverage stop
+rule — from round 2 the run sweeps the ENTIRE uncovered pool and the risky
+sweep before it may converge, at general-hunt cost. For a true scoped hunt,
+pass a subsystem-filtered inventory as `graph` (only the rows you want swept),
+or rows without the `examined` field to fall back to the legacy quietness-only
+stop.
 
 Each lens object is `{key, prompt}`. `key` must match `^[a-z0-9-]+$` —
 lowercase letters, digits, and hyphens only. Keys get interpolated into agent
