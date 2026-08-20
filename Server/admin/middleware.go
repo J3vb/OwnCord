@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/owncord/server/auth"
@@ -53,9 +54,18 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
 				case errors.Is(err, auth.ErrRoleNotFound):
 					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
-				default:
-					// ErrTokenNotFound or a wrapped DB error.
+				case errors.Is(err, auth.ErrTokenNotFound):
 					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+				default:
+					// A wrapped DB error, not one of the sentinels above (mirrors
+					// api.AuthMiddleware). A DB outage is not a bad token:
+					// answering 401 here would make the client treat a live,
+					// valid session as expired — the desktop client's doFetch
+					// 401 sink clears auth and deletes the stored credential for
+					// a session that was never revoked. Log it and report the
+					// failure as a server-side fault instead.
+					slog.ErrorContext(r.Context(), "admin: token resolution failed", "error", err)
+					writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable")
 				}
 				return
 			}
