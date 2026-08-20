@@ -937,10 +937,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         for (const [chId, users] of state.voiceUsers) {
           structSig += `|${chId}`;
           for (const [uid, u] of users) {
-            // Include the E2EE verification status so a verified↔unverified↔mismatch
-            // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
+            // Include the E2EE verification status, safety number, and session
+            // fingerprint so a verified↔unverified↔mismatch flip *and* a
+            // same-status fingerprint/safety-number change (e.g. a reconnect that
+            // re-announces a fresh ephemeral key, OC-0208) both re-render the
+            // badge (it lives outside voiceUsers, in peerVerifications).
             const verif = state.peerVerifications?.get(uid);
-            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}` : ""}`;
+            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}/${verif.safetyNumber ?? ""}/${verif.sessionFingerprint ?? ""}` : ""}`;
           }
         }
         return structSig;

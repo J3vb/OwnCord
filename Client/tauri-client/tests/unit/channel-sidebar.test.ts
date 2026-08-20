@@ -2001,6 +2001,23 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(title).toContain("not an identity");
   });
 
+  it("refreshes the badge tooltip when a peer's session fingerprint changes at an unchanged status (OC-0208)", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "unverified", null, "5E55 1234 5678 9ABC");
+    sidebar.mount(container);
+
+    expect(badgeFor(10)!.getAttribute("title") ?? "").toContain("5E55 1234 5678 9ABC");
+
+    // Peer reconnects: LiveKit E2EE re-announces a fresh ephemeral keypair,
+    // producing a new session fingerprint while `status` stays "unverified".
+    setPeerVerif(10, "unverified", null, "9C71 8888 4444 2222");
+    voiceStore.flush();
+
+    const title = badgeFor(10)!.getAttribute("title") ?? "";
+    expect(title).toContain("9C71 8888 4444 2222");
+    expect(title).not.toContain("5E55 1234 5678 9ABC");
+  });
+
   it("shows the local user's own session fingerprint on their voice row", () => {
     authStore.setState((prev) => ({
       ...prev,
