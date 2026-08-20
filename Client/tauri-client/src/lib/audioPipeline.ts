@@ -424,6 +424,13 @@ export class AudioPipeline {
     }
     // Stop AudioWorklet
     if (this.vadWorkletNode !== null) {
+      // Detach the handler first — the worklet's `process()` loop only
+      // observes `stop` on its next audio-thread callback, so it can still
+      // post one more {type:"gate"} message after this postMessage but
+      // before it does. Leaving onmessage live would let that late message
+      // re-gate the mic with no VAD left running to ever un-gate it again
+      // (OC-0231).
+      this.vadWorkletNode.port.onmessage = null;
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       this.vadWorkletNode.port.postMessage({ type: "stop" });
       this.vadWorkletNode.disconnect();
