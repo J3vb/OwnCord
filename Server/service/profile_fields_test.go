@@ -336,6 +336,44 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	}
 }
 
+// OC-0195: same defect as OC-0192 (TestUpdateProfile_OversizedDisplayNameAndAboutRejectedBeforeSanitizing)
+// but reached over presence_update instead of PATCH /users/me. HandlePresenceUpdate
+// applied MaxCustomStatusLen to cleanText's *output*, so an adversarial
+// nested-entity payload paid the full quadratic sanitizeToFixpoint cost before
+// ever being measured. The WS read limit (config.MaxMessageBytes, 1 MiB) admits
+// a payload here far larger than PATCH /users/me's body ever could, and this
+// runs on the connection's own readPump goroutine.
+func TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	ctx := context.Background()
+
+	// Adversarial nested-entity payload (16 KB) — see sanitizeToFixpoint's
+	// doc comment (message.go) for why this shape is quadratic to sanitize.
+	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("oversized custom_status err = %v, want ErrBadRequest", err)
+	}
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends well over 150ms in
+	// sanitizeToFixpoint on this payload before the rune-count check ever
+	// runs. 150ms gives generous margin over noise while staying far below
+	// the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("oversized custom_status took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
+	}
+	// The rejected call must not have committed the status either.
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.Status == db.StatusOnline {
+		t.Error("a rejected presence_update must not commit the status")
+	}
+}
+
 func TestHandlePresenceUpdate_RejectsUnknownStatusAndOverlongText(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})

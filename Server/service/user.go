@@ -114,6 +114,33 @@ func cleanText(v string) string {
 	return strings.TrimSpace(sanitizeToFixpoint(v))
 }
 
+// cleanTextBounded is cleanText plus the raw-byte guard OC-0192 established
+// for UpdateProfile's DisplayName/About fields, generalized for every other
+// free-text field that runs through cleanText: SetCustomStatus,
+// HandlePresenceUpdate's custom_status, and group DM names (OC-0195).
+//
+// cleanText's sanitizeToFixpoint pass is quadratic in input length, so a
+// bound applied only to its *output* (a plain rune-count check on the
+// cleaned string) still lets an adversarial nested-entity payload pay the
+// full sanitize cost first — it can even sanitize down to something well
+// under maxRunes and be silently accepted, having spent seconds of CPU to
+// get there. The byte-length pre-check runs before cleanText ever does, on
+// the untouched input, so the cost of rejecting an oversized value is
+// O(len(v)) instead of the sanitizer's cost. *4 is deliberately looser than
+// maxRunes — it exists only to keep the sanitizer from ever seeing a
+// pathological payload, not to duplicate the real (rune-count) bound, which
+// still runs afterward on the cleaned, trimmed value.
+func cleanTextBounded(v string, maxRunes int, fieldName string) (string, error) {
+	if len(v) > maxRunes*4 {
+		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
+	}
+	cleaned := cleanText(v)
+	if utf8.RuneCountInString(cleaned) > maxRunes {
+		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
+	}
+	return cleaned, nil
+}
+
 // resolveOptional picks the column value for one nullable text field: the
 // sanitized patch when it was supplied, the existing row otherwise.
 func resolveOptional(patch *string, existing *string) *string {
@@ -216,9 +243,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 // value persists across reconnects and is cleared explicitly on logout, which
 // is why it is stored rather than held on the connection.
 func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
-	cleaned := cleanText(text)
-	if utf8.RuneCountInString(cleaned) > MaxCustomStatusLen {
-		return fmt.Errorf("%w: custom_status must be at most %d characters", ErrBadRequest, MaxCustomStatusLen)
+	cleaned, err := cleanTextBounded(text, MaxCustomStatusLen, "custom_status")
+	if err != nil {
+		return err
 	}
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nullable(cleaned)); err != nil {
 		return fmt.Errorf("%w: failed to update custom status: %v", ErrInternal, err)

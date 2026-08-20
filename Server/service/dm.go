@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-	"unicode/utf8"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -231,9 +230,11 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, fmt.Errorf("%w: a group DM holds at most %d users", ErrBadRequest, db.MaxGroupDMParticipants)
 	}
 
-	cleanName := cleanText(name)
-	if utf8.RuneCountInString(cleanName) > MaxGroupDMNameLen {
-		return nil, fmt.Errorf("%w: name must be at most %d characters", ErrBadRequest, MaxGroupDMNameLen)
+	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
+	// runs — see cleanTextBounded's doc comment (user.go).
+	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	if err != nil {
+		return nil, err
 	}
 
 	for _, rid := range unique {
@@ -320,9 +321,11 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
 	}
 
-	cleanName := cleanText(name)
-	if utf8.RuneCountInString(cleanName) > MaxGroupDMNameLen {
-		return nil, fmt.Errorf("%w: name must be at most %d characters", ErrBadRequest, MaxGroupDMNameLen)
+	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
+	// runs — see cleanTextBounded's doc comment (user.go).
+	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.st.SetDMChannelName(ctx, channelID, cleanName); err != nil {
