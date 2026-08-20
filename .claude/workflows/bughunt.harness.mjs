@@ -73,6 +73,11 @@ export const finding = (n, over = {}) => ({
 })
 export const graphRows = (n) =>
   Array.from({ length: n }, (_, i) => ({ file: `Server/gen/g${i}.go`, score: 1 - i / (n + 1), degree: 10, cited: 5 }))
+export const inventoryRows = (n, over = () => ({})) =>
+  Array.from({ length: n }, (_, i) => ({
+    file: `Server/gen/g${i}.go`, degree: 10, cited: 5, score: 1 - i / (n + 1),
+    examined: false, risky: false, ...over(i),
+  }))
 export const confirmAll = (cands) => ({
   verdicts: cands.map((c) => ({
     title: c.title, file: c.file, line: c.line,
@@ -843,6 +848,60 @@ scenarios.s_explore_rewind_on_thrown_stage = async () => {
     assert.ok(!result.exploredFiles.includes(`Server/gen/g${i}.go`), `g${i} was never read - must not be reported explored`)
   assert.ok(result.exploredFiles.includes('Server/gen/g10.go'), 'files a LIVE lens drew stay reported')
   assert.equal(result.rounds[3].dryEligible, false, 'a nulled lens result still makes the round ineligible')
+}
+
+// COV1 (spec §3): coverage mode may NOT stop on quietness while inventory files are uncovered.
+// 60 rows, 10 pre-examined -> 50 to sweep. Nothing is ever found, so dry passes the threshold
+// at round 2 - the old stop rule would have converged there. The new rule keeps going until
+// round 4's explore lenses (quota 4 + backfill 2 slots; 5 draw files, the 6th comes up empty)
+// cover all 50, then exits. Also locks the enriched explore prompt (class checklist).
+scenarios.s_coverage_blocks_stop = async () => {
+  const inv = inventoryRows(60, (i) => (i >= 50 ? { examined: true } : {}))
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  assert.equal(result.rounds.length, 4, 'must run past the dry threshold (hit at r2) to sweep in r4')
+  assert.equal(result.converged, true)
+  assert.deepEqual(result.rounds.map((r) => r.dryAfter), [1, 2, 3, 4])
+  assert.deepEqual(result.runStats.coverage, { inventory: 60, preCovered: 10, covered: 60, uncoveredAtStop: 0 })
+  assert.match(result.report, /CONVERGED/)
+  const ep = (calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus') || {}).prompt || ''
+  assert.match(ep, /error-path data loss/, 'explore lenses carry the distilled class checklist')
+}
+
+// COV2 (spec §2+§4): a dead explore finder's files stay uncovered and get re-offered; the
+// run only converges after a LIVE lens covers them.
+scenarios.s_coverage_dead_finder = async () => {
+  const inv = inventoryRows(20)
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) => (round === 4 && key === 'explore-1' ? null : none),
+      verify: (r, k, c) => confirmAll(c),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/, 'r4 explore-1 drew the head of the pool')
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'dead lens files are re-offered next round')
+  assert.equal(result.rounds[3].dryEligible, false, 'dead finder keeps the round ineligible')
+  assert.equal(result.converged, true)
+  assert.deepEqual(result.runStats.coverage, { inventory: 20, preCovered: 0, covered: 20, uncoveredAtStop: 0 })
+}
+
+// COV7 (amendment 4): explore draws are directory-coherent - one lens reads one module,
+// not ten strangers. Cross-file classes (state desync, acquire/release pairs) need siblings
+// in one agent's context.
+scenarios.s_directory_coherent_draws = async () => {
+  const inv = inventoryRows(20, (i) => ({ file: i % 2 === 0 ? `Server/alpha/a${i}.go` : `Server/beta/b${i}.go` }))
+  const { calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({ hunt: () => none, verify: (r, k, c) => confirmAll(c) }),
+  })
+  const p1 = (calls.find((c) => (c.opts.label || '') === 'r4:hunt:explore-1:opus') || {}).prompt || ''
+  assert.match(p1, /Server\/alpha\/a0\.go/)
+  assert.match(p1, /Server\/alpha\/a18\.go/, 'all ten alpha files ride in the first lens')
+  assert.doesNotMatch(p1, /Server\/beta\//, 'no stranger directories in a coherent draw')
 }
 
 // ---------- runner ----------

@@ -15,7 +15,7 @@ const ARGS = (() => {
   }
   return args || {}
 })()
-const MAX_ROUNDS = ARGS.maxRounds || 8
+const MAX_ROUNDS = ARGS.maxRounds || 30
 const DRY_THRESHOLD = ARGS.dryThreshold || 2
 // A scoped hunt (args.lenses) replaces the round-1 family outright; later rounds still go
 // adaptive, so hotspot and explore coverage - and therefore convergence - still work.
@@ -303,6 +303,17 @@ function clusterOf(file) {
 // args.graph: session-computed coupling ranking (rank-explore.mjs). The workflow only reads
 // .file - scoring already happened outside, where the filesystem is.
 const GRAPH_ROWS = (Array.isArray(ARGS.graph) ? ARGS.graph : []).filter((r) => r && typeof r.file === 'string')
+// ---------- coverage mode (spec 2026-08-20) ----------
+// Arms only when rows carry the `examined` flag (full inventory from rank-explore.mjs).
+// Legacy rows and the churn fallback leave all of this inert: covered stays empty,
+// uncoveredCount() is 0, and the loop condition reduces to the old dry-threshold rule.
+const HAS_INVENTORY = GRAPH_ROWS.some((r) => 'examined' in r)
+const INVENTORY = HAS_INVENTORY ? GRAPH_ROWS.map((r) => r.file) : []
+const covered = new Set(HAS_INVENTORY ? GRAPH_ROWS.filter((r) => r.examined).map((r) => r.file) : [])
+const PRE_COVERED = covered.size
+const RISKY_FILES = HAS_INVENTORY ? GRAPH_ROWS.filter((r) => r.risky).map((r) => r.file) : []
+const uncoveredCount = () => (HAS_INVENTORY ? INVENTORY.reduce((n, f) => n + (covered.has(f) ? 0 : 1), 0) : 0)
+if (HAS_INVENTORY) log(`coverage: inventory=${INVENTORY.length} preCovered=${PRE_COVERED} risky=${RISKY_FILES.length}`)
 const EXPLORE_FILES_PER_LENS = 10
 const exploreConsumed = new Set() // within-run consumption: never re-offer a file to a later round
 let exploreFallbackLogged = false
@@ -316,9 +327,18 @@ function drawExploreFiles() {
     }
     pool = churnFiles
   }
-  const files = pool
-    .filter((f) => !exploreConsumed.has(f) && !seen.some((s) => s.file === f))
-    .slice(0, EXPLORE_FILES_PER_LENS)
+  const avail = pool.filter((f) => !exploreConsumed.has(f) && !covered.has(f) && !seen.some((s) => s.file === f))
+  const files = []
+  while (files.length < EXPLORE_FILES_PER_LENS && avail.length) {
+    const head = avail.shift()
+    files.push(head)
+    const dir = head.split('/').slice(0, -1).join('/')
+    // pull same-directory siblings forward: one lens reading one module beats ten strangers
+    for (let i = 0; i < avail.length && files.length < EXPLORE_FILES_PER_LENS; ) {
+      if (avail[i].split('/').slice(0, -1).join('/') === dir) files.push(avail.splice(i, 1)[0])
+      else i++
+    }
+  }
   for (const f of files) exploreConsumed.add(f)
   return files
 }
@@ -333,7 +353,12 @@ function exploreLens(i) {
       `single finding in them - either they are clean or every lens so far walked past them.`
   return {
     key: `explore-${i}`,
-    prompt: `${src} Read each one IN FULL with fresh eyes and hunt for real bugs of any class:\n` +
+    prompt: `${src} Read each one IN FULL with fresh eyes. Hunt every class: concurrency and ` +
+      `interleaving (races, TOCTOU, lock ordering, stale-closure writes after await); lifecycle and ` +
+      `teardown (unreleased acquires, use-after-close, missing disposal on error paths); state desync ` +
+      `(two sources of truth updated by different code paths); error-path data loss (swallowed errors, ` +
+      `partial writes, silent fallbacks); ordering and boundaries (off-by-one, pagination truncation, ` +
+      `sequence gaps, inclusive/exclusive disagreements).\n` +
       files.map((f) => `  - ${f}`).join('\n'),
     files,
   }
@@ -348,8 +373,10 @@ function buildAdaptiveLenses(round) {
     byCluster[cl].push(c)
   }
   // Explore-heavy schedule: measured hotspot yield flattened to 0.25 high+med/agent by round 6.
+  const sweeping = uncoveredCount() > 0
   const hotspotQuota = round <= 5 ? 2 : 1
-  const exploreQuota = round <= 5 ? 2 : 3
+  // sweep pace: 4 explore lenses x 10 files while inventory files remain uncovered
+  const exploreQuota = sweeping ? 4 : round <= 5 ? 2 : 3
   const hotKey = (cl) => ('hotspot ' + cl).toLowerCase().replace(/[^a-z0-9]+/g, '-')
   const picked = Object.entries(byCluster)
     .sort((a, b) => b[1].length - a[1].length)
@@ -370,7 +397,7 @@ function buildAdaptiveLenses(round) {
   if (shortfall > 0) log(`adaptive: hotspot pool short by ${shortfall} - trying explore backfill`)
   const explores = []
   for (let i = 1; i <= exploreQuota + shortfall; i++) {
-    if ((cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
+    if (!sweeping && (cleanStreak[`explore-${i}`] || 0) >= 2) continue // demoted slot: no substitution, that IS demotion
     const lens = exploreLens(i)
     if (!lens) {
       log(`adaptive: explore pool exhausted after ${explores.length} lens(es)`)
@@ -524,7 +551,7 @@ function verifyPrompt(lensKey, candidates) {
   )
 }
 
-while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
+while ((uncoveredCount() > 0 || dry < DRY_THRESHOLD) && round < MAX_ROUNDS) {
   if (BUDGET_TOTAL && remainingBudget() < ROUND_BUDGET_FLOOR) {
     stoppedOnBudget = true
     log(`Budget floor reached (${Math.round(remainingBudget() / 1000)}k left) - stopping before round ${round + 1}`)
@@ -535,7 +562,8 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   round++
   const spentBefore = budget.spent()
   const counts = { suppressedLedger: 0, suppressedRun: 0, finderNull: 0, finderEmpty: 0, verifierNull: 0 }
-  const lenses = family.filter((l) => (cleanStreak[l.key] || 0) < 2)
+  const sweepingNow = uncoveredCount() > 0
+  const lenses = family.filter((l) => (sweepingNow && /^explore-/.test(l.key)) || (cleanStreak[l.key] || 0) < 2)
   if (!lenses.length) {
     dry++
     roundStats.push({ round, family: familyName(round), lenses: 0, candidates: 0, fresh: 0, confirmed: 0, refuted: 0, dryEligible: true, dryAfter: dry, severity: { critical: 0, high: 0, medium: 0, low: 0 }, perLens: {}, filesTouched: 0, filesNew: 0, ...counts, spentBefore, spentAfter: budget.spent() })
@@ -618,6 +646,8 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       // files and the session does not record never-examined files as explored-clean
       for (const f of r.lens.files) exploreConsumed.delete(f)
     }
+    // coverage credit (spec: only explicit-file lenses that ran to completion)
+    if (r.lens.files && !r.finderFailed && !r.unmatched.length) for (const f of r.lens.files) covered.add(f)
     let lensConfirmed = 0
     let lensRefuted = 0
     for (const { v, cand } of r.matched) {
@@ -627,6 +657,7 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
       const rec = { file: v.file, line: v.line, title: v.title, status: v.refuted ? 'refuted' : 'confirmed' }
       if (seen.some((p) => isDup(rec, p))) { counts.suppressedRun++; continue } // cross-lens same-round duplicate
       seen.push(rec)
+      covered.add(rec.file) // any verdict proves the file was read (inert in legacy mode: seen already blocks re-draws)
       if (v.refuted) { newRefuted++; lensRefuted++ }
       else {
         newConfirmed++
@@ -656,7 +687,7 @@ while (dry < DRY_THRESHOLD && round < MAX_ROUNDS) {
   log(`Round ${round} (${familyName(round)}): ${newConfirmed} confirmed, ${newRefuted} refuted, dry=${dry}${eligible ? '' : ' (ineligible)'}`)
 }
 
-const converged = dry >= DRY_THRESHOLD
+const converged = uncoveredCount() === 0 && dry >= DRY_THRESHOLD
 
 // ---------- report (deterministic) ----------
 // A report agent silently dropped findings (79 sections for 82 confirmed on 2026-08-12), so the
@@ -669,6 +700,7 @@ const table = convergenceTable(roundStats, converged, stoppedOnBudget)
 const sum = (k) => roundStats.reduce((n, r) => n + (r[k] || 0), 0)
 const runStats = {
   config: { maxRounds: MAX_ROUNDS, dryThreshold: DRY_THRESHOLD, customLenses: !!CUSTOM_LENSES, knownCount: (ARGS.known || []).length, graphRows: GRAPH_ROWS.length, budgetTotal: BUDGET_TOTAL },
+  coverage: HAS_INVENTORY ? { inventory: INVENTORY.length, preCovered: PRE_COVERED, covered: INVENTORY.length - uncoveredCount(), uncoveredAtStop: uncoveredCount() } : null,
   spentTotal: budget.spent(),
   rounds: roundStats.length,
   converged,
