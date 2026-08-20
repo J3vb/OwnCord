@@ -17,11 +17,37 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args) as unknown,
 }));
 
+// Captures the module's logger calls directly (message + data), the same way
+// identity.test.ts does for its sibling keyring module — this is what pins
+// the log strings/payloads instead of leaving them free to mutate unnoticed.
+// vi.hoisted (not a plain const) because vi.mock factories are hoisted above
+// the static `authStore` import, whose own module graph pulls in logger.ts
+// before a plain top-level const would have run.
+const { logMock, createLoggerMock } = vi.hoisted(() => {
+  const logMock = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  return { logMock, createLoggerMock: vi.fn(() => logMock) };
+});
+
+vi.mock("@lib/logger", () => ({ createLogger: createLoggerMock }));
+
 const { saveCredential, loadCredential, deleteCredential, createUserUpdateCredentialSaver } =
   await import("@lib/credentials");
 
+// saveCredential (called from createUserUpdateCredentialSaver's listener) is
+// fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
+// until the internal dynamic import settles, so a synchronous assertion right
+// after invoking the listener can't tell "the guard returned early" apart
+// from "the call is merely still in flight". Flushing to a macrotask boundary
+// drains every pending microtask first, so by the time this resolves any
+// invoke() call that was going to happen already has.
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 beforeEach(() => {
   invoke.mockReset().mockResolvedValue(undefined);
+  logMock.debug.mockReset();
+  logMock.info.mockReset();
+  logMock.warn.mockReset();
+  logMock.error.mockReset();
 });
 
 // ── saveCredential ─────────────────────────────────────────────────────────
@@ -63,6 +89,16 @@ describe("saveCredential", () => {
     invoke.mockRejectedValue(new Error("keychain locked"));
 
     await expect(saveCredential("h.example", "alice", "tok")).resolves.toBe(false);
+    // The false return is the only signal the caller sees — the host and
+    // underlying error have to survive somewhere, and this is it.
+    expect(logMock.error).toHaveBeenCalledWith("Failed to save credential", {
+      host: "h.example",
+      error: "Error: keychain locked",
+    });
+  });
+
+  it("names its logger 'credentials' so these messages are filterable", () => {
+    expect(createLoggerMock).toHaveBeenCalledWith("credentials");
   });
 });
 
@@ -79,10 +115,11 @@ describe("createUserUpdateCredentialSaver", () => {
     }));
   });
 
-  it("does not save when the session declined to remember the password (BUG-135)", () => {
+  it("does not save when the session declined to remember the password (BUG-135)", async () => {
     const listener = createUserUpdateCredentialSaver("h.example", false, "s3cret");
 
     listener({ user_id: 1, username: "alice2" });
+    await flushMicrotasks();
 
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -105,10 +142,11 @@ describe("createUserUpdateCredentialSaver", () => {
     });
   });
 
-  it("ignores a user_update for someone else", () => {
+  it("ignores a user_update for someone else", async () => {
     const listener = createUserUpdateCredentialSaver("h.example", true, "s3cret");
 
     listener({ user_id: 999, username: "bob" });
+    await flushMicrotasks();
 
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -159,10 +197,15 @@ describe("loadCredential", () => {
     expect(got).not.toHaveProperty("bogus");
   });
 
-  it("returns null when nothing is stored", async () => {
+  it("returns null when nothing is stored, without logging it as an error", async () => {
     invoke.mockResolvedValue(null);
 
     await expect(loadCredential("h.example")).resolves.toBeNull();
+    // "No credential stored" is the ordinary first-run/logged-out case, not a
+    // failure: it must be filtered out by `result && typeof result ===
+    // "object"` before anything tries to read a field off it, not fall
+    // through into the try/catch's error path.
+    expect(logMock.error).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -182,6 +225,10 @@ describe("loadCredential", () => {
     invoke.mockRejectedValue(new Error("keychain locked"));
 
     await expect(loadCredential("h.example")).resolves.toBeNull();
+    expect(logMock.error).toHaveBeenCalledWith("Failed to load credential", {
+      host: "h.example",
+      error: "Error: keychain locked",
+    });
   });
 });
 
@@ -198,6 +245,10 @@ describe("deleteCredential", () => {
     invoke.mockRejectedValue(new Error("no such entry"));
 
     await expect(deleteCredential("h.example")).resolves.toBe(false);
+    expect(logMock.error).toHaveBeenCalledWith("Failed to delete credential", {
+      host: "h.example",
+      error: "Error: no such entry",
+    });
   });
 });
 
@@ -233,6 +284,7 @@ describe("outside Tauri", () => {
 
     await expect(save("h.example", "alice", "tok")).resolves.toBe(false);
     expect(invoke).not.toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalledWith("Tauri not available — credential not saved");
   });
 
   it("loadCredential returns null instead of throwing", async () => {
