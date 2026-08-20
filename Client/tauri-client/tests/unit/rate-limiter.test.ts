@@ -36,6 +36,10 @@ describe("RateLimiter", () => {
     expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow("windowMs must be >= 1");
   });
 
+  it("does not throw when windowMs is exactly 1 (boundary)", () => {
+    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 1 })).not.toThrow();
+  });
+
   // -- tryConsume -----------------------------------------------------------
 
   it("allows requests under the limit", () => {
@@ -161,6 +165,17 @@ describe("RateLimiter", () => {
     limiter.tryConsume();
 
     expect(limiter.getRemainingMs()).toBeGreaterThan(0);
+  });
+
+  it("getRemainingMs returns 0 when under limit despite prior activity in the window", () => {
+    // maxTokens=3 with only 1 consumed: timestamps.length (1) < maxTokens (3)
+    // is true, so the under-limit guard must return 0 immediately rather than
+    // falling through to the oldest-timestamp math below it (which would
+    // wrongly report a positive wait here).
+    const limiter = createRateLimiter(3, 1_000);
+    limiter.tryConsume("a");
+
+    expect(limiter.getRemainingMs("a")).toBe(0);
   });
 });
 
