@@ -4,6 +4,7 @@ import {
   resetVoiceStore,
   setVoiceStates,
   updateVoiceState,
+  updateVoiceUserProfile,
   removeVoiceUser,
   joinVoiceChannel,
   leaveVoiceChannel,
@@ -18,6 +19,12 @@ import {
   setVoiceConfig,
   getChannelVoiceUsers,
   setVoiceStatus,
+  setEncryptionDegraded,
+  setPeerVerification,
+  clearPeerVerification,
+  clearPeerVerifications,
+  getPeerVerification,
+  setLocalSessionFingerprint,
   setPttPollingLive,
   isPttPollingLive,
 } from "../../src/stores/voice.store";
@@ -134,6 +141,38 @@ describe("voice store", () => {
       const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
       expect(user?.camera).toBe(true);
       expect(user?.screenshare).toBe(true);
+    });
+
+    it("defaults username to empty string when the user isn't in membersStore", () => {
+      // VOICE_STATE_1's user_id (1) has no matching membersStore entry in
+      // this test file, so the `member?.username ?? ""` fallback applies.
+      setVoiceStates([VOICE_STATE_1]);
+      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(user?.username).toBe("");
+    });
+
+    it("defaults serverMuted/serverDeafened to false when the ready row omits them", () => {
+      setVoiceStates([VOICE_STATE_1]); // no server_muted/server_deafened on this fixture
+      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(user?.serverMuted).toBe(false);
+      expect(user?.serverDeafened).toBe(false);
+    });
+
+    it("carries serverMuted/serverDeafened through from the ready row when true", () => {
+      setVoiceStates([{ ...VOICE_STATE_1, server_muted: true, server_deafened: true }]);
+      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(user?.serverMuted).toBe(true);
+      expect(user?.serverDeafened).toBe(true);
+    });
+
+    it("does not auto-join when there is no signed-in user, even if a row's user_id is 0", () => {
+      // authStore has no user in this test, so currentUserId defaults to 0
+      // (authStore.getState().user?.id ?? 0). The self-state lookup loop
+      // must be gated on "there IS a signed-in user", not run unconditionally
+      // and coincidentally match a user_id: 0 row.
+      joinVoiceChannel(42);
+      setVoiceStates([{ ...VOICE_STATE_1, user_id: 0 }]);
+      expect(voiceStore.getState().currentChannelId).toBe(42);
     });
 
     it("replaces existing voice states entirely", () => {
@@ -265,6 +304,25 @@ describe("voice store", () => {
     });
   });
 
+  describe("updateVoiceUserProfile", () => {
+    it("patches the username in every channel the user occupies", () => {
+      setVoiceStates([VOICE_STATE_1]); // user 1 in channel 10
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, user_id: 1, channel_id: 20 }); // user 1 also in channel 20
+
+      updateVoiceUserProfile(1, { username: "renamed" });
+
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.username).toBe("renamed");
+      expect(voiceStore.getState().voiceUsers.get(20)?.get(1)?.username).toBe("renamed");
+    });
+
+    it("is a no-op (same state reference) when the user is in no voice channel", () => {
+      setVoiceStates([VOICE_STATE_1]);
+      const before = voiceStore.getState();
+      updateVoiceUserProfile(999, { username: "nobody" });
+      expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
   describe("removeVoiceUser", () => {
     it("removes a user from a channel", () => {
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
@@ -312,6 +370,17 @@ describe("voice store", () => {
       leaveVoiceChannel();
       expect(voiceStore.getState().localServerMuted).toBe(false);
       expect(voiceStore.getState().localServerDeafened).toBe(false);
+
+      // This describe block has no shared afterEach — without this reset the
+      // signed-in user leaks into every later test here (they'd silently
+      // stop exercising the "no signed-in user" / currentUserId === 0 path).
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
     });
 
     it("joinVoiceChannel overwrites previous channel", () => {
@@ -329,6 +398,49 @@ describe("voice store", () => {
     it("leaveVoiceChannel is safe when not in a channel", () => {
       leaveVoiceChannel();
       expect(voiceStore.getState().currentChannelId).toBeNull();
+    });
+
+    it("leaveVoiceChannel clears encryptionDegraded with the session", () => {
+      joinVoiceChannel(10);
+      voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+      leaveVoiceChannel();
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("leaveVoiceChannel with no signed-in user does not touch voiceUsers, even if a row's user_id is 0", () => {
+      // authStore has no user, so currentUserId defaults to 0. The
+      // `currentUserId === 0` guard must take the early-return branch
+      // (which never touches voiceUsers) rather than falling through and
+      // deleting a "user_id: 0" row it has no business owning.
+      setVoiceStates([{ ...VOICE_STATE_1, user_id: 0 }]);
+      joinVoiceChannel(10);
+      leaveVoiceChannel();
+      expect(voiceStore.getState().voiceUsers.get(10)?.has(0)).toBe(true);
+    });
+
+    it("leaveVoiceChannel preserves the voiceUsers map reference when the current user isn't in it", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "dave", avatar: null, role: "member" },
+      }));
+      // Join channel 10 locally, but voiceUsers was never populated for
+      // user 5 (setVoiceStates/updateVoiceState were never called for it) —
+      // the second guard (existingChannel missing / doesn't have the user)
+      // must early-return without allocating a new voiceUsers Map.
+      joinVoiceChannel(10);
+      const usersBefore = voiceStore.getState().voiceUsers;
+
+      leaveVoiceChannel();
+
+      expect(voiceStore.getState().voiceUsers).toBe(usersBefore);
+
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
     });
   });
 
@@ -373,6 +485,33 @@ describe("voice store", () => {
       setPttGated(false); // PTT key pressed
       expect(voiceStore.getState().localMuted).toBe(true);
       expect(voiceStore.getState().pttGated).toBe(false);
+    });
+
+    it("is a no-op (same state reference) when the value hasn't changed", () => {
+      setPttGated(true);
+      const before = voiceStore.getState();
+      setPttGated(true);
+      expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
+  describe("setEncryptionDegraded", () => {
+    it("sets encryptionDegraded to true", () => {
+      setEncryptionDegraded(true);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("sets encryptionDegraded back to false", () => {
+      setEncryptionDegraded(true);
+      setEncryptionDegraded(false);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("is a no-op (same state reference) when the value hasn't changed", () => {
+      setEncryptionDegraded(true);
+      const before = voiceStore.getState();
+      setEncryptionDegraded(true);
+      expect(voiceStore.getState()).toBe(before);
     });
   });
 
@@ -436,6 +575,42 @@ describe("voice store", () => {
       setLocalSpeaking(true);
       expect(voiceStore.getState()).toBe(before);
     });
+
+    it("is a no-op with no signed-in user, even if a row's user_id is 0", () => {
+      // authStore has no user, so currentUserId defaults to 0. Without the
+      // `currentUserId === 0` early return, the function would happily
+      // treat a "user_id: 0" roster row as "us" and flip its speaking flag.
+      setVoiceStates([{ ...VOICE_STATE_1, user_id: 0 }]);
+      joinVoiceChannel(10);
+      setLocalSpeaking(true);
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(0)?.speaking).toBe(false);
+    });
+
+    it("is a no-op (same state reference) when speaking already matches the requested value", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1]);
+      joinVoiceChannel(10);
+      setLocalSpeaking(true);
+      const before = voiceStore.getState();
+
+      setLocalSpeaking(true); // already true — must not allocate a new state
+
+      expect(voiceStore.getState()).toBe(before);
+
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
   });
 
   describe("getChannelVoiceUsers", () => {
@@ -497,6 +672,15 @@ describe("voice store", () => {
       // Server says nobody is speaking — remote user updated, local unchanged
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
+
+    it("preserves the VoiceUser object reference for a user whose speaking state doesn't change", () => {
+      // Both users default to speaking: false (from setVoiceStates). An
+      // empty speakers list changes nothing, so the unchanged branch must
+      // reuse the existing VoiceUser object rather than cloning it.
+      const before = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)).toBe(before);
     });
   });
 
@@ -588,23 +772,36 @@ describe("voice store", () => {
 
   describe("joinVoiceChannel — same channel no-op", () => {
     it("does not reset joinedAt when re-joining the same channel", () => {
-      joinVoiceChannel(42);
-      const firstJoinedAt = voiceStore.getState().joinedAt;
-      expect(firstJoinedAt).not.toBeNull();
+      // Date.now() spied with distinct values per call — two real calls in
+      // the same millisecond would otherwise make this assertion pass by
+      // coincidence even if the same-channel guard were gone entirely.
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValueOnce(1000).mockReturnValueOnce(2000);
+      try {
+        joinVoiceChannel(42);
+        const firstJoinedAt = voiceStore.getState().joinedAt;
+        expect(firstJoinedAt).toBe(1000);
 
-      // Re-join same channel
-      joinVoiceChannel(42);
-      expect(voiceStore.getState().joinedAt).toBe(firstJoinedAt);
+        // Re-join same channel — guard must return `prev` before Date.now()
+        // is called again, so joinedAt stays 1000, not the mocked 2000.
+        joinVoiceChannel(42);
+        expect(voiceStore.getState().joinedAt).toBe(firstJoinedAt);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it("resets joinedAt when joining a different channel", () => {
       joinVoiceChannel(42);
-      const firstJoinedAt = voiceStore.getState().joinedAt;
 
-      // Small delay to ensure different timestamp
       joinVoiceChannel(99);
       expect(voiceStore.getState().joinedAt).not.toBeNull();
       expect(voiceStore.getState().currentChannelId).toBe(99);
+    });
+
+    it("clears encryptionDegraded on a fresh join — a new session doesn't inherit the previous one's degraded flag", () => {
+      voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+      joinVoiceChannel(42);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
     });
   });
 
@@ -627,6 +824,13 @@ describe("voice store", () => {
       expect(voiceStore.getState().voiceStatus).toBe("securing");
       setVoiceStatus("reconnecting");
       expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
+    });
+
+    it("setVoiceStatus is a no-op (same state reference) when the status hasn't changed", () => {
+      setVoiceStatus("securing");
+      const before = voiceStore.getState();
+      setVoiceStatus("securing");
+      expect(voiceStore.getState()).toBe(before);
     });
   });
 
@@ -757,6 +961,24 @@ describe("voice store", () => {
       expect(state.voiceUsers.size).toBe(0);
       expect(state.voiceConfigs.size).toBe(0);
     });
+
+    it("resets localServerMuted/localServerDeafened/pttGated/encryptionDegraded to false", () => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        localServerMuted: true,
+        localServerDeafened: true,
+        pttGated: true,
+        encryptionDegraded: true,
+      }));
+
+      resetVoiceStore();
+
+      const state = voiceStore.getState();
+      expect(state.localServerMuted).toBe(false);
+      expect(state.localServerDeafened).toBe(false);
+      expect(state.pttGated).toBe(false);
+      expect(state.encryptionDegraded).toBe(false);
+    });
   });
 
   describe("setPttPollingLive / isPttPollingLive", () => {
@@ -801,6 +1023,121 @@ describe("voice store", () => {
     });
   });
 
+  describe("setPeerVerification / clearPeerVerification / clearPeerVerifications / getPeerVerification (F3 TOFU)", () => {
+    it("getPeerVerification returns null for an unknown peer", () => {
+      expect(getPeerVerification(1)).toBeNull();
+    });
+
+    it("setPeerVerification records a peer's verification, readable via getPeerVerification", () => {
+      setPeerVerification({
+        userId: 1,
+        status: "verified",
+        safetyNumber: "abcd-1234",
+        sessionFingerprint: "fp-1",
+      });
+      expect(getPeerVerification(1)).toEqual({
+        userId: 1,
+        status: "verified",
+        safetyNumber: "abcd-1234",
+        sessionFingerprint: "fp-1",
+      });
+    });
+
+    it("setPeerVerification overwrites a previous verification for the same peer", () => {
+      setPeerVerification({
+        userId: 1,
+        status: "unverified",
+        safetyNumber: null,
+        sessionFingerprint: "fp-1",
+      });
+      setPeerVerification({
+        userId: 1,
+        status: "mismatch",
+        safetyNumber: null,
+        sessionFingerprint: "fp-2",
+      });
+      expect(getPeerVerification(1)?.status).toBe("mismatch");
+      expect(getPeerVerification(1)?.sessionFingerprint).toBe("fp-2");
+    });
+
+    it("clearPeerVerification removes a single peer's verification", () => {
+      setPeerVerification({
+        userId: 1,
+        status: "verified",
+        safetyNumber: "x",
+        sessionFingerprint: "y",
+      });
+      setPeerVerification({
+        userId: 2,
+        status: "verified",
+        safetyNumber: "x",
+        sessionFingerprint: "y",
+      });
+
+      clearPeerVerification(1);
+
+      expect(getPeerVerification(1)).toBeNull();
+      expect(getPeerVerification(2)).not.toBeNull();
+    });
+
+    it("clearPeerVerification is a no-op (same state reference) for a peer with no verification", () => {
+      setPeerVerification({
+        userId: 2,
+        status: "verified",
+        safetyNumber: "x",
+        sessionFingerprint: "y",
+      });
+      const before = voiceStore.getState();
+      clearPeerVerification(999);
+      expect(voiceStore.getState()).toBe(before);
+    });
+
+    it("clearPeerVerifications drops every peer's verification", () => {
+      setPeerVerification({
+        userId: 1,
+        status: "verified",
+        safetyNumber: "x",
+        sessionFingerprint: "y",
+      });
+      setPeerVerification({
+        userId: 2,
+        status: "unverified",
+        safetyNumber: null,
+        sessionFingerprint: "z",
+      });
+
+      clearPeerVerifications();
+
+      expect(voiceStore.getState().peerVerifications?.size).toBe(0);
+    });
+
+    it("clearPeerVerifications is a no-op (same state reference) when already empty", () => {
+      const before = voiceStore.getState();
+      clearPeerVerifications();
+      expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
+  describe("setLocalSessionFingerprint", () => {
+    it("publishes the local session fingerprint", () => {
+      setLocalSessionFingerprint("fp-local");
+      expect(voiceStore.getState().localSessionFingerprint).toBe("fp-local");
+    });
+
+    it("clears the fingerprint with null", () => {
+      setLocalSessionFingerprint("fp-local");
+      setLocalSessionFingerprint(null);
+      expect(voiceStore.getState().localSessionFingerprint).toBeNull();
+    });
+
+    it("is a no-op (same state reference) when the value hasn't changed", () => {
+      setLocalSessionFingerprint("fp-local");
+      const before = voiceStore.getState();
+      setLocalSessionFingerprint("fp-local");
+      expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
   describe("subscribe", () => {
     it("notifies on state changes", () => {
       const listener = vi.fn();
@@ -817,6 +1154,31 @@ describe("voice store", () => {
       unsub();
       joinVoiceChannel(42);
       expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  // MUST stay the last describe block in this file: vi.resetModules() below
+  // repoints subsequent `await import(...)` calls at fresh module instances
+  // for the rest of the file's execution, which would desync any later
+  // test's dynamically-imported module from this file's statically-imported
+  // `voiceStore`/`authStore` (as it did for the "clearAuth voice cleanup"
+  // test above, which relies on that static `voiceStore` observing the
+  // effect of a dynamically-imported `clearAuth()`).
+  describe("module INITIAL_STATE (fresh import, untouched by any reset)", () => {
+    it("defaults every flag to false — the describe blocks above only ever observe state after the outer beforeEach's resetStore() has already overwritten it, and that local helper doesn't even set localServerMuted/localServerDeafened/pttGated/encryptionDegraded (they'd read `undefined` there, not the real default)", async () => {
+      vi.resetModules();
+      const fresh = await import("../../src/stores/voice.store");
+      const state = fresh.voiceStore.getState();
+      expect(state.localMuted).toBe(false);
+      expect(state.localDeafened).toBe(false);
+      expect(state.localServerMuted).toBe(false);
+      expect(state.localServerDeafened).toBe(false);
+      expect(state.pttGated).toBe(false);
+      expect(state.localCamera).toBe(false);
+      expect(state.localScreenshare).toBe(false);
+      expect(state.listenOnly).toBe(false);
+      expect(state.encryptionDegraded).toBe(false);
+      expect(fresh.isPttPollingLive()).toBe(false);
     });
   });
 });
