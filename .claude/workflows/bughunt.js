@@ -332,10 +332,10 @@ function drawExploreFiles() {
   while (files.length < EXPLORE_FILES_PER_LENS && avail.length) {
     const head = avail.shift()
     files.push(head)
-    const dir = head.split('/').slice(0, -1).join('/')
+    const dir = clusterOf(head)
     // pull same-directory siblings forward: one lens reading one module beats ten strangers
     for (let i = 0; i < avail.length && files.length < EXPLORE_FILES_PER_LENS; ) {
-      if (avail[i].split('/').slice(0, -1).join('/') === dir) files.push(avail.splice(i, 1)[0])
+      if (clusterOf(avail[i]) === dir) files.push(avail.splice(i, 1)[0])
       else i++
     }
   }
@@ -641,13 +641,14 @@ while ((uncoveredCount() > 0 || dry < DRY_THRESHOLD) && round < MAX_ROUNDS) {
     candCount += r.unionCount
     freshCount += r.fresh.length
     if (r.finderFailed) eligible = false
-    if (r.finderFailed && r.lens.files) {
-      // a dead finder read nothing: un-consume its draw so later rounds can re-offer the
-      // files and the session does not record never-examined files as explored-clean
-      for (const f of r.lens.files) exploreConsumed.delete(f)
+    if (r.lens.files) {
+      // coverage credit (spec: only explicit-file lenses that ran to completion). A lens
+      // denied credit - dead finder OR candidates left unverified - returns its whole draw
+      // to the pool: consumed-but-uncovered files would otherwise strand uncoveredCount()
+      // above zero forever, and a partially-verified draw is not evidence of cleanliness.
+      if (!r.finderFailed && !r.unmatched.length) for (const f of r.lens.files) covered.add(f)
+      else for (const f of r.lens.files) exploreConsumed.delete(f)
     }
-    // coverage credit (spec: only explicit-file lenses that ran to completion)
-    if (r.lens.files && !r.finderFailed && !r.unmatched.length) for (const f of r.lens.files) covered.add(f)
     let lensConfirmed = 0
     let lensRefuted = 0
     for (const { v, cand } of r.matched) {

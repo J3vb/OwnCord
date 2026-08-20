@@ -904,6 +904,32 @@ scenarios.s_directory_coherent_draws = async () => {
   assert.doesNotMatch(p1, /Server\/beta\//, 'no stranger directories in a coherent draw')
 }
 
+// COV8 (Task 5 review finding): an explore lens whose candidates never get a verdict is
+// denied coverage credit - its draw must return to the pool and be re-offered, or the
+// consumed-but-uncovered files strand uncoveredCount() above zero and the run can never
+// converge (it would grind to the round backstop instead).
+scenarios.s_uncredited_draw_returns_to_pool = async () => {
+  const inv = inventoryRows(20)
+  const { result, calls } = await run({
+    args: { graph: inv },
+    agentStub: makeStub({
+      hunt: (round, key) =>
+        round === 4 && key === 'explore-1'
+          ? { findings: [finding(1, { file: 'Server/gen/g0.go', title: 'orphaned candidate one' })] }
+          : none,
+      verify: (round, key, cands) =>
+        round === 4 && key === 'explore-1' ? { verdicts: [] } : confirmAll(cands),
+    }),
+  })
+  const promptOf = (rnd, key) => (calls.find((c) => (c.opts.label || '') === `r${rnd}:hunt:${key}:opus`) || {}).prompt || ''
+  assert.match(promptOf(4, 'explore-1'), /Server\/gen\/g0\.go/)
+  assert.match(promptOf(5, 'explore-1'), /Server\/gen\/g0\.go/, 'uncredited draw is re-offered next round')
+  assert.equal(result.rounds[3].dryEligible, false, 'unverified candidates keep the round ineligible')
+  assert.equal(result.converged, true, 'the run must still converge once a later lens covers the files')
+  assert.deepEqual(result.runStats.coverage, { inventory: 20, preCovered: 0, covered: 20, uncoveredAtStop: 0 })
+  assert.equal(result.unverified.length, 1, 'the orphaned candidate stays reported unverified')
+}
+
 // ---------- runner ----------
 const only = process.argv[2]
 for (const [name, fn] of Object.entries(scenarios)) {
