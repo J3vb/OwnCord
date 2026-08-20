@@ -138,7 +138,17 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		}
 		// Escalation guard: a MANAGE_CHANNELS holder without ADMINISTRATOR
 		// cannot grant bits their own role lacks via a channel override.
-		if err := requireGrantableOverride(actorRole, allow, deny); err != nil {
+		// Checked against the union of the bits being written and the bits
+		// already present on the row: clearing an existing deny is also a
+		// grant (EffectivePerms = (rolePerm &^ deny) | allow), so writing an
+		// all-zero mask over a deny the actor's own role lacks must not slip
+		// past this guard just because the NEW mask alone is empty.
+		curAllow, curDeny, err := database.GetChannelPermissions(r.Context(), ch.ID, roleID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel permission")
+			return
+		}
+		if err := requireGrantableOverride(actorRole, curAllow|allow, curDeny|deny); err != nil {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
@@ -213,6 +223,21 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 		actorRole := actorRoleFromContext(r)
 		if actorRole == nil {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Escalation guard: deleting an override is a permission mutation with
+		// the same authority as writing one — removing a deny row restores
+		// exactly the access the PUT path refuses to grant (EffectivePerms =
+		// (rolePerm &^ deny) | allow) — so gate it identically to
+		// handlePutChannelPermission, checked against the bits the deleted row
+		// actually carries.
+		curAllow, curDeny, err := database.GetChannelPermissions(r.Context(), ch.ID, roleID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel permission")
+			return
+		}
+		if err := requireGrantableOverride(actorRole, curAllow, curDeny); err != nil {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
 		// Hierarchy guard: deleting an override is a permission mutation with the
@@ -339,7 +364,16 @@ func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInv
 		}
 		// Escalation guard: a MANAGE_CHANNELS holder without ADMINISTRATOR
 		// cannot grant bits their own role lacks via a per-user override.
-		if err := requireGrantableOverride(actorRole, allow, deny); err != nil {
+		// Checked against the union of the bits being written and the bits
+		// already present on the row, same rationale as
+		// handlePutChannelPermission: clearing an existing deny is a grant, so
+		// an all-zero write must not bypass this guard.
+		curAllow, curDeny, err := database.GetUserChannelPermissions(r.Context(), ch.ID, user.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel user permission")
+			return
+		}
+		if err := requireGrantableOverride(actorRole, curAllow|allow, curDeny|deny); err != nil {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
@@ -390,6 +424,20 @@ func handleDeleteChannelUserPermission(database *db.DB, hub HubBroadcaster, perm
 		actorRole := actorRoleFromContext(r)
 		if actorRole == nil {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		// Escalation guard: clearing a per-user override restores exactly the
+		// access the PUT path refuses to grant (EffectivePerms = (rolePerm &^
+		// deny) | allow), so gate it identically to
+		// handlePutChannelUserPermission, checked against the bits the
+		// deleted row actually carries.
+		curAllow, curDeny, err := database.GetUserChannelPermissions(r.Context(), ch.ID, user.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel user permission")
+			return
+		}
+		if err := requireGrantableOverride(actorRole, curAllow, curDeny); err != nil {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
 		// Hierarchy guard: clearing a higher-ranked member's override is the

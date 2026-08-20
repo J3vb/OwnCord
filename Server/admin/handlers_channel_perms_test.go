@@ -431,3 +431,91 @@ func TestDeleteChannelPermission_UnknownRole(t *testing.T) {
 		t.Errorf("status = %d, want 404; body: %s", w.Code, w.Body.String())
 	}
 }
+
+// Clearing an override is a permission grant when it removes a deny bit the
+// actor's own role does not hold: EffectivePerms = (rolePerm &^ deny) | allow,
+// so wiping a deny row hands back exactly the access the PUT path refuses to
+// grant (TestPutChannelPermission_ModeratorCannotEscalate). The DELETE
+// handler must apply requireGrantableOverride to the override being REMOVED,
+// not skip it just because the hierarchy guard alone passes.
+func TestDeleteChannelPermission_EscalationGuard(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+
+	// Helper role: low position, base permissions include MANAGE_MESSAGES.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (20, 'Helper', NULL, ?, 5, 0)`,
+		permissions.ManageMessages,
+	); err != nil {
+		t.Fatalf("seed Helper role: %v", err)
+	}
+
+	// Actor: MANAGE_CHANNELS holder without MANAGE_MESSAGES or ADMINISTRATOR,
+	// ranked above Helper so only the escalation guard is exercised.
+	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate-del", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.UpsertChannelOverride(context.Background(), chID, 20, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete,
+		"/channels/"+itoa(chID)+"/permissions/20", modToken, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 20)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != permissions.ManageMessages {
+		t.Errorf("override mutated by forbidden delete: (%#x, %#x)", allow, deny)
+	}
+}
+
+// A PUT with an all-zero mask that clears an existing deny bit the actor's
+// own role does not hold is exactly as much an escalation as writing that
+// bit directly (TestPutChannelPermission_ModeratorCannotEscalate): clearing a
+// deny is a grant. requireGrantableOverride must see the bits being REMOVED
+// by this write, not just the (trivially empty) bits being written.
+func TestPutChannelPermission_ClearByZeroMaskEscalationGuard(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (20, 'Helper', NULL, ?, 5, 0)`,
+		permissions.ManageMessages,
+	); err != nil {
+		t.Fatalf("seed Helper role: %v", err)
+	}
+	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate-zero", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.UpsertChannelOverride(context.Background(), chID, 20, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/permissions/20", modToken,
+		map[string]any{"allow": 0, "deny": 0})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 20)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != permissions.ManageMessages {
+		t.Errorf("override mutated by forbidden zero-mask PUT: (%#x, %#x)", allow, deny)
+	}
+}
