@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (which has its own 100 MiB limit).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -34,7 +34,8 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 ## Standard Error Response
 
-All error responses use this JSON envelope:
+Error responses use this JSON envelope (one exception: the plugin admin
+endpoints return plain-text errors — see their section):
 
 ```json
 {
@@ -52,10 +53,10 @@ All error responses use this JSON envelope:
 | `FORBIDDEN` | 403 | Insufficient permissions, banned account, or admin IP restriction |
 | `NOT_FOUND` | 404 | Resource (channel, message, user, invite, file, backup) not found |
 | `RATE_LIMITED` | 429 | Too many requests; response includes `Retry-After` header (seconds) |
-| `INVALID_INPUT` / `BAD_REQUEST` | 400 | Malformed body, missing required fields, invalid query params |
+| `INVALID_INPUT` / `BAD_REQUEST` | 400 | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT` | 409 | Duplicate username on register, or server already up-to-date on update |
-| `TOO_LARGE` | 413 | File exceeds upload size limit |
-| `SERVER_ERROR` / `INTERNAL` | 500 | Internal server error |
+| `INTERNAL_ERROR` | 500 | Internal server error |
+| `STORAGE_ERROR` | 507 | Upload could not be persisted (storage backend write failure) |
 | `BAD_GATEWAY` | 502 | Upstream failure (GitHub API, LiveKit, GIF provider, asset download) |
 | `GIF_DISABLED` | 503 | GIF proxy is not configured on this server (no `gif.api_key`) |
 
@@ -116,7 +117,7 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 | 400 | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username |
 | 403 | `FORBIDDEN` | Registration is closed or unavailable while server-wide 2FA is required |
 | 429 | `RATE_LIMITED` | Exceeded 3 registrations/minute from this IP |
-| 500 | `SERVER_ERROR` | Hashing failure, session creation failure, or DB error |
+| 500 | `INTERNAL_ERROR` | Hashing failure, session creation failure, or DB error |
 
 ---
 
@@ -178,7 +179,7 @@ If the account has TOTP enabled:
 | 401 | `UNAUTHORIZED` | Wrong username or password |
 | 403 | `FORBIDDEN` | Account is banned/suspended |
 | 429 | `RATE_LIMITED` | IP locked out after 10 consecutive failures (15 min cooldown) |
-| 500 | `SERVER_ERROR` | Session creation failure |
+| 500 | `INTERNAL_ERROR` | Session creation failure |
 
 ---
 
@@ -226,7 +227,7 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 | ------ | ---- | ----- |
 | 400 | `INVALID_INPUT` | Malformed request body |
 | 401 | `UNAUTHORIZED` | Missing/expired challenge, invalid TOTP code, or challenge consumed |
-| 500 | `SERVER_ERROR` | Session creation failure |
+| 500 | `INTERNAL_ERROR` | Session creation failure |
 
 ---
 
@@ -307,7 +308,7 @@ Account deleted successfully. All sessions, messages (soft-deleted), and associa
 | 400 | `INVALID_INPUT` | Missing or incorrect password |
 | 403 | `FORBIDDEN` | Cannot delete the last admin account |
 | 429 | `RATE_LIMITED` | Locked out after 3 failed password attempts (15 min cooldown) |
-| 500 | `SERVER_ERROR` | Database error during deletion |
+| 500 | `INTERNAL_ERROR` | Database error during deletion |
 
 ---
 
@@ -404,6 +405,7 @@ event replaces the client's copy rather than patching it).
 | `avatar`       | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
 | `display_name` | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
 | `about`        | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption). |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
@@ -1442,6 +1444,14 @@ is deliberately not exposed here (anti-fingerprinting hardening, C-2).
 }
 ```
 
+When a health probe fails, the endpoint answers **503** with
+`"status": "degraded"` and a `reason` field naming the failing subsystem —
+`"hub"` (WS dispatch loop dead), `"database"`, or `"disk"`:
+
+```json
+{ "status": "degraded", "reason": "database", "uptime": 86400, "online_users": 3 }
+```
+
 ---
 
 ## Server Info
@@ -1465,9 +1475,9 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 
 ### GET /api/v1/metrics
 
-Runtime server metrics. Restricted to admin-allowed CIDRs.
+Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from `server.metrics_allowed_cidrs`, falling back to `server.admin_allowed_cidrs` when unset — set the dedicated key to admit a scraper without widening the admin perimeter.
 
-**Auth:** Admin IP restriction (not token-based)
+**Auth:** IP restriction (metrics CIDRs, admin fallback)
 
 ```json
 {
@@ -2066,6 +2076,8 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | ------ | ---- | ----- |
 | 503 | `CONTAINER_DEPLOYMENT` | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
 | 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
+| 409 | `RESTART_PENDING` | A restart from an earlier apply/restore is already pending |
+| 409 | `UPDATE_IN_PROGRESS` | Another restart-sensitive operation (update apply or backup restore) is running |
 | 409 | `NO_UPDATE` | Already up to date |
 | 502 | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure |
 
@@ -2388,6 +2400,15 @@ not open them).
 Plugin execution additionally requires a server built with `-tags wazero`
 and `plugins.enabled: true` in config.
 
+Unlike the rest of the API, these endpoints answer errors as **plain text**
+(`http.Error`), not the standard JSON envelope — the one envelope exception is
+install's `400 INSTALL_FAILED`. When the runtime is unavailable, mutating
+endpoints answer `503` `plugin runtime disabled`; other plain-text statuses
+are `400` (bad multipart/zip), `415` (not a `.zip`), `413` (`plugin upload
+too large` — the API's only 413), and `500`. `GET /api/v1/admin/plugins`
+always answers `200` and reports the runtime state in an `X-Plugin-Runtime`
+response header instead.
+
 ### GET /api/v1/admin/plugins
 
 List installed plugins.
@@ -2427,13 +2448,13 @@ These endpoints are only registered when LiveKit voice is configured.
 
 ### POST /api/v1/livekit/webhook
 
-LiveKit webhook receiver. Uses LiveKit JWT verification. Admin-IP-restricted. Called by the LiveKit server, not by clients.
+LiveKit webhook receiver. Uses LiveKit JWT verification. IP-restricted via `server.livekit_webhook_allowed_cidrs` (falls back to `server.admin_allowed_cidrs` when unset). Called by the LiveKit server, not by clients.
 
 ### GET /api/v1/livekit/health
 
 Check whether the LiveKit server is reachable.
 
-**Auth:** Admin IP restriction
+**Auth:** IP restriction (`server.livekit_webhook_allowed_cidrs`, admin fallback)
 
 #### Response 200 OK
 
@@ -2469,8 +2490,8 @@ All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The 
 
 Returns connectivity diagnostics for debugging voice/network issues.
 
-**Auth:** Required (any authenticated user)
-**Rate limit:** 5 requests/minute per user
+**Auth:** Required — `ADMINISTRATOR` only (H-8 hardening: the response reveals network topology)
+**Rate limit:** 5 requests/minute per IP
 
 ```json
 {
@@ -2482,7 +2503,7 @@ Returns connectivity diagnostics for debugging voice/network issues.
   },
   "voice": {
     "enabled": true,
-    "livekit_url": "ws://localhost:7880",
+    "livekit_url": "localhost:7880",
     "livekit_health": true,
     "node_ip": "203.0.113.1",
     "proxy_path": "/livekit"

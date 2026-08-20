@@ -311,8 +311,8 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []
 
 // buildReady constructs the ready server→client message.
 // Per docs/protocol.md, channels include unread_count and last_message_id per
-// user, and only protocol-specified fields (no slow_mode, archived, voice_*
-// extras).
+// user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
+// archived is the one stored field deliberately not shipped.
 func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {

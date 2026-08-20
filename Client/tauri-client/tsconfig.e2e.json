@@ -1,5 +1,5 @@
 {
-  // Typechecks the Playwright layer (47 spec files + fixtures + the three
+  // Typechecks the Playwright layer (every tests/e2e spec + fixtures + the
   // playwright configs), which the main tsconfig deliberately excludes from
   // the app graph. "exclude": [] is required to clear the inherited
   // "tests/e2e" exclusion — same trick tsconfig.build.json uses.

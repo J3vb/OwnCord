@@ -46,7 +46,7 @@ func (h handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 // WithGroup re-wraps so enrichment survives logger.WithGroup.
-// ponytail: req_id/trace_id are added at the record's top level; the codebase
+// req_id/trace_id are added at the record's top level; the codebase
 // opens no logger-level groups, so there is no group-nesting concern to handle
 // here. Revisit if slog group usage is introduced.
 func (h handler) WithGroup(name string) slog.Handler {

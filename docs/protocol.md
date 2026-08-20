@@ -95,7 +95,8 @@ The sequence number system enables reconnection with state recovery.
 | Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
 | Global broadcasts | Yes | `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral | No | `typing`, `presence` from a `presence_update` (see below) |
-| DM messages | No | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `dm_channel_open`, `dm_channel_close` |
+| DM chat events | Yes | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants |
+| DM lifecycle | No | `dm_channel_open`, `dm_channel_close` |
 | Call signalling | No | `call_incoming`, `call_declined` |
 | Direct responses | No | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong` |
 
@@ -211,7 +212,7 @@ After `auth_ok`, the server sends a `ready` message containing all initial state
 The server broadcasts to all connected clients:
 
 ```json
-{ "type": "member_join", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" } } }
+{ "type": "member_join", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
 { "type": "presence", "payload": { "user_id": 1, "status": "online", "custom_status": null } }
 ```
 
@@ -260,9 +261,12 @@ A visibility watermark forces the tier-3 full re-sync whenever channel
 visibility changed while the client was disconnected, so permission changes
 can never be replayed around.
 
-DM events are not stored in the ring buffer; DM history persisted to the
-`events` table is replayable via tier 2, and everything is always recoverable
-via the full `ready` payload.
+DM chat events (`chat_message`, `chat_edited`, `chat_deleted`,
+`reaction_update` in DM channels) are sequenced into the same ring buffer and
+`events` table as channel broadcasts, so they replay at tiers 1 and 2 —
+filtered to the DM's participants. The unsequenced DM lifecycle events
+(`dm_channel_open`/`dm_channel_close`) are not replayed; that state is always
+recoverable via the full `ready` payload.
 
 ---
 
@@ -319,9 +323,9 @@ to reconstruct them:
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
 
-**voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `muted`, `deafened`, `server_muted`, `server_deafened`
+**voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `username`, `muted`, `deafened`, `server_muted`, `server_deafened`, `speaking`, `camera`, `screenshare`
 
-**roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield)
+**roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield), `position`, `is_default`
 
 ---
 
@@ -736,14 +740,19 @@ Sent when a user first connects (fresh connection, not reconnect replay).
       "role": "member",
       "display_name": "New User",
       "identity_public_key": "base64-identity-pubkey"
-    }
+    },
+    "status": "online"
   }
 }
 ```
 
 `display_name` is the nickname to render instead of `username`; omitted when
 unset. `identity_public_key` is the user's long-term E2EE identity public key
-(see voice E2EE TOFU); omitted when the user has not published one.
+(see voice E2EE TOFU); omitted when the user has not published one. The
+top-level `status` is the viewer-safe presence the user comes online as (an
+invisible connector reports `"offline"` here) — clients must render presence
+from this field rather than assuming `"online"` because a `member_join`
+arrived.
 
 ### member_update (Server -> Client, broadcast)
 
@@ -1109,8 +1118,13 @@ ID in the channel). The joiner learns whether they are the key holder from
 `voice_token.is_key_holder`. When a participant leaves, the key holder rotates
 the room key so departed members cannot decrypt future media.
 
-Both E2EE message types are rate limited at 5 per second per user. Key
-material must be standard-alphabet base64 (padded or unpadded).
+`voice_e2ee_announce` is rate limited at 5 per second per user.
+`voice_e2ee_offer` has a higher outer budget of 64 per second per (sender,
+voice channel) — the key holder fans one offer per peer on a rotation — plus
+an inner cap of 5 per second per (sender, channel, target) so no single
+recipient can be flooded (the W1-2 per-victim cap). Both answer
+`RATE_LIMITED` when exceeded. Key material must be standard-alphabet base64
+(padded or unpadded).
 
 **Identity keys + TOFU:** each client holds a long-term ECDSA P-256 identity
 keypair, published via `PATCH /api/v1/users/me` (`identity_public_key`) and
@@ -1393,10 +1407,12 @@ and the ringer's own 30s window already covers it.
 | Code | Description |
 |------|-------------|
 | `BAD_REQUEST` | Invalid payload format or field values |
+| `BAD_PAYLOAD` | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets) |
 | `INTERNAL` | Server-side error |
 | `NOT_FOUND` | Channel or message not found |
 | `FORBIDDEN` | Missing required permission |
-| `RATE_LIMITED` | Too many requests (includes `retry_after` in seconds) |
+| `NOT_KEY_HOLDER` | `voice_e2ee_offer` sent by a participant who is not the channel's key holder |
+| `RATE_LIMITED` | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not) |
 | `ALREADY_JOINED` | Already in this voice channel |
 | `CHANNEL_FULL` | Voice channel at capacity |
 | `VOICE_ERROR` | Voice-specific error |
@@ -1433,10 +1449,17 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Voice E2EE offer | 64 | 1 second | `RATE_LIMITED` error |
 | Voice moderation (mute/deafen/move/kick) | 5 | 1 second | `RATE_LIMITED` error |
 | Call ring | 1 | 3 seconds | `RATE_LIMITED` error |
+| Call decline | 1 | 3 seconds | `RATE_LIMITED` error |
+| Plugin command (`chat_command`) | 5 | 1 second | `RATE_LIMITED` error |
+| Channel focus | 5 | 1 second | Silently dropped |
+| Mark read | 5 | 1 second (own budget, separate from focus) | Silently dropped |
+| Ping | 2 | 1 second | Silently dropped |
 
 The E2EE offer budget is deliberately higher than the announce budget: a key
 rotation fires one offer per peer in a single burst, so the limit is sized to
-a whole rotation rather than to a single frame.
+a whole rotation rather than to a single frame. Within that outer budget an
+inner cap of 5 per second per (sender, channel, target) stops any single
+recipient from being flooded.
 
 ---
 
@@ -1458,8 +1481,8 @@ tables below add per-type behavioral notes.
 | `reaction_add` | 5/sec | |
 | `reaction_remove` | 5/sec | |
 | `typing_start` | 1/3sec/channel | Silently dropped |
-| `channel_focus` | None | Updates read state |
-| `mark_read` | None | Updates read state without moving focus |
+| `channel_focus` | 5/sec (silently dropped) | Updates read state |
+| `mark_read` | 5/sec, own budget (silently dropped) | Updates read state without moving focus |
 | `presence_update` | 1/10sec | |
 | `voice_join` | 5/sec | |
 | `voice_leave` | 5/sec | Empty payload |
@@ -1473,11 +1496,11 @@ tables below add per-type behavioral notes.
 | `voice_mod_kick` | 5/sec | Requires MUTE_MEMBERS + outranks target |
 | `voice_token_refresh` | 1/60sec | Must be in voice |
 | `voice_e2ee_announce` | 5/sec | ECDH pubkey announce |
-| `voice_e2ee_offer` | 64/sec | Wrapped room key to target (budgeted per key rotation) |
+| `voice_e2ee_offer` | 64/sec outer, 5/sec per target | Wrapped room key to target (budgeted per key rotation) |
 | `call_ring` | 1/3sec | DM participants only; fans out as `call_incoming` |
-| `call_decline` | None | DM participants only; fans out as `call_declined` |
-| `chat_command` | None | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
-| `ping` | None | Heartbeat |
+| `call_decline` | 1/3sec | DM participants only; fans out as `call_declined` |
+| `chat_command` | 5/sec | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
+| `ping` | 2/sec (silently dropped) | Heartbeat |
 
 ### Server -> Client (39 types)
 
@@ -1486,12 +1509,12 @@ tables below add per-type behavioral notes.
 | `auth_ok` | No | Direct |
 | `auth_error` | No | Direct (then close) |
 | `ready` | No | Direct |
-| `chat_message` | Non-DM only | Channel or DM participants |
+| `chat_message` | Yes | Channel or DM participants |
 | `chat_send_ok` | No | Direct to sender |
-| `chat_edited` | Non-DM only | Channel or DM participants |
-| `chat_deleted` | Non-DM only | Channel or DM participants |
+| `chat_edited` | Yes | Channel or DM participants |
+| `chat_deleted` | Yes | Channel or DM participants |
 | `chat_bulk_deleted` | Yes | Channel |
-| `reaction_update` | Non-DM only | Channel or DM participants |
+| `reaction_update` | Yes | Channel or DM participants |
 | `typing` | No | Channel (excl. sender) or DM |
 | `presence` | Yes | All clients |
 | `channel_create` | Yes | All clients |
@@ -1521,7 +1544,7 @@ tables below add per-type behavioral notes.
 | `error` | No | Direct to requester |
 | `pong` | No | Direct to pinger |
 | `command_reply` | No | Direct to invoking client (ephemeral plugin reply) |
-| `plugin_broadcast` | No | Channel (plugin output posted as a broadcast) |
+| `plugin_broadcast` | Yes | Channel (plugin output posted as a broadcast; sequenced and replayable) |
 
 ### Plugin command types
 
@@ -1532,6 +1555,6 @@ the generated constants cover them and `make protocol-verify` plus the
 
 | Type | Direction | Notes |
 |------|-----------|-------|
-| `chat_command` | Client -> Server | `{command, args[], channel_id, req_id?}`; max 64 args; unknown commands return an `error`. No dedicated rate limit; a channel broadcast is gated by the same `CanPost` policy as a real message send. |
+| `chat_command` | Client -> Server | `{command, args[], channel_id, req_id?}`; max 64 args; unknown commands return an `error`. Rate limited at 5/sec (`RATE_LIMITED`); a channel broadcast is gated by the same `CanPost` policy as a real message send. |
 | `command_reply` | Server -> Client | Ephemeral plugin reply, sent only to the invoking client; echoes `req_id`. Payload: `{text}`. |
 | `plugin_broadcast` | Server -> Client | Plugin output posted to a channel. Payload: `{channel_id, user_id, command, text}`. |

@@ -1,7 +1,11 @@
 # Bug-detection improvements — design
 
 Date: 2026-08-08
-Status: approved, not implemented
+Status: partially implemented (verified 2026-08-19) — Tier 1a's `make fuzz`
+target exists (`Server/Makefile`) and Tier 2's five custom ESLint rules
+shipped 2026-08-08 (`Client/tauri-client/eslint-rules.js`), so the gap table
+below is stale for those two rows; Tiers 1b/1c are on-demand npm scripts;
+Tiers 3–4 remain unimplemented.
 
 ## Problem
 

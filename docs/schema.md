@@ -2,12 +2,14 @@
 
 OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-Go driver `modernc.org/sqlite` (no CGO). Migrations run automatically on startup.
 
-> **Data-access layers:** queries currently run as hand-written SQL in
-> `Server/db`; an sqlc-generated layer (`Server/db/dbgen`, from
-> `Server/db/queries/`) exists and is slated to become the real query layer
-> per decision D2 in
-> [plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md).
-> See [architecture/data-model.md](architecture/data-model.md) for the full
+> **Data-access layers:** most `Server/db` methods delegate to the
+> sqlc-generated layer (`Server/db/dbgen`, from `Server/db/queries/`) per
+> decision D2 in
+> [plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md);
+> a deliberate remainder (variable `IN` lists, FTS, multi-statement
+> transactions) still runs as hand-written SQL — tracked in
+> [plans/sqlc-adoption.md](plans/sqlc-adoption.md). See
+> [architecture/data-model.md](architecture/data-model.md) for the full
 > picture.
 
 ---
@@ -24,7 +26,12 @@ OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-
 | `mmap_size` | `268435456` | 256 MB memory-mapped I/O |
 | `cache_size` | `-64000` | 64 MB page cache |
 
-SQLite only allows one writer at a time. The connection pool is pinned to a single connection.
+SQLite only allows one writer at a time. File-backed databases (the production
+mode) therefore run a split pool: a single-connection writer pool
+(`SetMaxOpenConns(1)`) plus a multi-connection read-only pool sized
+`max(4, NumCPU)` and clamped to 1–64, configurable via `database.max_readers`
+(`Server/db/db.go`). Only in-memory databases (tests) keep the historical
+single shared connection.
 
 ---
 
@@ -72,6 +79,8 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `027_user_profile_fields.sql` | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe |
 | `028_group_dms.sql` | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving |
 | `029_drop_sounds_table.sql` | Drops `sounds` — dead since 001; the soundboard it was created for was never built (A-2026-07-13) |
+| `030_attachments_unlink_on_message_delete.sql` | Rebuilds `attachments` with `message_id ON DELETE SET NULL` (was CASCADE) — cascaded message deletes now unlink rows instead of removing them, so the periodic orphan sweep can still find and reclaim the stored files |
+| `031_sessions_expiry_index.sql` | Normalizes legacy `sessions.expires_at` values to RFC3339 UTC and adds `idx_sessions_expires_at` so the 15-minute expiry sweep is sargable |
 
 ---
 
@@ -92,14 +101,15 @@ CREATE TABLE roles (
 );
 ```
 
-**Default roles** (seeded by migration `001`, but no longer fixed — see
-*Role semantics* below):
+**Default roles** — current values after the full migration set (001 seeds
+different masks: 005/007 raise Member's, 022 grants `MENTION_EVERYONE` to
+Owner/Admin/Moderator). Not fixed at runtime — see *Role semantics* below:
 
 | id | name | color | permissions | position | Notes |
 |----|------|-------|-------------|----------|-------|
 | 1 | Owner | `#E74C3C` | `0x7FFFFFFF` | 100 | All 31 permission bits set |
 | 2 | Admin | `#F39C12` | `0x3FFFFFFF` | 80 | Everything except ADMINISTRATOR |
-| 3 | Moderator | `#3498DB` | `0x000FFFFF` | 60 | All message + voice + moderation |
+| 3 | Moderator | `#3498DB` | `0x002FFFFF` | 60 | All message + voice + moderation + mention-everyone |
 | 4 | Member | NULL | `0x1E63` | 40 | Send, read, attach, react, voice, video, screen share |
 
 **Role semantics:**
@@ -417,7 +427,7 @@ Supports FTS5 query syntax: simple terms, phrase queries, prefix queries, boolea
 ```sql
 CREATE TABLE attachments (
     id          TEXT    PRIMARY KEY,
-    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE SET NULL,
     filename    TEXT    NOT NULL,
     stored_as   TEXT    NOT NULL,
     mime_type   TEXT    NOT NULL,
@@ -432,6 +442,10 @@ CREATE TABLE attachments (
 Uses UUID primary keys. `message_id` is NULL during upload, linked when the
 message is sent. `uploader_id` (added by migration 010) records who uploaded
 the file and backs the ownership check when attaching an upload to a message.
+`ON DELETE SET NULL` (migration 030, was CASCADE) means a cascaded message
+delete unlinks the row instead of removing it, leaving the periodic orphan
+sweep (`DeleteOrphanedAttachments`) a handle on the stored file so the bytes
+are reclaimed rather than stranded.
 
 ---
 
@@ -716,24 +730,32 @@ CREATE TABLE plugin_kv (
 
 | Index Name | Table | Columns | Purpose |
 |------------|-------|---------|---------|
-| `idx_sessions_token` | sessions | `(token)` | Fast session lookup by token hash |
 | `idx_sessions_user` | sessions | `(user_id)` | Fast deletion of all sessions for a user |
+| `idx_sessions_expires_at` | sessions | `(expires_at)` | Sargable 15-minute session-expiry sweep (031) |
 | `idx_messages_channel` | messages | `(channel_id, id DESC)` | Latest messages in channel query |
 | `idx_messages_user` | messages | `(user_id)` | Filter by author |
-| `idx_invites_code` | invites | `(code)` | Fast invite validation |
+| `idx_messages_pinned` | messages | `(channel_id, id DESC)` partial: `WHERE pinned = 1 AND deleted = 0` | Pinned-message listing without scanning channel history (019) |
 | `idx_audit_timestamp` | audit_log | `(created_at DESC)` | Pagination of audit log |
 | `idx_audit_log_actor` | audit_log | `(actor_id)` | Filter by actor |
 | `idx_login_ip` | login_attempts | `(ip_address, timestamp)` | Rate limiting queries |
 | `idx_voice_states_channel` | voice_states | `(channel_id)` | All users in a voice channel |
-| `idx_channel_overrides_channel_role` | channel_overrides | `(channel_id, role_id)` | Permission lookup |
+| `idx_channel_overrides_role` | channel_overrides | `(role_id, channel_id, allow, deny)` | Covering per-role override fetch (019; replaced `idx_channel_overrides_channel_role`, which duplicated the UNIQUE auto-index) |
 | `idx_dm_participants_user` | dm_participants | `(user_id)` | DM channel lookup |
 | `idx_attachments_uploader` | attachments | `(uploader_id)` | Upload-ownership checks |
+| `idx_attachments_message` | attachments | `(message_id)` | Message → attachments fetch (019, recreated by 030's rebuild) |
 | `idx_user_blocks_blocked` | user_blocks | `(blocked_id, blocker_id)` | Reverse block lookup |
 | `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
 | `idx_events_created_at` | events | `(created_at)` | Retention pruning |
+| `idx_api_tokens_user` | api_tokens | `(user_id)` | Per-user token listing/revocation (018) |
 | `idx_message_mentions_user` | message_mentions | `(mentioned_user_id)` | Per-user mention lookup |
 | `idx_channel_user_overrides_user` | channel_user_overrides | `(user_id)` | "every override this member carries" — the direction the permission cache populates from (the PK covers the per-channel direction) |
 | `idx_roles_name_nocase` | roles | `(name COLLATE NOCASE)` UNIQUE | Case-insensitive role-name uniqueness |
+| `idx_users_avatar` | users | `(avatar)` partial: `WHERE avatar IS NOT NULL` | File route's avatar-authorization probe (027) |
+| `idx_channels_dm_group` | channels | `(is_group)` partial: `WHERE type = 'dm'` | Group-DM filtering (028) |
+
+Sessions are looked up by token and invites by code through their `UNIQUE`
+auto-indexes; the duplicating `idx_sessions_token` / `idx_invites_code` were
+dropped by migration 020.
 
 ---
 
