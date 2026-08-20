@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -240,11 +241,18 @@ const maxSessionsPerUser = 25
 // H-6: Enforces a per-user session cap by evicting the oldest session when
 // the limit is reached.
 func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
-	// Evict oldest sessions if at or above the cap.
-	_ = d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
+	// Evict oldest sessions if at or above the cap. A failed eviction must
+	// not block the login (the DELETE trims to the cap again on the next
+	// successful CreateSession, and a persistent DB failure fails the
+	// InsertSession below anyway), but an H-6 control failing is never
+	// allowed to be invisible.
+	if err := d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
 		UserID: userID,
 		Offset: maxSessionsPerUser - 1,
-	})
+	}); err != nil {
+		slog.Warn("session cap: failed to evict oldest sessions",
+			"user_id", userID, "err", err)
+	}
 
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
 	deviceCopy, ipCopy := device, ip

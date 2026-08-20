@@ -363,6 +363,17 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	return db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID), nil
 }
 
+// SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
+// or ok=false when they have none. Group DMs never match, mirroring the
+// block-enforcement boundary (requireDMNotBlocked exempts groups).
+func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
+	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
+	if err != nil {
+		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %v", ErrInternal, err)
+	}
+	return id, ok, nil
+}
+
 // RingTargets returns the other participants of a DM the caller is in — the
 // people a call_ring or call_decline is addressed to.
 //

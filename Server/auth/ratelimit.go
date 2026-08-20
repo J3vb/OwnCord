@@ -169,7 +169,10 @@ func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Dur
 	expiresAt := time.Now().Add(duration)
 	s.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
 	if r.store != nil {
-		_ = r.store.UpsertLockout(context.WithoutCancel(ctx), key, expiresAt)
+		if err := r.store.UpsertLockout(context.WithoutCancel(ctx), key, expiresAt); err != nil {
+			slog.Warn("ratelimit: failed to persist lockout; it will not survive a restart",
+				"key", key, "err", err)
+		}
 	}
 }
 
@@ -231,7 +234,10 @@ func (r *RateLimiter) Reset(ctx context.Context, key string) {
 	delete(s.windows, key)
 	delete(s.lockouts, key)
 	if r.store != nil {
-		_ = r.store.DeleteLockout(context.WithoutCancel(ctx), key)
+		if err := r.store.DeleteLockout(context.WithoutCancel(ctx), key); err != nil {
+			slog.Warn("ratelimit: failed to delete persisted lockout; it may reappear after a restart",
+				"key", key, "err", err)
+		}
 	}
 }
 
@@ -280,7 +286,9 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 
 	if r.store != nil {
 		// Runs from the StartCleanup background goroutine — no request ctx.
-		_ = r.store.CleanupExpiredLockouts(context.Background())
+		if err := r.store.CleanupExpiredLockouts(context.Background()); err != nil {
+			slog.Warn("ratelimit: failed to clean up expired persisted lockouts", "err", err)
+		}
 	}
 }
 

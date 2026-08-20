@@ -110,3 +110,77 @@ func TestCloseDM_OneToOneDoesNotEvictVoice(t *testing.T) {
 		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want none for a 1:1 close", bc.evictCalls)
 	}
 }
+
+// Blocking a user must evict them from the pair's live 1:1 DM voice call
+// (audit-2026-08-19 F-1): the block gate otherwise runs only on voice_join
+// and voluntary voice_token_refresh, so a blocked user already in the call
+// would stay in it indefinitely.
+func TestBlockUser_EvictsBlockedUserFromSharedDMVoice(t *testing.T) {
+	database := newDMTestDB(t)
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	router := buildDMRouter(database, bc)
+	tokens := []string{
+		dmCreateToken(t, database, "alice", 4),
+		dmCreateToken(t, database, "bob", 4),
+	}
+	rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2})
+	var created struct {
+		ChannelID int64 `json:"channel_id"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &created)
+	bc.evictCalls = nil
+
+	if blockRR := dmPut(t, router, "/api/v1/blocks/2", tokens[0]); blockRR.Code != http.StatusOK {
+		t.Fatalf("block: %d %s", blockRR.Code, blockRR.Body.String())
+	}
+
+	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != 2 || bc.evictCalls[0].channelID != created.ChannelID {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=2 channel=%d", bc.evictCalls, created.ChannelID)
+	}
+}
+
+// A block between users with no shared 1:1 DM has no call to sever — the
+// eviction capability must not fire at all.
+func TestBlockUser_NoSharedDM_NoEviction(t *testing.T) {
+	database := newDMTestDB(t)
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	router := buildDMRouter(database, bc)
+	alice := dmCreateToken(t, database, "alice", 4)
+	dmCreateToken(t, database, "bob", 4)
+
+	if blockRR := dmPut(t, router, "/api/v1/blocks/2", alice); blockRR.Code != http.StatusOK {
+		t.Fatalf("block: %d %s", blockRR.Code, blockRR.Body.String())
+	}
+
+	if len(bc.evictCalls) != 0 {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want none without a shared 1:1 DM", bc.evictCalls)
+	}
+}
+
+// Group DM calls are exempt from block enforcement (matching
+// requireDMNotBlocked's group exemption), so blocking a co-member of a group
+// must not evict them from the group's call.
+func TestBlockUser_GroupDMOnly_NoEviction(t *testing.T) {
+	database := newDMTestDB(t)
+	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
+	router := buildDMRouter(database, bc)
+	tokens := []string{
+		dmCreateToken(t, database, "alice", 4),
+		dmCreateToken(t, database, "bob", 4),
+		dmCreateToken(t, database, "carol", 4),
+	}
+	if rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
+		"recipient_ids": []int64{2, 3},
+	}); rr.Code != http.StatusCreated {
+		t.Fatalf("create group dm: %d %s", rr.Code, rr.Body.String())
+	}
+	bc.evictCalls = nil
+
+	if blockRR := dmPut(t, router, "/api/v1/blocks/2", tokens[0]); blockRR.Code != http.StatusOK {
+		t.Fatalf("block: %d %s", blockRR.Code, blockRR.Body.String())
+	}
+
+	if len(bc.evictCalls) != 0 {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want none for a group-only relationship", bc.evictCalls)
+	}
+}

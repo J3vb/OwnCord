@@ -794,6 +794,13 @@ func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 //
 // Only the topics the socket actually holds are examined — a blanket sweep over
 // every channel would disclose the full channel-ID list to a demoted user.
+//
+// revokeUnreadableChannelsPreActRaceHook, when non-nil, runs once per revoked
+// topic immediately before the live-client re-resolve. Test-only (nil in
+// production); pins the replaced-mid-loop hazard deterministically — same
+// pattern as refreshChannelVisibilityRaceHook.
+var revokeUnreadableChannelsPreActRaceHook func(userID int64)
+
 func (h *Hub) revokeUnreadableChannels(userID int64) {
 	// Ratcheted upward only (see bumpVisibilityWatermark), and evaluated at
 	// defer-RUN time — not the plain Store(Load(&h.seq)) this used to be,
@@ -843,7 +850,12 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		// makes the client clear its credentials instead of reconnecting.
 		slog.Warn("hub: role change visibility unresolved, closing socket",
 			"user_id", userID, "err", err)
-		h.kickClient(c)
+		// Re-resolve before kicking: the lookups above are DB round trips a
+		// reconnect can overlap, and kicking the stale snapshot would close a
+		// dead socket while the replacement keeps its subscriptions.
+		if live := h.GetClient(userID); live != nil {
+			h.kickClient(live)
+		}
 		return
 	}
 
@@ -862,19 +874,36 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		if chErr != nil {
 			slog.Warn("hub: role change channel lookup failed, closing socket",
 				"user_id", userID, "channel_id", chID, "err", chErr)
-			h.kickClient(c)
+			if live := h.GetClient(userID); live != nil {
+				h.kickClient(live)
+			}
 			return
 		}
 		if ch != nil && ch.Type == "dm" {
 			continue
 		}
-		c.sendMsg(buildChannelDelete(chID))
-		h.pubsub.Unsubscribe(c, topic)
-		c.mu.Lock()
-		if c.channelID == chID {
-			c.channelID = 0
+		if revokeUnreadableChannelsPreActRaceHook != nil {
+			revokeUnreadableChannelsPreActRaceHook(userID)
 		}
-		c.mu.Unlock()
+		// Re-resolve the live client immediately before acting: the DB round
+		// trips above (and computeAllowedChannels before the loop) give a
+		// reconnect room to replace this user's *Client in h.clients. Acting
+		// on the snapshot c would target the dead socket, and Unsubscribe
+		// would no-op on unsubscribeLocked's identity guard — stranding the
+		// replacement with the revoked topic (audit-2026-08-19 F-2; mirrors
+		// RefreshChannelVisibility's live re-resolve). A nil result means the
+		// user disconnected entirely; nothing left to revoke.
+		live := h.GetClient(userID)
+		if live == nil {
+			return
+		}
+		live.sendMsg(buildChannelDelete(chID))
+		h.pubsub.Unsubscribe(live, topic)
+		live.mu.Lock()
+		if live.channelID == chID {
+			live.channelID = 0
+		}
+		live.mu.Unlock()
 	}
 }
 

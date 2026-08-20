@@ -244,10 +244,6 @@ describe("message handling edge cases", () => {
     expect(client.getState()).toBe("connecting");
   });
 
-  it("isReplaying returns false when not reconnecting", () => {
-    expect(client.isReplaying()).toBe(false);
-  });
-
   it("_getWs returns null", () => {
     expect(client._getWs()).toBeNull();
   });

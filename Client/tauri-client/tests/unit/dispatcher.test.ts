@@ -128,7 +128,6 @@ function createMockWs() {
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),
-    isReplaying: vi.fn(() => false),
     _getWs: vi.fn(() => null),
   };
 
@@ -378,11 +377,11 @@ describe("WS Dispatcher", () => {
   });
 
   describe("chat_message notifications during a reconnect replay burst", () => {
-    // ws.ts clears isReplaying() as soon as auth_ok is processed — before the
-    // replay burst of chat_message frames the server sends right after it
-    // even arrives — so it cannot gate notifications the way it gates the
-    // unread counter above. A second auth_ok in this dispatcher's lifetime is
-    // always a reconnect handshake; its timestamp is the gate instead.
+    // The server writes auth_ok before the replay burst, so by the time
+    // replayed chat_message frames arrive the client is already "connected"
+    // — no connection-state flag can distinguish them. A second auth_ok in
+    // this dispatcher's lifetime is always a reconnect handshake; its
+    // timestamp is the gate instead.
     beforeEach(() => {
       vi.mocked(mockNotifyIncomingMessage).mockClear();
     });
@@ -3052,45 +3051,6 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(0);
   });
 
-  it("does not increment unread during replay", () => {
-    (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "other-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
-
-    mock.dispatch("chat_message", {
-      id: 300,
-      channel_id: 5,
-      user: { id: 2, username: "bob", avatar: null },
-      content: "replayed message",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
-
-    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(0);
-
-    (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(false);
-  });
-
   describe("chat_message DM store updates", () => {
     const dmChannel = {
       channelId: 50,
@@ -3176,33 +3136,6 @@ describe("WS Dispatcher", () => {
       const dm = dms.find((c) => c.channelId === 50);
       expect(dm?.lastMessage).toBe("active DM msg");
       expect(dm?.unreadCount).toBe(0);
-    });
-
-    it("updates DM preview (no unread) during replay", () => {
-      (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
-
-      mock.dispatch("chat_message", {
-        id: 503,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "replayed DM",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
-
-      const dms = dmStore.getState().channels;
-      const dm = dms.find((c) => c.channelId === 50);
-      expect(dm?.lastMessage).toBe("replayed DM");
-      expect(dm?.unreadCount).toBe(0);
-
-      (mock.ws.isReplaying as ReturnType<typeof vi.fn>).mockReturnValue(false);
     });
 
     it("increments the DM mention badge for an incoming @mention", () => {

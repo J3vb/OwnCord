@@ -389,7 +389,7 @@ describe("lastSeq tracking", () => {
   });
 });
 
-describe("reconnection dedup", () => {
+describe("reconnection replay handling", () => {
   let client: ReturnType<typeof createWsClient>;
 
   beforeEach(() => {
@@ -406,12 +406,11 @@ describe("reconnection dedup", () => {
     vi.useRealTimers();
   });
 
-  it("deduplicates messages during reconnection replay", async () => {
+  it("dispatches replay-burst frames arriving after auth_ok verbatim (no client-side dedup layer)", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    // Auth and get some messages to advance lastSeq
     emitTauriEvent(
       "ws-message",
       JSON.stringify({
@@ -424,7 +423,6 @@ describe("reconnection dedup", () => {
         },
       }),
     );
-
     emitTauriEvent(
       "ws-message",
       JSON.stringify({
@@ -435,7 +433,7 @@ describe("reconnection dedup", () => {
           id: 1,
           channel_id: 1,
           user: { id: 1, username: "a", avatar: null },
-          content: "original",
+          content: "before disconnect",
           reply_to: null,
           attachments: [],
           timestamp: "2026-01-01T00:00:00Z",
@@ -443,186 +441,51 @@ describe("reconnection dedup", () => {
       }),
     );
 
-    // Disconnect unexpectedly
     emitTauriEvent("ws-state", "closed");
-
-    // Wait for reconnect
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open");
 
-    // During reconnect, replay dedup is active
-    expect(client.isReplaying()).toBe(true);
+    // The server writes auth_ok BEFORE the replay burst
+    // (reconnectWriteReplay), so replayed frames land in the connected state
+    // exactly like live ones. The ws layer applies them verbatim — the old
+    // replayDedup machinery keyed off a pre-auth_ok window that never exists
+    // against a spec-compliant server and was removed (audit-2026-08-19
+    // F-6); duplicate handling belongs to the stores.
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 5,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+          replay_source: "buffer",
+        },
+      }),
+    );
 
     const messages: unknown[] = [];
     client.on("chat_message", (p) => messages.push(p));
 
-    // Send a message during replay -- first occurrence passes
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 5,
-        id: "msg-5",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "original",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    const replayFrame = JSON.stringify({
+      type: "chat_message",
+      seq: 6,
+      id: "msg-6",
+      payload: {
+        id: 2,
+        channel_id: 1,
+        user: { id: 1, username: "a", avatar: null },
+        content: "replayed",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    emitTauriEvent("ws-message", replayFrame);
+    emitTauriEvent("ws-message", replayFrame);
 
-    // Send the SAME message ID again — should be deduped
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 5,
-        id: "msg-5",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "original",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
-
-    // Only the first occurrence should pass through
-    expect(messages).toHaveLength(1);
-    expect((messages[0] as { content: string }).content).toBe("original");
-  });
-
-  it("auth_ok and ready messages are not deduped during replay", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 5,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    // Disconnect
-    emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
-
-    expect(client.isReplaying()).toBe(true);
-
-    const authPayloads: unknown[] = [];
-    client.on("auth_ok", (p) => authPayloads.push(p));
-
-    // auth_ok during replay should NOT be deduped
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 6,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    expect(authPayloads).toHaveLength(1);
-    // After auth_ok, replay dedup should be cleared
-    expect(client.isReplaying()).toBe(false);
-  });
-
-  it("dedup uses type:seq as key when message has no id", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "presence",
-        seq: 10,
-        payload: { user_id: 1, status: "idle" },
-      }),
-    );
-
-    // Disconnect
-    emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
-
-    const presences: unknown[] = [];
-    client.on("presence", (p) => presences.push(p));
-
-    // First presence during replay — passes through
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "presence",
-        seq: 10,
-        payload: { user_id: 1, status: "idle" },
-      }),
-    );
-
-    // Same type:seq — should be deduped
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "presence",
-        seq: 10,
-        payload: { user_id: 1, status: "idle" },
-      }),
-    );
-
-    // Different seq — should pass through
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "presence",
-        seq: 11,
-        payload: { user_id: 1, status: "online" },
-      }),
-    );
-
-    expect(presences).toHaveLength(2);
-    expect((presences[0] as { status: string }).status).toBe("idle");
-    expect((presences[1] as { status: string }).status).toBe("online");
-  });
-
-  it("dedup is not active for first connection (lastSeq=0)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    // First connect should NOT enable dedup
-    expect(client.isReplaying()).toBe(false);
+    expect(messages).toHaveLength(2);
   });
 });
 
@@ -854,115 +717,6 @@ describe("scheduleReconnect guard clauses", () => {
   });
 });
 
-describe("dedup eviction when exceeding MAX_DEDUP_SIZE", () => {
-  let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
-  });
-
-  it("evicts oldest entry when dedup set exceeds 1000 entries", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    // Get past lastSeq > 0 condition
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 100,
-        payload: {
-          id: 99,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "bump seq",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
-
-    // Disconnect to trigger dedup mode
-    emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
-    expect(client.isReplaying()).toBe(true);
-
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
-
-    // Send 1002 unique messages to trigger eviction (MAX_DEDUP_SIZE = 1000)
-    for (let i = 0; i < 1002; i++) {
-      emitTauriEvent(
-        "ws-message",
-        JSON.stringify({
-          type: "chat_message",
-          seq: 101 + i,
-          id: `msg-${i}`,
-          payload: {
-            id: i,
-            channel_id: 1,
-            user: { id: 1, username: "a", avatar: null },
-            content: `msg ${i}`,
-            reply_to: null,
-            attachments: [],
-            timestamp: "2026-01-01T00:00:00Z",
-          },
-        }),
-      );
-    }
-
-    // All 1002 should have been dispatched (first occurrence of each)
-    expect(messages).toHaveLength(1002);
-
-    // Now re-send the very first message (msg-0) — it was evicted, so it should pass again
-    const countBefore = messages.length;
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 101,
-        id: "msg-0",
-        payload: {
-          id: 0,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "msg 0",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
-    expect(messages).toHaveLength(countBefore + 1);
-  });
-});
-
 describe("auth_error during reconnection replay", () => {
   let client: ReturnType<typeof createWsClient>;
 
@@ -980,7 +734,7 @@ describe("auth_error during reconnection replay", () => {
     vi.useRealTimers();
   });
 
-  it("auth_error is not deduped during replay and stops reconnect", async () => {
+  it("auth_error after a reconnect handshake stops reconnection", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -1002,12 +756,10 @@ describe("auth_error during reconnection replay", () => {
     emitTauriEvent("ws-state", "closed");
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open");
-    expect(client.isReplaying()).toBe(true);
 
     const errors: unknown[] = [];
     client.on("auth_error", (p) => errors.push(p));
 
-    // auth_error during replay — should NOT be deduped
     emitTauriEvent(
       "ws-message",
       JSON.stringify({

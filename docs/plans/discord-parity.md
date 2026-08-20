@@ -10,8 +10,8 @@
 > `permissions/checker.go:116-121`). Named leftovers remain open and are listed
 > in-line: role hoist/mentionable flags + `@RoleName` mentions (Phase 5),
 > categories as real entities (Phase 5), and the §"still-dead code" cleanup
-> list (`sounds` table, `voice_speakers`, `voice_config.bitrate`, macOS PTT
-> stub).
+> list (`voice_speakers`, `voice_config.bitrate`, macOS PTT stub — the
+> `sounds` table was dropped by migration 029 on 2026-08-04, A-2026-07-13).
 
 Status: phase 6 complete (2026-08-01)
 

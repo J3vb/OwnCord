@@ -49,7 +49,6 @@ function createMockWs(state: "connected" | "disconnected" = "connected"): WsClie
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => currentState),
-    isReplaying: vi.fn(() => false),
     _getWs: vi.fn(() => null),
     _setState(s: "connected" | "disconnected") {
       currentState = s;

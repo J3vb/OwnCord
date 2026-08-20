@@ -152,7 +152,7 @@ jobs:
 
       - name: TypeScript check (Playwright specs)
         # The main tsconfig excludes tests/e2e from the app graph; this
-        # project typechecks the 47 spec files + fixtures + the three
+        # project typechecks every tests/e2e spec + fixtures + the
         # playwright configs so type rot cannot hide there.
         run: npx tsc -p tsconfig.e2e.json --noEmit
 

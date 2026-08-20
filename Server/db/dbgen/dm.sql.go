@@ -34,6 +34,31 @@ func (q *Queries) CountDMParticipants(ctx context.Context, channelID int64) (int
 	return count, err
 }
 
+const findDMChannelIDBetween = `-- name: FindDMChannelIDBetween :one
+SELECT dp1.channel_id FROM dm_participants dp1
+JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
+JOIN channels c ON c.id = dp1.channel_id
+WHERE dp1.user_id = ? AND dp2.user_id = ? AND c.type = 'dm' AND c.is_group = 0
+ORDER BY dp1.channel_id ASC
+`
+
+type FindDMChannelIDBetweenParams struct {
+	UserID   int64 `json:"userId"`
+	UserID_2 int64 `json:"userId2"`
+}
+
+// The 1:1 DM channel between two users, if one exists. Mirrors the lookup
+// inside GetOrCreateDMChannel (raw, transactional) without creating anything:
+// the is_group clause keeps group DMs out, matching the block-enforcement
+// boundary (blocks never gate group DMs). ORDER BY makes the row choice
+// deterministic should duplicates ever exist.
+func (q *Queries) FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelIDBetweenParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, findDMChannelIDBetween, arg.UserID, arg.UserID_2)
+	var channel_id int64
+	err := row.Scan(&channel_id)
+	return channel_id, err
+}
+
 const getDMParticipantIDs = `-- name: GetDMParticipantIDs :many
 SELECT user_id FROM dm_participants WHERE channel_id = ?
 `
