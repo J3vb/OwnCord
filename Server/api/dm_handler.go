@@ -399,6 +399,14 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 			return
 		}
 
+		// The block has already committed at this point, so the rest of this
+		// handler must survive the caller's request context being cancelled
+		// right after that commit (client disconnect mid-handler) — same
+		// reasoning as handleRenameGroupDM's own bgCtx. Without this, a
+		// canceled request context makes the shared-DM lookup below fail and
+		// get skipped, silently defeating the eviction it gates.
+		bgCtx := context.WithoutCancel(r.Context())
+
 		// Revocation must evict a live session, not merely block the next
 		// join (the same invariant the voice sweep states): without this, a
 		// blocked user already in the pair's 1:1 DM voice call stays in it
@@ -407,11 +415,11 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 		// controls. Group DM calls are deliberately untouched, matching
 		// requireDMNotBlocked's group exemption.
 		if ve, evictable := broadcaster.(dmVoiceEvictor); evictable {
-			if chID, exists, err := svc.DMs.SharedOneToOneDM(r.Context(), user.ID, targetID); err != nil {
+			if chID, exists, err := svc.DMs.SharedOneToOneDM(bgCtx, user.ID, targetID); err != nil {
 				slog.Warn("block: shared-DM lookup for voice eviction failed",
 					"blocker_id", user.ID, "target_id", targetID, "err", err)
 			} else if exists {
-				ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), targetID, chID)
+				ve.DisconnectFromVoiceInChannel(bgCtx, targetID, chID)
 			}
 		}
 
