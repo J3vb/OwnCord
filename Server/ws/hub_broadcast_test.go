@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -305,7 +306,7 @@ func TestHub_SetEventPersister(t *testing.T) {
 		if row.ChannelID != tc.channelID {
 			t.Errorf("%s: row channel_id = %d, want %d", tc.label, row.ChannelID, tc.channelID)
 		}
-		if string(row.Payload) != string(tc.frame) {
+		if !bytes.Equal(row.Payload, tc.frame) {
 			t.Errorf("%s: row payload = %s, want the delivered frame %s", tc.label, row.Payload, tc.frame)
 		}
 	}
