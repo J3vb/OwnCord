@@ -9,8 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -498,6 +500,120 @@ func TestExtractChatserverFromTarGz(t *testing.T) {
 	}
 	if !bytes.Equal(got, inner) {
 		t.Errorf("extracted content mismatch")
+	}
+}
+
+// tarEntry is one member of a test archive; body is empty for header-only
+// entries such as symlinks.
+type tarEntry struct {
+	hdr  tar.Header
+	body []byte
+}
+
+func buildTarGz(t *testing.T, entries ...tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for i := range entries {
+		hdr := entries[i].hdr
+		hdr.Mode = 0o755
+		hdr.Size = int64(len(entries[i].body))
+		if err := tw.WriteHeader(&hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(entries[i].body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractChatserverFromTarGzEntryFilters(t *testing.T) {
+	want := []byte("#!/bin/real\n")
+	wantSum := sha256.Sum256(want)
+	regular := tarEntry{hdr: tar.Header{Name: "chatserver", Typeflag: tar.TypeReg}, body: want}
+
+	tests := []struct {
+		name    string
+		entries []tarEntry
+		wantErr bool
+	}{
+		{
+			// A "chatserver" shipped as a symlink must not be followed.
+			name:    "non-regular entry is skipped",
+			entries: []tarEntry{{hdr: tar.Header{Name: "chatserver", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}}, regular},
+		},
+		{
+			name:    "path-traversal name is skipped",
+			entries: []tarEntry{{hdr: tar.Header{Name: "../../chatserver", Typeflag: tar.TypeReg}, body: []byte("planted")}, regular},
+		},
+		{
+			name:    "other basename is skipped",
+			entries: []tarEntry{{hdr: tar.Header{Name: "chatserver.sig", Typeflag: tar.TypeReg}, body: []byte("sig")}, regular},
+		},
+		{
+			name:    "no chatserver member at all",
+			entries: []tarEntry{{hdr: tar.Header{Name: "README", Typeflag: tar.TypeReg}, body: []byte("hi")}, {hdr: tar.Header{Name: "chatserver", Typeflag: tar.TypeSymlink, Linkname: "/bin/sh"}}},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "chatserver")
+			gotHash, err := extractChatserverFromTarGz(bytes.NewReader(buildTarGz(t, tc.entries...)), dest)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("extractChatserverFromTarGz = %q, want error", gotHash)
+				}
+				if _, statErr := os.Stat(dest); !errors.Is(statErr, fs.ErrNotExist) {
+					t.Errorf("destPath exists after a failed extraction (stat err %v)", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("extractChatserverFromTarGz: %v", err)
+			}
+			if gotHash != hex.EncodeToString(wantSum[:]) {
+				t.Errorf("hash = %q, want hash of the regular chatserver entry", gotHash)
+			}
+			got, readErr := os.ReadFile(dest)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("extracted %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A pre-existing staging path is an attacker-planted file: staging is O_EXCL,
+// so extraction must fail rather than write through it.
+func TestExtractChatserverFromTarGzRefusesExistingDest(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "chatserver")
+	planted := []byte("planted-by-attacker")
+	if err := os.WriteFile(dest, planted, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := buildTarGz(t, tarEntry{hdr: tar.Header{Name: "chatserver", Typeflag: tar.TypeReg}, body: []byte("#!/bin/real\n")})
+	if _, err := extractChatserverFromTarGz(bytes.NewReader(archive), dest); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("extractChatserverFromTarGz err = %v, want fs.ErrExist", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, planted) {
+		t.Errorf("pre-existing file was overwritten: %q", got)
 	}
 }
 

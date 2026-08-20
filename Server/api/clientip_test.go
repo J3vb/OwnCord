@@ -190,6 +190,39 @@ func TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(t *testing.T) {
 	}
 }
 
+// TestClientIP_XForwardedFor_SkipsMalformedEntries pins the skip guard in the
+// right-to-left walk: a garbage or empty XFF entry must be stepped over, never
+// used as a rate-limit/lockout key. The garbage sits to the RIGHT of the real
+// client so the walk actually reaches it. Dropping the guard would return
+// "not-an-ip" / "garbage" as the key.
+func TestClientIP_XForwardedFor_SkipsMalformedEntries(t *testing.T) {
+	trusted := parseCIDRList([]string{"10.0.0.0/8"})
+
+	tests := []struct {
+		name string
+		xff  string
+		want string
+	}{
+		{"garbage rightmost", "203.0.113.10, not-an-ip", "203.0.113.10"},
+		{"empty entry", "203.0.113.10, , 10.0.0.1", "203.0.113.10"},
+		{"garbage between hops", "203.0.113.10, ::gg::, 10.0.0.1", "203.0.113.10"},
+		// Nothing parseable at all: fall back to RemoteAddr, never a garbage key.
+		{"all malformed falls back to RemoteAddr", "garbage, , not-an-ip", "10.0.0.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.RemoteAddr = "10.0.0.1:9999" // the trusted proxy
+			req.Header.Set("X-Forwarded-For", tt.xff)
+
+			if ip := clientIPWithProxies(req, trusted); ip != tt.want {
+				t.Errorf("clientIP XFF %q = %q, want %q", tt.xff, ip, tt.want)
+			}
+		})
+	}
+}
+
 func TestClientIP_RemoteAddrWithoutPort(t *testing.T) {
 	// RemoteAddr sometimes has no port (e.g. Unix sockets in tests).
 	req := httptest.NewRequest("GET", "/", nil)

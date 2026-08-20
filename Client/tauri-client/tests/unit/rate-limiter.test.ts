@@ -36,6 +36,10 @@ describe("RateLimiter", () => {
     expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow("windowMs must be >= 1");
   });
 
+  it("does not throw when windowMs is exactly 1 (boundary)", () => {
+    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 1 })).not.toThrow();
+  });
+
   // -- tryConsume -----------------------------------------------------------
 
   it("allows requests under the limit", () => {
@@ -162,6 +166,17 @@ describe("RateLimiter", () => {
 
     expect(limiter.getRemainingMs()).toBeGreaterThan(0);
   });
+
+  it("getRemainingMs returns 0 when under limit despite prior activity in the window", () => {
+    // maxTokens=3 with only 1 consumed: timestamps.length (1) < maxTokens (3)
+    // is true, so the under-limit guard must return 0 immediately rather than
+    // falling through to the oldest-timestamp math below it (which would
+    // wrongly report a positive wait here).
+    const limiter = createRateLimiter(3, 1_000);
+    limiter.tryConsume("a");
+
+    expect(limiter.getRemainingMs("a")).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -238,11 +253,16 @@ describe("Pre-configured limiters", () => {
     expect(limiter.tryConsume()).toBe(true);
   });
 
-  it("createVoiceLimiter: 20 per 1s", () => {
+  // createVoiceLimiter gates onMuteToggle/onDeafenToggle (VoiceCallbacks.ts),
+  // which send voice_mute / voice_deafen. The server caps each of those at
+  // 2/sec (Server/ws/voice_broadcast.go voiceMuteRateLimit/voiceDeafenRateLimit,
+  // docs/protocol.md). The client limit must not exceed that budget, or an
+  // over-budget toggle applies its optimistic local state before the server
+  // refuses the send.
+  it("createVoiceLimiter: 2 per 1s (matches the server's voice_mute/voice_deafen budget)", () => {
     const limiter = createVoiceLimiter();
-    for (let i = 0; i < 20; i++) {
-      expect(limiter.tryConsume()).toBe(true);
-    }
+    expect(limiter.tryConsume()).toBe(true);
+    expect(limiter.tryConsume()).toBe(true);
     expect(limiter.tryConsume()).toBe(false);
 
     vi.advanceTimersByTime(1_001);

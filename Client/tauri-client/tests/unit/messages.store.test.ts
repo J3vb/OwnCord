@@ -341,6 +341,49 @@ describe("messages store", () => {
       expect(msgs.map((m) => m.id)).toEqual([500, 501]);
       expect(msgs.every((m) => m.status === "sent")).toBe(true);
     });
+
+    it("keeps a still-pending local row when its would-be echo sits in the head that overflow-trimming drops", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "echo-in-head",
+        replyTo: null,
+        timestamp: "2026-03-15T09:59:59Z",
+      });
+
+      // Server returns newest-first; id 1 becomes the OLDEST entry once
+      // reversed -- exactly the entry the initial overflow trim drops before
+      // the pending row's echo-match ever gets to see it. It carries the
+      // same author+content as the still-pending row above and must NOT be
+      // treated as its echo (the trim has to run before the match, not after).
+      const responses: MessageResponse[] = [];
+      for (let i = 501; i >= 1; i--) {
+        responses.push(
+          makeMessageResponse({
+            id: i,
+            content: i === 1 ? "echo-in-head" : `msg-${i}`,
+            user: i === 1 ? TEST_USER : TEST_USER_2,
+          }),
+        );
+      }
+      setMessages(1, responses, false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(500);
+      expect(msgs.some((m) => m.correlationId === "c1" && m.status === "pending")).toBe(true);
+    });
+
+    it("does not report hasMore at exactly the cap with no trimming and no carried overflow", () => {
+      const responses: MessageResponse[] = [];
+      for (let i = 1; i <= 500; i++) {
+        responses.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      setMessages(1, responses, false);
+
+      expect(getChannelMessages(1)).toHaveLength(500);
+      expect(hasMoreMessages(1)).toBe(false);
+    });
   });
 
   // 4. prependMessages prepends older messages
@@ -371,6 +414,14 @@ describe("messages store", () => {
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(1);
       expect(msgs[0]!.id).toBe(5);
+    });
+
+    it("does not mark the channel detached when the prepend has no actual overflow to trim", () => {
+      setMessages(1, [makeMessageResponse({ id: 20 })], true);
+
+      prependMessages(1, [makeMessageResponse({ id: 10 })], false);
+
+      expect(isWindowDetached(1)).toBe(false);
     });
   });
 
@@ -1091,6 +1142,51 @@ describe("messages store", () => {
       expect(hasMoreMessages(1)).toBe(false);
       expect(isWindowDetached(1)).toBe(true);
     });
+
+    it("does not duplicate a carried optimistic row that already fell within the kept head on overflow", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "p1",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "p2",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c3",
+        channelId: 1,
+        user: TEST_USER,
+        content: "p3",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:02Z",
+      });
+
+      // 498 fresh + 3 already-pending rows = 501: the overflow (1) is smaller
+      // than the trailing pending run (3), so the split falls INSIDE that
+      // run -- two of the three pending rows land in the kept head and only
+      // the third is pushed into the carried tail.
+      const older: MessageResponse[] = [];
+      for (let i = 498; i >= 1; i--) {
+        older.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      prependMessages(1, older, false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(501);
+      expect(msgs.map((m) => m.correlationId).filter((c) => c !== null)).toEqual([
+        "c1",
+        "c2",
+        "c3",
+      ]);
+    });
   });
 
   // 17. editMessage when message ID doesn't match
@@ -1142,6 +1238,8 @@ describe("messages store", () => {
       expect(msgs[0]!.status).toBe("pending");
       expect(msgs[0]!.correlationId).toBe("c1");
       expect(msgs[0]!.id).toBe(0);
+      expect(msgs[0]!.pinned).toBe(false);
+      expect(msgs[0]!.deleted).toBe(false);
       expect(messagesStore.getState().pendingSends.get("c1")).toBe(1);
     });
 
@@ -1221,6 +1319,62 @@ describe("messages store", () => {
 
       removeOptimistic("c1");
       expect(getChannelMessages(1)).toHaveLength(0);
+    });
+
+    it("removeOptimistic drops only the targeted row when multiple sends are still in flight", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "first",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "second",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+
+      // Both are still tracked in pendingSends (neither failed), so this
+      // exercises the direct channelId-lookup branch, not the fallback scan.
+      removeOptimistic("c1");
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.correlationId).toBe("c2");
+    });
+
+    it("removeOptimistic's fallback scan finds an already-failed row in a later channel, leaving an earlier unrelated channel untouched", () => {
+      // Channel 1 is inserted first and holds only an unrelated sent message,
+      // so it is visited first by the fallback scan's Map iteration order.
+      addMessage(makeChatPayload({ id: 60, channel_id: 1, content: "unrelated" }));
+
+      // Channel 2 (inserted second) holds a sent row plus the failed
+      // optimistic row we're targeting -- a mixed list, so `.some` and
+      // `.every` disagree on whether it contains the correlation id.
+      addMessage(makeChatPayload({ id: 61, channel_id: 2, content: "seed" }));
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 2,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+      // markSendFailed already dropped "c1" from pendingSends, so
+      // removeOptimistic must use the fallback scan below.
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+
+      removeOptimistic("c1");
+
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]!.id).toBe(60);
+      expect(getChannelMessages(2).map((m) => m.correlationId)).toEqual([null]);
     });
 
     it("addMessage is idempotent by real id (replay-safe)", () => {
@@ -1310,6 +1464,74 @@ describe("messages store", () => {
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(2);
       expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("failed");
+    });
+
+    it("does not reconcile a pending row against a different author's identical-content broadcast", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      // Different author, identical content -- must not be treated as this
+      // pending row's echo (isUnreconciledEcho requires the same user id).
+      addMessage(makeChatPayload({ id: 900, user: TEST_USER_2, content: "hi" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.find((m) => m.correlationId === "c1")!.status).toBe("pending");
+      expect(msgs.find((m) => m.id === 900)!.user.id).toBe(TEST_USER_2.id);
+    });
+
+    it("does not re-run step-2 reconciliation against an already-confirmed row that still carries its correlationId", () => {
+      // confirmSend flips status to "sent" but deliberately leaves
+      // correlationId set (it is cleared only once the id-matched broadcast
+      // lands) -- a same-author/same-content broadcast under a DIFFERENT id
+      // must not treat this already-confirmed row as an unreconciled echo.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      confirmSend("c1", 555, "2026-03-15T10:00:01Z");
+
+      addMessage(makeChatPayload({ id: 999, user: TEST_USER, content: "hi" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs.find((m) => m.id === 555)!.correlationId).toBe("c1");
+      expect(msgs.find((m) => m.id === 999)).toBeDefined();
+    });
+
+    it("replaces only the reconciled row, leaving a sibling message in the channel untouched", () => {
+      addMessage(
+        makeChatPayload({ id: 50, channel_id: 1, user: TEST_USER_2, content: "unrelated" }),
+      );
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "race",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+
+      // Broadcast races ahead of the ack; reconciles the pending row by
+      // author+content (step 2) at its own index, not the unrelated sibling
+      // that precedes it.
+      addMessage(makeChatPayload({ id: 800, user: TEST_USER, content: "race" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0]!.id).toBe(50);
+      expect(msgs[0]!.content).toBe("unrelated");
+      expect(msgs[1]!.id).toBe(800);
     });
 
     it("keeps id/time order when another user's message commits while our send is still in flight", () => {
@@ -1408,6 +1630,14 @@ describe("messages store", () => {
       const before = messagesStore.getState();
       invalidateLoadedMessageWindows();
       expect(messagesStore.getState()).toBe(before);
+    });
+
+    it("deletes the channel entry entirely when nothing survives (not just empties the array)", () => {
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+
+      invalidateLoadedMessageWindows();
+
+      expect(messagesStore.getState().messagesByChannel.has(1)).toBe(false);
     });
   });
 

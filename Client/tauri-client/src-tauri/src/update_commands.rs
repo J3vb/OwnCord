@@ -220,4 +220,39 @@ mod tests {
             "https://chat.example.com:8443/api/v1/client-update/{{target}}-{{arch}}-{{bundle_type}}/0.0.0"
         );
     }
+
+    #[test]
+    fn validate_server_url_rejects_unsafe_urls() {
+        // build_updater() calls this first, so it is the only guard before the
+        // updater downloads and runs an installer from this host.
+        let scheme = "server_url must use https:// scheme";
+        let userinfo = "server_url must not contain userinfo";
+        for (url, want_err) in [
+            ("http://chat.example.com", scheme),
+            ("ftp://chat.example.com", scheme),
+            ("chat.example.com", scheme),
+            // Case-sensitive on purpose: anything not literally https:// is out.
+            ("HTTPS://chat.example.com", scheme),
+            ("https://evil@chat.example.com", userinfo),
+            ("https://user:pass@chat.example.com", userinfo),
+            ("https://:pass@chat.example.com", userinfo),
+        ] {
+            assert_eq!(
+                validate_server_url(url),
+                Err(want_err.to_string()),
+                "expected {url} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_server_url_accepts_plain_https() {
+        for url in [
+            "https://chat.example.com",
+            "https://chat.example.com/",
+            "https://chat.example.com:8443/",
+        ] {
+            assert_eq!(validate_server_url(url), Ok(()), "expected {url} to pass");
+        }
+    }
 }

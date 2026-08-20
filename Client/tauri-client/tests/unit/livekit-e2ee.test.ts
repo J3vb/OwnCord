@@ -94,6 +94,7 @@ import {
   generateRoomKey,
   importPublicKey,
   exportPublicKey,
+  computeRawKeyFingerprint,
 } from "@lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { authStore } from "@stores/auth.store";
@@ -1451,5 +1452,181 @@ describe("E2EEManager", () => {
 
     mgr.clearState();
     expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith(null);
+  });
+
+  // ── Guards the suite reached but never pinned (mutation audit T-2026-08-19-47) ──
+
+  it("[T-47] aborts setup when a teardown lands during the key holder's keyProvider.setKey", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+
+    // Stall the holder's setKey — the last await before the keypair is
+    // published. A teardown here leaves nothing about our local state null,
+    // so only the session-generation check can see it.
+    let releaseSetKey!: () => void;
+    mockSetKey.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        releaseSetKey = resolve;
+      }),
+    );
+
+    const setupPromise = mgr.setupKeyExchange(true, 1);
+    await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalled());
+
+    mgr.clearState();
+    releaseSetKey();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Publishing the keypair here would defeat handleAnnounceInner's queue
+    // guard and go on to announce a dead ephemeral key over a live call.
+    expect((mgr as unknown as { _ecdhKeyPair: unknown })._ecdhKeyPair).toBeNull();
+    expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(0);
+    await expect(setupPromise).resolves.toBe(false);
+  });
+
+  it("[T-47] a superseded reconnect re-announce publishes neither its fingerprint nor a stray announce", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    ws.send.mockClear();
+    vi.mocked(setLocalSessionFingerprint).mockClear();
+
+    // Attempt A stalls after publishing its keypair, while computing its own
+    // session fingerprint.
+    let releaseFingerprint!: (v: string) => void;
+    const stalledFingerprint = new Promise<string>((resolve) => {
+      releaseFingerprint = resolve;
+    });
+    vi.mocked(computeRawKeyFingerprint)
+      .mockReturnValueOnce(stalledFingerprint)
+      .mockResolvedValueOnce("FP-B");
+
+    const reconnectA = mgr.reannounceForReconnect();
+    await vi.waitFor(() => expect(computeRawKeyFingerprint).toHaveBeenCalled());
+
+    // A second reconnect wins the race and publishes its own keypair.
+    vi.mocked(generateECDHKeyPair).mockResolvedValueOnce({
+      publicKey: { type: "pub-B" } as unknown as CryptoKey,
+      privateKey: { type: "priv-B" } as unknown as CryptoKey,
+    });
+    await mgr.reannounceForReconnect();
+
+    releaseFingerprint("FP-A-STALE");
+    await reconnectA;
+
+    // A owns neither the published keypair nor the announce: showing the user
+    // A's fingerprint (or re-announcing A's dead key) misrepresents the live
+    // session's identity.
+    expect(setLocalSessionFingerprint).toHaveBeenCalledWith("FP-B");
+    expect(setLocalSessionFingerprint).not.toHaveBeenCalledWith("FP-A-STALE");
+    expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
+  });
+
+  it("[T-47] does not arm a reconnect-confirmation retry when there was no room key to go stale", async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = { send: vi.fn() };
+      const mgr = createManager(ws); // never keyed: non-holder, no room key
+
+      await mgr.reannounceForReconnect();
+      expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
+
+      // Nothing could have gone stale — waiting for the first offer is
+      // setupKeyExchange's concern, so no confirmation retry belongs here.
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("[T-47] skips the reconnect-confirmation retry once a fresh offer replaced the room key", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    await mgr.handleOffer(PEER_ID, "enc", "iv"); // stands us down — now a non-holder with a key
+    ws.send.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      await mgr.reannounceForReconnect();
+      // The holder's confirming offer arrives well inside the window.
+      vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+        roomKey: new Uint8Array(32).fill(9),
+        epoch: 1,
+      });
+      await mgr.handleOffer(PEER_ID, "enc2", "iv2");
+
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1); // no retry
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("[T-47] a duplicate announce does not reset the sender's offer high-water mark", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    // Announce the exact key the export mock echoes back, so the repeat below
+    // takes the dedupe path rather than the key-changed path.
+    await mgr.handleAnnounce(PEER_ID, "bW9ja2VwaGVtZXJhbA==", "sig");
+    mockSetKey.mockClear();
+    vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
+
+    try {
+      unwrapAt(5, 5);
+      await mgr.handleOffer(PEER_ID, "enc5", "iv5");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-5");
+
+      // A replayed (validly signed) announce carrying the peer's CURRENT key
+      // must not clear the high-water mark — that would re-open the OC-0001
+      // downgrade window for every superseded offer of theirs.
+      await mgr.handleAnnounce(PEER_ID, "bW9ja2VwaGVtZXJhbA==", "sig");
+
+      unwrapAt(2, 2);
+      await mgr.handleOffer(PEER_ID, "enc2", "iv2");
+      expect(mockSetKey).toHaveBeenLastCalledWith("key-5");
+    } finally {
+      vi.mocked(roomKeyToBase64).mockImplementation(() => "mock-room-key-base64");
+    }
+  });
+
+  it("[T-47] does not promote itself on a leave while a lower-id participant remains", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // We are uid 50; uid 10 stays behind, so the election must pick them.
+    vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 50 } }) as never);
+    mockVoiceState.voiceUsers.set(1, new Map([[10, {}] as const, [50, {}] as const]));
+
+    try {
+      await mgr.handleParticipantLeft(PEER_ID);
+
+      // Self-promoting here means two holders rotating against each other:
+      // our offers get NOT_KEY_HOLDER'd only after we applied our own key.
+      expect(mgr.epoch).toBe(0);
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+    } finally {
+      vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 1 } }) as never);
+    }
+  });
+
+  it("[T-47] arms the periodic rotation timer for the key holder so forward secrecy actually fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = { send: vi.fn() };
+      const mgr = createManager(ws);
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      ws.send.mockClear();
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+      expect(mgr.epoch).toBe(2);
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

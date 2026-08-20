@@ -464,6 +464,37 @@ mod tests {
         );
     }
 
+    // ── CaptureVerifier ──────────────────────────────────────────────────────
+
+    // The whole post-handshake TOFU pin depends on CaptureVerifier recording
+    // the LEAF cert, not an intermediate — that's what the safety comment at
+    // the top of the impl asserts. Prove it: feed it a leaf plus a different
+    // intermediate and check which fingerprint lands in the shared cell.
+    #[test]
+    fn capture_verifier_records_leaf_not_intermediate() {
+        use rustls::client::danger::ServerCertVerifier;
+
+        let (verifier, captured) = CaptureVerifier::new();
+        let leaf = rustls::pki_types::CertificateDer::from(b"leaf-cert".to_vec());
+        let intermediate = rustls::pki_types::CertificateDer::from(b"intermediate-cert".to_vec());
+        let name = rustls::pki_types::ServerName::try_from("example.com".to_string()).unwrap();
+
+        let result = verifier.verify_server_cert(
+            &leaf,
+            &[intermediate],
+            &name,
+            &[],
+            rustls::pki_types::UnixTime::since_unix_epoch(std::time::Duration::from_secs(0)),
+        );
+
+        // Accepts unconditionally — the TOFU gate happens after the handshake.
+        assert!(result.is_ok());
+        assert_eq!(
+            captured.lock().unwrap().as_deref(),
+            Some(fingerprint_hex(b"leaf-cert").as_str())
+        );
+    }
+
     // ── HostScopedVerifier ──────────────────────────────────────────────────
 
     /// Stub for the non-pinned-host verifier: records nothing, just returns a

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
@@ -171,6 +171,108 @@ describe("UserProfilePopup", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
     expect(popup.isOpen()).toBe(false);
+  });
+});
+
+describe("UserProfilePopup positioning", () => {
+  let container: HTMLDivElement;
+  let originalInnerWidth: number;
+  let originalInnerHeight: number;
+  let offsetHeightDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    originalInnerWidth = window.innerWidth;
+    originalInnerHeight = window.innerHeight;
+  });
+
+  afterEach(() => {
+    container.remove();
+    window.innerWidth = originalInnerWidth;
+    window.innerHeight = originalInnerHeight;
+    if (offsetHeightDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+      offsetHeightDescriptor = undefined;
+    }
+  });
+
+  function getPopupEl(): HTMLElement {
+    return container.querySelector('[data-testid="user-profile-popup"]') as HTMLElement;
+  }
+
+  it("places the card to the right of the anchor, offset by the gap, when it fits", () => {
+    window.innerWidth = 800;
+    window.innerHeight = 600;
+    const popup = createUserProfilePopup({ user: makeUser(), anchorX: 100, anchorY: 100 });
+    popup.mount(container);
+
+    // 100 + 8 (gap) = 108, and 108 + 300 (width) = 408 fits inside 800 - 8, so
+    // no flip. jsdom never lays anything out (offsetHeight is 0), so nothing
+    // overflows the bottom either and top stays at the anchor.
+    expect(getPopupEl().style.left).toBe("108px");
+    expect(getPopupEl().style.top).toBe("100px");
+
+    popup.destroy?.();
+  });
+
+  it("flips the card to the left of the anchor when there is no room on the right", () => {
+    window.innerWidth = 1024;
+    window.innerHeight = 768;
+    const popup = createUserProfilePopup({ user: makeUser(), anchorX: 1020, anchorY: 100 });
+    popup.mount(container);
+
+    // 1020 + 8 + 300 = 1328 overflows the 1016px right bound, so it flips to
+    // sit left of the anchor instead: 1020 - 300 - 8 = 712.
+    expect(getPopupEl().style.left).toBe("712px");
+
+    popup.destroy?.();
+  });
+
+  it("clamps the left edge to the viewport margin when even the flipped position runs off both edges", () => {
+    window.innerWidth = 200;
+    window.innerHeight = 600;
+    const popup = createUserProfilePopup({ user: makeUser(), anchorX: 50, anchorY: 100 });
+    popup.mount(container);
+
+    // The 300px-wide card can't fit on either side of a 200px-wide window, so
+    // the flip still overflows negative and gets clamped to the margin.
+    expect(getPopupEl().style.left).toBe("8px");
+
+    popup.destroy?.();
+  });
+
+  it("lifts the card above the anchor so it fits when it would run off the bottom of the window", () => {
+    window.innerWidth = 1024;
+    window.innerHeight = 500;
+    // jsdom never lays anything out, so offsetHeight is always 0. Stub the
+    // popup card's measured height so the overflow branch actually triggers.
+    offsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.testid === "user-profile-popup" ? 400 : 0;
+      },
+    });
+    const popup = createUserProfilePopup({ user: makeUser(), anchorX: 10, anchorY: 450 });
+    popup.mount(container);
+
+    // 450 + 400 (measured height) = 850 overflows the 492px bottom bound, so
+    // the card is lifted to 500 - 400 - 8 = 92.
+    expect(getPopupEl().style.top).toBe("92px");
+
+    popup.destroy?.();
+  });
+
+  it("clamps the top edge to the viewport margin when the anchor is near the top edge", () => {
+    window.innerWidth = 1024;
+    window.innerHeight = 768;
+    const popup = createUserProfilePopup({ user: makeUser(), anchorX: 10, anchorY: 2 });
+    popup.mount(container);
+
+    expect(getPopupEl().style.top).toBe("8px");
+
+    popup.destroy?.();
   });
 });
 

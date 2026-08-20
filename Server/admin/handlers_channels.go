@@ -93,6 +93,13 @@ type createChannelRequest struct {
 	Position int    `json:"position"`
 }
 
+// createChannelPostCommitHook, when non-nil, runs synchronously right after
+// handleCreateChannel's AdminCreateChannel commit, before the post-commit
+// re-read and hub fan-out — the create-side twin of
+// patchChannelPostCommitHook, so tests can land a caller cancellation in that
+// exact window (OC-0158) instead of relying on wall-clock timing.
+var createChannelPostCommitHook func()
+
 func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createChannelRequest
@@ -120,14 +127,28 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		ch, err := database.GetChannel(r.Context(), id)
+		// From here on the row has already committed. If the admin's browser
+		// goes away in this window (tab close, navigation, network blip),
+		// r.Context() cancels, and a GetChannel re-read that still used it
+		// would fail with context.Canceled — 500ing while leaving a durably
+		// created channel unbroadcast, so no connected client learns about it
+		// until it reconnects (OC-0158). Run the rest of the handler on an
+		// uncancellable tail, matching handlePatchChannel and
+		// handleDeleteChannel.
+		tail := context.WithoutCancel(r.Context())
+
+		if createChannelPostCommitHook != nil {
+			createChannelPostCommitHook()
+		}
+
+		ch, err := database.GetChannel(tail, id)
 		if err != nil || ch == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch created channel")
 			return
 		}
 		actor := actorFromContext(r)
 		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_create", "channel", id,
+		db.WriteAudit(tail, database, actor, "channel_create", "channel", id,
 			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)

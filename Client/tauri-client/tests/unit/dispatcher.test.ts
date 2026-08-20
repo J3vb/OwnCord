@@ -259,9 +259,25 @@ describe("WS Dispatcher", () => {
     );
   });
 
-  it("wires auth_error to clear auth", () => {
+  it("wires auth_error to a full sign-out and the login-screen banner", () => {
+    // Start from an authenticated session — asserting "not authenticated"
+    // against the beforeEach's already-signed-out store would pass even if
+    // the handler did nothing at all.
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "",
+    });
+    expect(authStore.getState().isAuthenticated).toBe(true);
+
     mock.dispatch("auth_error", { message: "Invalid token" });
-    expect(authStore.getState().isAuthenticated).toBe(false);
+
+    const state = authStore.getState();
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.user).toBeNull();
+    // The refusal reason is only ever surfaced through ui.store — ConnectPage's
+    // banner is its single reader.
+    expect(uiStore.getState().transientError).toBe("Invalid token");
   });
 
   it("wires ready to channels, members, and voice stores", () => {
@@ -321,6 +337,44 @@ describe("WS Dispatcher", () => {
 
     expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(true);
     expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(true);
+  });
+
+  // The same resync path with the flags absent/false: `ready` restates our
+  // voice state on every full resync, so reading it as a moderator action
+  // would silently deafen a session nobody moderated (and there is no
+  // server-side undo — deafen only ever exists on this client).
+  it("leaves local audio alone on a ready whose self voice_state has no moderator flags", async () => {
+    vi.mocked(mockSetDeafened).mockClear();
+    vi.mocked(mockSetMuted).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "connected",
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
+      voice_states: [
+        {
+          channel_id: 3,
+          user_id: 5,
+          muted: false,
+          deafened: false,
+          server_muted: false,
+          server_deafened: false,
+        },
+      ],
+      roles: [],
+    });
+    await vi.runAllTimersAsync();
+
+    expect(vi.mocked(mockSetDeafened)).not.toHaveBeenCalled();
+    expect(vi.mocked(mockSetMuted)).not.toHaveBeenCalled();
   });
 
   it("wires chat_message to messages store", () => {
@@ -1220,6 +1274,36 @@ describe("WS Dispatcher", () => {
       // counts are fresh and the user was not yet reading anything.
       expect(sender).not.toHaveBeenCalled();
     });
+
+    // "Cleared by this ready" and "nothing was active" are different states.
+    // The presence check spans channels AND dm_channels, so an unrelated open
+    // DM must not keep a deleted channel alive; and once cleared, mark_read
+    // must not be sent for an id the server no longer recognizes.
+    it("does not mark_read the channel this ready just cleared", () => {
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+
+      mock.dispatch("ready", {
+        channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+          },
+        ],
+      });
+
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+      expect(sender).not.toHaveBeenCalled();
+    });
   });
 
   describe("ready reconciles the DM channelsStore mirror", () => {
@@ -1292,6 +1376,36 @@ describe("WS Dispatcher", () => {
       const ch = channelsStore.getState().channels.get(50);
       expect(ch?.unreadCount).toBe(0);
       expect(ch?.mentionCount).toBe(0);
+    });
+
+    // The two counts drift independently: a mention resolved on another
+    // device leaves the unread count exactly where it already was, so a
+    // reconciliation keyed on the unread count alone would keep rendering a
+    // mention badge that no longer exists.
+    it("restates a mirror row whose mention count alone drifted", () => {
+      seedDmMirrorRow(2, 4);
+
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 2,
+            mention_count: 1,
+          },
+        ],
+      });
+
+      const ch = channelsStore.getState().channels.get(50);
+      expect(ch?.mentionCount).toBe(1);
+      expect(ch?.unreadCount).toBe(2);
     });
 
     it("leaves a non-dm channel row's counts alone", () => {
@@ -1701,6 +1815,50 @@ describe("WS Dispatcher", () => {
 
       expect(isChannelLoaded(1)).toBe(false);
       expect(getHistoryLoadState(1)).toBe("error");
+    });
+
+    // Mirror of the .then guard: a rejection that lands after the user
+    // switched away belongs to a channel whose own mount/retry path now owns
+    // its load state. Flagging it errored paints an inline error + Retry on a
+    // channel whose load never failed, the next time the user opens it.
+    it("does not flag a channel load-errored when the rejection lands after a switch away", async () => {
+      cleanup();
+      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+      let rejectGetMessages: ((err: Error) => void) | null = null;
+      const getMessages = vi.fn().mockImplementation(
+        () =>
+          new Promise<{ messages: MessageResponse[]; has_more: boolean }>((_resolve, reject) => {
+            rejectGetMessages = reject;
+          }),
+      );
+      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setMessages(1, [storedMessage(10)], false);
+      const readyChannels = [
+        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
+        { id: 2, name: "other", type: "text" as const, category: null, position: 0 },
+      ];
+      const readyPayload = {
+        channels: readyChannels,
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      };
+
+      // First ready: initial connect. Second: the full-ready resync whose
+      // refetch for channel 1 is still in flight below.
+      mock.dispatch("ready", readyPayload);
+      mock.dispatch("ready", readyPayload);
+      expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      rejectGetMessages!(new Error("network down"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(getHistoryLoadState(1)).not.toBe("error");
     });
   });
 
@@ -2428,6 +2586,70 @@ describe("WS Dispatcher", () => {
     expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(true);
   });
 
+  // server_muted and server_deafened are independent flags and each one is
+  // enforced separately: applying the pair whenever either is set would mute
+  // a user no moderator muted, and re-applying one the client has already
+  // honoured would fight the local toggle on every restated voice_state.
+  describe("moderator audio enforcement is scoped to the flags actually set", () => {
+    beforeEach(() => {
+      vi.mocked(mockSetDeafened).mockClear();
+      vi.mocked(mockSetMuted).mockClear();
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+    });
+
+    function dispatchSelfVoiceState(flags: {
+      server_muted?: boolean;
+      server_deafened?: boolean;
+    }): void {
+      mock.dispatch("voice_state", {
+        channel_id: 3,
+        user_id: 5,
+        username: "me",
+        muted: false,
+        deafened: false,
+        speaking: false,
+        camera: false,
+        screenshare: false,
+        ...flags,
+      });
+    }
+
+    const cases = [
+      { name: "only server_deafened is set", flags: { server_deafened: true }, deafen: 1, mute: 0 },
+      { name: "only server_muted is set", flags: { server_muted: true }, deafen: 0, mute: 1 },
+      { name: "neither flag is present", flags: {}, deafen: 0, mute: 0 },
+      {
+        name: "both flags are explicitly false",
+        flags: { server_muted: false, server_deafened: false },
+        deafen: 0,
+        mute: 0,
+      },
+    ] as const;
+
+    for (const c of cases) {
+      it(`calls setDeafened ${c.deafen}x and setMuted ${c.mute}x when ${c.name}`, async () => {
+        dispatchSelfVoiceState(c.flags);
+        await vi.runAllTimersAsync();
+
+        expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledTimes(c.deafen);
+        expect(vi.mocked(mockSetMuted)).toHaveBeenCalledTimes(c.mute);
+      });
+    }
+
+    it("does not re-apply a moderator mute/deafen the client already honoured", async () => {
+      voiceStore.setState((prev) => ({ ...prev, localMuted: true, localDeafened: true }));
+
+      dispatchSelfVoiceState({ server_muted: true, server_deafened: true });
+      await vi.runAllTimersAsync();
+
+      expect(vi.mocked(mockSetDeafened)).not.toHaveBeenCalled();
+      expect(vi.mocked(mockSetMuted)).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not set the local moderator flags from another user's voice_state", () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -2933,6 +3155,86 @@ describe("WS Dispatcher", () => {
     expect(updateProfile).toHaveBeenCalledWith({ identity_public_key: "k" });
   });
 
+  it("on ready publishes the signed-in user's own key, not the first member's", async () => {
+    cleanup();
+    mockEnsurePublished.mockClear();
+    const updateProfile = vi.fn().mockResolvedValue({});
+    const getConfig = vi.fn(() => ({
+      host: "chat.example",
+      token: "[redacted]",
+    }));
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "alex", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [
+        {
+          id: 3,
+          username: "zoe",
+          avatar: null,
+          role: "member",
+          status: "online",
+          identity_public_key: "zoe-key",
+        },
+        {
+          id: 7,
+          username: "alex",
+          avatar: null,
+          role: "member",
+          status: "online",
+          identity_public_key: "alex-key",
+        },
+      ],
+      voice_states: [],
+      roles: [],
+    });
+
+    await Promise.resolve();
+    // Both the username and the "key the server already holds" must be ours:
+    // picking another member would PATCH our profile under their username,
+    // and a foreign current-key makes the idempotence check compare against
+    // the wrong value (re-publishing, or worse, skipping a needed publish).
+    expect(mockEnsurePublished).toHaveBeenCalledWith(
+      "chat.example",
+      "alex",
+      "alex-key",
+      expect.any(Function),
+    );
+  });
+
+  it("on ready publishes no identity key when nobody is signed in", async () => {
+    cleanup();
+    mockEnsurePublished.mockClear();
+    const updateProfile = vi.fn().mockResolvedValue({});
+    const getConfig = vi.fn(() => ({
+      host: "chat.example",
+      token: "[redacted]",
+    }));
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+
+    // No authStore.user, so currentUserId falls back to the 0 sentinel — a
+    // member row carrying that id must not be mistaken for "us" and have a
+    // long-term identity key published against it.
+    authStore.setState((prev) => ({ ...prev, user: null }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [{ id: 0, username: "nobody", avatar: null, role: "member", status: "online" }],
+      voice_states: [],
+      roles: [],
+    });
+
+    await Promise.resolve();
+    expect(mockEnsurePublished).not.toHaveBeenCalled();
+  });
+
   it("on ready loads the custom-emoji set from the REST list", async () => {
     cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
@@ -3247,6 +3549,10 @@ describe("WS Dispatcher", () => {
       expect(dm.name).toBe("Crew");
       expect(dm.participants.map((p) => p.id)).toEqual([10, 11]);
       expect(dm.participants[0]!.displayName).toBe("Bobby");
+      // DmUser.displayName is non-nullable ("" = no nickname); a participant
+      // the server sends without one must map to that, not to undefined —
+      // every render path does `displayName || username`.
+      expect(dm.participants[1]!.displayName).toBe("");
       // The compat recipient is the first of the list, so an older render path
       // still shows somebody rather than nothing.
       expect(dm.recipient.id).toBe(10);

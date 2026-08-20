@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { resolve } from "path";
 
 export default defineConfig({
@@ -18,6 +18,10 @@ export default defineConfig({
     // Both the `tests/**/*.test.ts` suite and component-local
     // `src/**/*.test.ts` files are picked up.
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    // tests/browser/ runs real browser APIs (AudioContext, WASM) under
+    // vitest.config.browser.ts (`npm run test:browser`); it cannot pass in
+    // jsdom and is not part of this suite.
+    exclude: [...configDefaults.exclude, "tests/browser/**"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

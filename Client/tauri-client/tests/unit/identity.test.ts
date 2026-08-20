@@ -1,12 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { invokeMock, logMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
-  logMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
+const { invokeMock, tauri, logMock, createLoggerMock } = vi.hoisted(() => {
+  const logMock = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  return {
+    invokeMock: vi.fn(),
+    // Flip `available` to false to simulate a non-Tauri environment (browser,
+    // plain vitest run): `@tauri-apps/api/core` resolves without a usable
+    // `invoke`, so `getInvoke()` yields null and every wrapper takes its
+    // no-op branch. Those branches are otherwise unreachable here, because
+    // the module mock always hands back a working `invoke`.
+    tauri: { available: true },
+    logMock,
+    createLoggerMock: vi.fn(() => logMock),
+  };
+});
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-vi.mock("@lib/logger", () => ({ createLogger: () => logMock }));
+vi.mock("@tauri-apps/api/core", () => ({
+  get invoke() {
+    return tauri.available ? invokeMock : undefined;
+  },
+}));
+vi.mock("@lib/logger", () => ({ createLogger: createLoggerMock }));
 
 import {
   saveIdentityKey,
@@ -51,6 +65,7 @@ beforeEach(() => {
   invokeMock.mockReset();
   logMock.error.mockReset();
   logMock.warn.mockReset();
+  tauri.available = true;
   // The keypair memo is process-wide by design; without this, one case's
   // cached pair would satisfy the next case's keyring assertions.
   resetIdentityKeyPairCache();
@@ -84,6 +99,16 @@ describe("identity keyring wrappers", () => {
     invokeMock.mockRejectedValue(new Error("keyring boom"));
     expect(await saveIdentityKey("h", "k")).toBe(false);
     expect(await deleteIdentityKey("h")).toBe(false);
+    // The log is the only trace either failure leaves — the caller just sees
+    // `false` — so it has to carry the host and the underlying error.
+    expect(logMock.error).toHaveBeenCalledWith("Failed to save identity key", {
+      host: "h",
+      error: "Error: keyring boom",
+    });
+    expect(logMock.error).toHaveBeenCalledWith("Failed to delete identity key", {
+      host: "h",
+      error: "Error: keyring boom",
+    });
   });
 
   it("loadIdentityKey rethrows (does not swallow) when the command rejects", async () => {
@@ -94,6 +119,52 @@ describe("identity keyring wrappers", () => {
     // store failure, invalidating every peer's TOFU pin.
     invokeMock.mockRejectedValueOnce(new Error("keyring boom"));
     await expect(loadIdentityKey("h")).rejects.toThrow("keyring boom");
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringMatching(/Failed to load identity key.*no key stored/),
+      { host: "h", error: "Error: keyring boom" },
+    );
+  });
+
+  it("names its logger 'identity' so these messages are filterable", () => {
+    expect(createLoggerMock).toHaveBeenCalledWith("identity");
+  });
+});
+
+describe("non-Tauri environment (no invoke available)", () => {
+  // Browser / plain-vitest runs have no Tauri IPC at all. Every wrapper has to
+  // no-op *distinguishably*: a save that never happened must not report
+  // success (loadOrGenerateIdentityKeyPair reads that boolean to decide
+  // whether to verify the write round-tripped), and a pin store that does not
+  // exist must report "no-store"/"unpinned", never "stored"/"pinned".
+  beforeEach(() => {
+    tauri.available = false;
+  });
+
+  it("saveIdentityKey reports failure — not a phantom success — and warns", async () => {
+    expect(await saveIdentityKey("chat.example", "blob")).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalledWith(expect.stringContaining("identity key not saved"));
+  });
+
+  it("loadIdentityKey resolves null (nothing stored) instead of throwing", async () => {
+    await expect(loadIdentityKey("chat.example")).resolves.toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("deleteIdentityKey reports failure", async () => {
+    expect(await deleteIdentityKey("chat.example")).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("storeIdentityPin reports 'no-store', never 'stored'", async () => {
+    expect(await storeIdentityPin("chat.example", "42", "pubkey")).toBe("no-store");
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalledWith(expect.stringContaining("identity pin not stored"));
+  });
+
+  it("getIdentityPin reports 'unpinned' (TOFU first sight), never 'pinned'", async () => {
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unpinned" });
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
 
@@ -208,6 +279,12 @@ describe("getOrCreateIdentityKeyPair", () => {
     const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.publicKey).toBeDefined();
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(true);
+    // Silently regenerating is indistinguishable from a first login; the log
+    // is what tells a support reader why peers suddenly see a new identity.
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringContaining("Stored identity key is corrupt"),
+      expect.objectContaining({ host: "chat.example", userId: 1 }),
+    );
   });
 
   it("hands every caller the same keypair when the keyring never persists", async () => {
@@ -285,6 +362,35 @@ describe("getOrCreateIdentityKeyPair", () => {
       host: "chat.example",
       userId: 1,
     });
+  });
+
+  it("treats a failed read-back as 'did not persist' (does not assume success) and still returns the fresh keypair", async () => {
+    // Save succeeds, then the store goes unreadable. Unlike the *first* load —
+    // which rethrows so the caller aborts rather than overwriting an
+    // unreadable identity — this read is only verifying the write, and a
+    // freshly generated keypair is already in hand, so there is nothing to
+    // abort. It must still be reported as unverified: assuming the write
+    // stuck hides the exact failure whose only other symptom is every peer
+    // seeing a new identity after each restart.
+    let saved = false;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") {
+        return saved ? Promise.reject(new Error("keychain locked")) : Promise.resolve(null);
+      }
+      if (cmd === "save_identity_key") {
+        saved = true;
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
+
+    expect(kp.publicKey).toBeDefined();
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringMatching(/did not persist.*prompt to re-verify/),
+      { host: "chat.example", userId: 1 },
+    );
   });
 
   it("aborts instead of regenerating when the keyring read fails (does not overwrite an unreadable identity)", async () => {
@@ -426,6 +532,10 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
     await expect(
       ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile),
     ).resolves.toBe(false);
+    expect(logMock.error).toHaveBeenCalledWith("Failed to publish identity key", {
+      host: "chat.example",
+      error: "Error: network down",
+    });
   });
 
   it("does not mint or publish an identity key when no user is authenticated yet (never falls back to a placeholder scope)", async () => {
@@ -508,6 +618,10 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
     expect(kp.publicKey).toBeDefined();
     expect(store.get("1@chat.example")).toBeDefined();
     expect(store.get("1@chat.example")).not.toBe("!!not-valid-jwk!!");
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringContaining("Legacy identity key is corrupt"),
+      expect.objectContaining({ host: "chat.example" }),
+    );
   });
 
   it("generates fresh, with no delete attempt, when there is no legacy key either (first login)", async () => {
@@ -533,5 +647,9 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
 
     expect(store.get("chat.example")).toBe(legacyBlob);
     expect(store.has("1@chat.example")).toBe(false);
+    expect(logMock.error).toHaveBeenCalledWith(
+      expect.stringMatching(/Failed to migrate legacy identity key.*next launch can retry/),
+      { host: "chat.example" },
+    );
   });
 });

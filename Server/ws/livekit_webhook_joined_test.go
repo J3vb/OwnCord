@@ -141,6 +141,43 @@ func TestWebhook_ParticipantJoined_TransientReadErrorDoesNotEvict(t *testing.T) 
 	}
 }
 
+// TestWebhook_ParticipantJoined_SurvivesCancelledRequestContext locks the
+// participant_joined half of OC-0018 (the participant_left half is locked by
+// TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext in
+// livekit_test.go). Without the context.WithoutCancel detach, a webhook sender
+// (LiveKit) that hangs up mid-request cancels r.Context(); GetVoiceState then
+// fails, the handler takes the "transient read failure" branch and skips the
+// rogue-participant check entirely — so a participant presenting a replayed
+// join token is never removed from the SFU.
+func TestWebhook_ParticipantJoined_SurvivesCancelledRequestContext(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "joined-ctxcancel-user")
+	chanID := seedVoiceChan(t, database, "joined-ctxcancel-ch")
+
+	// Simulate net/http cancelling the request context because the webhook
+	// sender hung up before the handler finished.
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	logs := captureLogs(t)
+
+	// No voice_states row exists for this user — the join is unauthorized and
+	// must still be flagged and evicted on a dead request context.
+	hub.HandleWebhookParticipantJoinedWithContextForTest(
+		cancelledCtx,
+		participantIdentityFor(user.ID, "replayed-token"),
+		roomNameFor(chanID),
+	)
+
+	out := logs()
+	if strings.Contains(out, "skipping rogue-participant check") {
+		t.Errorf("the cancelled request context was mistaken for a transient DB failure, so the rogue participant was never evicted; log:\n%s", out)
+	}
+	if !strings.Contains(out, "rogue participant_joined") {
+		t.Errorf("no rogue-participant warning logged on a cancelled request context; got:\n%s", out)
+	}
+}
+
 func TestWebhook_ParticipantJoined_WrongChannelFlagged(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "joined-wrongch-user")

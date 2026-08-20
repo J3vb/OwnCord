@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -15,20 +16,27 @@ import (
 // every connected client — an identity key that fails to propagate silently
 // breaks E2EE key agreement for everyone already online.
 
-// awaitMessage reads one message from ch, failing if none arrives.
-func awaitMessage(t *testing.T, ch chan []byte) map[string]any {
+// awaitRawMessage reads one raw frame from ch, failing if none arrives.
+func awaitRawMessage(t *testing.T, ch chan []byte) []byte {
 	t.Helper()
 	select {
 	case raw := <-ch:
-		var msg map[string]any
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			t.Fatalf("unmarshal %q: %v", raw, err)
-		}
-		return msg
+		return raw
 	case <-time.After(2 * time.Second):
 		t.Fatal("no message received")
 		return nil
 	}
+}
+
+// awaitMessage reads one message from ch, failing if none arrives.
+func awaitMessage(t *testing.T, ch chan []byte) map[string]any {
+	t.Helper()
+	raw := awaitRawMessage(t, ch)
+	var msg map[string]any
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal %q: %v", raw, err)
+	}
+	return msg
 }
 
 func TestHub_BroadcastUserUpdate(t *testing.T) {
@@ -186,14 +194,123 @@ func TestHub_ChannelReadAudience_ExcludesArchivedChannel(t *testing.T) {
 	assertNotReceived(t, send, "member with base READ_MESSAGES on an archived channel")
 }
 
+// stubDMEvent is a minimal ws.SequencedDMEvent so EmitEvents routes through
+// sendSequencedToUsers — persistEvent's second call site, the one that stamps
+// a non-zero channel_id without going through the broadcast queue.
+type stubDMEvent struct {
+	channelID      int64
+	participantIDs []int64
+	payload        []byte
+}
+
+func (e stubDMEvent) EventType() string       { return "chat_message" }
+func (e stubDMEvent) ChannelID() int64        { return e.channelID }
+func (e stubDMEvent) ParticipantIDs() []int64 { return e.participantIDs }
+func (e stubDMEvent) Payload() []byte         { return e.payload }
+
+// TestHub_SetEventPersister pins the invariant persistEvent exists for: the
+// row written to the EventStore carries the same seq (and type, and channel)
+// as the wrapped payload the client received — from both call sites,
+// deliverBroadcast and sendSequencedToUsers. Cold-tier reconnect replay
+// selects rows by row-seq against the payload-seq the client acked, so a
+// mismatch silently replays the wrong window.
 func TestHub_SetEventPersister(t *testing.T) {
 	hub, database := newTestHub(t)
 
-	persister := ws.NewEventPersister(database, 16, 4, 10*time.Millisecond)
+	// The persister needs the real events table; the hub's own test schema has
+	// none, so the store is a separately migrated DB.
+	store := openEventStoreDB(t)
+	persister := ws.NewEventPersister(store, 64, 1, 5*time.Millisecond)
+	persister.Start(context.Background())
 
 	// Setting and clearing must both be safe — SetEventPersister is called at
 	// startup and again on shutdown/reconfiguration.
 	hub.SetEventPersister(persister)
 	hub.SetEventPersister(nil)
 	hub.SetEventPersister(persister)
+
+	go hub.Run()
+	t.Cleanup(func() {
+		hub.Stop()
+		persister.Stop(context.Background())
+	})
+
+	user := seedMemberUser(t, database, "persisted-event-member")
+	chID := seedTestChannel(t, database, "persisted-event-dm")
+
+	send := make(chan []byte, 8)
+	hub.RegisterNowForTest(ws.NewTestClient(hub, user.ID, send))
+
+	// Global broadcast → deliverBroadcast → persistEvent(seq, 0, wrapped).
+	hub.BroadcastToAll([]byte(`{"type":"user_update","payload":{"user_id":7}}`))
+	globalFrame := awaitRawMessage(t, send)
+
+	// Sequenced DM → sendSequencedToUsers → persistEvent(seq, chID, wrapped).
+	hub.EmitEvents(context.Background(), []ws.Event{stubDMEvent{
+		channelID:      chID,
+		participantIDs: []int64{user.ID},
+		payload:        []byte(`{"type":"chat_message","payload":{"id":1}}`),
+	}})
+	dmFrame := awaitRawMessage(t, send)
+
+	// Stop drains the queue and waits for the flusher to exit, so everything
+	// enqueued above is on disk once it returns. The cleanup's second Stop is
+	// a no-op.
+	persister.Stop(context.Background())
+
+	stored, err := store.GetEventsSince(context.Background(), 0, 100)
+	if err != nil {
+		t.Fatalf("GetEventsSince: %v", err)
+	}
+	bySeq := make(map[int64]db.PersistedEvent, len(stored))
+	seen := make([]int64, 0, len(stored))
+	for _, row := range stored {
+		bySeq[row.Seq] = row
+		seen = append(seen, row.Seq)
+	}
+
+	cases := []struct {
+		label     string
+		frame     []byte
+		eventType string
+		channelID int64
+	}{
+		{"global broadcast", globalFrame, "user_update", 0},
+		{"sequenced DM", dmFrame, "chat_message", chID},
+	}
+	seqs := make([]int64, 0, len(cases))
+	for _, tc := range cases {
+		var wire struct {
+			Seq  int64  `json:"seq"`
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(tc.frame, &wire); err != nil {
+			t.Fatalf("%s: unmarshal %q: %v", tc.label, tc.frame, err)
+		}
+		if wire.Seq == 0 {
+			t.Fatalf("%s: delivered frame carries no seq: %s", tc.label, tc.frame)
+		}
+		if wire.Type != tc.eventType {
+			t.Fatalf("%s: frame type = %q, want %q", tc.label, wire.Type, tc.eventType)
+		}
+		seqs = append(seqs, wire.Seq)
+
+		row, ok := bySeq[wire.Seq]
+		if !ok {
+			t.Fatalf("%s: no persisted row at the delivered seq %d (stored seqs %v)",
+				tc.label, wire.Seq, seen)
+		}
+		if row.EventType != tc.eventType {
+			t.Errorf("%s: row event_type = %q, want %q", tc.label, row.EventType, tc.eventType)
+		}
+		if row.ChannelID != tc.channelID {
+			t.Errorf("%s: row channel_id = %d, want %d", tc.label, row.ChannelID, tc.channelID)
+		}
+		if !bytes.Equal(row.Payload, tc.frame) {
+			t.Errorf("%s: row payload = %s, want the delivered frame %s", tc.label, row.Payload, tc.frame)
+		}
+	}
+	if seqs[1] <= seqs[0] {
+		t.Errorf("seqs not monotonic across the two persist call sites: %v", seqs)
+	}
 }
