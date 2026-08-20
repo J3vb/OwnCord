@@ -745,6 +745,17 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onPurgeChannel,
   } = options;
   const ac = new AbortController();
+  // renderChannels() rebuilds every row from scratch on every channels-store
+  // notification (unread count, active channel, role change, mute toggle,
+  // ...). Per-row listeners (context menu, drag handlers) must NOT be
+  // registered on the sidebar-lifetime `ac.signal`, which only aborts once,
+  // at destroy() -- addEventListener({ signal }) keeps a detached row alive
+  // via that signal's own retained "abort" listener list until it fires, so
+  // every re-render would otherwise leak one full set of detached rows
+  // (OC-0229). renderAc is aborted and replaced at the top of every
+  // renderChannels() call, so only the CURRENT render's rows stay reachable;
+  // header/root listeners registered once in mount() keep using `ac.signal`.
+  let renderAc: AbortController | null = null;
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
   let serverNameEl: HTMLSpanElement | null = null;
@@ -778,6 +789,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     if (channelList === null) {
       return;
     }
+    // Abort the previous render's row-scoped listeners before the rows they
+    // belong to are detached below, so a stale row can never outlive the
+    // render that replaced it (OC-0229).
+    renderAc?.abort();
+    const currentRenderAc = new AbortController();
+    renderAc = currentRenderAc;
     clearChildren(channelList);
     voiceRowByUserId.clear();
 
@@ -803,7 +820,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           category,
           channels,
           state.activeChannelId,
-          ac.signal,
+          currentRenderAc.signal,
           onVoiceJoin,
           onVoiceLeave,
           onCreateChannel,
@@ -937,10 +954,13 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         for (const [chId, users] of state.voiceUsers) {
           structSig += `|${chId}`;
           for (const [uid, u] of users) {
-            // Include the E2EE verification status so a verified↔unverified↔mismatch
-            // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
+            // Include the E2EE verification status, safety number, and session
+            // fingerprint so a verified↔unverified↔mismatch flip *and* a
+            // same-status fingerprint/safety-number change (e.g. a reconnect that
+            // re-announces a fresh ephemeral key, OC-0208) both re-render the
+            // badge (it lives outside voiceUsers, in peerVerifications).
             const verif = state.peerVerifications?.get(uid);
-            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}` : ""}`;
+            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}/${verif.safetyNumber ?? ""}/${verif.sessionFingerprint ?? ""}` : ""}`;
           }
         }
         return structSig;
@@ -968,6 +988,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // ac.abort() also releases this sidebar's hold on the shared document-level
     // drag listeners (drag-reorder.ts tracks owners by signal).
     ac.abort();
+    renderAc?.abort();
+    renderAc = null;
     for (const unsub of unsubscribers) {
       unsub();
     }

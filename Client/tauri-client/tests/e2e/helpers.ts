@@ -688,10 +688,21 @@ export function buildTauriMockScript(opts: {
           ${
             opts.identityPinError === true
               ? `throw new Error("keyring unavailable (mock)");`
-              : `return ${JSON.stringify(opts.identityPins ?? {})}[String(args?.userId)] ?? null;`
+              : `window.__mockIdentityPins ??= ${JSON.stringify(opts.identityPins ?? {})};
+          return window.__mockIdentityPins[String(args?.userId)] ?? null;`
           }
         }
-        if (cmd === "store_identity_pin") return null;
+        // A pin write must be visible to the next read, exactly as the real
+        // keyring is: re-pinning a mismatched peer replays the announce that
+        // was blocked and re-verifies it against the pin just stored
+        // (OC-0212). A no-op store would serve the stale pin straight back,
+        // so the replay would re-fail and the mock would report a permanent
+        // mismatch the real keyring never produces.
+        if (cmd === "store_identity_pin") {
+          window.__mockIdentityPins ??= ${JSON.stringify(opts.identityPins ?? {})};
+          window.__mockIdentityPins[String(args?.userId)] = args?.pin ?? null;
+          return null;
+        }
 
         // ---- Window/webview plugin stubs ----
         if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;

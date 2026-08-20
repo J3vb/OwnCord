@@ -16,6 +16,7 @@ import (
 
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
@@ -163,6 +164,176 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 	bufTier, dbTier, fullTier := hub.ReconnectTierStats()
 	if fullTier != 1 {
 		t.Fatalf("reconnect tiers (buffer=%d db=%d full=%d): want full=1 — a client resuming from before a restart-restored seq must be forced onto the full-ready path, since an offline visibility change is never recoverable by replay",
+			bufTier, dbTier, fullTier)
+	}
+}
+
+// waitForFirstRingBufferEntry polls hub's ring buffer until it holds at
+// least one entry and returns that entry's seq, or fails the test after a
+// timeout. BroadcastToAll enqueues onto the hub's dispatch channel and
+// returns before a seq is actually assigned, so tests that need to know a
+// real assigned seq must synchronize on this instead of assuming one.
+func waitForFirstRingBufferEntry(t *testing.T, hub *ws.Hub) uint64 {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if oldest := hub.ReplayBuffer().OldestSeq(); oldest != 0 {
+			return oldest
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the first ring buffer entry to land")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// waitForRingBufferNewestAtLeast polls hub's ring buffer until its newest
+// entry's seq is >= target, or fails the test after a timeout. See
+// waitForFirstRingBufferEntry on why this can't be a fixed sleep.
+func waitForRingBufferNewestAtLeast(t *testing.T, hub *ws.Hub, target uint64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if newest := hub.ReplayBuffer().NewestSeq(); newest >= target {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for hub ring buffer newest seq to reach >= %d (currently %d)",
+				target, hub.ReplayBuffer().NewestSeq())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync pins
+// OC-0210: with event_persistence.enabled=false ("ring-buffer-only
+// behaviour", config.go's EventPersistenceConfig.Enabled doc), every boot's
+// h.seq previously started at 0 with an empty ring buffer, with nothing to
+// distinguish this boot's own watermarks from a PRIOR boot's. A reconnecting
+// client carrying a last_seq from a prior process's epoch was checked only
+// against whatever the new epoch's ring buffer happened to hold; if the new
+// epoch's traffic (e.g. other clients reconnecting first) had pushed seq past
+// that stale value, EventsSinceFiltered reported it as an ordinary in-window
+// replay instead of refusing it, silently handing back a different epoch's
+// events as if they were a contiguous resume.
+//
+// This simulates exactly the repro: hub "A" (a prior boot) runs with
+// persistence disabled and a client observes 40 broadcasts go by (its
+// last_seq is whatever the 40th one's seq turns out to be — captured
+// dynamically here rather than hardcoded, since the fix changes what that
+// number actually is). Hub A is then stopped (restart) and a fresh hub "B" is
+// booted with the same disabled config; other clients' traffic pushes hub B's
+// own (unrelated) epoch's seq past that same watermark, then the client
+// reconnects against hub B with its old last_seq — a watermark that has never
+// existed in hub B's epoch. That resume must be forced onto the full-ready
+// path; before the fix it silently resolves via the ordinary buffer tier
+// instead.
+func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer database.Close() //nolint:errcheck
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{EventPersistence: config.EventPersistenceConfig{Enabled: false}}
+
+	userID, err := database.CreateUser(ctx, "oc-0210-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	limiter := auth.NewRateLimiter()
+
+	// --- Prior boot: hub A runs with persistence disabled. A client's
+	// last_seq ends up as whatever the 40th broadcast's real seq turns out to
+	// be — captured dynamically so this test holds regardless of what value
+	// scheme is in effect (raw 1..N pre-fix, or a seeded floor post-fix). ---
+	hubOld := ws.NewHub(database, limiter, nil)
+	go hubOld.Run()
+	if persister, prunerDone := runStartEventPersistence(ctx, log, cfg, hubOld, database); persister != nil || prunerDone != nil {
+		t.Fatalf("runStartEventPersistence with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
+	}
+	for range 40 {
+		hubOld.BroadcastToAll([]byte(`{"type":"broadcast"}`))
+	}
+	oldFirstSeq := waitForFirstRingBufferEntry(t, hubOld)
+	staleLastSeq := oldFirstSeq + 39 // the 40th broadcast's seq: what a real client's lastSeq tracker would hold
+	waitForRingBufferNewestAtLeast(t, hubOld, staleLastSeq)
+	hubOld.Stop()
+
+	// --- Restart: hub B is a brand-new process-equivalent hub, same disabled
+	// config, same (in-memory but never touched by persistence) database. ---
+	hubNew := ws.NewHub(database, limiter, nil)
+	go hubNew.Run()
+	defer hubNew.Stop()
+	if persister, prunerDone := runStartEventPersistence(ctx, log, cfg, hubNew, database); persister != nil || prunerDone != nil {
+		t.Fatalf("runStartEventPersistence with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
+	}
+
+	// Other clients reconnect first and push hub B's own new epoch forward by
+	// 60 broadcasts — enough to overtake staleLastSeq pre-fix (repro's 1..60
+	// window covering 40) and trivially so post-fix (the seeded floor alone
+	// already exceeds it).
+	for range 60 {
+		hubNew.BroadcastToAll([]byte(`{"type":"broadcast"}`))
+	}
+	newFirstSeq := waitForFirstRingBufferEntry(t, hubNew)
+	newTargetSeq := newFirstSeq + 59
+	waitForRingBufferNewestAtLeast(t, hubNew, newTargetSeq)
+	if newTargetSeq <= staleLastSeq {
+		t.Fatalf("test setup invariant broken: hub B's epoch (reached %d) never overtook the stale watermark (%d)", newTargetSeq, staleLastSeq)
+	}
+
+	handler := ws.ServeWS(hubNew, database, []string{"*"}, 0)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// staleLastSeq is a watermark from hub A's epoch. It sits inside hub B's
+	// own live ring window, but nothing about it describes hub B's history —
+	// it must not be served by ordinary replay.
+	authMsg := map[string]any{
+		"type": "auth",
+		"payload": map[string]any{
+			"token":    token,
+			"last_seq": staleLastSeq,
+		},
+	}
+	raw, _ := json.Marshal(authMsg)
+	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if _, _, err := conn.Read(dialCtx); err != nil {
+		t.Fatalf("read handshake response: %v", err)
+	}
+
+	bufTier, dbTier, fullTier := hubNew.ReconnectTierStats()
+	if fullTier != 1 {
+		t.Fatalf("reconnect tiers (buffer=%d db=%d full=%d): want full=1 — a last_seq from a prior epoch must never be served by ring-buffer replay in ring-buffer-only mode, since the server has no way to tell it apart from an in-epoch watermark",
 			bufTier, dbTier, fullTier)
 	}
 }

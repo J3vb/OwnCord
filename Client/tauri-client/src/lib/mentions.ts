@@ -74,6 +74,12 @@ export function resolveMentionUserId(token: string, info?: MentionInfo): number 
     const member = members.get(id);
     if (member !== undefined && matches(member.username)) return id;
   }
+  // The server is authoritative once it has spoken: a token it did not list
+  // must not be resolved locally either, or the row-level gate (which trusts
+  // info.mentions outright) and this token-level pill disagree on the same
+  // message. Only fall back to the member-list/self scan when the server
+  // sent no list at all (predates mentions, or a purely local render).
+  if (info?.mentions !== undefined) return null;
   for (const member of members.values()) {
     if (matches(member.username)) return member.id;
   }

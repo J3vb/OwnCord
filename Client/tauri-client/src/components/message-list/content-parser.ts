@@ -44,6 +44,29 @@ export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
 
 export type { MentionInfo };
 
+/**
+ * Strip trailing punctuation that is likely sentence-level, not part of the
+ * URL — e.g. the period after "https://example.com." in "Check this out.".
+ *
+ * Gives back one trailing ")" if it balances an unmatched "(" earlier in the
+ * URL, since `https://en.wikipedia.org/wiki/Rust_(programming_language)` is a
+ * real address, not prose wrapped in parens.
+ *
+ * This is the single source of truth for "what counts as part of the URL vs.
+ * surrounding prose" — every consumer of a raw URL_REGEX match (linkifying
+ * anchors, extracting URLs for the embed pipeline) must strip through this
+ * function so they agree on the same URL.
+ */
+export function stripUrlTrailingPunctuation(rawUrl: string): string {
+  let stripped = rawUrl.replace(/[.,;:!?)]+$/, "");
+  if (rawUrl.length > stripped.length && rawUrl[stripped.length] === ")") {
+    const opens = (stripped.match(/\(/g) ?? []).length;
+    const closes = (stripped.match(/\)/g) ?? []).length;
+    if (opens > closes) stripped = stripped + ")";
+  }
+  return stripped || rawUrl; // fallback if stripping emptied it
+}
+
 /** Quotes may contain blocks, but a quote inside a quote inside a quote is a
  * fight the renderer does not need to have. */
 const MAX_BLOCK_DEPTH = 2;
@@ -168,17 +191,9 @@ export function renderMentions(text: string, info?: MentionInfo): DocumentFragme
     }
     // Strip trailing punctuation that is likely sentence-level, not part of the URL
     const rawUrl = match[0];
-    let stripped = rawUrl.replace(/[.,;:!?)]+$/, "");
-    // Give back one trailing ")" if it balances an unmatched "(" earlier in
-    // the URL — e.g. https://en.wikipedia.org/wiki/Rust_(programming_language)
-    // is a real address, not prose wrapped in parens.
-    if (rawUrl.length > stripped.length && rawUrl[stripped.length] === ")") {
-      const opens = (stripped.match(/\(/g) ?? []).length;
-      const closes = (stripped.match(/\)/g) ?? []).length;
-      if (opens > closes) stripped = stripped + ")";
-    }
+    const stripped = stripUrlTrailingPunctuation(rawUrl);
     const trailing = rawUrl.slice(stripped.length);
-    const url = stripped || rawUrl; // fallback if stripping emptied it
+    const url = stripped;
     if (isSafeUrl(url)) {
       const link = createElement("a", {
         class: "msg-link",

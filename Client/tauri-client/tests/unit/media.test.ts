@@ -1252,6 +1252,26 @@ describe("media.ts", () => {
       const urls = extractUrls("http://insecure.com https://secure.com");
       expect(urls).toEqual(["http://insecure.com", "https://secure.com"]);
     });
+
+    it("strips sentence-ending trailing punctuation, matching the linkifier", () => {
+      const urls = extractUrls("Nice pic https://cdn.example.com/a.png.");
+      expect(urls).toEqual(["https://cdn.example.com/a.png"]);
+    });
+
+    it("strips a wrapping close-paren but keeps a balanced one from the URL itself", () => {
+      const wrapped = extractUrls("(https://cdn.example.com/a.png)");
+      expect(wrapped).toEqual(["https://cdn.example.com/a.png"]);
+
+      const balanced = extractUrls(
+        "See https://en.wikipedia.org/wiki/Rust_(programming_language) for details",
+      );
+      expect(balanced).toEqual(["https://en.wikipedia.org/wiki/Rust_(programming_language)"]);
+    });
+
+    it("strips trailing punctuation from a YouTube link so it resolves to a valid video id", () => {
+      const urls = extractUrls("Check https://youtu.be/dQw4w9WgXcQ.");
+      expect(urls).toEqual(["https://youtu.be/dQw4w9WgXcQ"]);
+    });
   });
 
   // =========================================================================

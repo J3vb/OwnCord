@@ -15,6 +15,7 @@ import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
   MASKED_LINK_REGEX,
+  stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
@@ -513,7 +514,10 @@ export function extractUrls(content: string): string[] {
     .replace(INLINE_CODE_REGEX, "")
     .replace(MASKED_LINK_REGEX, "");
   const matches = withoutCodeBlocks.match(URL_REGEX);
-  return matches ?? [];
+  // Strip the same trailing sentence punctuation the linkifier strips (see
+  // stripUrlTrailingPunctuation), so the embed pipeline and the rendered
+  // anchor agree on exactly the same URL.
+  return (matches ?? []).map(stripUrlTrailingPunctuation);
 }
 
 /** Render URL embeds (YouTube players, generic link previews). */

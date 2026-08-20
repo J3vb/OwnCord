@@ -58,13 +58,17 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 
 	hash := auth.HashToken(p.Token)
 	sess, err := database.GetSessionByTokenHash(ctx, hash)
-	if err != nil || sess == nil {
+	if err != nil {
+		// DB outage, not a bad token — send a non-terminal error frame so the
+		// client's normal backoff/reconnect logic retries instead of treating
+		// this like a genuinely invalid session (buildAuthError is defined as
+		// non-recoverable on the wire: the client stops reconnecting and
+		// clears its stored credentials on that frame).
+		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
+		return nil, "", resumeHint{}, fmt.Errorf("auth: session lookup failed: %w", err)
+	}
+	if sess == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
-		if err != nil {
-			// DB outage, not a bad token — carry the cause so the caller's log
-			// distinguishes it from an ordinary invalid-token rejection.
-			return nil, "", resumeHint{}, fmt.Errorf("auth: session lookup failed: %w", err)
-		}
 		return nil, "", resumeHint{}, fmt.Errorf("auth: invalid session")
 	}
 
@@ -74,11 +78,13 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 	}
 
 	user, err := database.GetUserByID(ctx, sess.UserID)
-	if err != nil || user == nil {
+	if err != nil {
+		// Same DB-outage-vs-bad-credential distinction as above.
+		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
+		return nil, "", resumeHint{}, fmt.Errorf("auth: user lookup failed: %w", err)
+	}
+	if user == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("user not found"))
-		if err != nil {
-			return nil, "", resumeHint{}, fmt.Errorf("auth: user lookup failed: %w", err)
-		}
 		return nil, "", resumeHint{}, fmt.Errorf("auth: user not found")
 	}
 

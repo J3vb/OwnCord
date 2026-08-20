@@ -31,8 +31,10 @@ type updateProfileRequest struct {
 	Avatar            *string `json:"avatar"`
 	IdentityPublicKey *string `json:"identity_public_key"`
 	// DisplayName and About are omitted = unchanged, "" = cleared. Both are
-	// sanitized and length-checked in UserService, which is also the path a
-	// non-REST caller would take.
+	// length-checked in UserService, which is also the path a non-REST
+	// caller would take; DisplayName is additionally sanitized in this
+	// handler (before validateDisplayName runs — see the OC-0197 comment at
+	// the call site) and UserService's own sanitize of it is then a no-op.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
 }
@@ -158,6 +160,131 @@ var allowedAvatarMIME = map[string]bool{
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 // handleUpdateProfile processes PATCH /api/v1/users/me.
+// parseUpdateProfileRequest decodes the PATCH /users/me body and applies the
+// bound-then-sanitize-then-validate pass to every field, in the same order the
+// register path canonicalizes them. On any failure it writes the error response
+// and returns ok=false, and the caller must return without writing anything
+// further. Split out of handleUpdateProfile only to keep that handler under the
+// funlen limit; the field logic is unchanged.
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updateProfileRequest, bool) {
+	var req updateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "INVALID_INPUT", Message: "malformed request body",
+		})
+		return req, false
+	}
+
+	// OC-0151: bound the raw field before it ever reaches the fixpoint
+	// sanitizer below, for the same reason as the register path
+	// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
+	// cost is quadratic in input length, and nothing bounds this field
+	// before it runs. This is a cheap byte-length pre-check — *4 still
+	// admits any legitimate 32-rune UTF-8 username.
+	if len(req.Username) > maxLoginUsernameLen*4 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "INVALID_INPUT", Message: "username is too long",
+		})
+		return req, false
+	}
+
+	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
+	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always
+	// HTML-escaped, so a plain apostrophe would be persisted as &#39;
+	// and login (which never re-escapes) would look the account up
+	// under a name that no longer matches. See service.SanitizeText's
+	// doc comment and the register path (auth_handler.go), which
+	// already canonicalizes the same way.
+	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+	if req.Username == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "INVALID_INPUT", Message: "username is required",
+		})
+		return req, false
+	}
+	if err := auth.ValidateUsername(req.Username); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "INVALID_INPUT", Message: err.Error(),
+		})
+		return req, false
+	}
+
+	// OC-0192: bound the raw field before it reaches the fixpoint
+	// sanitizer below, same reasoning as the username bound above —
+	// sanitizeToFixpoint's cost is quadratic in input length. Unlike
+	// username, an oversized avatar was previously only caught *after*
+	// sanitizing, by validateAvatarURL's maxAvatarURLLen check.
+	if req.Avatar != nil && len(*req.Avatar) > maxAvatarURLLen*4 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "INVALID_INPUT", Message: "avatar URL is too long",
+		})
+		return req, false
+	}
+
+	// Sanitize and validate avatar if provided. Use the fixpoint
+	// sanitizer (service.SanitizeText), not a bare
+	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped, so a URL with more
+	// than one query parameter would have its "&" separators rewritten
+	// to "&amp;" and be persisted (and served) broken. Same reasoning as
+	// the username path above.
+	if req.Avatar != nil {
+		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
+		if err := validateAvatarURL(trimmed); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: err.Error(),
+			})
+			return req, false
+		}
+		req.Avatar = &trimmed
+	}
+
+	// display_name gets the same username-shaped scrutiny beyond length:
+	// it is rendered wherever a username is, so control characters and
+	// bidi overrides are exactly as unwelcome here. Length and the
+	// empty-clears-it rule still live in UserService, but sanitizing has
+	// to happen *before* validateDisplayName, not after: OC-0197 found
+	// that validating the raw JSON string let an HTML-entity-encoded
+	// control or bidi character (e.g. "&#x202e;") pass this check as
+	// harmless ASCII, only to be turned into the real character
+	// afterwards by UserService.UpdateProfile's cleanText call — the
+	// same sanitize-then-validate order the username path above already
+	// uses. OC-0192's raw-byte bound applies here too, now that
+	// sanitizing happens in this handler (UserService.UpdateProfile
+	// still bounds DisplayName/About the same way before its own
+	// cleanText calls, for any non-REST caller; cleanText's fixpoint
+	// output is stable, so that re-sanitize is a no-op here).
+	if req.DisplayName != nil {
+		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: "display_name is too long",
+			})
+			return req, false
+		}
+		trimmed := strings.TrimSpace(service.SanitizeText(*req.DisplayName))
+		if err := validateDisplayName(trimmed); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: err.Error(),
+			})
+			return req, false
+		}
+		req.DisplayName = &trimmed
+	}
+
+	// Validate the identity key before any write so the request is
+	// all-or-nothing.
+	if req.IdentityPublicKey != nil {
+		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
+		if err := validateIdentityKey(trimmed); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "INVALID_INPUT", Message: err.Error(),
+			})
+			return req, false
+		}
+		req.IdentityPublicKey = &trimmed
+	}
+	return req, true
+}
+
 func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
@@ -168,89 +295,9 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			return
 		}
 
-		var req updateProfileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "malformed request body",
-			})
+		req, ok := parseUpdateProfileRequest(w, r)
+		if !ok {
 			return
-		}
-
-		// OC-0151: bound the raw field before it ever reaches the fixpoint
-		// sanitizer below, for the same reason as the register path
-		// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
-		// cost is quadratic in input length, and nothing bounds this field
-		// before it runs. This is a cheap byte-length pre-check — *4 still
-		// admits any legitimate 32-rune UTF-8 username.
-		if len(req.Username) > maxLoginUsernameLen*4 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "username is too long",
-			})
-			return
-		}
-
-		// Use the fixpoint sanitizer (service.SanitizeText), not a bare
-		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always
-		// HTML-escaped, so a plain apostrophe would be persisted as &#39;
-		// and login (which never re-escapes) would look the account up
-		// under a name that no longer matches. See service.SanitizeText's
-		// doc comment and the register path (auth_handler.go), which
-		// already canonicalizes the same way.
-		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
-		if req.Username == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: "username is required",
-			})
-			return
-		}
-		if err := auth.ValidateUsername(req.Username); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error: "INVALID_INPUT", Message: err.Error(),
-			})
-			return
-		}
-
-		// Sanitize and validate avatar if provided. Use the fixpoint
-		// sanitizer (service.SanitizeText), not a bare
-		// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped, so a URL with more
-		// than one query parameter would have its "&" separators rewritten
-		// to "&amp;" and be persisted (and served) broken. Same reasoning as
-		// the username path above.
-		if req.Avatar != nil {
-			trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-			if err := validateAvatarURL(trimmed); err != nil {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "INVALID_INPUT", Message: err.Error(),
-				})
-				return
-			}
-			req.Avatar = &trimmed
-		}
-
-		// display_name gets the same username-shaped scrutiny beyond length:
-		// it is rendered wherever a username is, so control characters and
-		// bidi overrides are exactly as unwelcome here. Length, sanitization
-		// and the empty-clears-it rule live in UserService.
-		if req.DisplayName != nil {
-			if err := validateDisplayName(*req.DisplayName); err != nil {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "INVALID_INPUT", Message: err.Error(),
-				})
-				return
-			}
-		}
-
-		// Validate the identity key before any write so the request is
-		// all-or-nothing.
-		if req.IdentityPublicKey != nil {
-			trimmed := strings.TrimSpace(*req.IdentityPublicKey)
-			if err := validateIdentityKey(trimmed); err != nil {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error: "INVALID_INPUT", Message: err.Error(),
-				})
-				return
-			}
-			req.IdentityPublicKey = &trimmed
 		}
 
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{

@@ -48,6 +48,33 @@ func TestDeleteAccount_AllowedWhenOtherAdminExists(t *testing.T) {
 	}
 }
 
+// TestDeleteAccount_AllowedWhenOtherAdminHasLapsedTempBan locks the guard's
+// "is there another usable admin left" count against the same lapsed-ban
+// split anonymiseUser and notBannedClause document elsewhere: an admin whose
+// temporary ban has expired (banned=1, ban_expires in the past) is fully
+// functional per auth.IsEffectivelyBanned, so the raw `banned = 0` filter
+// must not make the guard blind to them.
+func TestDeleteAccount_AllowedWhenOtherAdminHasLapsedTempBan(t *testing.T) {
+	database := openMigratedMemory(t)
+	admin1 := seedUser(t, database, "admin1")
+	admin2 := seedUser(t, database, "admin2")
+	setRole(t, database, admin1, 2) // Admin
+	setRole(t, database, admin2, 2) // Admin
+
+	// admin2's temp ban has lapsed: banned stays 1 but ban_expires is in the
+	// past, so admin2 logs in and administers normally.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET banned = 1, ban_expires = '2020-01-01 00:00:00' WHERE id = ?`, admin2,
+	); err != nil {
+		t.Fatalf("set lapsed temp ban: %v", err)
+	}
+
+	err := database.DeleteAccount(context.Background(), admin1)
+	if err != nil {
+		t.Fatalf("DeleteAccount with a lapsed-temp-ban admin present: %v", err)
+	}
+}
+
 func TestDeleteAccount_AdminAllowedWhenOwnerExists(t *testing.T) {
 	database := openMigratedMemory(t)
 	ownerID := seedUser(t, database, "owner")

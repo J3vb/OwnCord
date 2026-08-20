@@ -262,15 +262,20 @@ describe("AccessibilityTab", () => {
   // -----------------------------------------------------------------------
 
   describe("side effects", () => {
-    it("toggles reduced-motion class on documentElement for reducedMotion", () => {
+    it("routes reducedMotion through syncOsMotionListener rather than writing the class directly (OC-0232)", () => {
+      // os-motion.ts is the single writer of `.reduced-motion`; the Reduce
+      // Motion toggle must delegate to it (passing the current syncOsMotion
+      // pref) instead of touching documentElement itself, so a manual toggle
+      // can no longer fight the OS-sync listener. With os-motion mocked here,
+      // the real class-application behaviour is covered in AccessibilityTab.test.ts.
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
       clickToggle(container, 0);
-      expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
+      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(false);
 
       clickToggle(container, 0);
-      expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
+      expect(mockSyncOsMotionListener).toHaveBeenLastCalledWith(false);
     });
 
     it("toggles high-contrast class on documentElement for highContrast", () => {

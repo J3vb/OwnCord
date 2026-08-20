@@ -179,6 +179,11 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		callDeps.DMSvc = svc.DMs
 		h.messageSvc = svc.Messages
 		h.perms = svc.Permissions
+		// So @here's offline narrowing can tell a disconnected idle/dnd reader
+		// (users.status keeps their last *chosen* value across a disconnect)
+		// from one who is actually still connected — the same live-connection
+		// rule presentableMembers applies to the members array.
+		svc.Messages.SetOnlineChecker(h.IsUserConnected)
 	}
 
 	registerChatHandlers(reg, chatDeps)

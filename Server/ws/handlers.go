@@ -119,7 +119,18 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 
 	if shouldCheck && c.tokenHash != "" {
 		result, dbErr := h.db.GetSessionWithBanStatus(c.ctx, c.tokenHash)
-		if dbErr != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+		if dbErr != nil {
+			// A failed read says nothing about this session's validity —
+			// kicking the client on a transient DB error (SQLITE_BUSY, an
+			// I/O error, a maintenance window) would be a false positive.
+			// Skip this recheck; the next one retries, and
+			// sweepRevokedSessions remains the time-based backstop for
+			// idle connections. Matches sweepRevokedSessions's identical
+			// rule for a failed batch lookup (hub_sweep.go).
+			slog.Warn("ws session recheck: lookup failed, skipping", "user_id", c.userID, "err", dbErr)
+			return false
+		}
+		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("ws session expired, closing connection", "user_id", c.userID)
 			h.kickClient(c)
 			return true

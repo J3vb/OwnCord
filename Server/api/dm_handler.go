@@ -72,7 +72,7 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
-		r.Post("/", handleCreateDM(svc))
+		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
 		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster))
@@ -117,7 +117,7 @@ type listDMsResponse struct {
 }
 
 // handleCreateDM creates or retrieves a DM channel with a recipient.
-func handleCreateDM(svc *service.Services) http.HandlerFunc {
+func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -139,6 +139,19 @@ func handleCreateDM(svc *service.Services) http.HandlerFunc {
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
+		}
+
+		// A brand-new 1:1 DM has dm_open_state pre-seeded for BOTH users by
+		// GetOrCreateDMChannel (db/dm_queries.go), so the recipient's first
+		// OpenDM call — fired later from the sender's first message — finds
+		// the row already present and reports opened=false. Without this,
+		// nothing ever tells the recipient the DM exists: no live event, and
+		// no visibility-watermark bump for a warm reconnect either. Only the
+		// creation path needs this — CreateDM re-opening an existing DM for
+		// the caller only touches the caller's own dm_open_state row, which
+		// the caller obviously already knows about.
+		if result.Created {
+			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
 
 		avatarStr := ""
@@ -399,6 +412,14 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 			return
 		}
 
+		// The block has already committed at this point, so the rest of this
+		// handler must survive the caller's request context being cancelled
+		// right after that commit (client disconnect mid-handler) — same
+		// reasoning as handleRenameGroupDM's own bgCtx. Without this, a
+		// canceled request context makes the shared-DM lookup below fail and
+		// get skipped, silently defeating the eviction it gates.
+		bgCtx := context.WithoutCancel(r.Context())
+
 		// Revocation must evict a live session, not merely block the next
 		// join (the same invariant the voice sweep states): without this, a
 		// blocked user already in the pair's 1:1 DM voice call stays in it
@@ -407,11 +428,11 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 		// controls. Group DM calls are deliberately untouched, matching
 		// requireDMNotBlocked's group exemption.
 		if ve, evictable := broadcaster.(dmVoiceEvictor); evictable {
-			if chID, exists, err := svc.DMs.SharedOneToOneDM(r.Context(), user.ID, targetID); err != nil {
+			if chID, exists, err := svc.DMs.SharedOneToOneDM(bgCtx, user.ID, targetID); err != nil {
 				slog.Warn("block: shared-DM lookup for voice eviction failed",
 					"blocker_id", user.ID, "target_id", targetID, "err", err)
 			} else if exists {
-				ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), targetID, chID)
+				ve.DisconnectFromVoiceInChannel(bgCtx, targetID, chID)
 			}
 		}
 

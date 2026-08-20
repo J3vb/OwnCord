@@ -640,7 +640,16 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 // the row back far enough to learn it), the row is re-read here and the
 // delete is skipped unless it still names channelID.
 func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
-	c.clearVoiceChID()
+	// OC-0219: use clearVoiceAndUnsubscribe (not the bare clearVoiceChID) so a
+	// join that already reached voiceJoinComplete's h.pubsub.Subscribe call
+	// drops its VoiceTopic subscription along with its in-memory voiceChID —
+	// exactly like every other path that takes a client out of voice while its
+	// WS stays up (see clearVoiceAndUnsubscribe's doc comment in
+	// voice_leave.go). Safe for the two earlier call sites too:
+	// Unsubscribe is a documented no-op when the client was never subscribed
+	// to that topic (pubsub.go), which is the case whenever this fires before
+	// voiceJoinComplete's Subscribe has run.
+	h.clearVoiceAndUnsubscribe(c)
 	// The client's voice state is now set before token generation (BUG-088),
 	// so a concurrent join/leave in the same channel can have elected this
 	// half-joined client key holder. Re-run the election after taking it back

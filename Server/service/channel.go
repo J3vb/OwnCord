@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-	"unicode/utf8"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -179,9 +178,14 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 
 	var cleaned *string
 	if customStatus != nil {
-		text := cleanText(*customStatus)
-		if utf8.RuneCountInString(text) > MaxCustomStatusLen {
-			return nil, fmt.Errorf("%w: custom_status must be at most %d characters", ErrBadRequest, MaxCustomStatusLen)
+		// OC-0195: bound the raw bytes before cleanText (sanitizeToFixpoint)
+		// runs — see cleanTextBounded's doc comment (user.go). This path is
+		// reachable over the WS presence_update frame, whose read limit is
+		// config.MaxMessageBytes (1 MiB), far larger than any REST body that
+		// reaches the equivalent guard on SetCustomStatus/UpdateProfile.
+		text, err := cleanTextBounded(*customStatus, MaxCustomStatusLen, "custom_status")
+		if err != nil {
+			return nil, err
 		}
 		cleaned = nullable(text)
 	}

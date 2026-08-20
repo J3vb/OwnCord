@@ -382,3 +382,72 @@ func TestDeleteChannelUserPermission_ClearsOverride(t *testing.T) {
 		t.Errorf("second delete status = %d, want 204", w.Code)
 	}
 }
+
+// Clearing a per-user override is a permission grant when it removes a deny
+// bit the actor's own role does not hold, exactly like the role-layer case
+// (TestDeleteChannelPermission_EscalationGuard in handlers_channel_perms_test.go).
+// The DELETE handler must apply requireGrantableOverride to the override
+// being REMOVED, not skip the escalation guard because hierarchy alone
+// passes.
+func TestDeleteChannelUserPermission_EscalationGuard(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	// Actor: MANAGE_CHANNELS holder without MANAGE_MESSAGES or ADMINISTRATOR.
+	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
+	target := seedOverrideTarget(t, database, "escalate-del-target")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate-del-user", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.UpsertChannelUserOverride(context.Background(), chID, target, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), modToken, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetUserChannelPermissions(context.Background(), chID, target)
+	if err != nil {
+		t.Fatalf("GetUserChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != permissions.ManageMessages {
+		t.Errorf("override mutated by forbidden delete: (%#x, %#x)", allow, deny)
+	}
+}
+
+// Same escalation, reached through a PUT that writes an all-zero mask: it
+// still clears the existing deny bit, which is a grant
+// (TestPutChannelPermission_ClearByZeroMaskEscalationGuard's per-user twin).
+func TestPutChannelUserPermission_ClearByZeroMaskEscalationGuard(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
+	target := seedOverrideTarget(t, database, "escalate-zero-target")
+
+	chID, err := database.CreateChannel(context.Background(), "escalate-zero-user", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.UpsertChannelUserOverride(context.Background(), chID, target, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodPut,
+		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), modToken,
+		map[string]any{"allow": 0, "deny": 0})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+
+	allow, deny, err := database.GetUserChannelPermissions(context.Background(), chID, target)
+	if err != nil {
+		t.Fatalf("GetUserChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != permissions.ManageMessages {
+		t.Errorf("override mutated by forbidden zero-mask PUT: (%#x, %#x)", allow, deny)
+	}
+}

@@ -9,9 +9,12 @@ import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
+import { resolveAuthor } from "@components/message-list/formatting";
+import { resolveDisplayName } from "@lib/avatar";
 
 const log = createLogger("notifications");
 
@@ -51,9 +54,22 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // Don't notify for own messages
   if (currentUser !== null && payload.user.id === currentUser.id) return;
 
-  // Don't notify if the window is focused AND the message is in the active channel
+  // Don't notify if the window is focused AND the message is in the active
+  // channel — UNLESS that channel is showing a detached around-window
+  // (OC-0204). "Active" only means this is the channel on screen; a jump to
+  // an old permalink/reply/search hit can leave it detached from the live
+  // tail (messages.store's detachedChannels), in which case the user is
+  // reading back-history and cannot see the new message at all — addMessage
+  // silently refuses to append it. Without this check that combination
+  // suppresses the one thing that would have told the user anything arrived.
   const activeChannelId = channelsStore.getState().activeChannelId;
-  if (isWindowFocused() && payload.channel_id === activeChannelId) return;
+  if (
+    isWindowFocused() &&
+    payload.channel_id === activeChannelId &&
+    !isWindowDetached(payload.channel_id)
+  ) {
+    return;
+  }
 
   const mentionInfo = {
     mentions: payload.mentions,
@@ -87,6 +103,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
   const channelLabel = isDm ? channelName : `#${channelName}`;
 
+  // The name to show for the author, resolved the same way the message list
+  // resolves it (resolveAuthor prefers the live membersStore nickname over
+  // whatever was frozen into the payload; resolveDisplayName falls back to
+  // the username when no nickname is set). Without this the notification
+  // names the sender differently from the message row it points at.
+  const authorName = resolveDisplayName(resolveAuthor(payload.user));
+
   // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function sanitizeNotif(s: string, maxLen: number): string {
     // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
@@ -96,8 +119,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const title = sanitizeNotif(
     mentioned
-      ? `${payload.user.username} mentioned you in ${channelLabel}`
-      : `${payload.user.username} in ${channelLabel}`,
+      ? `${authorName} mentioned you in ${channelLabel}`
+      : `${authorName} in ${channelLabel}`,
     80,
   );
   const body = sanitizeNotif(payload.content, 100);

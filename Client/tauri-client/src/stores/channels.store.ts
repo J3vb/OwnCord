@@ -333,10 +333,19 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
   });
 }
 
-/** Increment unread count for a channel, unless it is the active channel. */
-export function incrementUnread(channelId: number): void {
+/**
+ * Increment unread count for a channel, unless it is the active channel.
+ *
+ * `evenIfActive` (OC-0204) opts out of that skip: "active" normally means
+ * "the user is watching the live tail" — the reason a badge would be
+ * redundant there — but the active channel's loaded window can be detached
+ * from the live tail (a jump to an old permalink/reply/search hit), in which
+ * case the message is genuinely unseen and must still count. Callers own
+ * deciding when that applies; this still always skips an unknown channel id.
+ */
+export function incrementUnread(channelId: number, evenIfActive = false): void {
   channelsStore.setState((prev) => {
-    if (prev.activeChannelId === channelId) {
+    if (prev.activeChannelId === channelId && !evenIfActive) {
       return prev;
     }
     const existing = prev.channels.get(channelId);
@@ -357,10 +366,12 @@ export function incrementUnread(channelId: number): void {
  * Increment the mention count for a channel, unless it is the active channel.
  * Callers also call incrementUnread — a mention is always an unread too, and
  * the two counters are kept independent so the badge can outrank.
+ *
+ * `evenIfActive` mirrors incrementUnread's escape hatch — see its doc for why.
  */
-export function incrementMention(channelId: number): void {
+export function incrementMention(channelId: number, evenIfActive = false): void {
   channelsStore.setState((prev) => {
-    if (prev.activeChannelId === channelId) {
+    if (prev.activeChannelId === channelId && !evenIfActive) {
       return prev;
     }
     const existing = prev.channels.get(channelId);

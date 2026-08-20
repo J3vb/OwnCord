@@ -86,6 +86,23 @@ describe("dmDisplayName", () => {
   it("falls back to the recipient when the participant list is empty", () => {
     expect(dmDisplayName(makeDm({ participants: [] }))).toBe("bob");
   });
+
+  // Regression (OC-0220): a group DM that has lost every other member still
+  // has a live, is_group=1 channel row (LeaveGroupDM only deletes the row
+  // when the LAST member leaves), but the server never populates `recipient`
+  // for a channel with zero "other" participants — it stays the zero-valued
+  // DMUser (username ""). Falling back to that empty username renders a
+  // blank label everywhere dmDisplayName is used.
+  it("never renders blank for a group that has lost every other member", () => {
+    const name = dmDisplayName(
+      makeDm({
+        isGroup: true,
+        participants: [],
+        recipient: { id: 0, username: "", avatar: "", status: "" },
+      }),
+    );
+    expect(name).not.toBe("");
+  });
 });
 
 // ---------------------------------------------------------------------------

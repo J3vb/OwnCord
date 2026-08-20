@@ -193,7 +193,14 @@ const DEFAULT_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/y;
 /** Canonical language id for a fence tag, or null when unknown. */
 export function resolveLanguage(tag: string | null): string | null {
   if (tag === null) return null;
-  return ALIASES[tag.toLowerCase()] ?? null;
+  const key = tag.toLowerCase();
+  // Object.hasOwn guards against inherited keys ("constructor", "toString"),
+  // which a bare index read would resolve to a prototype value. Once that
+  // guard holds the own value is a real string, but noUncheckedIndexedAccess
+  // still types the read as string | undefined, so narrow it explicitly.
+  if (!Object.hasOwn(ALIASES, key)) return null;
+  const canonical = ALIASES[key];
+  return canonical === undefined ? null : canonical;
 }
 
 /**

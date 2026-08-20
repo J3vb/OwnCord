@@ -201,6 +201,81 @@ func TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
 	}
 }
 
+// OC-0192: same story as OC-0151 above, but for the avatar field — the
+// service.SanitizeText call in the avatar branch has no byte-length guard at
+// all, unlike the username field just above it. validateAvatarURL's
+// maxAvatarURLLen check never gets a chance to reject a huge payload cheaply,
+// because the fixpoint sanitizer already spent its (quadratic) cost on it
+// first. The fix must reject an oversized avatar on a cheap byte-length
+// check before sanitizing, so the rejection is near-instant regardless of
+// payload size.
+func TestUpdateProfile_OversizedAvatarRejectedBeforeSanitizing(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "avatarvictim", 4)
+
+	// Adversarial nested-entity payload (16 KB) — see service.sanitizeToFixpoint's
+	// doc comment for why this shape is quadratic to sanitize.
+	hugeAvatar := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "avatarvictim",
+		"avatar":   hugeAvatar,
+	})
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("UpdateProfile oversized avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// See TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing for the
+	// rationale behind this bound: a guard that runs before sanitizing
+	// rejects in well under a millisecond, while the pre-fix code spends over
+	// 150ms in sanitizeToFixpoint on this payload before validateAvatarURL's
+	// length check ever runs.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("UpdateProfile oversized avatar took %v, want well under 150ms (raw field must be bounded before sanitizing, not after)", elapsed)
+	}
+}
+
+// OC-0197: display_name is validated (validateDisplayName) against the raw
+// JSON string, before the fixpoint sanitizer's outer html.UnescapeString
+// ever runs (that happens later, inside UserService.UpdateProfile's
+// cleanText call). So an entity-encoded control or bidi character like
+// "&#x202e;" sails through validateDisplayName as harmless ASCII, and is only
+// turned into the real U+202E RIGHT-TO-LEFT OVERRIDE character afterwards,
+// on its way into storage. TestUpdateProfile_RejectsBadDisplayName
+// (avatar_handler_test.go) shows the literal character is correctly
+// rejected; this is the entity-encoded bypass of that same guard — the fix
+// is to sanitize display_name before validating it, the same order the
+// username field above already uses.
+func TestUpdateProfile_RejectsEntityEncodedBidiOverrideInDisplayName(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "dnentity", 4)
+
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username":     "dnentity",
+		"display_name": "ada&#x202e;gnp.exe",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("entity-encoded bidi override display_name status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Regardless of what the handler answered, the stored row must never end
+	// up holding a real bidi override character smuggled in via the entity
+	// encoding — that is the actual harm (it renders wherever the username
+	// does, in every connected client, once broadcast).
+	u, err := database.GetUserByUsername(context.Background(), "dnentity")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername: %v, %v", u, err)
+	}
+	if u.DisplayName != nil && strings.ContainsRune(*u.DisplayName, '\u202e') {
+		t.Errorf("stored display_name = %q, contains a real U+202E bidi override smuggled past validateDisplayName via HTML entity", *u.DisplayName)
+	}
+}
+
 // OC-0180: the avatar branch must canonicalize with the same fixpoint
 // sanitizer (service.SanitizeText) as the username path above it, not the
 // bare bluemonday sanitizer.Sanitize — Sanitize's output is always

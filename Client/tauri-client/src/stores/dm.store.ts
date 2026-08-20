@@ -139,7 +139,10 @@ export function updateDmLastMessage(
           lastMessageId: messageId,
           lastMessage: content,
           lastMessageAt: timestamp,
-          unreadCount: updated.unreadCount + 1,
+          unreadCount:
+            updated.lastMessageId !== null && messageId <= updated.lastMessageId
+              ? updated.unreadCount
+              : updated.unreadCount + 1,
         },
         ...rest,
       ],
@@ -194,7 +197,13 @@ export function clearDmUnread(channelId: number): void {
 export function dmDisplayName(dm: DmChannel): string {
   if (dm.name !== "") return dm.name;
   const names = dm.participants.map((p) => (p.displayName ?? "") || p.username);
-  if (names.length === 0) return dm.recipient.username;
+  if (names.length === 0) {
+    return dm.recipient.username !== ""
+      ? dm.recipient.username
+      : dm.isGroup
+        ? "Empty group"
+        : "Unknown user";
+  }
   if (!dm.isGroup) return names[0]!;
   if (names.length <= 3) return names.join(", ");
   return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;

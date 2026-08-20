@@ -518,6 +518,7 @@ describe("createChannelController", () => {
       // After a jump into history the composer stays enabled; sending must
       // land the optimistic row in the live tail, not mid-history.
       mockIsWindowDetached.mockReturnValueOnce(true);
+      mockMarkChannelRead.mockClear();
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
@@ -530,6 +531,10 @@ describe("createChannelController", () => {
       expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
       // The send itself still goes out.
       expect(opts.ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
+      // OC-0204: a detached-but-active channel can carry an unread/mention
+      // badge dispatcher.ts left behind for messages missed below the gap —
+      // jumping to present (which sending here implies) must clear it.
+      expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
     });
 
     it("onSend while disconnected records a failed optimistic row (no silent drop)", () => {
@@ -582,6 +587,7 @@ describe("createChannelController", () => {
     });
 
     it("onJumpToPresent reattaches the channel and refetches the live tail", () => {
+      mockMarkChannelRead.mockClear();
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
@@ -596,6 +602,10 @@ describe("createChannelController", () => {
       expect(mockReattachToPresent.mock.invocationCallOrder[0]).toBeLessThan(
         (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
       );
+      // OC-0204: clicking "Jump to Present" is reading whatever arrived
+      // below the gap — clear the badge it may have left, the same way
+      // leaving a channel does.
+      expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
     });
 
     it("onRetry re-sends the failed draft with a fresh correlation id", () => {

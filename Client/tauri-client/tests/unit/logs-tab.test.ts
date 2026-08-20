@@ -405,6 +405,47 @@ describe("LogsTab", () => {
     expect(copiedText).toContain('"key"');
   });
 
+  it("clear button updates the entry count, not just the list", () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "one"), makeMockEntry("info", "two")]);
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    expect(el.textContent).toContain("2 entries");
+
+    // Simulate clearLogBuffer() actually emptying the buffer.
+    mockClearLogBuffer.mockImplementation(() => {
+      mockGetLogBuffer.mockReturnValue([]);
+    });
+
+    const clearBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Clear Logs",
+    )!;
+    clearBtn.click();
+
+    expect(el.querySelectorAll(".log-entry").length).toBe(0);
+    expect(el.textContent).toContain("0 entries");
+    expect(el.textContent).not.toContain("2 entries");
+  });
+
+  it("Refresh button updates the entry count to match the refreshed list", () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    expect(el.textContent).toContain("1 entries");
+
+    mockGetLogBuffer.mockReturnValue([
+      makeMockEntry("info", "initial"),
+      makeMockEntry("warn", "new entry"),
+    ]);
+
+    const refreshBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Refresh",
+    )!;
+    refreshBtn.click();
+
+    expect(el.textContent).toContain("2 entries");
+    expect(el.textContent).not.toContain("1 entries");
+  });
+
   it("Refresh Diagnostics button re-renders diagnostics panel", () => {
     mockGetLogBuffer.mockReturnValue([]);
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);

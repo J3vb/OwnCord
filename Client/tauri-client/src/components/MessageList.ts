@@ -264,6 +264,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let renderedStart = 0;
   let renderedEnd = 0;
 
+  // scrollToMessage's highlight-flash: at most one outstanding flash at a
+  // time, so its cleanup timer never needs a per-call abort listener (which
+  // would accumulate one listener — and pin one row element — per jump).
+  let flashTimer = 0;
+  let flashEl: HTMLElement | null = null;
+
   /**
    * Unread count this channel carried when the visit that created this list
    * began. Read once here, not per render: the badge is cleared by the visit
@@ -965,6 +971,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       clearTimeout(renderWindowResetTimer);
       renderWindowResetTimer = 0;
     }
+    if (flashTimer !== 0) {
+      clearTimeout(flashTimer);
+      flashTimer = 0;
+      flashEl = null;
+    }
     unsubLoadingReset();
     for (const unsub of unsubscribers) {
       unsub();
@@ -1013,12 +1024,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const localIdx = idx - renderedStart;
       const el = contentContainer.children[localIdx] as HTMLElement | undefined;
       if (el !== undefined) {
+        // A prior flash still pending (rapid repeat jumps) must not linger on
+        // its now-stale row, and must not leave its timer live once replaced.
+        if (flashTimer !== 0) {
+          clearTimeout(flashTimer);
+          flashEl?.classList.remove("highlight-flash");
+        }
         el.classList.add("highlight-flash");
-        const timer = window.setTimeout(() => {
+        flashEl = el;
+        flashTimer = window.setTimeout(() => {
           el.classList.remove("highlight-flash");
+          flashTimer = 0;
+          flashEl = null;
         }, 1500);
-        // Unmounting mid-flash must not leave a timer pointing at a dead node.
-        ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
       }
     }
 

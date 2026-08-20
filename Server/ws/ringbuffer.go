@@ -133,3 +133,13 @@ func (rb *EventRingBuffer) OldestSeq() uint64 {
 	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
 	return rb.entries[oldestIdx].seq
 }
+
+// NewestSeq returns the highest sequence number in the buffer, or 0 if empty.
+func (rb *EventRingBuffer) NewestSeq() uint64 {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	if rb.count == 0 {
+		return 0
+	}
+	return rb.newestSeqLocked()
+}

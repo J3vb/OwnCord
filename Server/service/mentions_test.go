@@ -301,6 +301,37 @@ func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
 	}
 }
 
+// TestSendMessage_HereSkipsDisconnectedIdleDndUsers locks OC-0223: @here must
+// treat a reader with no live connection as offline even when their stored
+// status is idle/dnd, matching the read path's "no live connection is
+// offline, whatever the row says" rule (ws/serve_ready.go presentableMembers).
+// MarkUserDisconnected only ever rewrites "online" -> "offline" — an idle/dnd
+// choice survives the disconnect by design, so a bare
+// db.BroadcastStatus(r.Status) == db.StatusOffline test can never catch a
+// disconnected idle/dnd reader without also consulting live connection state.
+func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	// bob's last chosen status was "dnd" before disconnecting (mirrors what
+	// MarkUserDisconnected leaves behind for a non-"online" status).
+	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusDND); err != nil {
+		t.Fatalf("UpdateUserStatus(dnd): %v", err)
+	}
+	// bob has no live connection.
+	svc.SetOnlineChecker(func(userID int64) bool { return userID != 2 })
+
+	sendAs(t, svc, 4, "@here quick question")
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("disconnected dnd bob mention_count = %d, want 0", got)
+	}
+
+	// A plain @everyone still reaches them: only @here narrows on presence.
+	sendAs(t, svc, 4, "@everyone meeting now")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("disconnected dnd bob @everyone mention_count = %d, want 1", got)
+	}
+}
+
 // TestSendMessage_EveryoneSkipsUsersWithoutRead locks that the @everyone
 // fan-out honors per-channel denies, not just the base role mask.
 func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {

@@ -20,9 +20,19 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
+const { capturedOnRemoteVideo } = vi.hoisted(() => ({
+  capturedOnRemoteVideo: {
+    current: null as null | ((userId: number, stream: MediaStream, isScreenshare: boolean) => void),
+  },
+}));
+
 vi.mock("@lib/livekitSession", () => ({
   cleanupAll: vi.fn(),
-  setOnRemoteVideo: vi.fn(),
+  setOnRemoteVideo: vi.fn(
+    (cb: (userId: number, stream: MediaStream, isScreenshare: boolean) => void) => {
+      capturedOnRemoteVideo.current = cb;
+    },
+  ),
   setOnRemoteVideoRemoved: vi.fn(),
   clearOnRemoteVideo: vi.fn(),
   setWsClient: vi.fn(),
@@ -93,6 +103,15 @@ const {
         videoGridSlot: HTMLDivElement;
       };
       dmProfileSlot: HTMLDivElement;
+      videoGrid: {
+        addStream: ReturnType<typeof vi.fn>;
+        removeStream: ReturnType<typeof vi.fn>;
+        clearStreams: ReturnType<typeof vi.fn>;
+        hasStreams: ReturnType<typeof vi.fn>;
+        setFocusedTile: ReturnType<typeof vi.fn>;
+        getFocusedTileId: ReturnType<typeof vi.fn>;
+        setLabel: ReturnType<typeof vi.fn>;
+      };
     },
   },
 }));
@@ -132,20 +151,22 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       videoGridSlot: document.createElement("div"),
     };
     const dmProfileSlot = document.createElement("div");
-    capturedChatAreaRef.current = { slots, dmProfileSlot };
+    const videoGrid = {
+      addStream: vi.fn(),
+      removeStream: vi.fn(),
+      clearStreams: vi.fn(),
+      hasStreams: vi.fn(() => false),
+      setFocusedTile: vi.fn(),
+      getFocusedTileId: vi.fn(() => null),
+      setLabel: vi.fn(),
+      mount: vi.fn(),
+      destroy: vi.fn(),
+    };
+    capturedChatAreaRef.current = { slots, dmProfileSlot, videoGrid };
     return {
       chatArea: document.createElement("div"),
       slots,
-      videoGrid: {
-        addStream: vi.fn(),
-        removeStream: vi.fn(),
-        clearStreams: vi.fn(),
-        hasStreams: vi.fn(() => false),
-        setFocusedTile: vi.fn(),
-        getFocusedTileId: vi.fn(() => null),
-        mount: vi.fn(),
-        destroy: vi.fn(),
-      },
+      videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
         hashEl: document.createElement("span"),
@@ -165,8 +186,9 @@ import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, updateVoiceUserProfile } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
+import { membersStore, updateMemberProfile } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
@@ -196,6 +218,7 @@ function resetStores(): void {
     voiceStatus: "idle",
   }));
   dmStore.setState(() => ({ channels: [] }));
+  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map(), roleRevision: 0 }));
 }
 
 type FakeWsClient = WsClient & {
@@ -383,6 +406,175 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
   });
 
+  it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged (OC-0207)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    // Alice joins voice channel A (9). Someone's camera briefly toggles the
+    // signature so the real VideoModeController actually runs checkVideoMode
+    // against channel 9 and latches its lastChannelId there — mirroring
+    // "Alice is already in voice channel A" from the finding's repro.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              100,
+              {
+                userId: 100,
+                username: "carl",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              100,
+              {
+                userId: 100,
+                username: "carl",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    // Alice switches to voice channel B (10). Nobody in B has camera or
+    // screenshare on either, so MainPage's camera/screenshare signature does
+    // not change across the switch — the blind spot the finding describes.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 10,
+      voiceUsers: new Map([[10, new Map()]]),
+    }));
+    voiceStore.flush();
+
+    // The switch itself may legitimately clear stale tiles from channel A
+    // (that is the correct, eager fix) — what matters for this finding is
+    // that nothing clears the grid again *after* the new tile is added.
+    const videoGrid = capturedChatAreaRef.current!.videoGrid;
+    videoGrid.clearStreams.mockClear();
+
+    // Bob's screenshare track arrives via LiveKit in channel B ahead of the
+    // server's voice_state broadcast (the documented TrackSubscribed race).
+    const fakeStream = {} as MediaStream;
+    capturedOnRemoteVideo.current!(200, fakeStream, true);
+
+    expect(videoGrid.addStream).toHaveBeenCalled();
+    // The bug: VideoModeController's lastChannelId is still stuck on channel
+    // A (9) because the switch to B (10) never changed the signature, so the
+    // checkVideoMode() call right after addStream sees a "channel change"
+    // that isn't one and wipes the tile it was just given.
+    expect(videoGrid.clearStreams).not.toHaveBeenCalled();
+  });
+
+  it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          200,
+          {
+            id: 200,
+            username: "bob_1994",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+            displayName: "Bee",
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+      roleRevision: 0,
+    }));
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              200,
+              {
+                userId: 200,
+                username: "bob_1994",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    const fakeStream = {} as MediaStream;
+    capturedOnRemoteVideo.current!(200, fakeStream, false);
+
+    const videoGrid = capturedChatAreaRef.current!.videoGrid;
+    // The tile must show the same identity the voice roster and every other
+    // surface show for user 200 — the nickname "Bee" — not the raw username
+    // "bob_1994" (ChannelSidebar.ts's memberDisplayName idiom).
+    expect(videoGrid.addStream).toHaveBeenCalledWith(
+      200,
+      "Bee",
+      fakeStream,
+      expect.objectContaining({ isSelf: false }),
+    );
+
+    // Bob renames himself mid-call (Settings -> Account). The USER_UPDATE
+    // fan-out updates both membersStore and voiceStore's frozen username
+    // copy, exactly like dispatcher.ts's USER_UPDATE handler does.
+    updateMemberProfile(200, { username: "bob_1994", avatar: null, displayName: "Robert" });
+    updateVoiceUserProfile(200, { username: "bob_1994" });
+    voiceStore.flush();
+
+    // The already-open tile must pick up the new name without the tile
+    // being torn down and re-created (no new addStream call for tile 200).
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
+  });
+
   it("does not open the 1:1 profile panel for a group DM header click", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -525,6 +717,55 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).toBe("none");
+  });
+
+  it("does not cancel a group-DM ring when the ringer leaves voice but another callee is still in the call (OC-0235)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    // Alice (10) rings a group DM (channel 50); this client is a third
+    // participant (C).
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Bob (11) already accepted and is sitting in the DM's voice channel.
+    // The dispatcher's own voice_leave handler may already have removed
+    // Alice from the roster by the time this fires (order-independent), so
+    // her entry is absent here too — only Bob remains.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [
+              11,
+              {
+                userId: 11,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    // Alice, the ringer, hangs up. The call is still live — Bob is in it —
+    // so this client's own one-click Accept must not disappear.
+    ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
+
+    expect(banner.style.display).not.toBe("none");
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {

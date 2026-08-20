@@ -186,6 +186,27 @@ describe("createVoiceWidgetCallbacks", () => {
 
       expect(mockSetMuted).not.toHaveBeenCalled();
     });
+
+    it("does not send voice_deafen{deafened:false} on unmute while server-deafened (OC-0216)", () => {
+      // Mirrors onDeafenToggle's localServerMuted guard (OC-0179): a
+      // moderator-imposed deafen is not ours to lift, so unmuting must not
+      // spend a doomed voice_deafen round-trip that the server will refuse
+      // with SERVER_DEAFENED.
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, localDeafened: true, localServerDeafened: true }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+
+      // The unmute itself still goes through...
+      expect(mockSetMuted).toHaveBeenCalledWith(false);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: false } });
+      // ...but the undeafen must be suppressed while the server deafen stands.
+      expect(mockSetDeafened).not.toHaveBeenCalled();
+      expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
+    });
   });
 
   describe("onDeafenToggle", () => {

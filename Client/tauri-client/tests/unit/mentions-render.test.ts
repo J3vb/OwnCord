@@ -145,6 +145,17 @@ describe("@mention rendering", () => {
     const el = render("hi @alice", { mentions: [20] });
     expect(el.querySelector(".mention")?.getAttribute("data-user-id")).toBe("20");
   });
+
+  it("does not fall back to the member list when the server sent a mentions list that omits the token (OC-0228)", () => {
+    // The server resolved this message's mentions to [10] (alice) only, not
+    // the signed-in user (id 12, username "me"). The inline pill must agree
+    // with the row-level gate and stay unresolved for "@me" here — a token
+    // the server did not list must not render as a live mention, let alone a
+    // self one.
+    const el = render("hey @me", { mentions: [10] });
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.textContent).toBe("hey @me");
+  });
 });
 
 describe("@everyone / @here", () => {

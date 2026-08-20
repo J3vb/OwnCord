@@ -31,6 +31,7 @@ import {
   invalidateLoadedMessageWindows,
   setChannelLoading,
   setChannelLoadError,
+  isWindowDetached,
 } from "@stores/messages.store";
 import {
   setMembers,
@@ -65,7 +66,12 @@ import {
   updateDmParticipant,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
-import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
+import {
+  blocksStore,
+  setBlockedByMe,
+  setUserBlockedByThem,
+  clearBlockedByThem,
+} from "@stores/blocks.store";
 import { setCustomEmoji } from "@stores/emoji.store";
 import type { DmChannelPayload } from "./types";
 import { isTextLikeChannel } from "./types";
@@ -267,6 +273,16 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.READY, (payload) => {
+      // OC-0201: snapshot the current voice channel's peer roster BEFORE the
+      // wholesale replace below, so the reconciliation branch further down
+      // can tell who left while the socket was down. Must run before
+      // setVoiceStates() overwrites voiceUsers with the fresh payload.
+      const prevVoiceChannelId = voiceStore.getState().currentChannelId;
+      const prevVoicePeerIds =
+        prevVoiceChannelId !== null
+          ? new Set(voiceStore.getState().voiceUsers.get(prevVoiceChannelId)?.keys() ?? [])
+          : new Set<number>();
+
       setChannels(payload.channels);
       setRoles(payload.roles ?? []);
       setMembers(payload.members);
@@ -303,6 +319,31 @@ export function wireDispatcher(
           selfVoiceState.server_muted === true,
           selfVoiceState.server_deafened === true,
         );
+
+        // OC-0201: same gap, for E2EE. A full resync never replays the
+        // voice_leave for anyone who departed our voice channel during the
+        // outage — handleParticipantLeft (the only path that prunes a
+        // departed peer's key, rotates for membership forward secrecy, and
+        // re-runs the lowest-uid key-holder election) is otherwise only ever
+        // driven by a live voice_leave frame. Without this, a departed peer
+        // keeps a working room key indefinitely, and a client the server
+        // just elected key holder on reconnect (Server/ws hub.go
+        // registerNow -> updateKeyHolder) never self-elects. Only reconcile
+        // when the resync's self voice state is for the SAME channel the
+        // snapshot above was taken from — a channel change is out of scope
+        // here and comparing rosters across two different channels would
+        // misfire.
+        if (prevVoiceChannelId === selfVoiceState.channel_id) {
+          const currentVoicePeerIds = new Set(
+            payload.voice_states
+              .filter((vs) => vs.channel_id === selfVoiceState.channel_id)
+              .map((vs) => vs.user_id),
+          );
+          for (const uid of prevVoicePeerIds) {
+            if (uid === currentUserId || currentVoicePeerIds.has(uid)) continue;
+            void livekitSession().then(({ handleParticipantLeft }) => handleParticipantLeft(uid));
+          }
+        }
       }
 
       // F3: publish our long-term identity public key so peers can pin+verify
@@ -463,9 +504,17 @@ export function wireDispatcher(
       // clear it and re-fetch our own outgoing blocks authoritatively.
       clearBlockedByThem();
       if (api !== undefined) {
+        // OC-0218: snapshot the revision blocksStore was at right before
+        // issuing this fetch. If the user blocks/unblocks someone (via
+        // SidebarMemberSection's onToggleBlock -> setUserBlockedByMe) while
+        // this GET is in flight, that per-user delta bumps the revision;
+        // setBlockedByMe then sees the mismatch and skips applying this
+        // reply instead of clobbering the fresher local truth with a stale
+        // full-set snapshot.
+        const blockedByMeRevAtFetch = blocksStore.getState().blockedByMeRev ?? 0;
         api
           .listBlocks()
-          .then((r) => setBlockedByMe(r.blocked_user_ids))
+          .then((r) => setBlockedByMe(r.blocked_user_ids, blockedByMeRevAtFetch))
           .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
       }
 
@@ -566,30 +615,46 @@ export function wireDispatcher(
       const currentUserId = authStore.getState().user?.id ?? null;
       const isOwnMessage = currentUserId !== null && payload.user.id === currentUserId;
 
-      // Increment channel-level unread for non-active, non-own-message channels.
-      // Replayed frames increment unread counts like live ones — the burst
-      // is exactly the messages missed while away (a full-ready resume sends
-      // no burst at all; ready's unread_count values are authoritative
-      // there). DM channel IDs are not in channelsStore (they use dmStore),
-      // so incrementUnread is a no-op for DMs, but the own-message guard is
-      // applied here for defence-in-depth.
+      // Increment channel-level unread for non-active, non-own-message
+      // channels — OR for the active channel when its loaded window is
+      // detached from the live tail (OC-0204). "Active" normally means "the
+      // user is watching the live tail", which is why it is otherwise
+      // excluded here, but a jump to an old permalink/reply/search hit can
+      // leave the active channel showing a detached around-window
+      // (messages.store's detachedChannels) — addMessage already refuses to
+      // append a live broadcast onto that window, so without this a message
+      // (an @mention included) that arrives while the user reads
+      // back-history leaves no row AND no badge, with nothing to tell them
+      // it ever arrived. Replayed frames increment unread counts like live
+      // ones — the burst is exactly the messages missed while away (a
+      // full-ready resume sends no burst at all; ready's unread_count values
+      // are authoritative there). DM channel IDs are not in channelsStore
+      // (they use dmStore), so incrementUnread is a no-op for DMs, but the
+      // own-message guard is applied here for defence-in-depth.
       const isMention = highlightsCurrentUser(payload.content, {
         mentions: payload.mentions,
         mentionsEveryone: payload.mentions_everyone,
       });
+      const isDetached = isWindowDetached(payload.channel_id);
 
-      if (payload.channel_id !== activeId && !isOwnMessage) {
-        incrementUnread(payload.channel_id);
+      if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
+        // incrementUnread/incrementMention skip the active channel by
+        // default — evenIfActive (isDetached here) is a no-op for a
+        // genuinely non-active channel, since their internal guard only
+        // fires when channelId IS the active one.
+        incrementUnread(payload.channel_id, isDetached);
         // A mention is an unread too — the mention badge just outranks it.
         if (isMention) {
-          incrementMention(payload.channel_id);
+          incrementMention(payload.channel_id, isDetached);
         }
       }
 
       // Update DM store last message if this message belongs to a DM channel.
-      // Skip unread increment for own messages and the currently focused DM.
+      // Skip unread increment for own messages and the currently focused DM
+      // — unless that DM's window is detached from the live tail (OC-0204),
+      // the same exception the channel-level increment above makes.
       if (isDm) {
-        const isDmActive = payload.channel_id === activeId;
+        const isDmActive = payload.channel_id === activeId && !isDetached;
         if (isOwnMessage || isDmActive) {
           // Update last message preview but don't increment unread count.
           updateDmLastMessagePreview(
@@ -1111,10 +1176,22 @@ export function wireDispatcher(
       // that voice_leave's channel no longer matches the already-updated
       // currentChannelId, so it must not tear down the NEW channel's
       // optimistic state either), so voiceStatus is still "joining" when
-      // this error lands and the guard clears it here instead. An
-      // already-established session is never in "joining", so this never
-      // touches a live voice call.
+      // this error lands and the guard clears it here instead. A plain
+      // store rollback is safe for an already-established session (never
+      // "joining") and for a first-time join refusal (no prior session to
+      // tear down) — but a channel *switch* refused at precheck (RATE_LIMITED,
+      // FORBIDDEN, NOT_FOUND, archived-channel BAD_REQUEST) never reaches
+      // voiceJoinLeaveCurrent server-side, so no voice_leave is broadcast and
+      // the OLD channel's LiveKit room is still connected (mic still
+      // published) while the store already points at the NEW channel
+      // (OC-0193). isVoiceConnected() distinguishes that live-session case
+      // from the first-time-join refusal; tearing it down here also sends
+      // voice_leave so the server/SFU state for the OLD channel matches the
+      // now-cleared store.
       if (voiceStore.getState().voiceStatus === "joining") {
+        void livekitSession().then(({ isVoiceConnected, leaveVoice }) => {
+          if (isVoiceConnected()) leaveVoice(true);
+        });
         leaveVoiceChannel();
       }
       // Voice capacity refusals. The server owns the limits (voice_max_users /

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/db"
 )
@@ -59,6 +61,69 @@ func TestDMService_CreateGroupDM_RefusesBannedRecipient(t *testing.T) {
 	_, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CreateGroupDM with a banned recipient = %v, want ErrNotFound", err)
+	}
+}
+
+// OC-0194: same defect as OC-0192/OC-0195 (see
+// TestUpdateProfile_OversizedDisplayNameAndAboutRejectedBeforeSanitizing and
+// TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing) but
+// reached via CreateGroupDM. /api/v1/dms carries no rate limiter, and
+// CreateGroupDM runs cleanText(name) *before* the recipient-existence/ban/
+// block checks, so an adversarial nested-entity name pays the full quadratic
+// sanitizeToFixpoint cost even for a request that is going to 404 on its
+// recipients. The raw-byte guard must reject on cheap byte length alone.
+func TestDMService_CreateGroupDM_OversizedNameRejectedBeforeSanitizing(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	svc := NewDMService(database)
+
+	// Adversarial nested-entity payload (16 KB) — see sanitizeToFixpoint's
+	// doc comment (message.go) for why this shape is quadratic to sanitize.
+	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	// Recipients 999998/999999 do not exist. The guard must fire before the
+	// per-recipient GetUserByID/ban checks reach the database, matching the
+	// order CreateGroupDM actually runs them in.
+	_, err := svc.CreateGroupDM(context.Background(), 1, []int64{999998, 999999}, huge)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("CreateGroupDM with oversized name err = %v, want ErrBadRequest", err)
+	}
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends well over 150ms in
+	// sanitizeToFixpoint on this payload before the rune-count check ever
+	// runs. 150ms gives generous margin over noise while staying far below
+	// the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("CreateGroupDM with oversized name took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
+	}
+}
+
+// OC-0194 sibling: RenameGroupDM runs the identical cleanText(name) call and
+// must be bounded the same way as CreateGroupDM.
+func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	svc := NewDMService(database)
+
+	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
+	if err != nil {
+		t.Fatalf("setup CreateGroupDM: %v", err)
+	}
+
+	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	_, err = svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, huge)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("RenameGroupDM with oversized name err = %v, want ErrBadRequest", err)
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("RenameGroupDM with oversized name took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
 	}
 }
 

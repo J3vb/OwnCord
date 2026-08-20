@@ -209,6 +209,49 @@ func TestUpdateProfile_RejectsOverlongFields(t *testing.T) {
 	}
 }
 
+// OC-0192: UpdateProfile is the one function every transport (the REST
+// handler, and any future non-REST caller — see ProfilePatch's doc comment)
+// goes through, so the raw-length bound belongs here, not only in the
+// handler. cleanText (sanitizeToFixpoint) is quadratic in input length, and
+// nothing bounds DisplayName/About before line 140/143 run it — the rune-
+// count checks there run cleanText's full (expensive) output before ever
+// looking at how long it is. A caller that hands UpdateProfile an
+// adversarial nested-entity payload must be rejected on a cheap byte-length
+// check, not after the fixpoint sanitizer has already paid its cost on it.
+func TestUpdateProfile_OversizedDisplayNameAndAboutRejectedBeforeSanitizing(t *testing.T) {
+	svc, _ := newUserSvc(t)
+	ctx := context.Background()
+
+	// Adversarial nested-entity payload (16 KB) — see sanitizeToFixpoint's
+	// doc comment (message.go) for why this shape is quadratic to sanitize.
+	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	_, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &huge})
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("oversized display_name err = %v, want ErrBadRequest", err)
+	}
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends well over 150ms in
+	// sanitizeToFixpoint on this payload before the rune-count check ever
+	// runs. 150ms gives generous margin over noise while staying far below
+	// the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("oversized display_name took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
+	}
+
+	start = time.Now()
+	_, err = svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", About: &huge})
+	elapsed = time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("oversized about err = %v, want ErrBadRequest", err)
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("oversized about took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
+	}
+}
+
 func TestSetCustomStatus_RoundTripClearAndBound(t *testing.T) {
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
@@ -290,6 +333,44 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	u, _ = database.GetUserByID(ctx, 1)
 	if u.CustomStatus == nil || *u.CustomStatus != "away" {
 		t.Fatalf("bare status flip changed the stored text: %v", u.CustomStatus)
+	}
+}
+
+// OC-0195: same defect as OC-0192 (TestUpdateProfile_OversizedDisplayNameAndAboutRejectedBeforeSanitizing)
+// but reached over presence_update instead of PATCH /users/me. HandlePresenceUpdate
+// applied MaxCustomStatusLen to cleanText's *output*, so an adversarial
+// nested-entity payload paid the full quadratic sanitizeToFixpoint cost before
+// ever being measured. The WS read limit (config.MaxMessageBytes, 1 MiB) admits
+// a payload here far larger than PATCH /users/me's body ever could, and this
+// runs on the connection's own readPump goroutine.
+func TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	ctx := context.Background()
+
+	// Adversarial nested-entity payload (16 KB) — see sanitizeToFixpoint's
+	// doc comment (message.go) for why this shape is quadratic to sanitize.
+	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
+
+	start := time.Now()
+	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("oversized custom_status err = %v, want ErrBadRequest", err)
+	}
+	// A guard that runs before sanitizing rejects in well under a
+	// millisecond; the pre-fix code spends well over 150ms in
+	// sanitizeToFixpoint on this payload before the rune-count check ever
+	// runs. 150ms gives generous margin over noise while staying far below
+	// the unguarded cost.
+	if elapsed > 150*time.Millisecond {
+		t.Errorf("oversized custom_status took %v, want well under 150ms (raw field must be bounded before sanitizing)", elapsed)
+	}
+	// The rejected call must not have committed the status either.
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.Status == db.StatusOnline {
+		t.Error("a rejected presence_update must not commit the status")
 	}
 }
 

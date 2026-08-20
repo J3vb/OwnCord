@@ -16,14 +16,19 @@ class VadProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this._threshold = 0.05;
-    this._gateOnFrames = 12;   // ~200ms of silence before gating
-    this._gateOffFrames = 2;   // ~33ms of speech before ungating
+    // process() runs once per 128-sample render quantum (2.667ms @ 48kHz —
+    // see audioPipeline.ts's `new AudioContext({ sampleRate: 48000 })`), NOT
+    // once per ~16ms poll like the setTimeout fallback. These frame counts
+    // are therefore ~6x the fallback's, so both paths gate on the same
+    // wall-clock timing.
+    this._gateOnFrames = 75;   // ~200ms of silence before gating
+    this._gateOffFrames = 12;  // ~32ms of speech before ungating
     this._silentFrames = 0;
     this._speechFrames = 0;
     this._gated = false;
     this._active = true;
     this._startupFrames = 0;
-    this._startupGrace = 30;   // ~500ms grace period
+    this._startupGrace = 188;  // ~500ms grace period
     this._frameCounter = 0;    // for throttled RMS updates
 
     this.port.onmessage = (event) => {
@@ -65,10 +70,10 @@ class VadProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    // Send RMS value to main thread every ~6 frames (~50ms at 128 samples/frame @ 48kHz)
+    // Send RMS value to main thread every ~19 frames (~50ms at 128 samples/frame @ 48kHz)
     // This is used for the VAD indicator bar in the UI
     this._frameCounter++;
-    if (this._frameCounter >= 6) {
+    if (this._frameCounter >= 19) {
       this._frameCounter = 0;
       this.port.postMessage({ type: "rms", value: rms });
     }

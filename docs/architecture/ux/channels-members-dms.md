@@ -144,7 +144,7 @@ sequenceDiagram
     P->>API: POST /dms {recipient_id}
     API-->>P: DM channel
     P->>DM: open DM mode + focus channel
-    Note over U,DM: server also broadcasts dm_channel_open to both parties
+    Note over U,DM: on a newly created DM the server sends dm_channel_open to the recipient
 ```
 
 ### 3.1a Group DMs

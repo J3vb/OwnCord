@@ -78,6 +78,7 @@ export interface LogsTabHandle {
 
 export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal): LogsTabHandle {
   let logListEl: HTMLDivElement | null = null;
+  let countEl: HTMLDivElement | null = null;
   let logFilterLevel: LogLevel | "all" = readMigratedStringPref(
     "logs_filter_level",
     "all",
@@ -85,11 +86,18 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   );
   let unsubLogListener: (() => void) | null = null;
 
+  // Single point of truth for both the list and the "N entries" counter above
+  // it, so every render path (filter change, Clear, Refresh, live entry)
+  // keeps them in sync — see OC-0230.
   function renderLogEntries(): void {
+    const entries = getLogBuffer();
+    if (countEl !== null) {
+      countEl.textContent = `${entries.length} entries`;
+    }
+
     if (logListEl === null) return;
     clearChildren(logListEl);
 
-    const entries = getLogBuffer();
     for (const entry of entries) {
       if (logFilterLevel !== "all" && entry.level !== logFilterLevel) continue;
       logListEl.appendChild(formatLogEntry(entry));
@@ -314,7 +322,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     section.appendChild(diagBtns);
 
     // Log count
-    const countEl = createElement(
+    countEl = createElement(
       "div",
       {
         style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
@@ -338,7 +346,6 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     unsubLogListener = addLogListener(() => {
       if (getActiveTab() === "Logs") {
         renderLogEntries();
-        countEl.textContent = `${getLogBuffer().length} entries`;
       }
     });
 
@@ -349,6 +356,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     unsubLogListener?.();
     unsubLogListener = null;
     logListEl = null;
+    countEl = null;
   }
 
   return { build, cleanup };

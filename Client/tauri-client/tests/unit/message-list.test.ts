@@ -252,6 +252,31 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
+  it("OC-0217: repeated jumps do not each register a permanent abort listener on the component-lifetime signal", () => {
+    // As a user clicking a reply bar's jump arrow, a search hit, or a pinned
+    // entry repeatedly does across a live session.
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, messages);
+    msgList.mount(container);
+
+    // Installed after mount() so it only observes what scrollToMessage does,
+    // not mount's own (single, expected) abort registration.
+    const addEventListenerSpy = vi.spyOn(AbortSignal.prototype, "addEventListener");
+
+    for (let i = 1; i <= 5; i++) {
+      expect(msgList.scrollToMessage(i)).toBe(true);
+    }
+
+    // Each jump's highlight-flash cleanup must not add a new listener to the
+    // whole-lifetime AbortSignal — that accumulates one listener (and pins
+    // one detached row element through its closure) per jump, released only
+    // when the channel unmounts, not when that jump's flash finishes.
+    const abortRegistrations = addEventListenerSpy.mock.calls.filter(([type]) => type === "abort");
+    expect(abortRegistrations.length).toBe(0);
+
+    addEventListenerSpy.mockRestore();
+  });
+
   it("rebuilds the virtual window when scrolling outside the rendered range", async () => {
     setHasMore(1, false);
     const many = Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 }));

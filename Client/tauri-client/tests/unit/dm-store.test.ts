@@ -335,6 +335,28 @@ describe("dmStore", () => {
       expect(dmStore.getState().channels[1]!.unreadCount).toBe(2);
       expect(dmStore.getState().channels[1]!.lastMessageId).toBeNull();
     });
+
+    // Regression (OC-0224): on a fresh connect, registerNow (subscribing the
+    // client) runs before buildReady snapshots unread_count, so a DM that
+    // lands in that window is counted once by `ready` and then delivered
+    // again as a queued chat_message. Applying `ready` already sets
+    // unreadCount/lastMessageId to that message; a second call for the SAME
+    // message id must not double-count it.
+    it("does not double-count a message id already reflected by the last ready snapshot", () => {
+      setDmChannels([makeDm({ channelId: 5, unreadCount: 1, lastMessageId: 42 })]);
+      updateDmLastMessage(5, 42, "hello", "2026-03-28T12:00:00Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.unreadCount).toBe(1);
+    });
+
+    // A stale/out-of-order redelivery of an older message must not bump the
+    // badge either.
+    it("does not count a message id older than the channel's last message", () => {
+      setDmChannels([makeDm({ channelId: 5, unreadCount: 2, lastMessageId: 50 })]);
+      updateDmLastMessage(5, 42, "stale", "2026-03-28T12:00:00Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.unreadCount).toBe(2);
+    });
   });
 
   // ── updateDmLastMessagePreview ──────────────────────────

@@ -223,6 +223,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // onJumpToPresent — reattach clears "loaded" so the tail is refetched.
       if (isWindowDetached(channelId)) {
         reattachToPresent(channelId);
+        // OC-0204: while detached, this (already-active) channel could have
+        // picked up an unread/mention badge for messages that arrived below
+        // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
+        // it, since incrementUnread's usual "active channel" skip is exactly
+        // what a detached window opts out of. Jumping to present is reading
+        // it, so mark it read the same way leaving a channel does.
+        markChannelRead(channelId);
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
@@ -288,6 +295,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Dropping the detached flag also clears "loaded", so loadMessages
         // refetches the live tail instead of short-circuiting.
         reattachToPresent(channelId);
+        // OC-0204: see performSend's identical call above — a detached
+        // active channel's badge (from dispatcher.ts's evenIfActive path)
+        // must be cleared here too, or it lingers after the user has jumped
+        // back to present and is looking straight at the live tail.
+        markChannelRead(channelId);
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }

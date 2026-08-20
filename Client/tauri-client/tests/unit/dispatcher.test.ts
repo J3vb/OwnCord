@@ -20,7 +20,7 @@ import {
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { blocksStore } from "../../src/stores/blocks.store";
+import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import {
   emojiStore,
   setCustomEmoji,
@@ -85,6 +85,8 @@ import {
   leaveVoice as mockLeaveVoice,
   disableCamera as mockDisableCamera,
   disableScreenshare as mockDisableScreenshare,
+  isVoiceConnected as mockIsVoiceConnected,
+  handleParticipantLeft as mockHandleParticipantLeft,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
 
@@ -419,6 +421,53 @@ describe("WS Dispatcher", () => {
     mock.dispatch("chat_message", {
       id: 200,
       channel_id: 5, // different from active
+      user: { id: 2, username: "bob", avatar: null },
+      content: "ping",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    const ch = channelsStore.getState().channels.get(5);
+    expect(ch?.unreadCount).toBe(1);
+  });
+
+  // OC-0204: "active channel" normally means "the user is watching the live
+  // tail", so skipping the unread bump there is correct — until a jump to an
+  // old permalink/reply/search hit leaves the SAME active channel showing a
+  // detached around-window (messages.store's detachedChannels). addMessage
+  // already refuses to append a live broadcast onto a detached window, so
+  // without also bumping the badge here, a message arriving while the user
+  // reads back-history leaves no row AND no badge — nothing records it ever
+  // arrived.
+  it("wires chat_message to increment unread for the active channel when its window is detached", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(5, {
+        id: 5,
+        name: "general",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 5 }; // channel 5 IS active...
+    });
+    // ...but its loaded window is detached from the live tail (viewing
+    // back-history via a jump).
+    messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
+
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 5,
       user: { id: 2, username: "bob", avatar: null },
       content: "ping",
       reply_to: null,
@@ -3282,6 +3331,44 @@ describe("WS Dispatcher", () => {
     expect([...blocksStore.getState().blockedByMe]).toEqual([11, 22]);
   });
 
+  // OC-0218: the ready-time GET /blocks and a user-initiated block/unblock
+  // (SidebarMemberSection's onToggleBlock -> setUserBlockedByMe, after its
+  // own await api.blockUser/unblockUser) can race. The GET is issued first
+  // but its reply can land after the user's own fresher action — applying it
+  // unconditionally reverts what the user just did.
+  it("does not let a slow-to-resolve ready-time listBlocks revert a fresher local unblock", async () => {
+    cleanup(); // tear down the no-api dispatcher wired in beforeEach
+    let resolveListBlocks!: (v: { blocked_user_ids: number[] }) => void;
+    const listBlocks = vi.fn(
+      () =>
+        new Promise<{ blocked_user_ids: number[] }>((resolve) => {
+          resolveListBlocks = resolve;
+        }),
+    );
+    cleanup = wireDispatcher(mock.ws, { listBlocks });
+
+    // Local user 42 is blocked from a previous session.
+    blocksStore.setState(() => ({ blockedByMe: new Set([42]), blockedByThem: new Set() }));
+
+    // Reconnect: ready fires the GET, which does not resolve yet.
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    expect(listBlocks).toHaveBeenCalled();
+
+    // While it's in flight, the user clicks "Unblock" on 42 — the same
+    // sequence SidebarMemberSection's onToggleBlock performs once its own
+    // await api.unblockUser resolves.
+    setUserBlockedByMe(42, false);
+    expect([...blocksStore.getState().blockedByMe]).toEqual([]);
+
+    // The GET finally resolves with the stale pre-unblock snapshot.
+    resolveListBlocks({ blocked_user_ids: [42] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The user's unblock must win — 42 must not be silently re-added.
+    expect([...blocksStore.getState().blockedByMe]).toEqual([]);
+  });
+
   it("wires a local transport send failure to mark the pending row failed", () => {
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
@@ -3438,6 +3525,34 @@ describe("WS Dispatcher", () => {
       const dm = dms.find((c) => c.channelId === 50);
       expect(dm?.lastMessage).toBe("active DM msg");
       expect(dm?.unreadCount).toBe(0);
+    });
+
+    // OC-0204's DM-path sibling: the same "active means watching the live
+    // tail" assumption governs isDmActive here, and breaks the same way when
+    // the active DM's loaded window is detached (a jump to an old permalink/
+    // search hit inside the conversation).
+    it("updates DM last message WITH unread when the active DM's window is detached", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+      messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([50]) }));
+
+      mock.dispatch("chat_message", {
+        id: 503,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "arrived while reading back-history",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      const dms = dmStore.getState().channels;
+      const dm = dms.find((c) => c.channelId === 50);
+      expect(dm?.lastMessage).toBe("arrived while reading back-history");
+      expect(dm?.unreadCount).toBe(1);
     });
 
     it("increments the DM mention badge for an incoming @mention", () => {
@@ -3982,6 +4097,83 @@ describe("WS Dispatcher", () => {
     expect(voiceLeaveSent).toBe(false);
   });
 
+  // OC-0201: a full-ready resync that preserves a live voice session (the
+  // LiveKit room outlived a WS drop) never replays voice_leave for anyone
+  // who departed the channel while the socket was down — `ready` rebuilds
+  // voiceUsers wholesale and stops. Without reconciliation, a departed peer
+  // keeps a working room key forever (no rotation ever runs for them) and a
+  // client newly elected key holder by the server-side re-registration never
+  // self-elects, since only handleParticipantLeft runs the election.
+  it("reconciles E2EE state for peers who left during a full-ready resync with a live voice session", async () => {
+    vi.mocked(mockHandleParticipantLeft).mockClear();
+
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "me", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    // Before the resync: self (42) and peer (7) are both in channel 10 — the
+    // live LiveKit session survived the WS drop.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceStatus: "connected",
+      currentChannelId: 10,
+      voiceUsers: new Map([
+        [
+          10,
+          new Map([
+            [
+              42,
+              {
+                userId: 42,
+                username: "me",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+                serverMuted: false,
+                serverDeafened: false,
+              },
+            ],
+            [
+              7,
+              {
+                userId: 7,
+                username: "departed",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+                serverMuted: false,
+                serverDeafened: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+
+    // The full resync's voice_states shows peer 7 has left channel 10 while
+    // we were disconnected — only self remains.
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
+    // Must never be called for ourselves.
+    expect(mockHandleParticipantLeft).not.toHaveBeenCalledWith(42);
+  });
+
   it("unknown event type does not throw", () => {
     expect(() => {
       mock.dispatch("totally_unknown_server_event", { some: "data" });
@@ -4108,6 +4300,31 @@ describe("WS Dispatcher", () => {
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    // OC-0193: a channel *switch* refusal (precheck FORBIDDEN/BAD_REQUEST/
+    // RATE_LIMITED — anything that lands before the server's self voice_leave
+    // for the OLD channel) optimistically moved currentChannelId to the NEW
+    // channel and voiceStatus to "joining", but the LiveKit room from the OLD
+    // channel is still live — connected, mic published. The store-only
+    // leaveVoiceChannel() rollback used to leave that session dangling: the
+    // widget disappears (currentChannelId null hides it entirely) while audio
+    // keeps flowing and the server still lists us in the old channel. The
+    // rollback must also tear down the live LiveKit session so the media
+    // state and the store agree.
+    it("tears down a still-live LiveKit session when a channel-switch join is refused", async () => {
+      vi.mocked(mockLeaveVoice).mockClear();
+      vi.mocked(mockIsVoiceConnected).mockReturnValue(true);
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
+
+      mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
+      await vi.runAllTimersAsync();
+
+      expect(mockLeaveVoice).toHaveBeenCalledWith(true);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+
+      vi.mocked(mockIsVoiceConnected).mockReturnValue(false);
     });
   });
 

@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
@@ -182,6 +183,13 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrConflict):
 		return Result{Error: ClientError{Code: ErrCodeConflict, Message: err.Error()}}
 	default:
-		return Result{Error: ClientError{Code: ErrCodeInternal, Message: err.Error()}}
+		// Internal errors (service.ErrInternal wrappers embed the underlying
+		// driver error via %v) must not reach the client verbatim, matching
+		// the REST twin writeServiceError (Server/api/channel_handler.go) and
+		// every other ErrCodeInternal site in this package. Log server-side
+		// since this is the only ErrCodeInternal path whose caller
+		// (handlers.go) skips its own logging for ClientError results.
+		slog.Error("ws service internal error", "err", err)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "internal error"}}
 	}
 }

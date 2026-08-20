@@ -995,6 +995,11 @@ Create or retrieve a 1-on-1 DM channel with another user. If a DM channel alread
 }
 ```
 
+On a newly created channel (`201`, `"created": true`) the recipient also
+receives a `dm_channel_open`. Re-opening an existing DM (`200`) emits nothing —
+it only touches the caller's own open state. The creator is not sent the event
+on either path; it learns the channel from the response body above.
+
 ---
 
 ### GET /api/v1/dms

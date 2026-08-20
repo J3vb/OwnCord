@@ -108,6 +108,19 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
       timer = null;
       if (destroyed) return;
       apply(true);
+      // Re-check: apply() invokes options.onStatusChange synchronously, and a
+      // caller reacting to that (e.g. tearing down the page) may call
+      // destroy() from inside it. `timer` is already null at this point, so
+      // destroy()'s clearTimeout would be a no-op — the re-check below is
+      // what actually stops a synchronous destroy from being undone.
+      if (destroyed) return;
+      // Keep watching even when this firing changed nothing (already idle,
+      // or dnd/invisible/manual-idle made it a no-op): a status change made
+      // through a surface that produces no DOM activity event — the OS tray's
+      // Status submenu calls saveUserStatus() directly — can make the status
+      // eligible again without ever calling arm() itself. Re-arming here is
+      // the one place that covers every such surface at once.
+      arm();
     }, delayMs);
   }
 
