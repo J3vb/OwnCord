@@ -42,4 +42,34 @@ describe("isValidHost", () => {
     expect(isValidHost("::1")).toBe(true);
     expect(isValidHost("2001:db8::1")).toBe(true);
   });
+
+  it("rejects a bracketed IPv6 literal with characters before or after the brackets", () => {
+    // The bracketed-IPv6 regex is anchored at both ends (^...$); without
+    // those anchors, a bracket pattern anywhere in the string would
+    // wrongly match.
+    expect(isValidHost("evil[::1]")).toBe(false);
+    expect(isValidHost("[::1]evil")).toBe(false);
+  });
+
+  it("rejects a multi-colon host whose characters are not all IPv6-valid", () => {
+    // More than one colon alone must not be enough to accept a host as a
+    // bare IPv6 literal -- every character has to be IPv6-valid too (the
+    // `&&`, not `||`, between the colon-count and character checks).
+    expect(isValidHost("not:valid:host")).toBe(false);
+  });
+
+  it("rejects a single-colon host with a non-numeric port suffix", () => {
+    // Exactly one colon must never satisfy the bare-IPv6 branch (which
+    // requires *more than* one), and it isn't a valid host:port either
+    // unless the suffix after the colon is numeric.
+    expect(isValidHost("a:b")).toBe(false);
+  });
+
+  it("rejects a multi-colon host where the IPv6-valid run is only a substring", () => {
+    // The bare-IPv6 character regex is anchored at both ends -- it has to
+    // match the whole (multi-colon) host, not just some valid-looking
+    // substring within or at either end of it.
+    expect(isValidHost("xyz:ab:cd")).toBe(false);
+    expect(isValidHost("ab:cd:xyz")).toBe(false);
+  });
 });
