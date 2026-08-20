@@ -2401,3 +2401,75 @@ describe("ChannelSidebar channel context menu permissions", () => {
     expect(menu?.querySelector('[data-testid="ctx-edit-channel"]')).not.toBeNull();
   });
 });
+
+// ── Per-row listeners must not outlive the render that created them (OC-0229) ──
+//
+// renderChannels() does clearChildren(channelList) and rebuilds every row from
+// scratch on every channels-store notification (a new unread count, a new
+// active channel, a role change, ...). Each row's listeners (context menu,
+// drag handlers, ...) used to be registered on the sidebar's single
+// factory-lifetime AbortSignal, which only aborts once, in destroy(). That
+// signal's "abort" algorithm list is what actually keeps a DOM node alive in
+// a browser once addEventListener({ signal }) has been called on it, so a
+// detached row whose listener is still registered on that signal is retained
+// for the sidebar's entire lifetime instead of being collectable after the
+// re-render that replaced it.
+//
+// This cannot observe GC directly in jsdom, but the retained listener is
+// itself observable: a detached row whose "contextmenu" listener is still
+// live will still open a context menu when the event fires on it, even
+// though the row has not been part of the document since the render that
+// superseded it.
+describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+  });
+
+  it("does not leave a stale row's context-menu listener live after a re-render replaces it", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const staleRow = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    expect(staleRow).not.toBeNull();
+
+    // Provoke renderChannels() the same way incrementUnread does for every
+    // message delivered to a non-active channel: a fresh channels Map with
+    // fresh Channel object references flows through the `s.channels`
+    // selector, which is not shallow-equal to the previous one.
+    setChannels(testChannels);
+    channelsStore.flush();
+
+    // clearChildren(channelList) detached the old row and a new one replaced it.
+    const freshRow = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    expect(freshRow).not.toBeNull();
+    expect(freshRow).not.toBe(staleRow);
+    expect(staleRow.isConnected).toBe(false);
+
+    // The stale, detached row must not still be able to open a menu -- if it
+    // does, its listener is still registered (on a signal that only aborts at
+    // sidebar destroy()), which is the retention this finding is about.
+    staleRow.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
+    );
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+
+    // The replacement row must still work normally -- the fix must scope the
+    // listener to the render, not break the context menu outright.
+    freshRow.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
+    );
+    expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+  });
+});
