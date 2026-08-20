@@ -4,6 +4,7 @@
  */
 
 import { voiceStore } from "@stores/voice.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
@@ -170,17 +171,21 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
     // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
+    // Prefer the member's display name (same identity every other surface
+    // shows for a rename — see ChannelSidebar.ts's voice roster) over the
+    // frozen voice-roster username (OC-0227).
+    const member = membersStore.getState().members.get(currentUserId);
+    const me = channelUsers.get(currentUserId);
+    const myName = (member !== undefined ? memberDisplayName(member) : "") || me?.username;
     if (voice.localCamera) {
       if (!localTileAdded) {
         const localStream = getLocalCameraStream();
         if (localStream !== null) {
-          const me = channelUsers.get(currentUserId);
-          videoGrid.addStream(
-            currentUserId,
-            me?.username ? `${me.username} (You)` : "You",
-            localStream,
-            { isSelf: true, audioUserId: currentUserId, isScreenshare: false },
-          );
+          videoGrid.addStream(currentUserId, myName ? `${myName} (You)` : "You", localStream, {
+            isSelf: true,
+            audioUserId: currentUserId,
+            isScreenshare: false,
+          });
           localTileAdded = true;
         }
       }
@@ -195,10 +200,9 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       if (!localScreenshareTileAdded) {
         const localStream = getLocalScreenshareStream();
         if (localStream !== null) {
-          const me = channelUsers.get(currentUserId);
           videoGrid.addStream(
             screenshareUserId,
-            me?.username ? `${me.username} (Screen)` : "Your Screen",
+            myName ? `${myName} (Screen)` : "Your Screen",
             localStream,
             { isSelf: true, audioUserId: currentUserId, isScreenshare: true },
           );

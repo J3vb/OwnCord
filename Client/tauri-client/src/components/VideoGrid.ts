@@ -26,6 +26,10 @@ export interface TileConfig {
 
 export interface VideoGridComponent extends MountableComponent {
   addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
+  /** Update an already-open tile's label in place (e.g. a mid-call rename).
+   *  No-op if no tile is open for this id — callers don't need to know
+   *  whether the tile exists. */
+  setLabel(userId: number, username: string): void;
   removeStream(userId: number): void;
   /** Remove every tile — used on a real voice leave so stale remote tiles
    *  from the previous session don't survive into the next join. */
@@ -401,6 +405,19 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** Update an already-open tile's label in place. No-op if the tile isn't
+   *  open — used to keep a remote tile's name in sync with a mid-call
+   *  rename without re-creating the tile (addStream is only called once per
+   *  tile, from the LiveKit TrackSubscribed callback). */
+  function setLabel(userId: number, username: string): void {
+    const entry = cells.get(userId);
+    if (entry === undefined) return;
+    const label = entry.el.querySelector(".video-username");
+    if (label !== null) {
+      label.textContent = username;
+    }
+  }
+
   function removeStream(userId: number): void {
     const entry = cells.get(userId);
     if (entry === undefined) return;
@@ -487,6 +504,7 @@ export function createVideoGrid(): VideoGridComponent {
     mount,
     destroy,
     addStream,
+    setLabel,
     removeStream,
     clearStreams,
     hasStreams,

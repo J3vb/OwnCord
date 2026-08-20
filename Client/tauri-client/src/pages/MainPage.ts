@@ -25,6 +25,7 @@ import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
   cleanupAll as voiceCleanupAll,
@@ -621,12 +622,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // The ringer hanging up before anyone answered: their voice_leave is the
     // only signal there is that the call is over, because there is no call
     // record to close. Ringing for a room with nobody in it is worse than a
-    // missed call, so a leave stops the ring for that channel.
+    // missed call, so a leave stops the ring for that channel — but only
+    // when the ringer leaving actually emptied it. A group DM can still hold
+    // other callees who already accepted (voiceStore.voiceUsers answers
+    // that), and the ringer hanging up must not silence a call that is
+    // still live for them (OC-0235).
     unsubscribers.push(
       ws.on("voice_leave", (payload) => {
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
-        if (payload.user_id === ringing.fromUserId) {
+        if (payload.user_id !== ringing.fromUserId) return;
+        const roster = voiceStore.getState().voiceUsers.get(payload.channel_id);
+        const othersStillIn =
+          roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);
+        if (!othersStillIn) {
           ringCtrl?.cancel(payload.channel_id);
         }
       }),
@@ -673,20 +682,34 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Wire voice error callback to toast
     setVoiceOnError((msg) => showToast(msg, "error"));
 
+    // The label shown on a remote video tile: memberDisplayName when known —
+    // the same identity a rename shows everywhere else (ChannelSidebar's
+    // voice roster, message rows, the member list) — falling back to the
+    // voice roster's (possibly frozen) username, then a placeholder. Single
+    // writer so tile creation (setOnRemoteVideo below) and tile relabeling
+    // on a mid-call rename (the voiceStore subscriber below) cannot disagree
+    // (OC-0227).
+    function remoteTileLabel(userId: number, isScreenshare: boolean): string {
+      const voice = voiceStore.getState();
+      const channelId = voice.currentChannelId;
+      const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
+      const voiceUser = channelUsers?.get(userId);
+      const member = membersStore.getState().members.get(userId);
+      const name = (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+      if (name === undefined || name === "") {
+        return isScreenshare ? `User ${userId} (Screen)` : `User ${userId}`;
+      }
+      return isScreenshare ? `${name} (Screen)` : name;
+    }
+
     // Wire remote video callbacks to video grid
     setOnRemoteVideo((userId, stream, isScreenshare) => {
       if (videoGrid === null) return;
       const voice = voiceStore.getState();
       const channelId = voice.currentChannelId;
       if (channelId === null) return;
-      const channelUsers = voice.voiceUsers.get(channelId);
-      const user = channelUsers?.get(userId);
       const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
-      const username = isScreenshare
-        ? user?.username
-          ? `${user.username} (Screen)`
-          : `User ${userId} (Screen)`
-        : (user?.username ?? `User ${userId}`);
+      const username = remoteTileLabel(userId, isScreenshare);
       videoGrid.addStream(tileId, username, stream, {
         isSelf: false,
         audioUserId: userId,
@@ -701,20 +724,51 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera/screenshare state changes only (not speaking ticks)
+    // Subscribe to voice store for camera/screenshare state changes, voice
+    // channel switches, and remote-tile identity changes (not speaking ticks)
     let prevVideoSignature = "";
+    const prevTileLabels = new Map<number, string>();
     unsubscribers.push(
       voiceStore.subscribe((state) => {
         try {
-          // Build a lightweight signature of video-relevant state (camera + screenshare)
-          let sig = (state.localCamera ? "c" : "") + (state.localScreenshare ? "s" : "");
           const channelId = state.currentChannelId;
+          // Seed the signature with the channel id so ANY voice-channel
+          // switch changes it, even one where the camera/screenshare flags
+          // happen to be identical on both sides (e.g. both channels empty).
+          // Without this, VideoModeController.checkVideoMode() — the only
+          // writer of its own lastChannelId — never runs for that switch,
+          // so lastChannelId is still the old channel the next time it runs
+          // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
+          // and it clears the grid it was just given (OC-0207).
+          let sig =
+            `${String(channelId)}|` +
+            (state.localCamera ? "c" : "") +
+            (state.localScreenshare ? "s" : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);
             if (users) {
               for (const [uid, u] of users) {
                 if (u.camera) sig += `:c${uid}`;
                 if (u.screenshare) sig += `:s${uid}`;
+                // Relabel an already-open remote tile whose display name
+                // changed (mid-call rename) — addStream only runs once per
+                // tile, so nothing else keeps its label in sync (OC-0227).
+                // setLabel() no-ops for a tile that isn't open yet.
+                if (u.camera) {
+                  const label = remoteTileLabel(uid, false);
+                  if (prevTileLabels.get(uid) !== label) {
+                    prevTileLabels.set(uid, label);
+                    videoGrid?.setLabel(uid, label);
+                  }
+                }
+                if (u.screenshare) {
+                  const tileId = uid + SCREENSHARE_TILE_ID_OFFSET;
+                  const label = remoteTileLabel(uid, true);
+                  if (prevTileLabels.get(tileId) !== label) {
+                    prevTileLabels.set(tileId, label);
+                    videoGrid?.setLabel(tileId, label);
+                  }
+                }
               }
             }
           }
