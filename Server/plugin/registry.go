@@ -280,8 +280,11 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 	}
 
 	// Stage 3: atomically rename into the canonical plugin name directory.
+	// A previous version, if any, is renamed aside rather than deleted so it
+	// can be restored below if registration fails.
 	finalDir := filepath.Join(r.cfg.Directory, manifest.Name)
-	if err := installZipPromote(stageAbs, finalDir); err != nil {
+	backupDir, err := installZipPromote(stageAbs, finalDir)
+	if err != nil {
 		cleanup()
 		return "", err
 	}
@@ -292,7 +295,28 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 		Dir:      finalDir,
 		WASMPath: filepath.Join(finalDir, manifest.Entrypoint),
 	}); err != nil {
+		// The DB upsert (or the manifest serialize before it) failed after
+		// the new version was already promoted into finalDir. Undo the
+		// promote so a failed upgrade never destroys the previously-working
+		// version: drop the half-registered new tree and put the backup
+		// back, if we have one.
+		if rmErr := os.RemoveAll(finalDir); rmErr != nil {
+			slog.Warn("plugin: failed to remove half-installed upgrade after installFromDisk error",
+				"name", manifest.Name, "dir", finalDir, "err", rmErr)
+		}
+		if backupDir != "" {
+			if restoreErr := os.Rename(backupDir, finalDir); restoreErr != nil {
+				slog.Warn("plugin: failed to restore previous plugin version after a failed upgrade",
+					"name", manifest.Name, "dir", finalDir, "backup", backupDir, "err", restoreErr)
+			}
+		}
 		return manifest.Name, fmt.Errorf("installFromDisk: %w", err)
+	}
+	if backupDir != "" {
+		if err := os.RemoveAll(backupDir); err != nil {
+			slog.Warn("plugin: failed to remove backed-up previous version after a successful upgrade",
+				"name", manifest.Name, "backup", backupDir, "err", err)
+		}
 	}
 
 	r.installZipReactivate(ctx, manifest.Name)
@@ -418,19 +442,56 @@ func installZipStagedManifest(stageAbs string) (*Manifest, error) {
 }
 
 // installZipPromote moves the fully validated staging directory into its
-// canonical plugin-name directory.
-func installZipPromote(stageAbs, finalDir string) error {
-	// If a previous version exists, remove it. The store row is replaced by
-	// installFromDisk via the existing UPSERT path.
-	if _, err := os.Stat(finalDir); err == nil {
-		if err := os.RemoveAll(finalDir); err != nil {
-			return fmt.Errorf("remove existing plugin dir: %w", err)
+// canonical plugin-name directory. If a previous version already lives at
+// finalDir, it is renamed aside rather than deleted, and its temporary path
+// is returned as backupDir so the caller can restore it if a later install
+// step fails, or remove it once the install is confirmed. backupDir is empty
+// when there was nothing to preserve (a fresh install) or when the rename-
+// aside itself failed and installZipPromote fell back to a hard delete (e.g.
+// stageAbs and finalDir's parent are on different filesystems) — the
+// previous, always-destructive behaviour is preserved only in that fallback
+// case, which os.Rename within the same plugin directory should never hit in
+// practice.
+//
+// The backup directory name carries the same ".install-" prefix LoadAll's
+// stale-staging sweep already reaps on startup, so a backup orphaned by a
+// mid-install crash does not linger forever or get mistaken for a plugin by
+// scanPluginDirectory.
+func installZipPromote(stageAbs, finalDir string) (backupDir string, err error) {
+	if _, statErr := os.Stat(finalDir); statErr == nil {
+		tmp, mkErr := os.MkdirTemp(filepath.Dir(finalDir), ".install-old-")
+		if mkErr != nil {
+			return "", fmt.Errorf("stage backup dir: %w", mkErr)
+		}
+		// os.Rename requires the destination to not exist; free the name
+		// MkdirTemp just reserved immediately before renaming the previous
+		// version into it. Nothing else in this codepath creates that exact
+		// name, so the gap is not meaningfully racier than MkdirTemp's own
+		// creation was.
+		if rmErr := os.Remove(tmp); rmErr != nil {
+			return "", fmt.Errorf("free backup dir slot: %w", rmErr)
+		}
+		if renameErr := os.Rename(finalDir, tmp); renameErr != nil {
+			// Cross-device or other rename failure: fall back to the old
+			// (destructive) behaviour so the install can still proceed —
+			// there is nothing to roll back to in this fallback case.
+			if rmAllErr := os.RemoveAll(finalDir); rmAllErr != nil {
+				return "", fmt.Errorf("remove existing plugin dir: %w", rmAllErr)
+			}
+		} else {
+			backupDir = tmp
 		}
 	}
 	if err := os.Rename(stageAbs, finalDir); err != nil {
-		return fmt.Errorf("install rename: %w", err)
+		if backupDir != "" {
+			// Best-effort: put the previous version back so this failure
+			// doesn't also take out the plugin that was already installed.
+			_ = os.Rename(backupDir, finalDir)
+			backupDir = ""
+		}
+		return "", fmt.Errorf("install rename: %w", err)
 	}
-	return nil
+	return backupDir, nil
 }
 
 // installZipReactivate restores the enabled state of a plugin that was already
@@ -546,6 +607,13 @@ func (r *Registry) activate(ctx context.Context, inst *Instance) error {
 	return r.activateWithRuntime(ctx, platform, inst)
 }
 
+// enablePluginActivate is EnablePlugin's activation call, indirected through
+// a package variable so tests can deterministically simulate a concurrent
+// DisablePlugin/UninstallPlugin winning the race inside activate's unlocked
+// compile/instantiate window (OC-0243) without needing a real wazero runtime
+// and its own timing. Production never reassigns it.
+var enablePluginActivate = (*Registry).activate
+
 // EnablePlugin marks a plugin enabled in the store, then attempts to load it.
 func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	if err := r.cfg.Store.EnablePlugin(ctx, id); err != nil {
@@ -564,7 +632,7 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	r.mu.Lock()
 	inst.Enabled = true
 	r.mu.Unlock()
-	if err := r.activate(ctx, inst); err != nil {
+	if err := enablePluginActivate(r, ctx, inst); err != nil {
 		// Roll back the DB flag and the in-memory flag so the next start
 		// attempt is consistent.
 		_ = r.cfg.Store.DisablePlugin(ctx, id)
@@ -573,6 +641,27 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 		r.mu.Unlock()
 		return err
 	}
+	// activate releases r.mu for its whole compile+instantiate window (it is
+	// CPU-bound — see activateWithRuntime), so a concurrent DisablePlugin or
+	// UninstallPlugin (which calls DisablePlugin first) may have run to
+	// completion entirely inside that window. Such a call finds inst.Enabled
+	// still true but nothing yet to tear down — module still nil, no command
+	// bindings registered — so its teardown is a no-op, and activate then
+	// installs a live module and registers commands afterwards. Detect that
+	// lost race here, the one place both EnablePlugin and DisablePlugin
+	// funnel through, and redo the exact teardown DisablePlugin performs so a
+	// plugin the store and inst.Enabled both say is disabled never ends up
+	// with live command bindings routing DispatchCommand into it.
+	r.mu.Lock()
+	if !inst.Enabled {
+		for cmd, owner := range r.commands {
+			if owner == inst {
+				delete(r.commands, cmd)
+			}
+		}
+		r.platformDeactivate(ctx, inst)
+	}
+	r.mu.Unlock()
 	return nil
 }
 
