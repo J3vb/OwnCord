@@ -106,12 +106,13 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			return
 		}
 
-		uid, token, inviteCode, ok := setupCreateOwner(w, r, database, req, host)
+		uid, token, inviteCode, ownerWarnings, ok := setupCreateOwner(w, r, database, req, host)
 		if !ok {
 			return
 		}
 
 		warnings, restartRequired, restartURL := setupApplyWizard(r.Context(), database, req.Wizard, uid, r.Host, opts)
+		warnings = append(ownerWarnings, warnings...)
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid, "wizard", req.Wizard != nil, "restart", restartRequired)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "server_setup", "server", 0,
@@ -211,12 +212,24 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 // it: the session token, the default channels and the bootstrap invite. It
 // writes the error response itself; ok=false means the caller must return
 // immediately.
-func setupCreateOwner(w http.ResponseWriter, r *http.Request, database *db.DB, req setupRequest, host string) (int64, string, string, bool) {
+//
+// ok=false is only ever returned before CreateOwnerIfEmpty commits. Once the
+// owner row exists, every remaining step (session, channels, invite) is
+// best-effort: the setup endpoint's gate is "no users exist", so a 5xx after
+// the account is created would leave it permanently orphaned — every retry
+// would hit db.ErrConflict below and be refused with 403 forever, with the
+// wizard payload never applied and the bootstrap invite never minted
+// (OC-0253). Those steps also run against a context.WithoutCancel of the
+// request context, so a client that disconnects (reload, navigation, proxy
+// timeout) right after the commit can't take the session/channels/invite
+// down with it. Failures downgrade to entries in the returned warnings
+// slice instead, mirroring setupApplyWizard's contract below.
+func setupCreateOwner(w http.ResponseWriter, r *http.Request, database *db.DB, req setupRequest, host string) (int64, string, string, []string, bool) {
 	// Hash the password.
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to hash password")
-		return 0, "", "", false
+		return 0, "", "", nil, false
 	}
 
 	// Atomically check no users exist and create the owner (BUG-119).
@@ -224,45 +237,56 @@ func setupCreateOwner(w http.ResponseWriter, r *http.Request, database *db.DB, r
 	uid, err := database.CreateOwnerIfEmpty(r.Context(), req.Username, hash, ownerRoleID)
 	if errors.Is(err, db.ErrConflict) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
-		return 0, "", "", false
+		return 0, "", "", nil, false
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
-		return 0, "", "", false
+		return 0, "", "", nil, false
 	}
+
+	// The account exists from here on — see the doc comment above.
+	var warnings []string
+	ctx := context.WithoutCancel(r.Context())
 
 	// Issue a session token so the user is immediately logged in.
-	token, err := auth.GenerateToken()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate session token")
-		return 0, "", "", false
-	}
-
-	device := r.Header.Get("User-Agent")
-	const maxDeviceLen = 512
-	if len(device) > maxDeviceLen {
-		device = device[:maxDeviceLen]
-	}
-	if _, err := database.CreateSession(r.Context(), uid, auth.HashToken(token), device, host); err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
-		return 0, "", "", false
+	var token string
+	if t, err := auth.GenerateToken(); err != nil {
+		slog.Error("setup: failed to generate session token", "error", err)
+		warnings = append(warnings,
+			"your account was created, but a login session could not be started automatically — log in with your new credentials")
+	} else {
+		device := r.Header.Get("User-Agent")
+		const maxDeviceLen = 512
+		if len(device) > maxDeviceLen {
+			device = device[:maxDeviceLen]
+		}
+		if _, err := database.CreateSession(ctx, uid, auth.HashToken(t), device, host); err != nil {
+			slog.Error("setup: failed to create session", "error", err)
+			warnings = append(warnings,
+				"your account was created, but a login session could not be started automatically — log in with your new credentials")
+		} else {
+			token = t
+		}
 	}
 
 	// Create default channels under canonical categories.
-	_, _ = database.CreateChannel(r.Context(), "general", "text", "Text Channels", "Welcome to the server!", 0)
-	_, _ = database.CreateChannel(r.Context(), "General", "voice", "Voice Channels", "", 0)
+	_, _ = database.CreateChannel(ctx, "general", "text", "Text Channels", "Welcome to the server!", 0)
+	_, _ = database.CreateChannel(ctx, "General", "voice", "Voice Channels", "", 0)
 
 	// Generate a bootstrap invite code so the owner can invite others.
 	// Bound it (5 uses / 24h) rather than minting an unlimited, non-expiring
 	// invite — the owner can create fresh invites once logged in.
+	var inviteCode string
 	bootstrapInviteExpiry := time.Now().Add(24 * time.Hour)
-	inviteCode, err := database.CreateInvite(r.Context(), uid, 5, &bootstrapInviteExpiry)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite code")
-		return 0, "", "", false
+	if code, err := database.CreateInvite(ctx, uid, 5, &bootstrapInviteExpiry); err != nil {
+		slog.Error("setup: failed to generate bootstrap invite", "error", err)
+		warnings = append(warnings,
+			"your account was created, but the bootstrap invite could not be generated — create one from the admin panel after logging in")
+	} else {
+		inviteCode = code
 	}
 
-	return uid, token, inviteCode, true
+	return uid, token, inviteCode, warnings, true
 }
 
 // setupApplyWizard applies the wizard payload. wr == nil is the legacy
