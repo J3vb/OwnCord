@@ -19,6 +19,7 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../src/components/message-list/reaction-tooltip";
+import { membersStore } from "@stores/members.store";
 import type { ReactionUser } from "@lib/types";
 
 function user(id: number, username: string): ReactionUser {
@@ -34,6 +35,10 @@ beforeEach(() => {
   clearReactionUsersCache();
   fetcher = vi.fn().mockResolvedValue([ALICE, BOB]);
   setReactionUsersFetcher(fetcher as never);
+  // Every other identity surface (member list, typing indicator, voice
+  // roster, message rows) resolves through the real members store — reset it
+  // per test so a nickname set in one test cannot leak into another.
+  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map(), roleRevision: 0 }));
 });
 
 afterEach(() => {
@@ -92,6 +97,36 @@ describe("buildReactionTooltip", () => {
     const names = tip.querySelector(".reaction-tooltip-names") as HTMLElement;
     expect(names.querySelector("img")).toBeNull();
     expect(names.textContent).toBe("<img src=x onerror=alert(1)>");
+  });
+
+  // The member list, typing indicator, voice roster and message rows all
+  // prefer the nickname over the raw handle via memberDisplayName — the
+  // who-reacted tooltip must not be the one identity surface left printing
+  // the username when a nickname is set.
+  it("resolves a reactor's nickname from the members store instead of the raw username", () => {
+    membersStore.setState((prev) => {
+      const next = new Map(prev.members);
+      next.set(2, {
+        id: 2,
+        username: "bob",
+        avatar: null,
+        role: "member",
+        status: "online",
+        displayName: "Bee",
+      });
+      return { ...prev, members: next };
+    });
+
+    const tip = buildReactionTooltip("👍", [ALICE, BOB], 2);
+    expect(tip.querySelector(".reaction-tooltip-names")?.textContent).toBe("alice and Bee");
+  });
+
+  // A reactor who left the server (or was never loaded into the members
+  // store) has no entry to resolve against — fall back to the username
+  // rather than rendering nothing.
+  it("falls back to the username for a reactor with no members-store entry", () => {
+    const tip = buildReactionTooltip("👍", [ALICE, BOB], 2);
+    expect(tip.querySelector(".reaction-tooltip-names")?.textContent).toBe("alice and bob");
   });
 });
 

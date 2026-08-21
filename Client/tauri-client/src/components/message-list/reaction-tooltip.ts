@@ -14,6 +14,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import type { ReactionUser } from "@lib/types";
 
 const log = createLogger("reaction-tooltip");
@@ -175,8 +176,12 @@ export function formatReactorNames(
 // Tooltip DOM
 // ---------------------------------------------------------------------------
 
-/** Build the tooltip body. Text only — usernames are user-controlled, so they
- *  go in via textContent, never markup. */
+/** Build the tooltip body. Names resolve through memberDisplayName — the
+ *  nickname when the members store has the reactor, the raw username
+ *  otherwise (a reactor who has since left, or whose member row has not
+ *  loaded yet) — matching the member list, typing indicator, voice roster
+ *  and message rows. Text only — names are user-controlled, so they go in
+ *  via textContent, never markup. */
 export function buildReactionTooltip(
   emoji: string,
   users: readonly ReactionUser[],
@@ -191,7 +196,10 @@ export function buildReactionTooltip(
   setText(
     names,
     formatReactorNames(
-      users.map((u) => u.username),
+      users.map((u) => {
+        const member = membersStore.getState().members.get(u.id);
+        return member !== undefined ? memberDisplayName(member) : u.username;
+      }),
       totalCount,
     ),
   );
