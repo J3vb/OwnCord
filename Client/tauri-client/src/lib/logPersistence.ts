@@ -135,6 +135,12 @@ export async function initLogPersistence(): Promise<() => void> {
     }
 
     currentDate = today();
+    // Rotate at startup too: flushBuffer only rotates when the calendar date
+    // changes mid-session, so a session that starts and ends on the same day
+    // (the common case for a daily-launched desktop app) would otherwise
+    // never rotate at all. rotateOldFiles() swallows its own errors, so a
+    // failing readDir here cannot break init.
+    await rotateOldFiles();
     initialized = true;
 
     // Persist entries logged before this listener attached (the bootstrap
