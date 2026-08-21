@@ -169,6 +169,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     clearChildren(slots.typingSlot);
     clearChildren(slots.inputSlot);
 
+    // The server only delivers live broadcasts for the focused channel, so
+    // the window being torn down here stops updating the moment it does.
+    // Every teardown path routes through this one choke point (bare
+    // destroyChannel() calls from the NSFW gate's "Go Back" and a resync's
+    // setActiveChannel(null), as well as mountChannel's channel-to-channel
+    // switch), so invalidating here — rather than only in mountChannel's
+    // previousChannelId branch — covers all of them: without it, a bare
+    // destroyChannel() leaves the torn-down channel's "loaded" flag set and
+    // the next visit renders its pre-teardown snapshot as current (OC-0247).
+    // Idempotent (no-ops once the flag is already gone), so this is safe
+    // alongside mountChannel's existing invalidate of previousChannelId.
+    if (_currentChannelId !== null) invalidateChannelMessageWindow(_currentChannelId);
     _currentChannelId = null;
   }
 

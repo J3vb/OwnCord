@@ -1630,6 +1630,31 @@ describe("createChannelController", () => {
 
       expect(opts.reactionCtrl.destroy).toHaveBeenCalled();
     });
+
+    it("invalidates the torn-down channel's loaded window, so a bare destroyChannel (not a channel-to-channel switch) does not leave it stale (OC-0247)", () => {
+      // The NSFW gate's "Go Back" and a resync-driven setActiveChannel(null)
+      // both tear down via a bare destroyChannel() with no next mountChannel
+      // to invalidate the outgoing channel via the previousChannelId path.
+      // Without invalidation here, the channel keeps its "loaded" flag and
+      // the next visit renders the pre-teardown snapshot as current.
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockInvalidateWindow.mockClear();
+
+      ctrl.destroyChannel();
+
+      expect(mockInvalidateWindow).toHaveBeenCalledWith(42);
+    });
+
+    it("does not invalidate anything when destroyChannel is called with no channel mounted", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+
+      ctrl.destroyChannel();
+
+      expect(mockInvalidateWindow).not.toHaveBeenCalled();
+    });
   });
   // ─── NSFW age gate ────────────────────────────────────────────────────────
 
