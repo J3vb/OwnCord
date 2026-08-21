@@ -13,7 +13,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
-import { isRenderableAvatar } from "@lib/avatar";
+import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
 import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachments";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,10 @@ import { fetchImageAsDataUrl, resolveServerUrl } from "./message-list/attachment
 export interface DmProfileData {
   readonly id: number;
   readonly username: string;
+  /** Nickname, when set. The DM header this panel opens from renders through
+   *  `dmDisplayName`, which prefers this over `username` -- without it here
+   *  the panel would show a different identity from the header just clicked. */
+  readonly displayName?: string | null;
   readonly avatar: string | null;
   readonly status: UserStatus;
   readonly about?: string | null;
@@ -152,7 +156,7 @@ export function createDmProfileSidebar(
     // once the bytes arrive. `<img src>` cannot carry the auth header an
     // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
     wrapper.style.background = "var(--accent, #5865f2)";
-    const initial = user.username.charAt(0).toUpperCase() || "?";
+    const initial = avatarInitial(user);
     const letter = createElement("span", {}, initial);
     wrapper.appendChild(letter);
 
@@ -162,7 +166,7 @@ export function createDmProfileSidebar(
         if (dataUrl === null || !wrapper.isConnected) return;
         const img = createElement("img", {
           src: dataUrl,
-          alt: user.username,
+          alt: resolveDisplayName(user),
           class: "dps-avatar-img",
         });
         img.style.width = "80px";
@@ -261,7 +265,7 @@ export function createDmProfileSidebar(
     nameEl.style.fontWeight = "600";
     nameEl.style.color = "var(--text-primary, #f2f3f5)";
     nameEl.style.marginBottom = "4px";
-    setText(nameEl, user.username);
+    setText(nameEl, resolveDisplayName(user));
 
     // Status line
     const statusLine = createElement("div", {

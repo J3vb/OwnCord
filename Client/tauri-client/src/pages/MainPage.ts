@@ -268,6 +268,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       user: {
         id: recipient.id,
         username: recipient.username,
+        // The DM header this panel opens from renders through dmDisplayName,
+        // which prefers the nickname -- drop it here and the panel shows a
+        // different identity from the header the reader just clicked.
+        displayName: recipient.displayName ?? null,
         avatar: recipient.avatar || null,
         status,
         about: null,
