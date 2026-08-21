@@ -54,8 +54,7 @@ let _serverHost: string | null = null;
  *  (OC-0241). */
 export function setServerHost(host: string): void {
   const withoutPort =
-    host.endsWith(":443") &&
-    (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
+    host.endsWith(":443") && (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
       ? host.slice(0, -4)
       : host;
   _serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();

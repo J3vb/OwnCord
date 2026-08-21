@@ -487,7 +487,6 @@ func installZipPromote(stageAbs, finalDir string) (backupDir string, err error) 
 			// Best-effort: put the previous version back so this failure
 			// doesn't also take out the plugin that was already installed.
 			_ = os.Rename(backupDir, finalDir)
-			backupDir = ""
 		}
 		return "", fmt.Errorf("install rename: %w", err)
 	}
