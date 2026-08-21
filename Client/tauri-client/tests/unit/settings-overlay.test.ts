@@ -1118,6 +1118,40 @@ describe("SettingsOverlay", () => {
     expect(slider.value).toBe("20");
   });
 
+  // --- Listener retention across tab switches (OC-0268) ---
+  //
+  // Every TAB_BUILDERS entry registers its element listeners on the single
+  // overlay-lifetime `ac.signal`. Switching away from a tab detaches its pane
+  // via clearChildren() but never aborts that build's listener registrations,
+  // so the discarded subtree stays reachable (and live) through the shared
+  // AbortController for as long as the overlay itself is mounted.
+  it("stops a discarded tab's listeners from firing once the tab is switched away", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    getTab(container, 1).click(); // Appearance
+    const fontSlider = container.querySelector(".settings-slider") as HTMLInputElement;
+    expect(fontSlider).not.toBeNull();
+
+    getTab(container, 2).click(); // Notifications — discards the Appearance pane
+    expect(container.contains(fontSlider)).toBe(false);
+
+    document.documentElement.style.removeProperty("--font-size");
+    localStorage.removeItem("owncord:settings:fontSize");
+
+    // The pane is gone from the DOM, but nothing has told its listener to
+    // stop — dispatching directly on the detached element still reaches it
+    // if the registration was never aborted.
+    fontSlider.value = "19";
+    fontSlider.dispatchEvent(new Event("input"));
+
+    expect(document.documentElement.style.getPropertyValue("--font-size")).toBe("");
+    expect(localStorage.getItem("owncord:settings:fontSize")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
   // --- Cleanup ---
 
   it("destroy removes root from DOM", () => {

@@ -100,6 +100,15 @@ export function createSettingsOverlay(
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
+  /**
+   * Scopes the *current* tab build's element listeners. `renderActiveTab()`
+   * aborts the previous one before building the next, so a discarded pane's
+   * listeners are dropped immediately instead of accumulating on `ac` for
+   * the whole overlay lifetime (OC-0268) — every render used to register
+   * against `ac.signal` directly, and nothing ever aborted a stale build's
+   * registrations short of `destroy()`.
+   */
+  let renderAC: AbortController | null = null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, ac.signal);
@@ -107,28 +116,33 @@ export function createSettingsOverlay(
 
   // ---- Tab content builders -------------------------------------------------
 
-  const TAB_BUILDERS: Readonly<Record<TabName, () => HTMLDivElement>> = {
-    Account: () => buildAccountTab(options, ac.signal),
-    Appearance: () => buildAppearanceTab(ac.signal),
-    Notifications: () => buildNotificationsTab(ac.signal),
-    "Text & Images": () => buildTextImagesTab(ac.signal),
-    Accessibility: () => buildAccessibilityTab(ac.signal),
-    "Voice & Audio": () => voiceTab.build(),
-    Keybinds: () => buildKeybindsTab(ac.signal),
-    Advanced: () => buildAdvancedTab(ac.signal),
-    Logs: () => logsTab.build(),
+  const TAB_BUILDERS: Readonly<Record<TabName, (signal: AbortSignal) => HTMLDivElement>> = {
+    Account: (signal) => buildAccountTab(options, signal),
+    Appearance: (signal) => buildAppearanceTab(signal),
+    Notifications: (signal) => buildNotificationsTab(signal),
+    "Text & Images": (signal) => buildTextImagesTab(signal),
+    Accessibility: (signal) => buildAccessibilityTab(signal),
+    "Voice & Audio": (signal) => voiceTab.build(signal),
+    Keybinds: (signal) => buildKeybindsTab(signal),
+    Advanced: (signal) => buildAdvancedTab(signal),
+    Logs: (signal) => logsTab.build(signal),
   };
 
   // ---- Core methods ---------------------------------------------------------
 
   function renderActiveTab(): void {
     if (contentArea === null) return;
+    // Drop the previous build's listeners before replacing its DOM — see
+    // the `renderAC` comment above.
+    renderAC?.abort();
+    renderAC = new AbortController();
+    const buildSignal = AbortSignal.any([ac.signal, renderAC.signal]);
     clearChildren(contentArea);
     if (pageTitle === null) return;
     pageTitle.textContent = activeTab;
     contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
-    contentArea.appendChild(builder());
+    contentArea.appendChild(builder(buildSignal));
     contentLive = true;
   }
 
