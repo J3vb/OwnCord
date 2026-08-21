@@ -82,6 +82,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		Attachments:      attachments,
 		Mentions:         mentions.UserIDs,
 		MentionsEveryone: mentions.Everyone,
+		MentionsHere:     mentions.HereOnly,
 	}
 
 	// DM path: open DM for recipients.
@@ -356,6 +357,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		IsDM:             isDM,
 		Mentions:         mentions.UserIDs,
 		MentionsEveryone: mentions.Everyone,
+		MentionsHere:     mentions.HereOnly,
 	}
 
 	if isDM {

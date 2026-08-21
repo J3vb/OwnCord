@@ -77,7 +77,7 @@ import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { notifyIncomingMessage } from "./notifications";
-import { highlightsCurrentUser } from "./mentions";
+import { mentionsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
@@ -678,10 +678,29 @@ export function wireDispatcher(
       // are authoritative there). DM channel IDs are not in channelsStore
       // (they use dmStore), so incrementUnread is a no-op for DMs, but the
       // own-message guard is applied here for defence-in-depth.
-      const isMention = highlightsCurrentUser(payload.content, {
-        mentions: payload.mentions,
-        mentionsEveryone: payload.mentions_everyone,
-      });
+      //
+      // isReplayFrame is computed here (rather than only below, where the
+      // notification gate uses it) because the mention badge needs it too —
+      // see isMention.
+      const isReplayFrame =
+        lastReconnectHandshakeAt !== null &&
+        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
+        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
+      // highlightsCurrentUser (mentions.ts) treats @everyone and @here as one
+      // bit, because the wire carries only one: mentions_everyone. But the
+      // server's applyMentionCounts (mentions.go) narrows an @here fan-out to
+      // readers who had a live connection at send time — a reader with none
+      // never got read_states.mention_count bumped for a here-only mention.
+      // The reconnect tier that delivers this replay burst never follows up
+      // with a `ready` to correct a wrongly-raised badge (OC-0271), so a
+      // here-only mention landing inside that burst must not raise one here
+      // either. A direct mention, or an @here/@everyone frame delivered live,
+      // is unaffected — mentions_here is only ever set alongside
+      // mentions_everyone for an @here (never a plain @everyone) token.
+      const isMention =
+        mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
+        (payload.mentions_everyone === true &&
+          !(payload.mentions_here === true && isReplayFrame));
       const isDetached = isWindowDetached(payload.channel_id);
 
       if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
@@ -738,11 +757,8 @@ export function wireDispatcher(
       // (see serverClockSkewMs above) so a lagging or skewed server clock
       // cannot make a live message look like a replay.
       // The wall-clock window additionally bounds a cold (never-sampled)
-      // skew's damage — see REPLAY_GATE_WINDOW_MS.
-      const isReplayFrame =
-        lastReconnectHandshakeAt !== null &&
-        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
-        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
+      // skew's damage — see REPLAY_GATE_WINDOW_MS. (isReplayFrame itself is
+      // computed above, alongside isMention, which needs it too.)
       if (!isReplayFrame) {
         notifyIncomingMessage(payload);
         // Refresh the skew estimate from this accepted-as-live frame so it

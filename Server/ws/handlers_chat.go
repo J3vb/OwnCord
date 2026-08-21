@@ -62,6 +62,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		Attachments:      attData,
 		Mentions:         result.Mentions,
 		MentionsEveryone: result.MentionsEveryone,
+		MentionsHere:     result.MentionsHere,
 	})
 
 	if !result.IsDM {
@@ -118,7 +119,7 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
-		result.Mentions, result.MentionsEveryone)
+		result.Mentions, result.MentionsEveryone, result.MentionsHere)
 	if result.IsDM {
 		return Result{Events: []Event{dmEventOrFallback(
 			MessageEditedDMEvent{channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},

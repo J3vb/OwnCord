@@ -390,7 +390,8 @@ Direct response to sender (no seq):
     "reactions": [],
     "pinned": false,
     "mentions": [7, 9],
-    "mentions_everyone": true
+    "mentions_everyone": true,
+    "mentions_here": false
   }
 }
 ```
@@ -399,6 +400,7 @@ Direct response to sender (no seq):
 |-------|------|-------------|
 | `mentions` | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved. |
 | `mentions_everyone` | bool | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
+| `mentions_here` | bool | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both). |
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message). An `@word` that
@@ -406,6 +408,16 @@ matches no username, and an `@everyone`/`@here` from an author without
 `MENTION_EVERYONE`, resolve to nothing and stay plain text — clients must
 highlight from these fields rather than re-parsing the content. DMs never carry
 `mentions_everyone`.
+
+`@everyone` and `@here` both raise `mention_count` for every reader except
+`@here` skips a reader with no live connection at send time (the server's
+`applyMentionCounts` treats that reader as unreachable, the same way a push
+notification would). A client cannot tell the two tokens apart from
+`mentions_everyone` alone, which is why `mentions_here` exists: a reconnecting
+client that replays this frame from the gap it was disconnected for must not
+raise a mention badge for a here-only mention the server never counted — there
+is no `ready` in that reconnect tier to correct a wrong badge afterward. A
+direct `mentions` hit is unaffected either way.
 
 ### chat_edit (Client -> Server)
 
@@ -434,15 +446,16 @@ Own messages only. Max 4000 runes.
     "content": "Hello everyone! (edited)",
     "edited_at": "2026-03-14T10:31:00Z",
     "mentions": [7],
-    "mentions_everyone": false
+    "mentions_everyone": false,
+    "mentions_here": false
   }
 }
 ```
 
-`mentions`/`mentions_everyone` are re-resolved from the edited content and
-replace the stored set. Editing never raises anyone's `mention_count`: a badge
-is only ever raised by the original send, so re-adding an already-counted
-mention cannot double-count it.
+`mentions`/`mentions_everyone`/`mentions_here` are re-resolved from the edited
+content and replace the stored set. Editing never raises anyone's
+`mention_count`: a badge is only ever raised by the original send, so
+re-adding an already-counted mention cannot double-count it.
 
 ### chat_delete (Client -> Server)
 

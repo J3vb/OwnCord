@@ -747,6 +747,71 @@ describe("WS Dispatcher", () => {
       incoming({ content: "@everyone", mentions_everyone: false });
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
     });
+
+    // OC-0271: the server's applyMentionCounts (mentions.go) narrows an
+    // @here fan-out to readers who were online at send time — a reader with
+    // no live connection never gets their mention_count bumped for a
+    // here-only mention. mentions_everyone alone cannot tell the client
+    // which case it is (the wire collapses @here into the same bit as
+    // @everyone), so this needs mentions_here too. The reconnect tier that
+    // replays this burst never sends a follow-up `ready` to correct a wrong
+    // badge, so the client must not raise one in the first place for a
+    // here-only mention delivered inside that burst.
+    it("does not raise the mention badge for an @here-only mention replayed after a reconnect", () => {
+      seedChannel();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      // Second auth_ok in this dispatcher's lifetime = a reconnect.
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      incoming({
+        content: "@here standup",
+        mentions_everyone: true,
+        mentions_here: true,
+        timestamp: new Date(handshakeAt - 1000).toISOString(),
+      });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+
+    it("still raises the mention badge for a live (non-replayed) @here mention", () => {
+      seedChannel();
+      incoming({ content: "@here standup", mentions_everyone: true, mentions_here: true });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+    });
+
+    it("still raises the mention badge inside a replay burst for a direct mention alongside @here", () => {
+      seedChannel();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      incoming({
+        content: "@here @alex standup",
+        mentions: [1],
+        mentions_everyone: true,
+        mentions_here: true,
+        timestamp: new Date(handshakeAt - 1000).toISOString(),
+      });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+    });
   });
 
   it("wires presence to members store", () => {

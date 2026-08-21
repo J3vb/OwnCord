@@ -277,6 +277,32 @@ func TestSendMessage_HereSkipsOfflineUsers(t *testing.T) {
 	}
 }
 
+// TestSendMessage_MentionsHereDistinguishesHereFromEveryone locks OC-0271:
+// MentionsEveryone alone cannot tell a client which fan-out rule applied — a
+// plain @everyone reaches every reader, but @here skips one with no live
+// connection at send time (TestSendMessage_HereSkipsOfflineUsers above). A
+// reconnecting client uses MentionsHere to avoid raising a mention badge the
+// server never counted for a here-only mention delivered in its replay burst.
+func TestSendMessage_MentionsHereDistinguishesHereFromEveryone(t *testing.T) {
+	svc, _, _ := newMentionFixture(t)
+
+	here := sendAs(t, svc, 4, "@here quick question")
+	if !here.MentionsEveryone {
+		t.Fatal("@here must set MentionsEveryone")
+	}
+	if !here.MentionsHere {
+		t.Error("MentionsHere = false, want true for a here-only mention")
+	}
+
+	everyone := sendAs(t, svc, 4, "@everyone meeting now")
+	if !everyone.MentionsEveryone {
+		t.Fatal("@everyone must set MentionsEveryone")
+	}
+	if everyone.MentionsHere {
+		t.Error("MentionsHere = true, want false for a plain @everyone")
+	}
+}
+
 // TestSendMessage_HereSkipsInvisibleUsers locks the phase-6 half of the @here
 // rule. users.status stores the status the user *chose*, so an invisible reader
 // holds the literal "invisible" here — a bare == "offline" test would ping them,
