@@ -467,7 +467,22 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// that was deliberately torn down: subscribed to the voice topic and
 	// broadcast as present, with no row behind it. Their decision wins; a
 	// same-instance state is the only thing this join may finish.
-	if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
+	// markVoiceJoinCompleteIfMatch performs the same same-instance check as the
+	// old plain getVoiceState comparison, but atomically with recording that
+	// this join has now completed — closing the gap a separate check-then-set
+	// would leave between confirming the match and marking it, which a
+	// concurrent eviction landing in between could otherwise turn into a
+	// completed flag surviving a state that was cleared out from under it.
+	// registerNow (OC-0270) relies on this flag being set only for a join
+	// that genuinely reached this point: a network reconnect transfers a
+	// replaced connection's voice state onto the resuming client solely when
+	// this is true, so that an in-flight join still racing its own
+	// supersession guards (the OC-0008 check above, and this one) is never
+	// handed off — doing so would make those guards misread the transfer
+	// itself as an eviction and abandon the join while its voice_states row
+	// stays behind for nothing to reap.
+	if !c.markVoiceJoinCompleteIfMatch(channelID, state.JoinedAt) {
+		curChID, _ := c.getVoiceState()
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
 		return

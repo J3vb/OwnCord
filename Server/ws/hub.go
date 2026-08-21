@@ -496,13 +496,34 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
-		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
-			if c.getVoiceChID() == 0 {
+			//
+			// Gated on oldVoiceJoinCompleted (OC-0270): a join that
+			// voiceJoinPersist has merely committed to the DB and set on the
+			// old client, but that voiceJoinComplete has not yet finished, is
+			// still racing its own supersession guards in voice_join.go
+			// (voice_join.go:423, :470) — both compare the old client's live
+			// voiceChID/voiceJoinToken against the values captured when the
+			// join started. Clearing the old client's state above as part of
+			// this very transfer makes those guards read as "superseded" and
+			// abort the join (no token delivered, no voice_state broadcast,
+			// no VoiceTopic subscribe) — while the DB row and the new
+			// client's transferred state still agree, so sweepStaleVoiceStates
+			// never reaps it. Transferring only a completed join avoids
+			// resurrecting exactly that half-finished state; an incomplete
+			// one instead leaves the new client with voiceChID 0, so the
+			// still-committed row now disagrees with hub state and the next
+			// sweep tick reaps it, letting the user rejoin.
+			if c.getVoiceChID() == 0 && oldVoiceJoinCompleted {
 				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+				// c.setVoiceState above resets the fresh-join-in-progress flag
+				// it defaults to; restore it since we just verified the old
+				// client's join over this same (chID, token) had completed.
+				c.markVoiceJoinCompleteIfMatch(oldVoiceChID, oldVoiceJoinToken)
 				// The announced ECDH key must survive with the voice state:
 				// the client keeps its keypair across a WS blip and only
 				// re-announces on a LiveKit-room reconnect, so without the

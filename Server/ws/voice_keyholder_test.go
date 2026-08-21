@@ -20,6 +20,11 @@ func setupVoiceRoom(t *testing.T) (*Hub, *Client, *Client) {
 	h.clients[2] = c2
 	c1.setVoiceState(5, "join-token-1")
 	c2.setVoiceState(5, "join-token-2")
+	// Both represent settled, already-completed voice sessions (not a join
+	// still racing its own supersession guards) — see OC-0270 — so a network
+	// reconnect is expected to transfer them.
+	c1.markVoiceJoinCompleteIfMatch(5, "join-token-1")
+	c2.markVoiceJoinCompleteIfMatch(5, "join-token-2")
 
 	h.updateKeyHolder(5)
 	if !h.IsVoiceKeyHolder(5, 1) {
