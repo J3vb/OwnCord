@@ -260,6 +260,50 @@ describe("MessageList — new-messages divider", () => {
     expect(after.dataset.testid).toBe("message-4");
   });
 
+  // Regression (OC-0258): a message arriving before the async history fetch
+  // resolves must not latch the divider onto it. mountChannel starts with an
+  // empty window (the fetch is in flight), so a live message landing first
+  // produces a 1-row window — nowhere near long enough to contain the real
+  // unread boundary — and resolveNewDividerIndex used to latch onto whatever
+  // that 1-row formula pointed at (the live message itself) regardless.
+  it("does not latch the divider onto a message that arrives before the history page loads", () => {
+    openChannelWithUnread(3);
+    mount(); // 0 rows: the async history fetch has not resolved yet.
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+
+    // A live message lands first, via the real append path — exactly what
+    // dispatcher.ts's chat_message handler does while a history fetch for
+    // the same channel is still outstanding.
+    const liveTimestamp = new Date(Date.UTC(2024, 0, 15, 0, 51 * 5)).toISOString();
+    addMessage({
+      id: 1001,
+      channel_id: CHANNEL_ID,
+      user: { id: 1, username: "Alice", avatar: null },
+      content: "Message 1001",
+      reply_to: null,
+      attachments: [],
+      timestamp: liveTimestamp,
+    });
+    messagesStore.flush();
+
+    // The history page then lands: 50 older messages plus the message that
+    // had already arrived live, exactly as the real merge produces.
+    const history = Array.from({ length: 50 }, (_, i) => ({
+      ...makeMessage(951 + i),
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, (i + 1) * 5)).toISOString(),
+    }));
+    setMessages([...history, { ...makeMessage(1001), timestamp: liveTimestamp }]);
+    messagesStore.flush();
+
+    // The divider must separate the actual tail of the now-51-message window
+    // (999/1000/1001) from history, not sit directly above message 1001 —
+    // which would render 999 and 1000 as indistinguishable from read history.
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect(divider).not.toBeNull();
+    const next = divider?.nextElementSibling as HTMLElement;
+    expect(next.dataset.testid).toBe("message-999");
+  });
+
   // The line marks a boundary; the message under it must not be rendered as a
   // grouped continuation of the message above the line.
   it("breaks message grouping at the divider", () => {
