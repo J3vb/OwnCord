@@ -187,6 +187,13 @@ type Querier interface {
 	// reaches the ON CONFLICT branch. It is scoped to the voice session:
 	// leaving voice deletes the row, so a rejoin starts clean.
 	JoinVoiceChannel(ctx context.Context, arg JoinVoiceChannelParams) error
+	// The channel-wide row count excludes the joining user's own existing row
+	// (if any), mirroring the OC-0081 fix on EnableCameraIfUnderLimit /
+	// EnableScreenshareIfUnderLimit below. Without this, a user who already
+	// holds a row on the target channel (e.g. retrying a join after a failed
+	// channel-switch left their old row in place) gets counted against their
+	// own capacity slot, so a full channel refuses an upsert that would only
+	// replace the row already there (OC-0255).
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
