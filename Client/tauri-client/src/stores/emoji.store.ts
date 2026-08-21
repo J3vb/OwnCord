@@ -29,11 +29,25 @@ export interface EmojiState {
   readonly emoji: readonly CustomEmoji[];
   /** Lookup by lowercase shortcode. Rebuilt with the list, never mutated. */
   readonly byShortcode: ReadonlyMap<string, CustomEmoji>;
+  /**
+   * Bumped by every `emoji_update`-sourced write (OC-0251). Optional —
+   * absent/undefined reads as revision 0 — so state literals that predate
+   * this field (tests, a full setState replace) do not need updating.
+   *
+   * Lets a ready-time GET /emoji snapshot the revision it observed just
+   * before issuing the request and pass it back to setCustomEmoji: if an
+   * `emoji_update` landed (bumping the revision) while that fetch was in
+   * flight, the fetch's reply is a stale full-set snapshot answering a
+   * question that is no longer current, and must not clobber the fresher
+   * broadcast.
+   */
+  readonly rev?: number;
 }
 
 const INITIAL: EmojiState = {
   emoji: [],
   byShortcode: new Map(),
+  rev: 0,
 };
 
 export const emojiStore = createStore<EmojiState>(INITIAL);
@@ -46,8 +60,19 @@ export const emojiStore = createStore<EmojiState>(INITIAL);
  */
 export const SHORTCODE_PATTERN = /^[a-z0-9_]{2,32}$/;
 
-/** Replace the whole set (from the REST list or an `emoji_update`). */
-export function setCustomEmoji(list: readonly CustomEmoji[]): void {
+/**
+ * Replace the whole set (from the REST list or an `emoji_update`).
+ *
+ * `rev`, when given, must match the store's current `rev` — the revision the
+ * caller observed right before starting the fetch this reply answers
+ * (OC-0251, mirroring the blocksStore blockedByMeRev guard). A mismatch
+ * means a fresher `emoji_update` landed after the fetch was issued, so this
+ * reply is stale and is skipped rather than reverting that broadcast. Omit
+ * `rev` to always apply — the `emoji_update` handler's unconditional call is
+ * exactly what bumps the revision an in-flight GET's `rev` would then fail
+ * to match.
+ */
+export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void {
   const next: CustomEmoji[] = [];
   const byShortcode = new Map<string, CustomEmoji>();
   for (const e of list) {
@@ -62,7 +87,10 @@ export function setCustomEmoji(list: readonly CustomEmoji[]): void {
     // one after the list has already been rendered.
     if (!byShortcode.has(shortcode)) byShortcode.set(shortcode, entry);
   }
-  emojiStore.setState(() => ({ emoji: next, byShortcode }));
+  emojiStore.setState((prev) => {
+    if (rev !== undefined && rev !== (prev.rev ?? 0)) return prev;
+    return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1 };
+  });
 }
 
 /** Drop every custom emoji (logout, or a switch to another server). */

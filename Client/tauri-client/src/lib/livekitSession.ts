@@ -1739,6 +1739,15 @@ export class LiveKitSession {
     return this._room;
   }
 
+  /** True while a join/connect attempt is in flight OR a room is live —
+   *  i.e. `_state.type !== "idle"`. Unlike `getRoom() !== null`, this also
+   *  covers "connecting" (no Room object exists yet) and "reconnecting" (the
+   *  `_room` getter reads null there too) — see OC-0249: a caller that only
+   *  wants to know "should we tear anything down" must not miss those. */
+  hasActiveSession(): boolean {
+    return this._state.type !== "idle";
+  }
+
   getSessionDebugInfo(): Record<string, unknown> {
     return buildSessionDebugInfo({
       room: this._room,
@@ -1802,6 +1811,15 @@ export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(se
 /** True when the LiveKit session has an active room connection. */
 export function isVoiceConnected(): boolean {
   return session.getRoom() !== null;
+}
+
+/** True while a join is in flight ("connecting"/"reconnecting") OR a room is
+ *  live ("connected") — i.e. there is something for leaveVoice() to tear
+ *  down. OC-0249: isVoiceConnected() alone reads false for the entire
+ *  "connecting" state (no Room object exists yet), so a caller deciding
+ *  whether to abort an in-flight join must ask this instead. */
+export function isVoiceSessionActive(): boolean {
+  return session.hasActiveSession();
 }
 
 export function getRoomForStats(): Room | null {
