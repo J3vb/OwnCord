@@ -100,8 +100,19 @@ func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
 // restarts the server if startup-only values changed. It only works when no
 // users exist in the database, preventing abuse after initial setup.
 func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
+	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
+	// request. opts.RunningCfg is nil in the legacy/test construction path
+	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
+	// setupClientIP then always falls back to raw RemoteAddr, preserving
+	// prior behaviour exactly.
+	var trustedProxies []string
+	if opts.RunningCfg != nil {
+		trustedProxies = opts.RunningCfg.Server.TrustedProxies
+	}
+	proxyNets := setupParseCIDRList(trustedProxies)
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins)
+		req, host, ok := setupPrecheck(w, r, limiter, allowedOrigins, proxyNets)
 		if !ok {
 			return
 		}
@@ -138,8 +149,11 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 // origin check, rate limit, body decode, credential and wizard validation —
 // before any state is created. It writes the error response itself; ok=false
 // means the caller must return immediately. The returned host is the
-// rate-limit bucket key, reused as the session IP.
-func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string) (setupRequest, string, bool) {
+// rate-limit bucket key, reused as the session IP; proxyNets (parsed once by
+// the caller from config.Server.TrustedProxies) makes both honour
+// trusted_proxies the same way every other session-creating path does
+// (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
+func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet) (setupRequest, string, bool) {
 	var req setupRequest
 
 	// CSRF protection: reject cross-origin requests (BUG-097).
@@ -152,13 +166,11 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		}
 	}
 
-	// Rate limit: 5 attempts per minute per IP.
-	// Strip the port so that different source ports from the same IP
-	// are correctly grouped under a single rate-limit bucket.
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
+	// Rate limit: 5 attempts per minute per IP. Resolved through proxyNets so
+	// different source ports/hops from the same real client are correctly
+	// grouped under a single rate-limit bucket, and so distinct clients
+	// behind the same trusted proxy are NOT collapsed into one.
+	host := setupClientIP(r, proxyNets)
 	setupKey := "setup:" + host
 	if !limiter.Allow(setupKey, 5, time.Minute) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
