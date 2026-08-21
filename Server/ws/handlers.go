@@ -273,8 +273,20 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
 			return
 		}
-	} else if ch != nil && !ch.Archived && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
-		return
+	} else if ch != nil && !ch.Archived {
+		// hasPermChecked, not hasChannelAccess: ch is already in hand and known
+		// non-DM here, so the role/override bit is the whole answer (a second
+		// hasChannelAccess-internal GetChannel would only repeat the read
+		// above), and unlike hasChannelAccess it reports a lookup failure
+		// instead of collapsing it to a denial — required by the "transient
+		// lookup error is NOT a denial" contract documented above (OC-0266).
+		allowed, permErr := hasPermChecked(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages)
+		if permErr != nil {
+			return
+		}
+		if allowed {
+			return
+		}
 	}
 	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
 	c.mu.Lock()
