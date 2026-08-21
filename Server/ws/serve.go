@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
@@ -135,11 +136,20 @@ func (h *Hub) upgradeAndAuth(
 	c.authChannelID = hint.ChannelID
 
 	// Look up role name for protocol-compliant payloads and cache on client.
-	roleName := "member"
-	if role, roleErr := database.GetRoleByID(r.Context(), user.RoleID); roleErr == nil && role != nil {
-		roleName = strings.ToLower(role.Name)
+	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
+	// this value is authoritative on the wire — auth_ok reports it as the
+	// user's own role, member_join broadcasts it to every other client, and
+	// every chat_message carries it — so a lookup failure must not silently
+	// substitute "member" and pin the whole session to a fabricated role
+	// (OC-0269).
+	role, roleErr := database.GetRoleByID(r.Context(), user.RoleID)
+	if roleErr != nil || role == nil {
+		slog.Error("ws: role lookup failed during handshake, closing connection",
+			"user_id", user.ID, "role_id", user.RoleID, "err", roleErr)
+		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
+		return nil, 0, fmt.Errorf("upgradeAndAuth: role lookup failed for user %d: %w", user.ID, roleErr)
 	}
-	c.roleName = roleName
+	c.roleName = strings.ToLower(role.Name)
 
 	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
 	db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "ws_connect", "user", user.ID,
@@ -350,6 +360,15 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database *db.DB, c *Clien
 	}
 	if user == nil {
 		return fmt.Errorf("refreshUserSnapshot: user %d vanished", c.userID)
+	}
+	// A ban committing during the handshake window (after authenticateConn's
+	// own check) must stop the connection here rather than sail through to a
+	// live, fully authorized socket: both callers are already fail-closed on
+	// this function's error (handleFreshConnect closes the conn;
+	// reconnectPrecheck falls back to the full-ready path, which re-reads and
+	// hits this same guard) (OC-0272).
+	if auth.IsEffectivelyBanned(user) {
+		return fmt.Errorf("refreshUserSnapshot: user %d is banned", c.userID)
 	}
 	if user.RoleID != c.user.RoleID {
 		roleName := "member"
@@ -896,6 +915,23 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, database *db.DB, 
 	if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
+	// The DB row is gone, but the still-registered OLD *Client (if any) is
+	// otherwise only cleared by registerNow — which two early-return paths
+	// further down handleFreshConnect (the refreshUserSnapshot and
+	// GetRoleByID failure branches) can skip entirely. Without this, that
+	// old client's in-memory voiceChID and the E2EE key-holder election for
+	// this room survive as a memory-without-row ghost that
+	// sweepStaleVoiceStates can never see, since it iterates DB rows
+	// (OC-0252). Clearing here makes freshConnectCleanStaleVoice self
+	// sufficient regardless of whether registerNow ever runs; registerNow's
+	// own replacedVoiceChID re-election later becomes a redundant no-op
+	// (clearVoiceState finds nothing left to clear), not a conflict.
+	if old := h.GetClient(c.userID); old != nil {
+		if _, cleared := old.clearVoiceStateIfMatch(vs.ChannelID); cleared {
+			h.pubsub.Unsubscribe(old, VoiceTopic(vs.ChannelID))
+		}
+	}
+	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
 	if h.livekit == nil {
 		return
