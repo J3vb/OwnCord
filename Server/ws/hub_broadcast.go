@@ -931,6 +931,22 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 	return true
 }
 
+// SendToUserLow sends a low-priority message to a specific user. Unlike
+// SendToUserHigh, an overflow is silently dropped rather than disconnecting
+// the client — the targeted-delivery sibling of BroadcastToAllLow /
+// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
+// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.sendLowMsg(msg)
+	return true
+}
+
 // BroadcastToAllLow enqueues a low-priority global broadcast.
 // Low-priority messages are silently dropped if a client's buffer is full.
 func (h *Hub) BroadcastToAllLow(msg []byte) {
