@@ -96,7 +96,14 @@ export function createMessageController(opts: MessageControllerOptions): Message
         setMessages(channelId, resp.messages, resp.has_more);
       }
     } catch (err) {
-      if (!signal.aborted) {
+      // Same re-check as the success path above: a same-channel jump can
+      // install an around-window (setAroundMessages) while this mount-time
+      // tail fetch is still in flight, and nothing aborts this fetch's
+      // signal in that case. If that window already landed and marked the
+      // channel loaded, this fetch lost the race — it must be discarded
+      // silently instead of flagging a correctly-loaded, fully-rendered
+      // channel as load-errored and toasting on top of a jump that worked.
+      if (!signal.aborted && !isChannelLoaded(channelId)) {
         log.error("Failed to load messages", {
           channelId,
           error: String(err),
