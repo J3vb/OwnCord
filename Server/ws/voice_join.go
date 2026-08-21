@@ -199,17 +199,23 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 	// that branch is never reached: the flags are snapshotted here and
 	// reapplied once the new row exists.
 	//
-	// This covers the self-switch only. voice_mod_move deletes the row on the
-	// moderator's goroutine (DisconnectFromVoice) before the target's client
-	// re-joins, so by the time this handler runs there is nothing left to read
-	// and currentChID is already 0 — preserving the flags across a move needs
-	// state that outlives the row (see the cross-batch note on v029).
+	// currentChID > 0 is the self-switch case: the row is still there to read.
+	// voice_mod_move instead deletes the row on the moderator's goroutine
+	// (DisconnectFromVoice) before the target's client re-joins, so by the
+	// time this handler runs there is nothing left to read and currentChID is
+	// already 0 — the flags for that case were snapshotted onto this client by
+	// handleVoiceModMoveV2 before the delete ran (see setPendingModFlags /
+	// voicePendingModFlagsSetter in voice_moderation.go) and are taken back
+	// out here instead. Take-and-clear so an ordinary first join, unrelated to
+	// any move, is unaffected by a stash nobody consumed.
 	var wasServerMuted, wasServerDeafened bool
 	if currentChID > 0 {
 		if prevState, prevErr := h.db.GetVoiceState(ctx, c.userID); prevErr == nil && prevState != nil {
 			wasServerMuted = prevState.ServerMuted
 			wasServerDeafened = prevState.ServerDeafened
 		}
+	} else {
+		wasServerMuted, wasServerDeafened = c.takePendingModFlags()
 	}
 
 	// If user is already in a different voice channel, leave it first.

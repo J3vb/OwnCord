@@ -33,9 +33,16 @@ type Client struct {
 	voiceJoinToken string // opaque join-instance token for the current voice session; guarded by voiceMu
 	e2eePubKey     string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
 	e2eeSignature  string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
-	roleName       string // cached role name for chat_message broadcasts
-	tokenHash      string // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq        uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
+	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
+	// the voice_states row those flags normally live in before the target's
+	// own re-join can read them back. Guarded by voiceMu; see
+	// setPendingModFlags/takePendingModFlags.
+	pendingModServerMuted    bool
+	pendingModServerDeafened bool
+	roleName                 string // cached role name for chat_message broadcasts
+	tokenHash                string // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq                  uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -173,6 +180,32 @@ func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
 	c.e2eePubKey = ""
 	c.e2eeSignature = ""
 	return oldJoinToken, true
+}
+
+// setPendingModFlags stashes a moderator-imposed mute/deafen on this client
+// before a server-driven leave (voice_mod_move) deletes the voice_states row
+// those flags live in. Guarded by voiceMu, the same lock
+// clearVoiceStateIfMatch takes for the delete, so the stash can never
+// interleave with it. Paired with takePendingModFlags, which the client's own
+// subsequent voice_join consults when there is no live row left to read the
+// flags back from (currentChID == 0).
+func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.pendingModServerMuted = serverMuted
+	c.pendingModServerDeafened = serverDeafened
+}
+
+// takePendingModFlags reads and clears the flags stashed by
+// setPendingModFlags. Take-and-clear so an ordinary later join — one not
+// preceded by a moderator move — is unaffected by a stash nobody consumed.
+func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	serverMuted, serverDeafened = c.pendingModServerMuted, c.pendingModServerDeafened
+	c.pendingModServerMuted = false
+	c.pendingModServerDeafened = false
+	return serverMuted, serverDeafened
 }
 
 // setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
