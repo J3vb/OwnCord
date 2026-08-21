@@ -672,6 +672,6 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64,
 		}
 	}
 	if broadcast {
-		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, c.userID))
+		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
 	}
 }
