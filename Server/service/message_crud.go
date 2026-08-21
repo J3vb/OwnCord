@@ -467,6 +467,15 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 
+	// OC-0275: reverse this message's mention_count increments so a deleted
+	// mention does not leave a red badge on a channel with zero unread.
+	// Detached from ctx like the audit write above and the DM fan-out below —
+	// the soft-delete already committed, so a canceled request must not skip
+	// the correction.
+	if mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), msg.ChannelID, []int64{msgID}); mcErr != nil {
+		slog.Error("MessageService.DeleteMessage DecrementMentionCounts", "err", mcErr, "channel_id", msg.ChannelID, "msg_id", msgID)
+	}
+
 	result := &DeleteMessageResult{
 		MessageID: msgID,
 		ChannelID: msg.ChannelID,

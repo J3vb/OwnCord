@@ -497,6 +497,57 @@ func TestChannelFocus_ClearsMentionCount(t *testing.T) {
 	}
 }
 
+// TestDeleteMessage_ClearsMentionCount is OC-0275: deleting the only
+// mentioning message in a channel must not leave a red mention badge behind.
+// mention_count is a stored counter with exactly one incrementer
+// (IncrementMentionCounts) and, before this fix, exactly one clearer
+// (UpdateReadState via channel focus / mark-read) — DeleteMessage never
+// touched it, so the badge survived the message that caused it.
+func TestDeleteMessage_ClearsMentionCount(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	res := sendAs(t, svc, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d, want 1", got)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("after deleting the only mentioning message, bob mention_count = %d, want 0", got)
+	}
+}
+
+// TestPurgeMessages_ClearsMentionCounts is the bulk-delete sibling of
+// TestDeleteMessage_ClearsMentionCount (OC-0275): PurgeMessages must reverse
+// the mention_count increments of every message it purges, the same way a
+// single moderator delete does.
+func TestPurgeMessages_ClearsMentionCounts(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// newMentionFixture's moderator role only carries MENTION_EVERYONE by
+	// default; grant it MANAGE_MESSAGES on channel 10 so mod (user 4) can purge.
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
+
+	res := sendAs(t, svc, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d, want 1", got)
+	}
+
+	purgeResult, err := svc.PurgeMessages(context.Background(), 4, 10, 10, 0)
+	if err != nil {
+		t.Fatalf("PurgeMessages: %v", err)
+	}
+	if len(purgeResult.MessageIDs) != 1 || purgeResult.MessageIDs[0] != res.MessageID {
+		t.Fatalf("purged ids = %v, want [%d]", purgeResult.MessageIDs, res.MessageID)
+	}
+
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("after purging the only mentioning message, bob mention_count = %d, want 0", got)
+	}
+}
+
 // ─── edits ───────────────────────────────────────────────────────────────────
 
 func TestEditMessage_ReplacesMentionsWithoutRecounting(t *testing.T) {

@@ -44,6 +44,7 @@ type Store interface {
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
 	GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error)
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
+	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
