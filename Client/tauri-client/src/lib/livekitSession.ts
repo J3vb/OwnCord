@@ -1478,8 +1478,8 @@ export class LiveKitSession {
    * Handle a participant leaving the voice channel (key-holder election and
    * membership-forward-secrecy rekey). See E2EEManager.handleParticipantLeft.
    */
-  async handleParticipantLeft(userId: number): Promise<void> {
-    return this._e2ee.handleParticipantLeft(userId);
+  async handleParticipantLeft(userId: number, stillInRoster = false): Promise<void> {
+    return this._e2ee.handleParticipantLeft(userId, stillInRoster);
   }
 
   /** Retry microphone permission after being in listen-only mode. */

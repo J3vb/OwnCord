@@ -844,7 +844,27 @@ export class E2EEManager {
       // clearState() runs concurrently.
       const keypair = this._ecdhKeyPair;
       const currentRoomKey = this._roomKey;
-      if (this._isKeyHolder && currentRoomKey && keypair) {
+      // OC-0257: key-holder election is server-authoritative — lowest
+      // connected user id (Server/ws/voice_e2ee.go) — and is re-run on every
+      // join, but the server has no demotion message and
+      // handleVoiceTokenRefresh discards the corrected is_key_holder it gets
+      // on every token refresh. So a stale holder's _isKeyHolder can outlive
+      // its actual election. A peer announcing with a LOWER user id than
+      // ours proves exactly that: the server would never have elected us
+      // while they're connected, so wrapping and offering the room key here
+      // would only earn a NOT_KEY_HOLDER refusal (surfaced to the user as a
+      // spurious error toast) after wasting the wrap. Stand down here — same
+      // as handleOfferInner does on accepting the real holder's offer —
+      // instead of emitting a doomed offer.
+      const myUserId = authStore.getState().user?.id ?? 0;
+      if (this._isKeyHolder && myUserId !== 0 && userId < myUserId) {
+        this._isKeyHolder = false;
+        this.clearKeyRotationTimer();
+        log.info("E2EE: stood down as key holder — announcing peer has a lower user id", {
+          userId,
+          myUserId,
+        });
+      } else if (this._isKeyHolder && currentRoomKey && keypair) {
         // Capture epoch before the wrap await — a rotation racing this
         // announce already added the peer to _peerPublicKeys before we got
         // here, so it offers them the fresh key on its own; if that
@@ -1222,8 +1242,16 @@ export class E2EEManager {
    * Key holder election: the participant with the lowest user ID among remaining
    * participants is elected. This is deterministic and does not depend on Map
    * insertion order (which is not guaranteed to match server join order).
+   *
+   * @param stillInRoster - (OC-0239) True when the caller knows, from a
+   *   roster snapshot taken BEFORE its own store mutation, that this user
+   *   was still present in the channel when the leave was received — the
+   *   signal that this is a stale, superseded-rejoin leave rather than a
+   *   genuine departure (OC-0213). Defaults to false so callers with no
+   *   better information fall back to this method's own (post-mutation)
+   *   roster read.
    */
-  async handleParticipantLeft(userId: number): Promise<void> {
+  async handleParticipantLeft(userId: number, stillInRoster = false): Promise<void> {
     const departingKey = this._peerPublicKeys.get(userId);
     const hadPeerKey = departingKey !== undefined;
     this._peerPublicKeys.delete(userId);
@@ -1258,7 +1286,16 @@ export class E2EEManager {
     // is still removed from _peerPublicKeys above (and, below, this event
     // still correctly excludes them from any resulting rotation) so nothing
     // regresses for a genuine departure.
-    if (departingKey && !channelUsers?.has(userId)) {
+    //
+    // `channelUsers` alone can no longer tell this apart in production
+    // (OC-0239): the only real VOICE_LEAVE caller (dispatcher.ts) deletes the
+    // user from the voice-user roster BEFORE calling this method, so
+    // `channelUsers?.has(userId)` is always false by the time we get here —
+    // the store mutation always wins the race this check was meant to
+    // detect. `stillInRoster` lets a caller pass a snapshot taken BEFORE its
+    // own roster mutation instead; it is OR'd with the live read so a direct
+    // caller relying on the store alone (as tests do) still works unchanged.
+    if (departingKey && !stillInRoster && !channelUsers?.has(userId)) {
       this.retirePeerKey(userId, await exportPublicKey(departingKey));
     }
 
