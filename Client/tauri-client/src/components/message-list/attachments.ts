@@ -11,6 +11,7 @@ import { createLogger } from "@lib/logger";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
+import { bracketBareIPv6Host } from "@lib/ws";
 import { save } from "@tauri-apps/plugin-dialog";
 
 const log = createLogger("attachments");
@@ -38,9 +39,26 @@ let _serverHost: string | null = null;
  *  src-tauri/src/tofu.rs — config hosts are stored verbatim (e.g.
  *  "Example.COM:443") but WHATWG URL drops the default port for https:,
  *  so isServerUrl's host comparison must normalize the same way or a
- *  ":443"-suffixed host never matches its own resolved URLs. */
+ *  ":443"-suffixed host never matches its own resolved URLs.
+ *
+ *  Only strip the trailing ":443" when what's left is unambiguously a host
+ *  (no remaining colon) or a bracketed IPv6 literal (ends in "]", as in
+ *  "[::1]:443") — otherwise a bare IPv6 literal whose final hextet is "443"
+ *  (e.g. "fd00::443") would have that hextet eaten as if it were a port,
+ *  same guard as tofu.rs::cert_store_key (OC-0215).
+ *
+ *  A bare (unbracketed) IPv6 literal is then wrapped in brackets so it forms
+ *  a parseable authority: resolveServerUrl interpolates _serverHost directly
+ *  into a URL, and WHATWG's URL.host is always the bracketed form for IPv6,
+ *  so isServerUrl's comparison also needs the bracketed form to ever match
+ *  (OC-0241). */
 export function setServerHost(host: string): void {
-  _serverHost = host.replace(/:443$/, "").toLowerCase();
+  const withoutPort =
+    host.endsWith(":443") &&
+    (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
+      ? host.slice(0, -4)
+      : host;
+  _serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
