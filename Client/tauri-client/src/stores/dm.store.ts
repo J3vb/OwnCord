@@ -120,18 +120,32 @@ export function closeDmLocally(channelId: number, fallback: () => void): void {
   if (wasActive) fallback();
 }
 
-/** Update last message info for a DM channel (on new message) and increment unread.
+/** Update last message info for a DM channel (on new message), increment unread,
+ *  and — when `isMention` is set — the mention count too, both behind the same
+ *  message-id monotonicity guard.
+ *
+ *  OC-0242: a DM message delivered between the server's registerNow and
+ *  buildReady is both counted in `ready`'s snapshot (lastMessageId already
+ *  advanced to its id) AND redelivered as a queued chat_message once the
+ *  socket drains. The unread guard below exists precisely for that replay;
+ *  a mention must not double-count in the same case, so it is folded into
+ *  this same setState behind the same guard rather than left as a separate
+ *  unconditional increment in a sibling function — by the time any such
+ *  sibling ran, this function would already have advanced lastMessageId to
+ *  the incoming id, so a guard placed there instead could never see the replay.
  *  Moves the channel to the top of the list so new messages are always visible. */
 export function updateDmLastMessage(
   channelId: number,
   messageId: number,
   content: string,
   timestamp: string,
+  isMention = false,
 ): void {
   dmStore.setState((prev) => {
     const updated = prev.channels.find((c) => c.channelId === channelId);
     if (updated === undefined) return prev;
     const rest = prev.channels.filter((c) => c.channelId !== channelId);
+    const isReplay = updated.lastMessageId !== null && messageId <= updated.lastMessageId;
     return {
       channels: [
         {
@@ -139,10 +153,8 @@ export function updateDmLastMessage(
           lastMessageId: messageId,
           lastMessage: content,
           lastMessageAt: timestamp,
-          unreadCount:
-            updated.lastMessageId !== null && messageId <= updated.lastMessageId
-              ? updated.unreadCount
-              : updated.unreadCount + 1,
+          unreadCount: isReplay ? updated.unreadCount : updated.unreadCount + 1,
+          mentionCount: isMention && !isReplay ? updated.mentionCount + 1 : updated.mentionCount,
         },
         ...rest,
       ],
@@ -238,14 +250,4 @@ export function updateDmParticipant(userId: number, patch: Partial<DmUser>): voi
     });
     return changed ? { channels } : prev;
   });
-}
-
-/** Increment a DM's mention count. Callers also call updateDmLastMessage — a
- *  mention is always an unread too. */
-export function incrementDmMention(channelId: number): void {
-  dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) =>
-      c.channelId === channelId ? { ...c, mentionCount: c.mentionCount + 1 } : c,
-    ),
-  }));
 }

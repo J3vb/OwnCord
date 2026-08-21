@@ -277,6 +277,32 @@ func TestSendMessage_HereSkipsOfflineUsers(t *testing.T) {
 	}
 }
 
+// TestSendMessage_MentionsHereDistinguishesHereFromEveryone locks OC-0271:
+// MentionsEveryone alone cannot tell a client which fan-out rule applied — a
+// plain @everyone reaches every reader, but @here skips one with no live
+// connection at send time (TestSendMessage_HereSkipsOfflineUsers above). A
+// reconnecting client uses MentionsHere to avoid raising a mention badge the
+// server never counted for a here-only mention delivered in its replay burst.
+func TestSendMessage_MentionsHereDistinguishesHereFromEveryone(t *testing.T) {
+	svc, _, _ := newMentionFixture(t)
+
+	here := sendAs(t, svc, 4, "@here quick question")
+	if !here.MentionsEveryone {
+		t.Fatal("@here must set MentionsEveryone")
+	}
+	if !here.MentionsHere {
+		t.Error("MentionsHere = false, want true for a here-only mention")
+	}
+
+	everyone := sendAs(t, svc, 4, "@everyone meeting now")
+	if !everyone.MentionsEveryone {
+		t.Fatal("@everyone must set MentionsEveryone")
+	}
+	if everyone.MentionsHere {
+		t.Error("MentionsHere = true, want false for a plain @everyone")
+	}
+}
+
 // TestSendMessage_HereSkipsInvisibleUsers locks the phase-6 half of the @here
 // rule. users.status stores the status the user *chose*, so an invisible reader
 // holds the literal "invisible" here — a bare == "offline" test would ping them,
@@ -494,6 +520,57 @@ func TestChannelFocus_ClearsMentionCount(t *testing.T) {
 	}
 	if got := mentionCount(t, database, 2); got != 0 {
 		t.Errorf("after focus mention_count = %d, want 0", got)
+	}
+}
+
+// TestDeleteMessage_ClearsMentionCount is OC-0275: deleting the only
+// mentioning message in a channel must not leave a red mention badge behind.
+// mention_count is a stored counter with exactly one incrementer
+// (IncrementMentionCounts) and, before this fix, exactly one clearer
+// (UpdateReadState via channel focus / mark-read) — DeleteMessage never
+// touched it, so the badge survived the message that caused it.
+func TestDeleteMessage_ClearsMentionCount(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	res := sendAs(t, svc, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d, want 1", got)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("after deleting the only mentioning message, bob mention_count = %d, want 0", got)
+	}
+}
+
+// TestPurgeMessages_ClearsMentionCounts is the bulk-delete sibling of
+// TestDeleteMessage_ClearsMentionCount (OC-0275): PurgeMessages must reverse
+// the mention_count increments of every message it purges, the same way a
+// single moderator delete does.
+func TestPurgeMessages_ClearsMentionCounts(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// newMentionFixture's moderator role only carries MENTION_EVERYONE by
+	// default; grant it MANAGE_MESSAGES on channel 10 so mod (user 4) can purge.
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
+
+	res := sendAs(t, svc, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d, want 1", got)
+	}
+
+	purgeResult, err := svc.PurgeMessages(context.Background(), 4, 10, 10, 0)
+	if err != nil {
+		t.Fatalf("PurgeMessages: %v", err)
+	}
+	if len(purgeResult.MessageIDs) != 1 || purgeResult.MessageIDs[0] != res.MessageID {
+		t.Fatalf("purged ids = %v, want [%d]", purgeResult.MessageIDs, res.MessageID)
+	}
+
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("after purging the only mentioning message, bob mention_count = %d, want 0", got)
 	}
 }
 

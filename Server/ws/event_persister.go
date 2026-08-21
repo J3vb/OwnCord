@@ -111,6 +111,24 @@ func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, p
 	if p == nil {
 		return
 	}
+	// run() stops reading p.queue the instant it exits, but the channel keeps
+	// its buffer and keeps accepting sends — without this check a caller that
+	// enqueues after Stop has returned (e.g. hub.GracefulStop still
+	// broadcasting a server_restart notice after main.go's LIFO defers have
+	// already stopped this persister) would land silently in a dead channel:
+	// neither persisted nor counted as dropped. p.done closes only when
+	// run() has actually exited, so this is exact, not a best guess.
+	select {
+	case <-p.done:
+		p.dropped.Add(1)
+		slog.Error("event dropped: persister stopped",
+			"seq", seq,
+			"event_type", eventType,
+			"channel_id", channelID,
+		)
+		return
+	default:
+	}
 	select {
 	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: payload}:
 	default:

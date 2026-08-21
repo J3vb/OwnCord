@@ -503,6 +503,65 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 	}
 }
 
+// TestVoiceMod_Move_PreservesServerMute locks OC-0245: a moderator move is
+// implemented as a server-driven leave (which deletes the target's
+// voice_states row) followed by the target's client answering voice_moved
+// with an ordinary voice_join to the destination — exactly like
+// dispatcher.ts's VOICE_MOVED handler. voiceJoinLeaveCurrent's flag snapshot
+// is gated on currentChID > 0, which is already 0 by the time that re-join
+// runs (the moderator's goroutine cleared it), so a moderator-imposed
+// server_muted/server_deafened must not be silently lifted by the very move
+// the moderator asked for.
+func TestVoiceMod_Move_PreservesServerMute(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-move-mute-from")
+	toID := seedVoiceChan(t, database, "vc-move-mute-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-move-mute", 2)
+	target := seedVoiceUserWithRole(t, database, "member-move-mute", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+
+	if _, err := database.SetVoiceServerMute(context.Background(), target.ID, fromID, true); err != nil {
+		t.Fatalf("SetVoiceServerMute: %v", err)
+	}
+	if _, err := database.SetVoiceServerDeafen(context.Background(), target.ID, fromID, true); err != nil {
+		t.Fatalf("SetVoiceServerDeafen: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
+		t.Fatal("target did not receive voice_moved")
+	}
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state == nil
+	}, "target to be removed from the old channel pending re-join")
+
+	// Simulate the target's client answering voice_moved with a plain
+	// voice_join to the destination.
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(toID))
+
+	state, err := database.GetVoiceState(context.Background(), target.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after move re-join: %v", err)
+	}
+	if state == nil || state.ChannelID != toID {
+		t.Fatalf("target should be in channel %d after move re-join, got %+v", toID, state)
+	}
+	if !state.ServerMuted {
+		t.Error("ServerMuted was cleared by the moderator move, want it to survive")
+	}
+	if !state.ServerDeafened {
+		t.Error("ServerDeafened was cleared by the moderator move, want it to survive")
+	}
+}
+
 func TestVoiceMod_Move_TextChannelDestination_BadRequest(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	fromID := seedVoiceChan(t, database, "vc-move-bad")

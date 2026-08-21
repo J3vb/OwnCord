@@ -81,6 +81,12 @@ type chatMessagePayload struct {
 	// these instead of re-parsing the content.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionsHere reports that MentionsEveryone came from @here rather than
+	// @everyone (never both). applyMentionCounts (service/mentions.go) skips
+	// the mention-count bump for an @here reader with no live connection at
+	// send time, so a client replaying this frame during a reconnect must not
+	// raise a badge the server never counted (OC-0271).
+	MentionsHere bool `json:"mentions_here"`
 }
 
 type memberUpdatePayload struct {
@@ -147,6 +153,8 @@ type chatEditedPayload struct {
 	// edit that adds or drops a mention updates the highlight too.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionsHere: see chatMessagePayload.MentionsHere.
+	MentionsHere bool `json:"mentions_here"`
 }
 
 type chatDeletedPayload struct {
@@ -424,6 +432,7 @@ type chatMessageArgs struct {
 	Attachments      []map[string]any
 	Mentions         []int64
 	MentionsEveryone bool
+	MentionsHere     bool
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -457,6 +466,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			Pinned:           false,
 			Mentions:         mentions,
 			MentionsEveryone: a.MentionsEveryone,
+			MentionsHere:     a.MentionsHere,
 		},
 	})
 }
@@ -542,7 +552,7 @@ func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
 }
 
 // buildChatEdited constructs a chat_edited broadcast.
-func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions []int64, mentionsEveryone bool) []byte {
+func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions []int64, mentionsEveryone, mentionsHere bool) []byte {
 	if mentions == nil {
 		mentions = []int64{}
 	}
@@ -555,6 +565,7 @@ func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions 
 			EditedAt:         editedAt,
 			Mentions:         mentions,
 			MentionsEveryone: mentionsEveryone,
+			MentionsHere:     mentionsHere,
 		},
 	})
 }

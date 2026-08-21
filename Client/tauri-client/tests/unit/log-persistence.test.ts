@@ -558,10 +558,14 @@ describe("log persistence", () => {
       expect(mockRemove).not.toHaveBeenCalled();
     });
 
-    it("does not rotate on flush when the date has not changed", async () => {
+    it("does not rotate again on flush when the date has not changed", async () => {
       const { getListener } = captureListener();
       const { initLogPersistence } = await freshImport();
       await initLogPersistence();
+
+      // initLogPersistence rotates once at startup (OC-0254) — that is the
+      // only readDir call we expect from this whole flow.
+      expect(mockReadDir).toHaveBeenCalledTimes(1);
 
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
@@ -570,8 +574,9 @@ describe("log persistence", () => {
       getListener()!(makeEntry({ message: "same-day" }));
       await vi.advanceTimersByTimeAsync(2000);
 
-      // readDir should not be called for rotation (only date change triggers it)
-      expect(mockReadDir).not.toHaveBeenCalled();
+      // Neither flush changed the date, so flushBuffer's own rotation check
+      // should not have fired readDir again beyond the startup rotation.
+      expect(mockReadDir).toHaveBeenCalledTimes(1);
     });
 
     it("handles rotation failure gracefully", async () => {
@@ -592,6 +597,33 @@ describe("log persistence", () => {
 
       // The write should still succeed despite rotation failure
       expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
+    });
+
+    // OC-0254: rotateOldFiles() previously only ran from flushBuffer's
+    // `date !== currentDate` check. initLogPersistence seeded currentDate to
+    // today() without ever rotating, so a session that starts and ends on
+    // the same calendar day (the common case for a daily-launched desktop
+    // app) never rotated at all — client-logs/ grew one file per day
+    // forever. Rotation must happen at startup too.
+    it("rotates old files at startup, even in a session that never crosses midnight", async () => {
+      mockReadDir.mockResolvedValueOnce([
+        { name: "2025-06-10.jsonl", isDirectory: false },
+        { name: "2025-06-11.jsonl", isDirectory: false },
+        { name: "2025-06-12.jsonl", isDirectory: false },
+        { name: "2025-06-13.jsonl", isDirectory: false },
+        { name: "2025-06-14.jsonl", isDirectory: false },
+        { name: "2025-06-15.jsonl", isDirectory: false },
+      ]);
+
+      const { initLogPersistence } = await freshImport();
+      captureListener();
+      await initLogPersistence();
+
+      // No log entries, no flush, no date change — just startup. Rotation
+      // must still have run and trimmed down to MAX_LOG_FILES (5).
+      expect(mockReadDir).toHaveBeenCalledTimes(1);
+      expect(mockRemove).toHaveBeenCalledTimes(1);
+      expect(mockRemove).toHaveBeenCalledWith("/mock/logs/client-logs/2025-06-10.jsonl");
     });
 
     it("filters out directories and non-jsonl files during rotation", async () => {

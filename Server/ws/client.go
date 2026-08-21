@@ -31,11 +31,33 @@ type Client struct {
 	channelID      int64  // currently viewed channel for channel-scoped broadcasts
 	voiceChID      int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	voiceJoinToken string // opaque join-instance token for the current voice session; guarded by voiceMu
-	e2eePubKey     string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	e2eeSignature  string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
-	roleName       string // cached role name for chat_message broadcasts
-	tokenHash      string // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq        uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// voiceJoinCompleted is true once voiceJoinComplete's supersession guard
+	// has passed for the current (voiceChID, voiceJoinToken) pair — i.e. the
+	// join actually reached the SFU handoff (token sent, voice topic
+	// subscribed, voice_state broadcast). It starts false the moment
+	// voiceJoinPersist calls setVoiceState (BUG-088, immediately after the DB
+	// row commits but well before completion) and is reset to false by every
+	// state change, so it is true only while a real, deliverable membership
+	// is live. registerNow reads it (via clearVoiceState) to decide whether a
+	// network reconnect's replaced connection had a completed join to hand
+	// off, or only a persisted-but-not-yet-delivered one still racing its own
+	// supersession guards in voice_join.go — transferring the latter makes
+	// those guards misread the transfer as an eviction and abandon the join
+	// while its voice_states row stays behind for nothing to reap (OC-0270).
+	// Guarded by voiceMu.
+	voiceJoinCompleted bool
+	e2eePubKey         string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
+	e2eeSignature      string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
+	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
+	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
+	// the voice_states row those flags normally live in before the target's
+	// own re-join can read them back. Guarded by voiceMu; see
+	// setPendingModFlags/takePendingModFlags.
+	pendingModServerMuted    bool
+	pendingModServerDeafened bool
+	roleName                 string // cached role name for chat_message broadcasts
+	tokenHash                string // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq                  uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -137,24 +159,50 @@ func (c *Client) setVoiceState(chID int64, joinToken string) {
 	defer c.voiceMu.Unlock()
 	c.voiceChID = chID
 	c.voiceJoinToken = joinToken
+	// A new join instance starts (BUG-088 sets this before the token round
+	// trip and completion guard even run); only voiceJoinComplete may mark it
+	// done, via markVoiceJoinCompleteIfMatch.
+	c.voiceJoinCompleted = false
+}
+
+// markVoiceJoinCompleteIfMatch records that the join for (chID, joinToken) has
+// passed voiceJoinComplete's supersession guard, but only if the client is
+// still in exactly that join instance — re-checked under this same lock
+// acquisition so nothing can land between voiceJoinComplete's guard check and
+// this call and have it silently mark a superseded/cleared state as done.
+// Returns whether it matched and was recorded.
+func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	if c.voiceChID != chID || c.voiceJoinToken != joinToken {
+		return false
+	}
+	c.voiceJoinCompleted = true
+	return true
 }
 
 // clearVoiceChID clears the voice channel ID and returns the old value.
 func (c *Client) clearVoiceChID() int64 {
-	oldChID, _ := c.clearVoiceState()
+	oldChID, _, _ := c.clearVoiceState()
 	return oldChID
 }
 
-func (c *Client) clearVoiceState() (int64, string) {
+// clearVoiceState clears the client's voice state and returns the old channel
+// ID, join token, and whether that join had completed (see
+// voiceJoinCompleted) — the last is what registerNow consults before handing
+// a resuming connection this state (OC-0270).
+func (c *Client) clearVoiceState() (int64, string, bool) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	oldChID := c.voiceChID
 	oldJoinToken := c.voiceJoinToken
+	oldCompleted := c.voiceJoinCompleted
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
+	c.voiceJoinCompleted = false
 	c.e2eePubKey = ""
 	c.e2eeSignature = ""
-	return oldChID, oldJoinToken
+	return oldChID, oldJoinToken, oldCompleted
 }
 
 // clearVoiceStateIfMatch clears the voice state only when the current channel
@@ -170,9 +218,36 @@ func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
 	oldJoinToken := c.voiceJoinToken
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
+	c.voiceJoinCompleted = false
 	c.e2eePubKey = ""
 	c.e2eeSignature = ""
 	return oldJoinToken, true
+}
+
+// setPendingModFlags stashes a moderator-imposed mute/deafen on this client
+// before a server-driven leave (voice_mod_move) deletes the voice_states row
+// those flags live in. Guarded by voiceMu, the same lock
+// clearVoiceStateIfMatch takes for the delete, so the stash can never
+// interleave with it. Paired with takePendingModFlags, which the client's own
+// subsequent voice_join consults when there is no live row left to read the
+// flags back from (currentChID == 0).
+func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.pendingModServerMuted = serverMuted
+	c.pendingModServerDeafened = serverDeafened
+}
+
+// takePendingModFlags reads and clears the flags stashed by
+// setPendingModFlags. Take-and-clear so an ordinary later join — one not
+// preceded by a moderator move — is unaffected by a stash nobody consumed.
+func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	serverMuted, serverDeafened = c.pendingModServerMuted, c.pendingModServerDeafened
+	c.pendingModServerMuted = false
+	c.pendingModServerDeafened = false
+	return serverMuted, serverDeafened
 }
 
 // setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,

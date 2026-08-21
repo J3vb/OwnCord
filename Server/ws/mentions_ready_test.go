@@ -73,6 +73,58 @@ func TestChatSend_BroadcastCarriesMentions(t *testing.T) {
 	}
 }
 
+// TestChatSend_BroadcastDistinguishesHereFromEveryone locks OC-0271: the wire
+// must carry mentions_here alongside mentions_everyone so a client replaying
+// this frame after a reconnect can tell a here-only fan-out (which
+// applyMentionCounts narrows to readers with a live connection at send time)
+// apart from a plain @everyone (which always reaches every reader) — without
+// it, a client cannot avoid raising a mention badge the server never counted.
+func TestChatSend_BroadcastDistinguishesHereFromEveryone(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	hub.RunMentionCountsInlineForTest()
+
+	author := seedCoverageOwner(t, database, "here-author") // owner role holds MENTION_EVERYONE
+	chID := seedTestChannel(t, database, "here-chan")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, author, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"payload": map[string]any{
+			"channel_id": chID,
+			"content":    "@here quick question",
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+
+	var found bool
+	for _, msg := range drainChanTimeout(send, 300*time.Millisecond) {
+		var env struct {
+			Type    string `json:"type"`
+			Payload struct {
+				MentionsEveryone bool `json:"mentions_everyone"`
+				MentionsHere     bool `json:"mentions_here"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(msg, &env) != nil || env.Type != "chat_message" {
+			continue
+		}
+		found = true
+		if !env.Payload.MentionsEveryone {
+			t.Error("mentions_everyone = false, want true")
+		}
+		if !env.Payload.MentionsHere {
+			t.Error("mentions_here = false, want true for an @here-only mention")
+		}
+	}
+	if !found {
+		t.Fatal("no chat_message broadcast received")
+	}
+}
+
 func TestBuildReady_CarriesMentionCount(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	ctx := context.Background()

@@ -55,7 +55,9 @@ func NewPermissionService(st Store, checker *permissions.Checker) *PermissionSer
 
 // HasChannelPerm reports whether the user has the required permission bits
 // on the given channel. Uses cached role/override data when available.
-// Cancellation of ctx reaches the underlying store reads.
+// Cancellation of ctx reaches the underlying store reads. Any lookup failure
+// (a transient DB hiccup as much as a genuine "no role") collapses to false —
+// callers that need to tell those apart use HasChannelPermChecked instead.
 func (s *PermissionService) HasChannelPerm(ctx context.Context, userID, channelID, perm int64) bool {
 	// Phase B Step 8 — span the perm check so traces show how many permission
 	// lookups a single REST/WS request triggers. The cache hit path is fast,
@@ -66,11 +68,32 @@ func (s *PermissionService) HasChannelPerm(ctx context.Context, userID, channelI
 		telemetry.Int64("channel_id", channelID),
 	)
 	defer span.End()
-	cp := s.getOrPopulate(ctx, userID)
-	if cp == nil {
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil || cp == nil {
 		return false
 	}
 	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm)
+}
+
+// HasChannelPermChecked is HasChannelPerm's error-preserving counterpart: it
+// distinguishes "the store lookup failed" (err != nil, verdict meaningless)
+// from "the store answered and the user lacks the bit" (false, nil error).
+// OC-0266: a caller like ws's applySetChannelID post-Subscribe revalidation
+// must not treat a transient DB hiccup on the role/override read as a
+// positive denial — that already-fail-closed collapse belongs to
+// HasChannelPerm and the rest of this service's callers, not to a caller that
+// documents "a transient lookup error is NOT a denial".
+func (s *PermissionService) HasChannelPermChecked(ctx context.Context, userID, channelID, perm int64) (bool, error) {
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if cp == nil {
+		// No role row: a genuine "no permissions" outcome, not a lookup
+		// failure — HasChannelPerm has always treated it as a plain false.
+		return false, nil
+	}
+	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm), nil
 }
 
 // RequireChannelAccess checks whether the user can access the channel with
@@ -95,9 +118,10 @@ func (s *PermissionService) RequireChannelAccess(ctx context.Context, userID int
 
 // GetRoleForUser returns the user's role, using the cache when available.
 func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
-	cp := s.getOrPopulate(ctx, userID)
-	if cp == nil {
-		// Cache miss, fall back to direct DB query.
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil || cp == nil {
+		// Cache miss (or a lookup failure the cache couldn't populate through),
+		// fall back to direct DB query.
 		return s.st.GetRoleForUser(ctx, userID)
 	}
 	return s.st.GetRoleByID(ctx, cp.roleID)
@@ -145,15 +169,21 @@ func (s *PermissionService) CacheStats() (hits, misses uint64) {
 	return s.hits.Load(), s.misses.Load()
 }
 
-// getOrPopulate returns cached perms for the user, populating the cache
-// on miss or staleness. Returns nil if the user's role can't be loaded.
-func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *cachedPerms {
+// getOrPopulate returns cached perms for the user, populating the cache on
+// miss or staleness. Returns (nil, nil) if the user genuinely has no role row
+// (not a lookup failure — there is nothing to cache and nothing to retry).
+// Returns (nil, err) if a store read failed, so callers that must not
+// collapse a transient DB hiccup into a denial (HasChannelPermChecked) can
+// tell it apart from that legitimate "no role" case; HasChannelPerm and
+// GetRoleForUser keep their existing fail-closed behavior by treating either
+// case the same way.
+func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) (*cachedPerms, error) {
 	s.mu.RLock()
 	cp, ok := s.cache[userID]
 	if ok && time.Since(cp.populatedAt) < permCacheTTL {
 		s.mu.RUnlock()
 		s.hits.Add(1)
-		return cp
+		return cp, nil
 	}
 	startGen := s.gen
 	s.mu.RUnlock()
@@ -161,8 +191,11 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *ca
 
 	// Populate.
 	role, err := s.st.GetRoleForUser(ctx, userID)
-	if err != nil || role == nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if role == nil {
+		return nil, nil
 	}
 	// Admins bypass every channel check, so skip the fetch entirely (mirrors
 	// ChannelService.ListVisibleChannels and ws.buildReady). The fetch pulls
@@ -173,10 +206,12 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *ca
 	if !permissions.HasAdmin(role.Permissions) {
 		raw, oErr := s.st.GetChannelOverridesFor(ctx, role.ID, userID)
 		if oErr != nil {
-			// Fail closed: an empty map would silently drop every deny bit,
-			// and caching it would keep doing so for permCacheTTL.
+			// Fail closed (for HasChannelPerm/GetRoleForUser): an empty map
+			// would silently drop every deny bit, and caching it would keep
+			// doing so for permCacheTTL. HasChannelPermChecked callers get the
+			// error itself and decide for themselves whether that's a denial.
 			slog.Error("PermissionService.getOrPopulate override fetch failed, denying", "err", oErr, "user_id", userID, "role_id", role.ID)
-			return nil
+			return nil, oErr
 		}
 		overrides = permOverrides(raw)
 	}
@@ -197,5 +232,5 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) *ca
 		s.cache[userID] = cp
 	}
 	s.mu.Unlock()
-	return cp
+	return cp, nil
 }

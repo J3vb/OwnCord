@@ -85,6 +85,43 @@ describe("DmProfileSidebar", () => {
   });
 
   // -------------------------------------------------------------------------
+  // OC-0264: the DM header (dmDisplayName) prefers the nickname, so the
+  // profile panel it opens must show the same identity -- both the title and
+  // the avatar-fallback initial -- rather than falling back to the raw
+  // username the header never showed.
+  // -------------------------------------------------------------------------
+  it("prefers the display name over the raw username for both the title and the avatar initial", () => {
+    const user = makeUser({
+      username: "bob",
+      displayName: "Charlie",
+    });
+    const sidebar = createDmProfileSidebar(makeOptions({ user }));
+    sidebar.mount(container);
+
+    const usernameEl = container.querySelector('[data-testid="dps-username"]');
+    expect(usernameEl!.textContent).toBe("Charlie");
+
+    const avatarEl = container.querySelector('[data-testid="dps-avatar"]');
+    expect(avatarEl!.textContent).toBe("C");
+
+    sidebar.destroy?.();
+  });
+
+  it("falls back to the username when no display name is set", () => {
+    const user = makeUser({ username: "bob", displayName: null });
+    const sidebar = createDmProfileSidebar(makeOptions({ user }));
+    sidebar.mount(container);
+
+    const usernameEl = container.querySelector('[data-testid="dps-username"]');
+    expect(usernameEl!.textContent).toBe("bob");
+
+    const avatarEl = container.querySelector('[data-testid="dps-avatar"]');
+    expect(avatarEl!.textContent).toBe("B");
+
+    sidebar.destroy?.();
+  });
+
+  // -------------------------------------------------------------------------
   // Test 2: Sidebar displays correct user profile data
   // -------------------------------------------------------------------------
   it("displays correct user profile data", () => {

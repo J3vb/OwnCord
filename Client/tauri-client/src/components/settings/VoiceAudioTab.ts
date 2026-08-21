@@ -14,7 +14,14 @@ import {
 } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
-  build(): HTMLDivElement;
+  /**
+   * Build the pane's DOM. `signal` scopes this build's own element
+   * listeners — pass a per-render signal (aborted just before the next
+   * build) so a discarded pane's listeners don't outlive it. Defaults to
+   * the factory's overlay-lifetime signal when omitted, matching this
+   * tab's original single-signal behavior.
+   */
+  build(signal?: AbortSignal): HTMLDivElement;
   cleanup(): void;
 }
 
@@ -46,11 +53,11 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
     }
   }
 
-  function build(): HTMLDivElement {
+  function build(buildSignal: AbortSignal = signal): HTMLDivElement {
     // Clean up any previous mic/camera stream before rebuilding
     cleanupMic();
     return buildVoiceAudioTabInner(
-      signal,
+      buildSignal,
       (stream, ctx, frame) => {
         micStream = stream;
         micAudioCtx = ctx;
@@ -488,10 +495,10 @@ function buildVoiceAudioTabInner(
   }
 
   // Camera teardown on overlay close is already covered by the factory's
-  // single signal.addEventListener("abort", cleanupMic) — registering here
-  // too would add one more permanent listener (and retain this build's DOM
-  // subtree via closure) every time the tab is rebuilt, since `signal` is
-  // shared for the whole overlay lifetime, not per-build.
+  // single signal.addEventListener("abort", cleanupMic), registered once
+  // against the overlay-lifetime signal in createVoiceAudioTab — registering
+  // another "abort" handler here too would add one more listener every time
+  // the tab is rebuilt, since this function runs again on every build.
 
   // Start mic level monitoring for visual feedback
   void (async () => {

@@ -227,7 +227,13 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		}
 		return nil, fmt.Errorf("%w: failed to update profile: %v", ErrInternal, err)
 	}
-	user, err := s.st.GetUserByID(ctx, userID)
+	// This re-read, like the audit write below, must survive a request ctx
+	// canceled after the write above committed — otherwise a client that
+	// hangs up right after the commit turns a successful write into
+	// ErrInternal here, and the caller (handleUpdateProfile) never reaches
+	// broadcastUserUpdate: every other connected client is left showing the
+	// stale profile indefinitely even though the DB already has the new one.
+	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch updated user: %v", ErrInternal, err)
 	}
@@ -271,7 +277,12 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
 		return nil, fmt.Errorf("%w: failed to update identity key", ErrInternal)
 	}
-	user, err := s.st.GetUserByID(ctx, userID)
+	// Detached for the same reason as UpdateProfile's post-commit re-read: a
+	// request ctx canceled right after the write above commits must not turn
+	// an already-successful key rotation into ErrInternal here, which would
+	// stop the caller from broadcasting the new key to peers relying on it
+	// for TOFU pinning.
+	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
 	}

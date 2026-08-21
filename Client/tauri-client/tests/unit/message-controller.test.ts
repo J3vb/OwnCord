@@ -187,6 +187,29 @@ describe("createMessageController", () => {
 
       expect(mockSetMessages).not.toHaveBeenCalled();
     });
+
+    it("does not mark load-errored or toast when a stale tail fetch rejects after the channel was loaded by something else (e.g. a same-channel jump's around-window won the race)", async () => {
+      // Not loaded when the fetch starts (so it proceeds past the early
+      // return), but loaded by the time it rejects — simulating
+      // MessageJump.jumpTo's setAroundMessages winning the race and
+      // rendering the jump target while this mount-time tail fetch is still
+      // in flight. The window it installed has rows, matching the real
+      // repro where the user already sees a fully-loaded, correct channel.
+      mockIsChannelLoaded.mockReturnValueOnce(false).mockReturnValueOnce(true);
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "around window row" }]);
+      const api = makeApi({
+        getMessages: vi.fn().mockRejectedValue(new Error("network error")),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadMessages(42, makeAbort().signal);
+
+      // The jump already succeeded and rendered correctly — a losing tail
+      // fetch must not retroactively flag the channel load-errored or pop an
+      // error toast on top of a visibly-working jump.
+      expect(mockSetChannelLoadError).not.toHaveBeenCalled();
+      expect(showError).not.toHaveBeenCalled();
+    });
   });
 
   describe("loadOlderMessages", () => {

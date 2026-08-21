@@ -160,6 +160,37 @@ describe("setAroundMessages", () => {
     expect(msgs[3]!.status).toBe("pending");
     expect(msgs[4]!.status).toBe("failed");
   });
+
+  it("keeps a live message that landed while the fetch was in flight, once the window reattaches to the tail (OC-0244)", () => {
+    // The socket is already subscribed to the channel (channel_focus was sent
+    // on mount), so a broadcast that commits while the /messages/around
+    // request is still in flight lands as an ordinary "sent" row — the
+    // channel isn't marked detached yet, so addMessage appends it normally.
+    addMessage(broadcast(900));
+
+    // The around-window response then lands and reaches the live tail
+    // (has_more_after=false, nothing trimmed): this reattaches the channel,
+    // asserting the window now IS the live tail.
+    setAroundMessages(1, ascendingWindow(10, 12), true, false);
+
+    // The live message must survive that claim exactly as setMessages'
+    // merge protects an equivalent race — losing it here means no badge, no
+    // "Jump to Present" pill, and no way to ever see it again.
+    expect(ids(1)).toEqual([10, 11, 12, 900]);
+    expect(isWindowDetached(1)).toBe(false);
+  });
+
+  it("still drops a live message that landed before the fetch when the new window stays detached", () => {
+    addMessage(broadcast(900));
+
+    // has_more_after=true: the window does not reach the live tail, so it
+    // makes no claim of completeness — the "Jump to Present" pill (plus the
+    // unread bump) represents the live message instead.
+    setAroundMessages(1, ascendingWindow(10, 12), true, true);
+
+    expect(ids(1)).toEqual([10, 11, 12]);
+    expect(isWindowDetached(1)).toBe(true);
+  });
 });
 
 describe("live messages while detached", () => {

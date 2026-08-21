@@ -2,6 +2,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSearchOverlay } from "../../src/components/SearchOverlay";
 import type { SearchOverlayOptions } from "../../src/components/SearchOverlay";
 import type { SearchResultItem } from "../../src/lib/types";
+import { setDmChannels } from "../../src/stores/dm.store";
+import type { DmChannel } from "../../src/stores/dm.store";
+
+function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
+  return {
+    channelId: 42,
+    recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+    participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+    name: "",
+    isGroup: false,
+    lastMessageId: null,
+    lastMessage: "",
+    lastMessageAt: "",
+    unreadCount: 0,
+    mentionCount: 0,
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,11 +57,13 @@ describe("createSearchOverlay", () => {
     vi.useFakeTimers();
     container = document.createElement("div");
     document.body.appendChild(container);
+    setDmChannels([]);
   });
 
   afterEach(() => {
     vi.useRealTimers();
     container.remove();
+    setDmChannels([]);
   });
 
   it("mounts with overlay and input", () => {
@@ -139,6 +159,39 @@ describe("createSearchOverlay", () => {
     expect(items[0]!.querySelector(".search-result-content")!.textContent).toBe("first result");
 
     expect(items[1]!.querySelector(".search-result-channel")!.textContent).toBe("#random");
+
+    overlay.destroy?.();
+  });
+
+  it("labels a DM result with the DM display name instead of a bare '#' (OC-0262)", async () => {
+    // A 1:1 DM channel row has channels.name === "" server-side, so a search
+    // hit inside a DM comes back with channel_name: "". Rendering it as
+    // `#${r.channel_name}` collapses to a bare "#" with no way to tell which
+    // conversation it came from. The label should route through dmStore, the
+    // same source every other DM-labelling surface (chat header, sidebar)
+    // uses, and use the '@' sigil the chat header uses for DMs.
+    setDmChannels([
+      makeDmChannel({
+        channelId: 42,
+        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+        participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+      }),
+    ]);
+
+    const results = [makeResult({ channel_id: 42, channel_name: "" })];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const opts = makeOptions({ onSearch });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "dm search";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const channelLabel = container.querySelector(".search-result-channel")!;
+    expect(channelLabel.textContent).toBe("@bob");
+    expect(channelLabel.textContent).not.toBe("#");
 
     overlay.destroy?.();
   });

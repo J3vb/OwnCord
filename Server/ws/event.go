@@ -223,8 +223,14 @@ func (e TypingChannelEvent) ExcludeUserID() int64 { return e.excludeUserID }
 func (e TypingChannelEvent) Payload() []byte      { return e.payload }
 
 // TypingDMEvent is a typing indicator sent to DM participants, excluding sender.
-// It uses UserTargetedEvent routing because DM typing excludes the sender and
-// is delivered directly to each other participant.
+// It satisfies UserTargetedEvent structurally (DM typing excludes the sender
+// and is delivered directly to each other participant), but EmitEvents
+// special-cases it onto h.SendToUserLow — the direct-delivery counterpart of
+// TypingChannelEvent's broadcastExcludeLow — rather than the UserTargetedEvent
+// default of h.SendToUserHigh, so this ephemeral frame shares the same
+// drop-on-overflow durability as its channel sibling instead of the
+// disconnect-on-overflow behavior meant for durable targeted events like DM
+// opens and mentions (OC-0260).
 type TypingDMEvent struct {
 	targetUserID int64
 	payload      []byte

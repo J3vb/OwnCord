@@ -76,6 +76,21 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// the owner's own client on a stale status — the same hazard
 			// OC-0003/OC-0214 fixed for the "others" half of presence.
 			h.SendToUser(e.TargetUserID(), e.Payload())
+		case TypingDMEvent:
+			// Low priority, NOT the UserTargetedEvent default below (which
+			// TypingDMEvent also satisfies — this case must stay ordered
+			// before it so the type switch picks this one). DM typing is the
+			// direct-delivery counterpart of TypingChannelEvent, which
+			// satisfies ExcludeSenderEvent and is routed to
+			// broadcastExcludeLow above — ephemeral and safely droppable on
+			// overflow. Falling through to UserTargetedEvent's
+			// h.SendToUserHigh instead gave the identical event the
+			// STRICTEST durability class in a DM (its overflow fallback
+			// chain disconnects the client, client.go sendHighMsg ->
+			// closeAllSendLocked) versus the most droppable one in a channel,
+			// so a busy DM typer could disconnect a backpressured recipient
+			// over a cosmetic frame (OC-0260).
+			h.SendToUserLow(e.TargetUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
 			// dm_channel_open is unsequenced and targeted, so replay can never

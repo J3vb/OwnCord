@@ -61,7 +61,6 @@ import {
   clearDmUnread,
   updateDmLastMessage,
   updateDmLastMessagePreview,
-  incrementDmMention,
   dmDisplayName,
   updateDmParticipant,
 } from "@stores/dm.store";
@@ -72,13 +71,13 @@ import {
   setUserBlockedByThem,
   clearBlockedByThem,
 } from "@stores/blocks.store";
-import { setCustomEmoji } from "@stores/emoji.store";
+import { emojiStore, setCustomEmoji } from "@stores/emoji.store";
 import type { DmChannelPayload } from "./types";
 import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
 import { notifyIncomingMessage } from "./notifications";
-import { highlightsCurrentUser } from "./mentions";
+import { mentionsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
@@ -128,15 +127,44 @@ function livekitSession(): Promise<typeof import("@lib/livekitSession")> {
  * The `!voice.localMuted`/`!voice.localDeafened` guards make it safe to call
  * from either path — or both, on the same session — without redundantly
  * re-invoking the livekit calls once already applied.
+ *
+ * OC-0246: a moderator restriction must also be released once it is lifted.
+ * `setMuted`/`setDeafened` deliberately send no voice_mute/voice_deafen frame
+ * (unlike the user's own toggle), so nothing else ever un-applies a
+ * moderator-imposed local mute/deafen — without this, the falling edge
+ * (server_muted/server_deafened going back to false) left the client
+ * permanently silent/deaf while every peer's roster, and the server's own
+ * voice_states row, said otherwise. `prevServerMuted`/`prevServerDeafened`
+ * scope the release to the exact frame the restriction was lifted on (a
+ * falling edge), rather than to every voice_state that happens to show the
+ * flag already false — the latter would risk undoing an in-flight optimistic
+ * self-mute from an unrelated restated voice_state (e.g. a camera toggle).
+ * `selfMuted`/`selfDeafened` are the row's own muted/deafened fields (never
+ * touched by moderation, always kept in sync with the user's own toggle via
+ * voice_mute/voice_deafen) — requiring them to also be false before
+ * releasing means a genuine self-mute that happens to coincide with the
+ * moderator's release is never clobbered.
  */
-function enforceModeratorAudioState(serverMuted: boolean, serverDeafened: boolean): void {
+function enforceModeratorAudioState(
+  serverMuted: boolean,
+  serverDeafened: boolean,
+  prevServerMuted: boolean,
+  prevServerDeafened: boolean,
+  selfMuted: boolean,
+  selfDeafened: boolean,
+): void {
   const voice = voiceStore.getState();
   const applyDeafen = serverDeafened && !voice.localDeafened;
   const applyMute = serverMuted && !voice.localMuted;
-  if (applyDeafen || applyMute) {
+  const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
+  const releaseDeafen =
+    prevServerDeafened && !serverDeafened && voice.localDeafened && !selfDeafened;
+  if (applyDeafen || applyMute || releaseMute || releaseDeafen) {
     void livekitSession().then(({ setDeafened, setMuted }) => {
       if (applyDeafen) setDeafened(true);
       if (applyMute) setMuted(true);
+      if (releaseMute) setMuted(false);
+      if (releaseDeafen) setDeafened(false);
     });
   }
 }
@@ -282,6 +310,12 @@ export function wireDispatcher(
         prevVoiceChannelId !== null
           ? new Set(voiceStore.getState().voiceUsers.get(prevVoiceChannelId)?.keys() ?? [])
           : new Set<number>();
+      // OC-0246: same reasoning as the VOICE_STATE handler — snapshot the
+      // pre-resync moderator flags before setVoiceStates() overwrites them,
+      // so a moderator restriction lifted while we were disconnected (and
+      // still applied locally from before the drop) is released here too.
+      const prevSelfServerMuted = voiceStore.getState().localServerMuted ?? false;
+      const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
 
       setChannels(payload.channels);
       setRoles(payload.roles ?? []);
@@ -318,6 +352,10 @@ export function wireDispatcher(
         enforceModeratorAudioState(
           selfVoiceState.server_muted === true,
           selfVoiceState.server_deafened === true,
+          prevSelfServerMuted,
+          prevSelfServerDeafened,
+          selfVoiceState.muted,
+          selfVoiceState.deafened,
         );
 
         // OC-0201: same gap, for E2EE. A full resync never replays the
@@ -522,10 +560,19 @@ export function wireDispatcher(
       // change rarely, so they do not belong in the per-session dump). Load
       // them once here; `emoji_update` keeps them fresh from then on. A
       // failure is non-fatal — unresolved shortcodes stay plain text.
+      //
+      // OC-0251: snapshot the revision emojiStore was at right before issuing
+      // this fetch, mirroring the OC-0218 blockedByMeRev guard above. The GET
+      // travels over a separate HTTP connection while an `emoji_update` can
+      // arrive on the already-open socket — if one lands (bumping the
+      // revision) while this GET is in flight, setCustomEmoji sees the
+      // mismatch and skips applying this reply instead of clobbering the
+      // fresher broadcast with a stale full-set snapshot.
       if (api?.listEmoji !== undefined) {
+        const emojiRevAtFetch = emojiStore.getState().rev ?? 0;
         api
           .listEmoji()
-          .then((list) => setCustomEmoji(list))
+          .then((list) => setCustomEmoji(list, emojiRevAtFetch))
           .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
       }
 
@@ -631,10 +678,28 @@ export function wireDispatcher(
       // are authoritative there). DM channel IDs are not in channelsStore
       // (they use dmStore), so incrementUnread is a no-op for DMs, but the
       // own-message guard is applied here for defence-in-depth.
-      const isMention = highlightsCurrentUser(payload.content, {
-        mentions: payload.mentions,
-        mentionsEveryone: payload.mentions_everyone,
-      });
+      //
+      // isReplayFrame is computed here (rather than only below, where the
+      // notification gate uses it) because the mention badge needs it too —
+      // see isMention.
+      const isReplayFrame =
+        lastReconnectHandshakeAt !== null &&
+        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
+        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
+      // highlightsCurrentUser (mentions.ts) treats @everyone and @here as one
+      // bit, because the wire carries only one: mentions_everyone. But the
+      // server's applyMentionCounts (mentions.go) narrows an @here fan-out to
+      // readers who had a live connection at send time — a reader with none
+      // never got read_states.mention_count bumped for a here-only mention.
+      // The reconnect tier that delivers this replay burst never follows up
+      // with a `ready` to correct a wrongly-raised badge (OC-0271), so a
+      // here-only mention landing inside that burst must not raise one here
+      // either. A direct mention, or an @here/@everyone frame delivered live,
+      // is unaffected — mentions_here is only ever set alongside
+      // mentions_everyone for an @here (never a plain @everyone) token.
+      const isMention =
+        mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
+        (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
       const isDetached = isWindowDetached(payload.channel_id);
 
       if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
@@ -664,13 +729,21 @@ export function wireDispatcher(
             payload.timestamp,
           );
         } else {
-          updateDmLastMessage(payload.channel_id, payload.id, payload.content, payload.timestamp);
           // The DM badge reads dmStore's mentionCount (mute-immune, rendered
           // by DmSidebar) — incrementMention above no-ops for DM ids, which
-          // are absent from channelsStore. Same guards as the unread bump.
-          if (isMention) {
-            incrementDmMention(payload.channel_id);
-          }
+          // are absent from channelsStore. isMention is passed through so the
+          // mention bump sits behind updateDmLastMessage's own message-id
+          // guard (OC-0242) — a separate unconditional increment here would
+          // double-count a mention redelivered between registerNow and
+          // buildReady, since lastMessageId has already advanced by the time
+          // any such follow-up call could check it.
+          updateDmLastMessage(
+            payload.channel_id,
+            payload.id,
+            payload.content,
+            payload.timestamp,
+            isMention,
+          );
         }
       }
 
@@ -683,11 +756,8 @@ export function wireDispatcher(
       // (see serverClockSkewMs above) so a lagging or skewed server clock
       // cannot make a live message look like a replay.
       // The wall-clock window additionally bounds a cold (never-sampled)
-      // skew's damage — see REPLAY_GATE_WINDOW_MS.
-      const isReplayFrame =
-        lastReconnectHandshakeAt !== null &&
-        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
-        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
+      // skew's damage — see REPLAY_GATE_WINDOW_MS. (isReplayFrame itself is
+      // computed above, alongside isMention, which needs it too.)
       if (!isReplayFrame) {
         notifyIncomingMessage(payload);
         // Refresh the skew estimate from this accepted-as-live frame so it
@@ -902,12 +972,28 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_STATE, (payload) => {
-      updateVoiceState(payload);
       // Auto-join voice channel if the event is for the current user
       const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id !== currentUserId) return;
+      const isSelf = payload.user_id === currentUserId;
+      // OC-0246: snapshot the pre-update moderator flags before updateVoiceState
+      // overwrites them, so enforceModeratorAudioState can detect a falling
+      // edge (a restriction that WAS in effect and is now lifted) rather than
+      // only ever seeing the post-update state.
+      const prevServerMuted = isSelf ? (voiceStore.getState().localServerMuted ?? false) : false;
+      const prevServerDeafened = isSelf
+        ? (voiceStore.getState().localServerDeafened ?? false)
+        : false;
+      updateVoiceState(payload);
+      if (!isSelf) return;
       joinVoiceChannel(payload.channel_id);
-      enforceModeratorAudioState(payload.server_muted === true, payload.server_deafened === true);
+      enforceModeratorAudioState(
+        payload.server_muted === true,
+        payload.server_deafened === true,
+        prevServerMuted,
+        prevServerDeafened,
+        payload.muted,
+        payload.deafened,
+      );
     }),
   );
 
@@ -964,6 +1050,17 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_LEAVE, (payload) => {
+      // OC-0239: snapshot the roster BEFORE removeVoiceUser() below mutates
+      // it. handleParticipantLeft's own stale-leave guard (OC-0213, "is this
+      // peer still listed as present?") reads the SAME store — if it read
+      // that after removeVoiceUser() already deleted the user, the check
+      // would always see them as absent and could never tell a stale,
+      // superseded-rejoin leave from a genuine departure, permanently
+      // retiring a peer who never actually left. Pass this pre-mutation
+      // snapshot through explicitly instead of relying on the post-mutation
+      // store state.
+      const stillInRoster =
+        voiceStore.getState().voiceUsers.get(payload.channel_id)?.has(payload.user_id) ?? false;
       removeVoiceUser(payload);
       const currentUserId = authStore.getState().user?.id ?? 0;
       const isSelf = payload.user_id === currentUserId;
@@ -980,7 +1077,7 @@ export function wireDispatcher(
       // (when applicable) tear down the media session — both through one lazy
       // import so the two effects cannot land in different ticks.
       void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-        void handleParticipantLeft(payload.user_id);
+        void handleParticipantLeft(payload.user_id, stillInRoster);
         if (shouldTeardownSession) void leaveVoice(false);
       });
       // Clear local voice state only for the same channel-match case as the
@@ -1184,13 +1281,21 @@ export function wireDispatcher(
       // voiceJoinLeaveCurrent server-side, so no voice_leave is broadcast and
       // the OLD channel's LiveKit room is still connected (mic still
       // published) while the store already points at the NEW channel
-      // (OC-0193). isVoiceConnected() distinguishes that live-session case
-      // from the first-time-join refusal; tearing it down here also sends
-      // voice_leave so the server/SFU state for the OLD channel matches the
-      // now-cleared store.
+      // (OC-0193). isVoiceSessionActive() distinguishes that live-or-in-flight
+      // case from the first-time-join refusal; tearing it down here also
+      // sends voice_leave so the server/SFU state matches the now-cleared
+      // store. OC-0249: isVoiceConnected() (Room !== null) reads false for
+      // the entire "connecting" state — the very state a join is in while
+      // voiceStatus is "joining" and connectAndSetup() still awaits
+      // createRoom()/resolveLiveKitUrl() — so an unrelated error landing in
+      // that window used to roll back only the store while the connect
+      // attempt ran to completion unseen (hot mic, no UI). isVoiceSessionActive()
+      // also covers "connecting"/"reconnecting", and leaveVoice() itself
+      // already tolerates a null Room, aborting the in-flight attempt at its
+      // next checkpoint.
       if (voiceStore.getState().voiceStatus === "joining") {
-        void livekitSession().then(({ isVoiceConnected, leaveVoice }) => {
-          if (isVoiceConnected()) leaveVoice(true);
+        void livekitSession().then(({ isVoiceSessionActive, leaveVoice }) => {
+          if (isVoiceSessionActive()) leaveVoice(true);
         });
         leaveVoiceChannel();
       }

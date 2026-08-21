@@ -96,12 +96,18 @@ func (h *Hub) ApplySetChannelIDForTest(c *Client, newChID int64) {
 	h.applySetChannelID(c, newChID)
 }
 
-// SetClientVoiceStateForTest sets both the voice channel and join token.
+// SetClientVoiceStateForTest sets both the voice channel and join token,
+// representing a settled, already-completed voice session — see
+// voiceJoinCompleted on Client (OC-0270) — rather than a join still racing
+// its own in-flight supersession guards. Callers that specifically need the
+// latter (e.g. to exercise those guards, or registerNow's OC-0270 transfer
+// gate) must not use this helper; use setVoiceState directly instead.
 func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.voiceChID = channelID
 	c.voiceJoinToken = joinToken
+	c.voiceJoinCompleted = true
 }
 
 // SetClientE2EEPubKeyForTest sets the E2EE public key on a client (no signature).

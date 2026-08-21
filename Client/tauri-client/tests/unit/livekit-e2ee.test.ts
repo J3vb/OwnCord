@@ -1760,4 +1760,77 @@ describe("E2EEManager", () => {
       vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
     }
   });
+
+  it("[OC-0239] a stale voice_leave must not retire a peer's key when the caller's pre-mutation roster snapshot still listed them as present", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1); // holder in channel 1
+
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+
+    const KEY = "b2xk";
+
+    try {
+      // The peer's rejoin announce (carrying a fresh key) arrives first — same
+      // OC-0213 reordering.
+      await mgr.handleAnnounce(PEER_ID, KEY, "sig");
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+
+      // Reproduce dispatcher.ts's real VOICE_LEAVE ordering: removeVoiceUser()
+      // deletes the peer from the roster BEFORE handleParticipantLeft runs, so
+      // by the time this fires the local roster no longer lists them — the
+      // OC-0213 guard's own `channelUsers?.has(userId)` read is unreachable in
+      // production. The caller must instead pass a snapshot taken BEFORE that
+      // mutation, which is what `stillInRoster` carries here.
+      mockVoiceState.voiceUsers.set(1, new Map()); // peer already removed from roster
+      await mgr.handleParticipantLeft(PEER_ID, /* stillInRoster */ true);
+
+      // Removed from the live peer map (unchanged behavior)...
+      expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+      // ...but the key must not be permanently retired: the peer's own,
+      // still-valid re-announce of the SAME key must be accepted again, not
+      // rejected as a replay of a "retired" key — otherwise the peer is
+      // stranded, un-re-announceable, for the rest of the call.
+      await mgr.handleAnnounce(PEER_ID, KEY, "sig");
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY}` });
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+
+  it("[OC-0257] a stale (demoted) key holder must not send a doomed voice_e2ee_offer to a peer with a lower user id", async () => {
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    // We are uid 10 and became holder while we were the lowest connected id.
+    vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 10 } }) as never);
+
+    try {
+      const ok = await mgr.setupKeyExchange(true, 1);
+      expect(ok).toBe(true);
+      ws.send.mockClear();
+
+      // A peer with a LOWER user id (5) joins and announces. The server
+      // always elects the lowest connected user id as holder
+      // (Server/ws/voice_e2ee.go) and re-runs election on every join, but
+      // sends no demotion message — voice_token_refresh's corrected
+      // is_key_holder is thrown away too (handleVoiceTokenRefresh) — so our
+      // stale _isKeyHolder flag would otherwise wrap the room key and send a
+      // voice_e2ee_offer the server refuses with NOT_KEY_HOLDER, surfacing
+      // as a spurious error toast for a call that is actually fine.
+      await mgr.handleAnnounce(5, "cGVlcg==", "sig");
+
+      expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+    } finally {
+      vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 1 } }) as never);
+    }
+  });
 });

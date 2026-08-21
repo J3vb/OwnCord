@@ -72,7 +72,14 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
 // ---------------------------------------------------------------------------
 
 export interface LogsTabHandle {
-  build(): HTMLDivElement;
+  /**
+   * Build the pane's DOM. `signal` scopes this build's own element
+   * listeners — pass a per-render signal (aborted just before the next
+   * build) so a discarded pane's listeners don't outlive it. Defaults to
+   * the factory's overlay-lifetime signal when omitted, matching this
+   * tab's original single-signal behavior.
+   */
+  build(signal?: AbortSignal): HTMLDivElement;
   cleanup(): void;
 }
 
@@ -107,7 +114,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     logListEl.scrollTop = logListEl.scrollHeight;
   }
 
-  function build(): HTMLDivElement {
+  function build(buildSignal: AbortSignal = signal): HTMLDivElement {
     const section = createElement("div", { class: "settings-pane active" });
 
     // Version display
@@ -157,7 +164,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         savePref("logs_filter_level", logFilterLevel);
         renderLogEntries();
       },
-      { signal },
+      { signal: buildSignal },
     );
 
     // Log level selector
@@ -195,7 +202,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         setLogLevel(level);
         savePref("logs_min_level", level);
       },
-      { signal },
+      { signal: buildSignal },
     );
 
     // Copy All button
@@ -238,7 +245,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
             }, 1500);
           });
       },
-      { signal },
+      { signal: buildSignal },
     );
 
     // Clear button
@@ -249,12 +256,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         clearLogBuffer();
         renderLogEntries();
       },
-      { signal },
+      { signal: buildSignal },
     );
 
     // Refresh button
     const refreshBtn = createElement("button", { class: "ac-btn" }, "Refresh");
-    refreshBtn.addEventListener("click", () => renderLogEntries(), { signal });
+    refreshBtn.addEventListener("click", () => renderLogEntries(), { signal: buildSignal });
 
     appendChildren(
       controls,
@@ -288,7 +295,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { class: "ac-btn", style: "margin-top: 6px;" },
       "Refresh Diagnostics",
     );
-    diagRefresh.addEventListener("click", refreshDiag, { signal });
+    diagRefresh.addEventListener("click", refreshDiag, { signal: buildSignal });
 
     const diagCopy = createElement(
       "button",
@@ -313,7 +320,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
             }, 1500);
           });
       },
-      { signal },
+      { signal: buildSignal },
     );
 
     section.appendChild(diagPanel);

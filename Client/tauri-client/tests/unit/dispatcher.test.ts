@@ -52,6 +52,7 @@ vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceConnected: vi.fn(() => false),
+  isVoiceSessionActive: vi.fn(() => false),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
@@ -86,6 +87,7 @@ import {
   disableCamera as mockDisableCamera,
   disableScreenshare as mockDisableScreenshare,
   isVoiceConnected as mockIsVoiceConnected,
+  isVoiceSessionActive as mockIsVoiceSessionActive,
   handleParticipantLeft as mockHandleParticipantLeft,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
@@ -744,6 +746,71 @@ describe("WS Dispatcher", () => {
       seedChannel();
       incoming({ content: "@everyone", mentions_everyone: false });
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+
+    // OC-0271: the server's applyMentionCounts (mentions.go) narrows an
+    // @here fan-out to readers who were online at send time — a reader with
+    // no live connection never gets their mention_count bumped for a
+    // here-only mention. mentions_everyone alone cannot tell the client
+    // which case it is (the wire collapses @here into the same bit as
+    // @everyone), so this needs mentions_here too. The reconnect tier that
+    // replays this burst never sends a follow-up `ready` to correct a wrong
+    // badge, so the client must not raise one in the first place for a
+    // here-only mention delivered inside that burst.
+    it("does not raise the mention badge for an @here-only mention replayed after a reconnect", () => {
+      seedChannel();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      // Second auth_ok in this dispatcher's lifetime = a reconnect.
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      incoming({
+        content: "@here standup",
+        mentions_everyone: true,
+        mentions_here: true,
+        timestamp: new Date(handshakeAt - 1000).toISOString(),
+      });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+
+    it("still raises the mention badge for a live (non-replayed) @here mention", () => {
+      seedChannel();
+      incoming({ content: "@here standup", mentions_everyone: true, mentions_here: true });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+    });
+
+    it("still raises the mention badge inside a replay burst for a direct mention alongside @here", () => {
+      seedChannel();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+      const handshakeAt = Date.now();
+      mock.dispatch("auth_ok", {
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+        server_name: "TestServer",
+        motd: "",
+      });
+
+      incoming({
+        content: "@here @alex standup",
+        mentions: [1],
+        mentions_everyone: true,
+        mentions_here: true,
+        timestamp: new Date(handshakeAt - 1000).toISOString(),
+      });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
     });
   });
 
@@ -2697,6 +2764,53 @@ describe("WS Dispatcher", () => {
       expect(vi.mocked(mockSetDeafened)).not.toHaveBeenCalled();
       expect(vi.mocked(mockSetMuted)).not.toHaveBeenCalled();
     });
+
+    // OC-0246: enforceModeratorAudioState only ever applies a restriction —
+    // once a moderator lifts server_muted/server_deafened, the client must
+    // release the local mute/deafen it applied earlier, or the user stays
+    // silent/deaf forever while every peer's roster (and localServerMuted/
+    // localServerDeafened, which gate the widget's own controls) say they
+    // are no longer restricted.
+    it("releases a moderator mute/deafen once the server lifts it", async () => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        localMuted: true,
+        localDeafened: true,
+        localServerMuted: true,
+        localServerDeafened: true,
+      }));
+
+      dispatchSelfVoiceState({ server_muted: false, server_deafened: false });
+      await vi.runAllTimersAsync();
+
+      expect(voiceStore.getState().localServerMuted).toBe(false);
+      expect(voiceStore.getState().localServerDeafened).toBe(false);
+      expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(false);
+      expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(false);
+    });
+
+    // The release must not fire on every restated voice_state showing
+    // server_muted/server_deafened already false — only on the falling edge
+    // (previously true, now false) — or an unrelated voice_state (e.g. from a
+    // camera toggle) that happens to arrive while the user is NOT moderator
+    // restricted would repeatedly no-op through the livekit calls. More
+    // importantly, a moderator flag that was never true must never release a
+    // mute the user applied themselves.
+    it("does not release a self-applied mute when no moderator restriction was ever in effect", async () => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        localMuted: true,
+        localDeafened: false,
+        localServerMuted: false,
+        localServerDeafened: false,
+      }));
+
+      dispatchSelfVoiceState({ server_muted: false, server_deafened: false });
+      await vi.runAllTimersAsync();
+
+      expect(vi.mocked(mockSetMuted)).not.toHaveBeenCalled();
+      expect(vi.mocked(mockSetDeafened)).not.toHaveBeenCalled();
+    });
   });
 
   it("does not set the local moderator flags from another user's voice_state", () => {
@@ -3301,6 +3415,46 @@ describe("WS Dispatcher", () => {
     expect(resolveEmoji("wave")?.id).toBe(4);
   });
 
+  // OC-0251: the ready-time GET /emoji and an `emoji_update` broadcast can
+  // race — the GET travels over a separate HTTP connection while the
+  // `emoji_update` arrives on the already-open socket, so a fresher
+  // `emoji_update` can land and then be clobbered by the slower, stale GET
+  // reply. Mirrors the OC-0218 blockedByMeRev guard for listBlocks.
+  it("does not let a slow-to-resolve ready-time listEmoji revert a fresher emoji_update", async () => {
+    cleanup(); // tear down the no-api dispatcher wired in beforeEach
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    let resolveListEmoji!: (v: { id: number; shortcode: string; url: string }[]) => void;
+    const listEmoji = vi.fn(
+      () =>
+        new Promise<{ id: number; shortcode: string; url: string }[]>((resolve) => {
+          resolveListEmoji = resolve;
+        }),
+    );
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+
+    // Reconnect: ready fires the GET, which does not resolve yet.
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    expect(listEmoji).toHaveBeenCalled();
+
+    // While it's in flight, a fresher emoji_update lands on the socket (e.g.
+    // an admin deleted :wave: and uploaded :party:).
+    mock.dispatch("emoji_update", {
+      emoji: [{ id: 9, shortcode: "party", url: "/api/v1/emoji/9/image" }],
+    });
+    emojiStore.flush();
+    expect(resolveEmoji("party")?.id).toBe(9);
+
+    // The stale GET (issued before the change) now resolves with the
+    // pre-change full set — it must not clobber the fresher emoji_update.
+    resolveListEmoji([{ id: 4, shortcode: "wave", url: "/api/v1/emoji/4/image" }]);
+    await Promise.resolve();
+    await Promise.resolve();
+    emojiStore.flush();
+
+    expect(resolveEmoji("party")?.id).toBe(9);
+    expect(resolveEmoji("wave")).toBeNull();
+  });
+
   it("survives a failed emoji load — shortcodes just stay plain text", async () => {
     cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
@@ -3601,6 +3755,43 @@ describe("WS Dispatcher", () => {
 
       const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
       expect(dm?.mentionCount).toBe(0);
+    });
+
+    // OC-0242: a DM message can land between the server's registerNow and
+    // buildReady — `ready` already counts it (unreadCount/mentionCount both
+    // bumped, lastMessageId advanced to its id), and the same message is then
+    // redelivered as a queued chat_message once writePump drains. The unread
+    // guard (lastMessageId monotonicity) already prevents the unread double
+    // count; the mention badge must not double count either.
+    it("does not double-count a DM mention whose id is already reflected in lastMessageId", () => {
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "me", avatar: null, role: "member" },
+      }));
+
+      // Simulate the `ready` snapshot that already counted this exact message.
+      dmStore.setState((prev) => ({
+        channels: prev.channels.map((c) =>
+          c.channelId === 50 ? { ...c, lastMessageId: 504, unreadCount: 1, mentionCount: 1 } : c,
+        ),
+      }));
+
+      // The same message redelivered as a queued chat_message.
+      mock.dispatch("chat_message", {
+        id: 504,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content: "hey @me",
+        mentions: [5],
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.unreadCount).toBe(1);
+      expect(dm?.mentionCount).toBe(1);
     });
   });
 
@@ -4314,7 +4505,11 @@ describe("WS Dispatcher", () => {
     // state and the store agree.
     it("tears down a still-live LiveKit session when a channel-switch join is refused", async () => {
       vi.mocked(mockLeaveVoice).mockClear();
-      vi.mocked(mockIsVoiceConnected).mockReturnValue(true);
+      // OC-0249: the dispatcher asks isVoiceSessionActive() (true for a live
+      // "connected" room too, not just an in-flight "connecting" one) rather
+      // than isVoiceConnected(), so a genuinely connected session is covered
+      // by the same guard as the in-flight case exercised below.
+      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(true);
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
@@ -4324,7 +4519,33 @@ describe("WS Dispatcher", () => {
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
 
+      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
+    });
+
+    // OC-0249: isVoiceConnected() reads session.getRoom(), whose `_room`
+    // getter is null for the ENTIRE "connecting" state — the very state a
+    // voice join is in while voiceStatus is "joining" and connectAndSetup()
+    // is still awaiting createRoom()/resolveLiveKitUrl(). An unrelated error
+    // that lands in that window (e.g. RATE_LIMITED from a different action)
+    // must still abort the in-flight connect attempt, not just roll back the
+    // store — otherwise the join completes with a hot mic and no UI. Because
+    // isVoiceConnected() alone can't see a "connecting" session, the guard
+    // must ask a broader question than "is there a Room" — isVoiceConnected()
+    // itself keeps reporting false throughout.
+    it("tears down an in-flight connect attempt that has no Room yet when a refusal lands", async () => {
+      vi.mocked(mockLeaveVoice).mockClear();
       vi.mocked(mockIsVoiceConnected).mockReturnValue(false);
+      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(true);
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "too many requests" });
+      await vi.runAllTimersAsync();
+
+      expect(mockLeaveVoice).toHaveBeenCalledWith(true);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+
+      vi.mocked(mockIsVoiceSessionActive).mockReturnValue(false);
     });
   });
 

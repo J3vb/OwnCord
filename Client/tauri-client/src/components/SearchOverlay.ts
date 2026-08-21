@@ -7,6 +7,7 @@
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +82,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       const header = createElement("div", { class: "search-result-header" });
       const channel = createElement("span", { class: "search-result-channel" });
-      setText(channel, `#${r.channel_name}`);
+      const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
+      setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
       const author = createElement("span", { class: "search-result-author" });
       setText(author, r.user.username);
       const time = createElement("span", { class: "search-result-time" });

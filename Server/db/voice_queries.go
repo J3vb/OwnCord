@@ -49,6 +49,7 @@ func (d *DB) JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID i
 		ChannelID:   channelID,
 		JoinedAt:    newVoiceJoinToken(),
 		ChannelID_2: channelID,
+		UserID_2:    userID,
 		ChannelID_3: int64(maxUsers),
 	})
 	if err != nil {

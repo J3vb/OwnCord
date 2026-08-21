@@ -286,18 +286,18 @@ func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 		return remoteHost
 	}
 
-	// Prefer X-Real-IP when coming from a trusted proxy.
-	// BUG-112: Validate extracted IP to prevent spoofed rate-limit keys.
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		if net.ParseIP(xri) != nil {
-			return xri
-		}
-	}
-
-	// Fall back to X-Forwarded-For, walking from the RIGHT and skipping entries
-	// that are themselves trusted proxies. The first non-trusted, valid address
-	// is the real client. Taking the leftmost entry (BUG-112) would trust a
-	// client-supplied value: a client can prepend a spoofed IP
+	// Prefer X-Forwarded-For when coming from a trusted proxy. Unlike
+	// X-Real-IP — which the project's own documented nginx and Caddy
+	// reverse-proxy recipes forward verbatim from whatever the client sent,
+	// rather than overwriting — every proxy fronting this server sets
+	// X-Forwarded-For with the true peer appended, so the anti-spoof walk
+	// below is authoritative and a client-injected X-Real-IP can never
+	// override it (OC-0240).
+	//
+	// Walk from the RIGHT and skip entries that are themselves trusted
+	// proxies. The first non-trusted, valid address is the real client.
+	// Taking the leftmost entry (BUG-112) would trust a client-supplied
+	// value: a client can prepend a spoofed IP
 	// (`X-Forwarded-For: <spoofed>, <real>`) that the proxy then appends to,
 	// letting it forge per-IP rate-limit and lockout keys.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -324,6 +324,17 @@ func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 		// startup validation warns about entries that cannot be proxies.
 		if leftmostValid != "" {
 			return leftmostValid
+		}
+	}
+
+	// Fall back to X-Real-IP only when X-Forwarded-For was absent or wholly
+	// unusable. BUG-112 / OC-0240: still validate the extracted IP to prevent
+	// spoofed rate-limit keys — this header is untrustworthy on its own since
+	// the documented deployment recipes never overwrite it, so it is only
+	// ever used as a last resort, never ahead of X-Forwarded-For.
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		if net.ParseIP(xri) != nil {
+			return xri
 		}
 	}
 

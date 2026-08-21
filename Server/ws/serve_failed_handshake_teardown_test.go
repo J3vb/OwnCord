@@ -73,6 +73,10 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	oldClient := NewTestClient(h, userID, make(chan []byte, 64))
 	oldClient.user = &db.User{ID: userID, Status: "online"}
 	oldClient.setVoiceState(vcID, vs.JoinedAt)
+	// A settled, already-completed voice session (not a join still racing its
+	// own supersession guards) — see OC-0270 — so registerNow is expected to
+	// transfer it on this network reconnect.
+	oldClient.markVoiceJoinCompleteIfMatch(vcID, vs.JoinedAt)
 	h.clients[userID] = oldClient
 	h.updateKeyHolder(vcID)
 

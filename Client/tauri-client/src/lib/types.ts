@@ -312,6 +312,15 @@ export interface ChatMessagePayload {
    * semantics at all. Absent from older servers.
    */
   readonly mentions_everyone?: boolean;
+  /**
+   * Whether the mentions_everyone bit above came from @here rather than
+   * @everyone (never both — @here only narrows when @everyone is absent).
+   * The server's applyMentionCounts (mentions.go) skips the mention-count
+   * bump for an @here fan-out reader with no live connection at send time;
+   * the client uses this bit to avoid raising a badge a reconnect replay
+   * cannot otherwise correct (OC-0271). Absent from older servers.
+   */
+  readonly mentions_here?: boolean;
 }
 
 export interface ChatSendOkPayload {
@@ -327,6 +336,8 @@ export interface ChatEditedPayload {
   /** Re-resolved mentions for the new content. An edit never re-notifies. */
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
+  /** See ChatMessagePayload.mentions_here. */
+  readonly mentions_here?: boolean;
 }
 
 export interface ChatDeletedPayload {

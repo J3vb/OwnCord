@@ -148,6 +148,26 @@ func TestClientIP_XForwardedFor_UsedWhenNoXRealIP(t *testing.T) {
 	}
 }
 
+// TestClientIP_TrustedProxy_XForwardedForWinsOverXRealIP pins OC-0240: the
+// project's own documented nginx/Caddy reverse-proxy recipes forward
+// whatever X-Real-IP the client sent instead of overwriting it, but they do
+// set X-Forwarded-For with the true peer appended (docs/deployment.md's
+// "Working nginx snippet" never sets X-Real-IP). So when both headers are
+// present from a trusted proxy, the hardened X-Forwarded-For walk must win —
+// an attacker-supplied X-Real-IP must never override it and drive the admin
+// allowlist or a per-IP rate-limit/lockout key.
+func TestClientIP_TrustedProxy_XForwardedForWinsOverXRealIP(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.2:9999"
+	req.Header.Set("X-Real-IP", "192.168.1.50")                // attacker-supplied; proxy never overwrites it
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.2") // proxy-appended, trustworthy
+
+	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	if ip != "203.0.113.9" {
+		t.Errorf("clientIP trusted proxy with both headers = %q, want %q (X-Forwarded-For)", ip, "203.0.113.9")
+	}
+}
+
 // TestClientIP_BroadTrustedCIDRKeepsClientsDistinct locks the W2-5 fix: with
 // a trusted_proxies range broad enough to cover the clients themselves, the
 // right-to-left walk exhausts; falling back to RemoteAddr would collapse

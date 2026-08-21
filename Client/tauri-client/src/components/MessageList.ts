@@ -300,6 +300,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * only until an anchor exists, then latches it — skipping id 0 (an
    * unconfirmed optimistic row) since that id is not unique across pending
    * sends and would anchor to the wrong message once reconciled.
+   *
+   * Also skips latching while the window is shorter than unreadOnOpen: the
+   * initial mount can render one live message (via the append path) before
+   * the async history fetch resolves, and firstUnreadIndex's
+   * `Math.max(0, ...)` clamp turns that 1-row window into index 0 just like a
+   * real boundary would. Latching onto that message would glue the divider
+   * to whatever happened to arrive first instead of the actual unread
+   * boundary once the full window loads.
    */
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
@@ -307,7 +315,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     const idx = firstUnreadIndex(messages, unreadOnOpen);
     const anchor = idx !== -1 ? messages[idx] : undefined;
-    if (anchor !== undefined && anchor.id !== 0) {
+    if (anchor !== undefined && anchor.id !== 0 && messages.length >= unreadOnOpen) {
       newDividerAnchorId = anchor.id;
     }
     return idx;
@@ -715,6 +723,40 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       log.debug("renderAll START", { count: renderAllCount });
       wasAtBottom = isNearBottom();
 
+      // When scrolled away from the bottom, remember which message is
+      // topmost in the viewport *before* rebuildItems() swaps virtualItems
+      // out from under it. A history prepend (or any other non-append
+      // rebuild) inserts or removes rows above/around the visible range
+      // without touching scrollTop, so the unchanged pixel offset silently
+      // ends up pointing at different content — most visibly, a "load
+      // older" page landing and throwing the reader dozens of messages
+      // backwards. Anchoring on the message's id rather than its index
+      // survives the prepend, since the id is stable while the index shifts.
+      let anchorMessageId: number | null = null;
+      let anchorOffsetInItem = 0;
+      if (!wasAtBottom && root !== null && virtualItems.length > 0) {
+        let anchorIdx = offsetToIndex(root.scrollTop);
+        // The topmost item may be a day divider or the NEW divider, neither
+        // of which has an identity that survives a rebuild — walk forward to
+        // the message row that follows it (every divider is immediately
+        // followed by one).
+        while (anchorIdx < virtualItems.length && virtualItems[anchorIdx]!.kind !== "message") {
+          anchorIdx++;
+        }
+        const anchorItem = virtualItems[anchorIdx];
+        // id 0 is the unconfirmed-optimistic-row sentinel (see itemKey
+        // above) — not unique across pending sends, so it cannot identify a
+        // specific row to re-find after the rebuild.
+        if (
+          anchorItem !== undefined &&
+          anchorItem.kind === "message" &&
+          anchorItem.message.id !== 0
+        ) {
+          anchorMessageId = anchorItem.message.id;
+          anchorOffsetInItem = root.scrollTop - offsetBefore(anchorIdx);
+        }
+      }
+
       rebuildItems();
       log.debug("renderAll rebuildItems done", { itemCount: virtualItems.length });
 
@@ -733,6 +775,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (topSpacer !== null) topSpacer.style.height = "0px";
         if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
         root.scrollTop = Math.max(0, estTotal - root.clientHeight);
+      } else if (anchorMessageId !== null && root !== null) {
+        const newIdx = virtualItems.findIndex(
+          (item) => item.kind === "message" && item.message.id === anchorMessageId,
+        );
+        if (newIdx !== -1) {
+          // Same clamping hazard as the bottom branch above: inflate the
+          // spacers to the freshly rebuilt estimated total before assigning
+          // scrollTop, so a prepend's larger offset is not silently clamped
+          // back down to the stale (smaller) pre-rebuild scrollHeight.
+          const estTotal = totalHeight();
+          if (topSpacer !== null) topSpacer.style.height = "0px";
+          if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
+          root.scrollTop = Math.max(0, offsetBefore(newIdx) + anchorOffsetInItem);
+        }
       }
 
       // Reset rendered range to force full re-render
