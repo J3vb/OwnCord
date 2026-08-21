@@ -20,6 +20,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/owncord/server/auth"
@@ -123,13 +124,7 @@ drain:
 		}
 	}
 
-	found := false
-	for _, r := range leaveRecipients {
-		if r == uid {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(leaveRecipients, uid)
 	if !found {
 		t.Errorf("victim (CONNECT_VOICE but no READ_MESSAGES on the channel) is not in the recipient list for their "+
 			"own compensating voice_leave after rollbackVoiceJoin ran with broadcast=true; recipients = %v — their "+

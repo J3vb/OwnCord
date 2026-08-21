@@ -81,7 +81,7 @@ func TestSetup_HonoursTrustedProxies(t *testing.T) {
 	// client (all requests arrive from the same trusted proxy, so only
 	// X-Forwarded-For distinguishes them) and confirm a second, distinct
 	// real client behind the same proxy is unaffected.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		req := httptest.NewRequest(http.MethodPost, "/setup", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = trustedProxyAddr + ":5555"

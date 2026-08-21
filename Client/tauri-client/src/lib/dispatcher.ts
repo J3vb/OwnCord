@@ -699,8 +699,7 @@ export function wireDispatcher(
       // mentions_everyone for an @here (never a plain @everyone) token.
       const isMention =
         mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
-        (payload.mentions_everyone === true &&
-          !(payload.mentions_here === true && isReplayFrame));
+        (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
       const isDetached = isWindowDetached(payload.channel_id);
 
       if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
