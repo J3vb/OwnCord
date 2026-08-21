@@ -304,6 +304,32 @@ describe("messages store", () => {
       expect(msgs[0]!.status).toBe("sent");
     });
 
+    it("dedupes an optimistic row against its own real message when the server sanitized the content (OC-0256)", () => {
+      // The server runs every send through sanitizeToFixpoint before storing
+      // and broadcasting it, so the echo's content need not be byte-identical
+      // to what the client typed — a double-escaped entity unescapes down to
+      // its plain character.
+      setMessages(1, [makeMessageResponse({ id: 10 })], false);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "&amp;lt;",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      invalidateLoadedMessageWindows();
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]!.status).toBe("pending");
+
+      setMessages(1, [makeMessageResponse({ id: 500, content: "<", user: TEST_USER })], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(500);
+      expect(msgs[0]!.status).toBe("sent");
+    });
+
     it("keeps two genuinely distinct same-author, same-text sends distinct across the same resync", () => {
       setMessages(1, [], false);
       addOptimisticMessage({
@@ -383,6 +409,40 @@ describe("messages store", () => {
 
       expect(getChannelMessages(1)).toHaveLength(500);
       expect(hasMoreMessages(1)).toBe(false);
+    });
+
+    it("clears a stale window when a purge empties the channel between mount and refetch (OC-0259)", () => {
+      // Channel loaded with two rows, then the user navigates away (rows are
+      // kept, only the loaded flag drops) and every message in the channel is
+      // purged server-side while it isn't focused, so no broadcast tells this
+      // client about it.
+      setMessages(1, [makeMessageResponse({ id: 10 }), makeMessageResponse({ id: 9 })], false);
+
+      // The user navigates back: MessageController calls setChannelLoading
+      // synchronously before issuing the GET, recording a watermark of the
+      // highest id present at that moment (10).
+      setChannelLoading(1);
+
+      // The server now reports the channel as empty (every row deleted).
+      // Without a watermark, maxSnapshotId defaults to 0 and the stale "sent"
+      // rows (id > 0) would be kept forever.
+      setMessages(1, [], false);
+
+      expect(getChannelMessages(1)).toEqual([]);
+    });
+
+    it("still keeps a live row that arrived during the fetch of a channel with no prior history", () => {
+      // A brand-new channel: no rows before the fetch starts, so the watermark
+      // is 0 — indistinguishable from "no watermark recorded" on its own, but
+      // a live broadcast that lands mid-fetch must still survive.
+      setChannelLoading(1);
+      addMessage(makeChatPayload({ id: 50, channel_id: 1, content: "live" }));
+
+      setMessages(1, [], false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(50);
     });
   });
 
@@ -1437,6 +1497,28 @@ describe("messages store", () => {
       // It did reach the server after all — its broadcast (or a reconnect
       // replay) arrives with the real id.
       addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hi" }));
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(900);
+      expect(msgs[0]!.status).toBe("sent");
+    });
+
+    it("reconciles an OFFLINE-failed row whose echo comes back sanitized — stripped tags don't defeat the match (OC-0256)", () => {
+      // sanitizeToFixpoint (Server/service/message.go) strips HTML tags
+      // before the content is stored and broadcast, so the echo need not be
+      // byte-identical to the raw text the user typed.
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "<b>hello</b>",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "OFFLINE");
+
+      addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hello" }));
 
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(1);

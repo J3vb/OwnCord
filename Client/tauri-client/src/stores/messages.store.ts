@@ -97,6 +97,18 @@ export interface MessagesState {
    * appending them would fake continuity across a gap.
    */
   readonly detachedChannels: ReadonlySet<number>;
+  /**
+   * channelId -> highest message id present the moment a history fetch was
+   * started (setChannelLoading), consumed and cleared by the matching
+   * setMessages. Lets setMessages tell "no messages arrived after the
+   * snapshot was taken" apart from "the snapshot itself was empty" — an
+   * empty page's own maxSnapshotId is 0, which without this watermark floor
+   * would make every pre-existing "sent" row look newer than the snapshot and
+   * survive forever, even when the channel was genuinely emptied by a purge.
+   * The store always sets it; optional only so the many inline MessagesState
+   * test fixtures need not restate it.
+   */
+  readonly loadWatermark?: ReadonlyMap<number, number>;
 }
 
 // -----------------------------------------------------------------------------
@@ -160,6 +172,7 @@ const INITIAL_STATE: MessagesState = {
   hasMore: new Map(),
   historyLoadState: new Map(),
   detachedChannels: new Set(),
+  loadWatermark: new Map(),
 };
 
 // -----------------------------------------------------------------------------
@@ -171,6 +184,49 @@ export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
 // -----------------------------------------------------------------------------
 // Actions
 // -----------------------------------------------------------------------------
+
+/**
+ * Approximates one round of the server's `sanitizePass`
+ * (Server/service/message.go): unescape HTML entities, strip tags (bluemonday's
+ * StrictPolicy keeps only surviving text), then unescape once more. Not a
+ * byte-exact port — bluemonday additionally re-escapes special characters left
+ * in the surviving text on write, which this skips — but it recognizes the
+ * two shapes that actually break naive byte-equality against our own echo:
+ * stripped tags and unescaped entities. Only used by echoNormalize below, to
+ * decide whether a replayed server echo is *our* sanitized send.
+ */
+function sanitizePassApprox(s: string): string {
+  const unescapeOnce = (input: string): string =>
+    input
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&");
+  const stripTags = (input: string): string => input.replace(/<[^>]*>/g, "");
+  return unescapeOnce(stripTags(unescapeOnce(s)));
+}
+
+/**
+ * Approximates the server's `sanitizeToFixpoint`: repeats sanitizePassApprox
+ * until it stops changing (bounded, since real message content is short and
+ * each pass only ever shrinks or holds steady). Used to normalize what the
+ * user typed before comparing it against a server echo, since the server
+ * sanitizes content before storing/broadcasting it — see isUnreconciledEcho.
+ */
+function echoNormalize(s: string): string {
+  let cur = s;
+  for (let i = 0; i < 20; i++) {
+    const next = sanitizePassApprox(cur);
+    if (next === cur) return next;
+    cur = next;
+  }
+  return cur;
+}
 
 /**
  * Whether `optimistic` is an unreconciled local row for the same send that
@@ -197,7 +253,8 @@ function isUnreconciledEcho(optimistic: Message, candidate: Message): boolean {
       (optimistic.status === "failed" && optimistic.errorCode === "OFFLINE")) &&
     optimistic.correlationId !== null &&
     optimistic.user.id === candidate.user.id &&
-    optimistic.content === candidate.content
+    (optimistic.content === candidate.content ||
+      echoNormalize(optimistic.content) === candidate.content)
   );
 }
 
@@ -237,10 +294,11 @@ export function addMessage(payload: ChatMessagePayload): void {
     //    that had actually gone through). Scoped to OFFLINE — a server-rejected
     //    send (SLOW_MODE/FORBIDDEN/...) is never broadcast, so no echo can ever
     //    arrive for it, and eating that row here would silently drop the retry
-    //    the user still needs. Content must match too — our own echo always
-    //    carries identical content, while a same-author message from another
-    //    session of this account does not, and consuming the pending row for it
-    //    would orphan the real send.
+    //    the user still needs. Content must match too (allowing for the
+    //    server's sanitization — see echoNormalize) — a same-author message
+    //    from another session of this account carries genuinely different
+    //    content, and consuming the pending row for it would orphan the real
+    //    send.
     const pendingIdx = existing.findIndex((m) => isUnreconciledEcho(m, message));
     if (pendingIdx !== -1) {
       const replaced = existing.map((m, i) => (i === pendingIdx ? message : m));
@@ -376,12 +434,22 @@ export function removeOptimistic(correlationId: string): void {
   });
 }
 
-/** Mark a channel's first-page history fetch as in flight. */
+/**
+ * Mark a channel's first-page history fetch as in flight. Also records a
+ * watermark of the highest message id present right now, consumed by the
+ * matching setMessages call to tell "nothing arrived after this snapshot" (an
+ * empty result really means empty) apart from "no snapshot was taken" — see
+ * MessagesState.loadWatermark.
+ */
 export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => {
     const updated = new Map(prev.historyLoadState);
     updated.set(channelId, "loading");
-    return { ...prev, historyLoadState: updated };
+    const existing = prev.messagesByChannel.get(channelId) ?? [];
+    const currentMaxId = existing.reduce((max, m) => Math.max(max, m.id), 0);
+    const updatedWatermark = new Map(prev.loadWatermark ?? []);
+    updatedWatermark.set(channelId, currentMaxId);
+    return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
   });
 }
 
@@ -417,6 +485,14 @@ export function setMessages(
     const previous = prev.messagesByChannel.get(channelId) ?? [];
     const snapshotIds = new Set(trimmed.map((m) => m.id));
     const maxSnapshotId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
+    // A "sent" row survives only if it arrived after the fetch actually
+    // started — maxSnapshotId alone can't tell that apart from "the snapshot
+    // was empty" (id > 0 is vacuously true for a purged/empty page's own
+    // default of 0). The watermark setChannelLoading recorded at fetch start
+    // is the floor: a row already present then is stale once an empty/smaller
+    // page comes back, while a live broadcast that landed mid-fetch (id above
+    // the watermark) is still newer than either bound and survives either way.
+    const carryFloor = Math.max(maxSnapshotId, prev.loadWatermark?.get(channelId) ?? 0);
     // A pending/OFFLINE-failed row whose chat_send_ok ack was lost to the same
     // disconnect that forced this resync would otherwise survive forever
     // (its id stays 0, so it can never collide with the real id above) while
@@ -426,7 +502,7 @@ export function setMessages(
     const consumedEchoes = new Set<number>();
     const carried = previous.filter((m) => {
       if (snapshotIds.has(m.id)) return false;
-      if (m.status === "sent") return m.id > maxSnapshotId;
+      if (m.status === "sent") return m.id > carryFloor;
       const echoIdx = trimmed.findIndex(
         (s, i) => !consumedEchoes.has(i) && isUnreconciledEcho(m, s),
       );
@@ -459,6 +535,10 @@ export function setMessages(
     const updatedDetached = new Set(prev.detachedChannels);
     updatedDetached.delete(channelId);
 
+    // The watermark's job ends here — it was consumed as carryFloor above.
+    const updatedWatermark = new Map(prev.loadWatermark ?? []);
+    updatedWatermark.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
@@ -466,6 +546,7 @@ export function setMessages(
       hasMore: updatedHasMore,
       historyLoadState: updatedLoadState,
       detachedChannels: updatedDetached,
+      loadWatermark: updatedWatermark,
     };
   });
 }
@@ -482,7 +563,11 @@ export function setMessages(
  * Carries unreconciled (pending/failed) rows across the replacement exactly
  * like setMessages does — they are the only copy of the user's composed
  * text, and a jump elsewhere must not silently destroy an in-flight send or
- * orphan its Retry draft.
+ * orphan its Retry draft. When the window reattaches to the live tail it also
+ * carries any "sent" row newer than the window, for the same reason
+ * setMessages protects a live broadcast that landed mid-fetch: a reattached
+ * window claims to BE the live tail, and dropping such a row here would
+ * delete it with no badge, no "Jump to Present" pill, and no recovery path.
  */
 export function setAroundMessages(
   channelId: number,
@@ -501,7 +586,15 @@ export function setAroundMessages(
       : converted;
   messagesStore.setState((prev) => {
     const previous = prev.messagesByChannel.get(channelId) ?? [];
-    const carried = previous.filter((m) => m.status !== "sent");
+    // Reattaches iff the window reaches the live tail with nothing stranded —
+    // the exact negation of the detached condition below. Only then does the
+    // window claim to BE "now", so only then may a live "sent" row newer than
+    // it survive; a window that stays detached makes no such claim, and that
+    // message is instead represented by the "Jump to Present" pill (plus the
+    // unread bump) once it lands for real.
+    const attached = !hasMoreAfter && trimmed.length === converted.length;
+    const maxWindowId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
+    const carried = previous.filter((m) => m.status !== "sent" || (attached && m.id > maxWindowId));
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, carried.length > 0 ? [...trimmed, ...carried] : trimmed);
 
@@ -515,12 +608,10 @@ export function setAroundMessages(
     updatedLoadState.delete(channelId);
 
     const updatedDetached = new Set(prev.detachedChannels);
-    // Trimming the tail of an oversized window also strands newer messages,
-    // so the window is detached either way.
-    if (hasMoreAfter || trimmed.length < converted.length) {
-      updatedDetached.add(channelId);
-    } else {
+    if (attached) {
       updatedDetached.delete(channelId);
+    } else {
+      updatedDetached.add(channelId);
     }
 
     return {
@@ -797,6 +888,9 @@ export function clearChannelMessages(channelId: number): void {
     const updatedDetached = new Set(prev.detachedChannels);
     updatedDetached.delete(channelId);
 
+    const updatedWatermark = new Map(prev.loadWatermark ?? []);
+    updatedWatermark.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
@@ -804,6 +898,7 @@ export function clearChannelMessages(channelId: number): void {
       hasMore: updatedHasMore,
       historyLoadState: updatedLoadState,
       detachedChannels: updatedDetached,
+      loadWatermark: updatedWatermark,
     };
   });
 }
