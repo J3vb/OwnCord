@@ -4,6 +4,12 @@
   // the app graph. "exclude": [] is required to clear the inherited
   // "tests/e2e" exclusion — same trick tsconfig.build.json uses.
   "extends": "./tsconfig.json",
+  // TypeScript 6 defaults "types" to [] instead of every installed @types
+  // package, so the Node globals (process, Buffer) used by the Playwright
+  // layer must be pulled in explicitly.
+  "compilerOptions": {
+    "types": ["node"]
+  },
   "include": [
     "tests/e2e",
     "playwright.config.ts",
