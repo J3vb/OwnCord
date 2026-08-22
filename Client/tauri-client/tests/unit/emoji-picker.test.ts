@@ -286,4 +286,64 @@ describe("EmojiPicker", () => {
     expect(onSelect).toHaveBeenCalledWith(firstEmoji.getAttribute("title"));
     picker.destroy();
   });
+
+  // OC-0306: every cell's click listener used to be registered directly on
+  // the span against the picker-lifetime AbortSignal (aborted only in
+  // destroy()). renderAllCategories() discards and rebuilds the whole grid
+  // on every search keystroke, so a discarded span's own listener was never
+  // released — it stayed live (and reachable via the signal's abort-listener
+  // list) for the rest of the picker's life. A fixed, delegated listener on
+  // the container means a stale span dispatched at directly must no longer
+  // reach the handler once a rebuild has discarded it.
+  it("does not leave a discarded cell's click listener live after a search rebuild", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const firstEmoji = picker.element.querySelector(".ep-emoji") as HTMLSpanElement;
+    expect(firstEmoji).not.toBeNull();
+
+    // Sanity: the live cell's listener does fire.
+    firstEmoji.click();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    onSelect.mockClear();
+
+    // Any search keystroke fully discards and rebuilds the cell set, even
+    // when the same emoji still matches — renderAllCategories always calls
+    // clearChildren() first.
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "fire";
+    input.dispatchEvent(new Event("input"));
+    expect(picker.element.contains(firstEmoji)).toBe(false);
+
+    // Dispatching directly on the stale, detached span must not still reach
+    // the handler it closed over.
+    firstEmoji.dispatchEvent(new MouseEvent("click"));
+    expect(onSelect).not.toHaveBeenCalled();
+
+    picker.destroy();
+  });
+
+  // OC-0308: Recent is fed any selection, including `:shortcode:` tokens
+  // that are only meaningful on the server that defined them (or that have
+  // since been deleted). An entry that can no longer resolve must not be
+  // offered back out of Recent — clicking it would insert (or re-react
+  // with) dead literal text.
+  it("drops unresolvable :shortcode: entries from Recent", () => {
+    localStorage.setItem("owncord:recent-emoji", JSON.stringify([":blobwave:", "😀"]));
+    clearCustomEmoji();
+    emojiStore.flush();
+
+    const { picker } = makePicker();
+    const recentLabel = Array.from(picker.element.querySelectorAll(".ep-category-label")).find(
+      (l) => l.textContent === "Recent",
+    );
+    expect(recentLabel).not.toBeUndefined();
+    const grid = recentLabel!.nextElementSibling as HTMLElement;
+    const cellTitles = Array.from(grid.querySelectorAll(".ep-emoji")).map((c) =>
+      c.getAttribute("title"),
+    );
+
+    expect(cellTitles).not.toContain(":blobwave:");
+    expect(cellTitles).toContain("😀");
+    picker.destroy();
+  });
 });
