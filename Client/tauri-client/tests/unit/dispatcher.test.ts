@@ -2673,6 +2673,62 @@ describe("WS Dispatcher", () => {
     expect(voiceStore.getState().currentChannelId).toBe(7);
   });
 
+  // OC-0283: a departing peer's roster entry is only ever removed by THIS
+  // same voice_leave handler (removeVoiceUser below), so a roster read taken
+  // at any point relative to that mutation — before or after — sees the
+  // peer as "still present" on a genuine departure exactly as it would for
+  // the OC-0213 stale-leave case. handleParticipantLeft must not be handed a
+  // flag computed that way: E2EEManager.handleParticipantLeft used to accept
+  // a `stillInRoster` second argument (OC-0239) that this dispatcher always
+  // computed as true from a pre-mutation snapshot, permanently disabling the
+  // OC-0020 departed-peer key retirement in production. Assert the call
+  // shape directly so a future re-introduction of such a flag is caught here.
+  it("[OC-0283] does not pass a stale-leave roster snapshot to handleParticipantLeft on a genuine departure", async () => {
+    vi.mocked(mockHandleParticipantLeft).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // Peer 7 is present in the roster right up until their own leave, just
+    // as a real join (voice_state) would have left them — nothing removes
+    // them from voiceUsers before this voice_leave is processed.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [
+          3,
+          new Map([
+            [
+              7,
+              {
+                userId: 7,
+                username: "peer",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+                serverMuted: false,
+                serverDeafened: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 7,
+    });
+    await vi.runAllTimersAsync();
+
+    // Exactly one argument: no roster-derived flag riding along that could
+    // suppress the departed peer's key retirement.
+    expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
+  });
+
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
     authStore.setState((prev) => ({
       ...prev,

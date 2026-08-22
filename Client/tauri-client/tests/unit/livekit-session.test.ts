@@ -1713,6 +1713,34 @@ describe("LiveKitSession", () => {
         mockVoiceState.localServerMuted = false;
       }
     });
+
+    // OC-0287: applyMicMuteState's re-enable branch used to await
+    // setMicrophoneEnabled(true) with no try/catch. Every caller (setMuted,
+    // setDeafened, ptt.ts) fires it forgetfully with only a `.catch(e =>
+    // log.warn(...))`, so a rejection (mic revoked/unplugged) never reached
+    // setListenOnly/setLocalMuted or onErrorCallback — yet setLocalMuted(false)
+    // and the outbound voice_mute{muted:false} frame had already gone out.
+    // The user was left reporting "unmuted" everywhere while publishing no
+    // audio, with no error and no Grant-Microphone affordance (that button is
+    // gated on listenOnly, which stayed false). This pins the fix: a failed
+    // re-enable must flip back into listen-only + muted and surface an error.
+    it("unmuting when the mic cannot be acquired enters listen-only, re-mutes, and reports an error (OC-0287)", async () => {
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      const domErr = new DOMException("Permission denied", "NotAllowedError");
+      mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(domErr);
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Must not silently swallow the failure: listen-only mode has to come
+      // back on (this is what reveals the existing Grant Microphone button)
+      // and the local mute flag has to reflect that no audio is publishing.
+      expect(setListenOnly).toHaveBeenCalledWith(true);
+      expect(setLocalMuted).toHaveBeenCalledWith(true);
+      expect(errorCb).toHaveBeenCalled();
+      expect(errorCb.mock.calls[0]?.[0]).toEqual(expect.stringMatching(/microphone/i));
+    });
   });
 
   describe("setDeafened (with active room)", () => {

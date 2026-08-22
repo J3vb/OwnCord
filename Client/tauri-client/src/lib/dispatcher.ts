@@ -1050,17 +1050,14 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_LEAVE, (payload) => {
-      // OC-0239: snapshot the roster BEFORE removeVoiceUser() below mutates
-      // it. handleParticipantLeft's own stale-leave guard (OC-0213, "is this
-      // peer still listed as present?") reads the SAME store — if it read
-      // that after removeVoiceUser() already deleted the user, the check
-      // would always see them as absent and could never tell a stale,
-      // superseded-rejoin leave from a genuine departure, permanently
-      // retiring a peer who never actually left. Pass this pre-mutation
-      // snapshot through explicitly instead of relying on the post-mutation
-      // store state.
-      const stillInRoster =
-        voiceStore.getState().voiceUsers.get(payload.channel_id)?.has(payload.user_id) ?? false;
+      // OC-0283: removeVoiceUser() below always mutates the roster before
+      // handleParticipantLeft below runs, and a pre-mutation snapshot (the
+      // OC-0239 attempt this replaced) reads "still present" on every
+      // genuine departure too — a departing peer is only ever removed from
+      // the roster by this very handler, so any roster read taken here, at
+      // any point relative to that mutation, cannot tell a genuine departure
+      // apart from the OC-0213 stale-leave case. Don't try; see
+      // E2EEManager.handleParticipantLeft for the current defense.
       removeVoiceUser(payload);
       const currentUserId = authStore.getState().user?.id ?? 0;
       const isSelf = payload.user_id === currentUserId;
@@ -1077,7 +1074,7 @@ export function wireDispatcher(
       // (when applicable) tear down the media session — both through one lazy
       // import so the two effects cannot land in different ticks.
       void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-        void handleParticipantLeft(payload.user_id, stillInRoster);
+        void handleParticipantLeft(payload.user_id);
         if (shouldTeardownSession) void leaveVoice(false);
       });
       // Clear local voice state only for the same channel-match case as the

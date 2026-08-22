@@ -1478,8 +1478,8 @@ export class LiveKitSession {
    * Handle a participant leaving the voice channel (key-holder election and
    * membership-forward-secrecy rekey). See E2EEManager.handleParticipantLeft.
    */
-  async handleParticipantLeft(userId: number, stillInRoster = false): Promise<void> {
-    return this._e2ee.handleParticipantLeft(userId, stillInRoster);
+  async handleParticipantLeft(userId: number): Promise<void> {
+    return this._e2ee.handleParticipantLeft(userId);
   }
 
   /** Retry microphone permission after being in listen-only mode. */
@@ -1636,11 +1636,28 @@ export class LiveKitSession {
         log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute/PTT)");
         return;
       }
-      // Re-enable mic — this re-publishes the track to the SFU
-      await room.localParticipant.setMicrophoneEnabled(true);
-      // Rebuild the audio pipeline on the fresh track
-      this._audioPipeline.setupAudioPipeline();
-      log.debug("Mic re-published (unmuted)");
+      // Re-enable mic — this re-publishes the track to the SFU. Every caller
+      // (setMuted/setDeafened's unmute branches, ptt.ts, roomEventHandlers)
+      // fires this forgetfully with only a `.catch(e => log.warn(...))`, so a
+      // rejection here (permission revoked, device unplugged) must not
+      // propagate silently: without recovery, setLocalMuted(false) and the
+      // outbound voice_mute{muted:false} frame have already gone out by the
+      // time this runs, leaving the client reporting itself unmuted to the
+      // server and every peer while publishing no audio at all (OC-0287).
+      // Fall back into listen-only + muted so the state matches reality and
+      // the existing "Grant Microphone" affordance (gated on listenOnly)
+      // reappears as the recovery path.
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true);
+        // Rebuild the audio pipeline on the fresh track
+        this._audioPipeline.setupAudioPipeline();
+        log.debug("Mic re-published (unmuted)");
+      } catch (err) {
+        setListenOnly(true);
+        setLocalMuted(true);
+        log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
+        this.onErrorCallback?.("Microphone unavailable — you are muted");
+      }
     }
   }
 

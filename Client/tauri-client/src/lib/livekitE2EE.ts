@@ -1242,16 +1242,8 @@ export class E2EEManager {
    * Key holder election: the participant with the lowest user ID among remaining
    * participants is elected. This is deterministic and does not depend on Map
    * insertion order (which is not guaranteed to match server join order).
-   *
-   * @param stillInRoster - (OC-0239) True when the caller knows, from a
-   *   roster snapshot taken BEFORE its own store mutation, that this user
-   *   was still present in the channel when the leave was received — the
-   *   signal that this is a stale, superseded-rejoin leave rather than a
-   *   genuine departure (OC-0213). Defaults to false so callers with no
-   *   better information fall back to this method's own (post-mutation)
-   *   roster read.
    */
-  async handleParticipantLeft(userId: number, stillInRoster = false): Promise<void> {
+  async handleParticipantLeft(userId: number): Promise<void> {
     const departingKey = this._peerPublicKeys.get(userId);
     const hadPeerKey = departingKey !== undefined;
     this._peerPublicKeys.delete(userId);
@@ -1287,15 +1279,25 @@ export class E2EEManager {
     // still correctly excludes them from any resulting rotation) so nothing
     // regresses for a genuine departure.
     //
-    // `channelUsers` alone can no longer tell this apart in production
-    // (OC-0239): the only real VOICE_LEAVE caller (dispatcher.ts) deletes the
-    // user from the voice-user roster BEFORE calling this method, so
-    // `channelUsers?.has(userId)` is always false by the time we get here —
-    // the store mutation always wins the race this check was meant to
-    // detect. `stillInRoster` lets a caller pass a snapshot taken BEFORE its
-    // own roster mutation instead; it is OR'd with the live read so a direct
-    // caller relying on the store alone (as tests do) still works unchanged.
-    if (departingKey && !stillInRoster && !channelUsers?.has(userId)) {
+    // `channelUsers` is a POST-mutation read: the only real VOICE_LEAVE
+    // caller (dispatcher.ts) deletes the user from the voice-user roster
+    // BEFORE calling this method, so `channelUsers?.has(userId)` is always
+    // false by the time we get here in production — this guard only ever
+    // protects the OC-0213 case for a caller that reads the roster itself
+    // without that prior mutation (as tests do). OC-0239 tried to plug that
+    // production gap by having the caller pass a PRE-mutation roster
+    // snapshot (`stillInRoster`) instead, but that snapshot cannot tell the
+    // two cases apart either (OC-0283): the roster still lists a departing
+    // peer as present right up until this very event is what removes them,
+    // so the snapshot reads "still present" on every genuine departure too,
+    // not just the stale-leave case it was meant to isolate. Gating on it
+    // made retirement never run in production, silently killing this replay
+    // defense — worse than the gap it was meant to close. A real fix for the
+    // OC-0213 race needs a discriminator the roster does not carry (e.g. the
+    // server stamping a join/epoch id on voice_leave so a stale leave for a
+    // superseded join can be dropped outright), not a roster read taken at
+    // any point during this call.
+    if (departingKey && !channelUsers?.has(userId)) {
       this.retirePeerKey(userId, await exportPublicKey(departingKey));
     }
 
