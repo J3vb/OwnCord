@@ -8,7 +8,7 @@
  * channels for every member of the server.
  */
 
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
   attachDragHandlers,
@@ -60,7 +60,7 @@ interface Rig {
   container: HTMLElement;
   items: Map<number, HTMLElement>;
   channels: Channel[];
-  onReorder: ReturnType<typeof vi.fn>;
+  onReorder: Mock<(reorders: readonly ChannelReorderData[]) => void>;
   abort: AbortController;
 }
 
@@ -105,7 +105,7 @@ function buildRig(channels: Channel[]): Rig {
   document.body.appendChild(container);
 
   const items = new Map<number, HTMLElement>();
-  const onReorder = vi.fn();
+  const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
   const abort = new AbortController();
   rigAborts.push(abort);
 

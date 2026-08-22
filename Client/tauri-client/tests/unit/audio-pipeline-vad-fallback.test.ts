@@ -88,10 +88,17 @@ describe("AudioPipeline", () => {
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
       };
 
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -164,10 +171,17 @@ describe("AudioPipeline", () => {
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
       };
 
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -246,10 +260,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -340,10 +361,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -412,10 +440,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -480,10 +515,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -559,10 +601,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {

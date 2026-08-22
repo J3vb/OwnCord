@@ -913,7 +913,12 @@ describe("VoiceAudioTab UI structure", () => {
       addEventListenerSpy.mock.calls.filter(([type]) => type === "abort").length;
 
     const tab = createVoiceAudioTab(ac.signal);
-    const afterCreate = abortListenerCount();
+
+    // The first build may add jsdom's single internal bookkeeping listener
+    // for `{ signal }`-scoped DOM listeners; snapshot after it so the
+    // assertion isolates listener growth caused by rebuilds.
+    tab.build();
+    const afterFirstBuild = abortListenerCount();
 
     tab.build();
     tab.build();
@@ -922,7 +927,7 @@ describe("VoiceAudioTab UI structure", () => {
     // Rebuilding the tab three times must not add three more permanent
     // "abort" listeners to the overlay-lifetime signal — only the single
     // listener the factory registers once at creation should exist.
-    expect(abortListenerCount()).toBe(afterCreate);
+    expect(abortListenerCount()).toBe(afterFirstBuild);
 
     ac.abort();
   });

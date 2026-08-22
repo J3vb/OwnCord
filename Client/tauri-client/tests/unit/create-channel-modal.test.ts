@@ -247,7 +247,7 @@ describe("CreateChannelModal", () => {
 
   it("disables submit button and shows 'Creating...' while creating", async () => {
     let resolveCreate: (() => void) | undefined;
-    const onCreate = vi.fn<any>(
+    const onCreate = vi.fn<NonNullable<CreateChannelModalOptions["onCreate"]>>(
       () =>
         new Promise<void>((resolve) => {
           resolveCreate = resolve;

@@ -20,20 +20,22 @@ export default defineConfig({
     cssCodeSplit: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Keep the ~1.3 MB LiveKit SDK in its own chunk, out of the entry.
-          livekit: ["livekit-client"],
+        // Keep the ~1.3 MB LiveKit SDK in its own chunk, out of the entry.
+        // Rolldown (Vite 8) only supports the function form of manualChunks.
+        manualChunks(id) {
+          if (id.includes("node_modules/livekit-client/")) return "livekit";
+          return undefined;
         },
       },
     },
   },
   resolve: {
     alias: {
-      "@lib": resolve(__dirname, "src/lib"),
-      "@stores": resolve(__dirname, "src/stores"),
-      "@components": resolve(__dirname, "src/components"),
-      "@pages": resolve(__dirname, "src/pages"),
-      "@styles": resolve(__dirname, "src/styles"),
+      "@lib": resolve(import.meta.dirname, "src/lib"),
+      "@stores": resolve(import.meta.dirname, "src/stores"),
+      "@components": resolve(import.meta.dirname, "src/components"),
+      "@pages": resolve(import.meta.dirname, "src/pages"),
+      "@styles": resolve(import.meta.dirname, "src/styles"),
     },
   },
   clearScreen: false,

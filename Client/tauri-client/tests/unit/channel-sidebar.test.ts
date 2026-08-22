@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 // Mock livekitSession (required by streamPreview). rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
@@ -183,15 +183,15 @@ function setAdminUser(): void {
 describe("ChannelSidebar", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
-  let onVoiceJoin: ReturnType<typeof vi.fn>;
-  let onVoiceLeave: ReturnType<typeof vi.fn>;
+  let onVoiceJoin: Mock<(channelId: number) => void>;
+  let onVoiceLeave: Mock<() => void>;
 
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    onVoiceJoin = vi.fn();
-    onVoiceLeave = vi.fn();
+    onVoiceJoin = vi.fn<(channelId: number) => void>();
+    onVoiceLeave = vi.fn<() => void>();
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
   });
 
@@ -2247,15 +2247,15 @@ describe("ChannelSidebar voice identity badge", () => {
 describe("ChannelSidebar channel feature flags", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
-  let onVoiceJoin: ReturnType<typeof vi.fn>;
-  let onVoiceLeave: ReturnType<typeof vi.fn>;
+  let onVoiceJoin: Mock<(channelId: number) => void>;
+  let onVoiceLeave: Mock<() => void>;
 
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    onVoiceJoin = vi.fn();
-    onVoiceLeave = vi.fn();
+    onVoiceJoin = vi.fn<(channelId: number) => void>();
+    onVoiceLeave = vi.fn<() => void>();
     sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
   });
 

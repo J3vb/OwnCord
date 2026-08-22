@@ -148,7 +148,7 @@ describe("DeleteChannelModal", () => {
 
   it("disables button and shows 'Deleting...' during delete", async () => {
     let resolveDelete: (() => void) | undefined;
-    const onConfirm = vi.fn<any>(
+    const onConfirm = vi.fn<() => Promise<void>>(
       () =>
         new Promise<void>((resolve) => {
           resolveDelete = resolve;

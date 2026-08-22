@@ -9,10 +9,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSetKey = vi.hoisted(() => vi.fn());
 
 vi.mock("livekit-client", () => ({
-  ExternalE2EEKeyProvider: vi.fn(() => ({
-    setKey: mockSetKey,
-    getKeys: vi.fn().mockReturnValue([]),
-  })),
+  // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
+  ExternalE2EEKeyProvider: vi.fn(function () {
+    return {
+      setKey: mockSetKey,
+      getKeys: vi.fn().mockReturnValue([]),
+    };
+  }),
 }));
 
 const mockKeyPair = vi.hoisted(() => ({
