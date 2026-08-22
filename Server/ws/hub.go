@@ -498,6 +498,20 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID
+		// A moderator-imposed mute/deafen stashed by voice_mod_move
+		// (setPendingModFlags) lives ONLY on the old *Client between the
+		// target's eviction (which deletes the voice_states row that state
+		// normally lives in) and the target's own re-join, which consumes it
+		// via takePendingModFlags (voice_join.go). Any client replacement —
+		// reconnect or full resync alike — must carry it to the new *Client
+		// or it is silently destroyed and the mute is lost (OC-0302).
+		// Unlike the voice-state transfer below, this has none of the
+		// voiceJoinCompleted supersession concerns, so it is not gated on
+		// c.lastSeq > 0: take-and-clear leaves nothing behind for old to
+		// double-serve, and a stash nobody set is always (false, false).
+		if pendingMuted, pendingDeafened := old.takePendingModFlags(); pendingMuted || pendingDeafened {
+			c.setPendingModFlags(pendingMuted, pendingDeafened)
+		}
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
