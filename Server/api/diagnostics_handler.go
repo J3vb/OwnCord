@@ -42,8 +42,9 @@ func handleDiagnosticsConnectivity(
 	ver string,
 	hub *ws.Hub,
 ) http.HandlerFunc {
+	proxyNets := parseCIDRList(cfg.Server.TrustedProxies) // OC-0305: parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientAddr := clientIP(r)
+		clientAddr := clientIPWithProxies(r, proxyNets)
 
 		lkHealthy := false
 		if ok, _ := hub.LiveKitHealthCheck(r.Context()); ok {
