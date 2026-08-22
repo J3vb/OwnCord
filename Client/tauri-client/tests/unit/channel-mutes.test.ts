@@ -141,6 +141,24 @@ describe("channel mutes — host scoping", () => {
     setChannelMutesHost("b.example.com");
     expect(isChannelMuted(7)).toBe(false);
   });
+
+  it("does not leak the legacy mute list into a brand-new host that has never had a scoped key", () => {
+    // Regression for OC-0288: the legacy read-through fired for ANY host
+    // missing a scoped key, not just the first host migrated, and it never
+    // consumed the legacy key. So server A migrates correctly, but server B
+    // (first connection ever, no scoped key yet) reads through to the same
+    // legacy list and persists server A's mutes as its own — even though the
+    // user never muted anything on B and channel ids don't even correspond
+    // across servers.
+    localStorage.setItem(KEY, JSON.stringify([7]));
+
+    setChannelMutesHost("a.example.com");
+    expect(isChannelMuted(7)).toBe(true); // migration onto A is correct
+
+    setChannelMutesHost("b.example.com");
+    expect(isChannelMuted(7)).toBe(false);
+    expect(localStorage.getItem(`${STORAGE_PREFIX}mutedChannels:b.example.com`)).toBeNull();
+  });
 });
 
 describe("channel mutes — notification gating", () => {

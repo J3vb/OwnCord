@@ -26,6 +26,19 @@ func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
+	// kickClient (hub_sweep.go and the ban/expiry paths below) removes c from
+	// the hub and closes its send channels, but never touches the underlying
+	// connection or signals readPump — readPump keeps calling handleMessage
+	// for every frame it reads until the write side eventually times out and
+	// closes the conn (OC-0285). isSendClosed is the same "this client has
+	// been cut off" flag Subscribe already treats as canonical (pubsub.go)
+	// and that closeSend sets synchronously before kickClient returns, so
+	// checking it here — before the session recheck even runs — drops every
+	// frame a kicked/banned/expired client's connection still has buffered,
+	// regardless of which goroutine did the kicking.
+	if c.isSendClosed() {
+		return
+	}
 	if h.handleMessageSessionRecheck(c) {
 		return
 	}

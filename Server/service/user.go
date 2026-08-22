@@ -235,7 +235,26 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// stale profile indefinitely even though the DB already has the new one.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch updated user: %v", ErrInternal, err)
+		// OC-0297: the write above already committed, so this re-read failing
+		// (SQLITE_BUSY, an I/O error, pool exhaustion — anything short of the
+		// context cancellation the comment above already covers) must not be
+		// reported as ErrInternal. A caller that treats any UpdateProfile
+		// error as "the write never landed" — handleUploadAvatar deletes the
+		// file it just stored on that assumption — would otherwise delete a
+		// file the committed avatar column now points at, permanently
+		// breaking it with no user_update ever broadcast. UpdateUserProfile
+		// only ever writes username/avatar/display_name/about, so merging
+		// those four onto the pre-write snapshot (current) reconstructs the
+		// row that is now actually in the database without needing the read
+		// to succeed.
+		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
+			"user_id", userID, "error", err)
+		merged := *current
+		merged.Username = username
+		merged.Avatar = avatar
+		merged.DisplayName = displayName
+		merged.About = about
+		user = &merged
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,

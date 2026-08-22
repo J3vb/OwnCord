@@ -100,7 +100,7 @@ function closeIdentityModal(): void {
 async function openIdentityMismatchModal(
   userId: number,
   username: string,
-  signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
 ): Promise<void> {
   closeIdentityModal();
   // Compute the newly-delivered key's fingerprint so the user can verify it
@@ -117,8 +117,14 @@ async function openIdentityMismatchModal(
       log.warn("E2EE: could not compute changed-key fingerprint for re-pin modal", err);
     }
   }
-  // The sidebar (or a newer open) may have superseded us during the async compute.
-  if (signal.aborted) return;
+  // The SIDEBAR (or a newer open) may have superseded us during the async
+  // compute — but NOT a mere re-render: `lifetimeSignal` is the sidebar's own
+  // factory-lifetime signal (aborted only in destroy()), not the per-render
+  // one that renderChannels() replaces on every redraw (OC-0281). Binding this
+  // check to the render signal made an unrelated re-render landing mid-compute
+  // (a message in another channel, a peer toggling mute) turn the click into a
+  // silent no-op.
+  if (lifetimeSignal.aborted) return;
   closeIdentityModal();
   const modal = createIdentityMismatchModal({
     username,
@@ -148,8 +154,10 @@ async function openIdentityMismatchModal(
   });
   modal.mount(document.body);
   activeIdentityModal = modal;
-  // Close if the owning sidebar is destroyed while the modal is still open.
-  signal.addEventListener("abort", closeIdentityModal, { once: true });
+  // Close if the owning sidebar is destroyed while the modal is still open —
+  // NOT on a re-render, which is why this is `lifetimeSignal` and not the
+  // render-scoped signal (OC-0281).
+  lifetimeSignal.addEventListener("abort", closeIdentityModal, { once: true });
 }
 
 export interface ChannelReorderData {
@@ -332,6 +340,7 @@ function buildVoiceModOptions(
 function renderVoiceChannelItem(
   channel: Channel,
   signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
   onWatchStream?: (userId: number) => void,
@@ -494,7 +503,16 @@ function renderVoiceChannelItem(
             "click",
             (e) => {
               e.stopPropagation();
-              void openIdentityMismatchModal(user.userId, user.username || "Unknown", signal);
+              // lifetimeSignal (not the per-render `signal`): the modal must
+              // survive an unrelated re-render, and must not be silently
+              // skipped by one landing during the async fingerprint compute
+              // (OC-0281). The click listener itself stays on the per-render
+              // `signal` so it dies with this row (OC-0229).
+              void openIdentityMismatchModal(
+                user.userId,
+                user.username || "Unknown",
+                lifetimeSignal,
+              );
             },
             { signal },
           );
@@ -514,7 +532,10 @@ function renderVoiceChannelItem(
               user.username || "Unknown",
               e.clientX,
               e.clientY,
-              signal,
+              // lifetimeSignal (not the per-render `signal`): the menu is
+              // mounted on document.body, independent of this row's render,
+              // and must not be torn down by an unrelated re-render (OC-0282).
+              lifetimeSignal,
               buildVoiceModOptions(channel.id, user, onVoiceModerate),
             );
           },
@@ -583,6 +604,7 @@ function renderChannelItem(
   channel: Channel,
   isActive: boolean,
   signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
   onEditChannel?: (channel: Channel) => void,
@@ -599,6 +621,7 @@ function renderChannelItem(
     el = renderVoiceChannelItem(
       channel,
       signal,
+      lifetimeSignal,
       onVoiceJoin,
       onVoiceLeave,
       onWatchStream,
@@ -607,9 +630,25 @@ function renderChannelItem(
   } else {
     el = renderTextChannelItem(channel, isActive, signal);
   }
-  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel, onPurgeChannel);
+  attachChannelContextMenu(
+    el,
+    channel,
+    signal,
+    lifetimeSignal,
+    onEditChannel,
+    onDeleteChannel,
+    onPurgeChannel,
+  );
   if (containerEl !== undefined && channels !== undefined) {
-    attachDragHandlers(el, channel, containerEl, channels, signal, onReorderChannel);
+    attachDragHandlers(
+      el,
+      channel,
+      containerEl,
+      channels,
+      signal,
+      lifetimeSignal,
+      onReorderChannel,
+    );
   }
   return el;
 }
@@ -619,6 +658,7 @@ function renderCategoryGroup(
   channels: readonly Channel[],
   activeChannelId: number | null,
   signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
   onCreateChannel?: (category: string) => void,
@@ -689,6 +729,7 @@ function renderCategoryGroup(
             ch,
             ch.id === activeChannelId,
             signal,
+            lifetimeSignal,
             onVoiceJoin,
             onVoiceLeave,
             onEditChannel,
@@ -713,6 +754,7 @@ function renderCategoryGroup(
           ch,
           ch.id === activeChannelId,
           signal,
+          lifetimeSignal,
           onVoiceJoin,
           onVoiceLeave,
           onEditChannel,
@@ -821,6 +863,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           channels,
           state.activeChannelId,
           currentRenderAc.signal,
+          // Sidebar-lifetime signal (aborted only in destroy()) for anything
+          // that owns DOM mounted outside this render's rows -- a menu or
+          // modal on document.body must not be torn down by an unrelated
+          // re-render (OC-0281, OC-0282).
+          ac.signal,
           onVoiceJoin,
           onVoiceLeave,
           onCreateChannel,

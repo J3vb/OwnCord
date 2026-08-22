@@ -336,8 +336,9 @@ func (d *DB) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	return result, nil
 }
 
-// CountUsersWithoutTOTP returns the number of non-banned users that do not
-// currently have a confirmed TOTP secret.
+// CountUsersWithoutTOTP returns the number of users who are not effectively
+// banned (unbanned, or serving a temporary ban whose ban_expires has already
+// lapsed) and do not currently have a confirmed TOTP secret.
 func (d *DB) CountUsersWithoutTOTP(ctx context.Context) (int, error) {
 	count, err := d.q.CountUsersWithoutTOTP(ctx)
 	if err != nil {

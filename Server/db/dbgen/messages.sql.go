@@ -267,13 +267,12 @@ func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedPara
 	return q.db.ExecContext(ctx, setMessagePinned, arg.Pinned, arg.ID)
 }
 
-const softDeleteMessage = `-- name: SoftDeleteMessage :exec
-UPDATE messages SET deleted = 1 WHERE id = ?
+const softDeleteMessage = `-- name: SoftDeleteMessage :execresult
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0
 `
 
-func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, softDeleteMessage, id)
-	return err
+func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteMessage, id)
 }
 
 const updateReadState = `-- name: UpdateReadState :exec

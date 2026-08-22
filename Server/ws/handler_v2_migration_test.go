@@ -89,6 +89,40 @@ func TestHandleVoiceLeaveV2_RateLimited(t *testing.T) {
 	}
 }
 
+// A rate-limited voice_leave must still signal LeaveVoice so handlers.go's
+// error path (handlers.go:109) runs the hub's handleVoiceLeave and reconciles
+// server-side voice membership with a client that already tore its local
+// voice session down before sending the frame. Without this, a throttled
+// leave leaves c.voiceChID and the voice_states row pointing at the old
+// channel forever, and a later voice_join for that same channel is refused
+// with ALREADY_JOINED. handleVoiceLeave is a documented no-op when the
+// client is not in voice, so this is safe even when the throttled attempt
+// was spurious.
+func TestHandleVoiceLeaveV2_RateLimited_StillSignalsLeave(t *testing.T) {
+	deps := VoiceDeps{Limiter: auth.NewRateLimiter()}
+	cmd := VoiceLeaveCmd{userID: 1}
+	info := ClientInfo{UserID: 1}
+
+	// voiceLeaveRateLimit (5) per voiceLeaveWindow (1s) — the 6th is rejected.
+	var sawRateLimited bool
+	for range voiceLeaveRateLimit + 1 {
+		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
+		if res.Error != nil {
+			ce, ok := res.Error.(ClientError)
+			if !ok || ce.Code != ErrCodeRateLimited {
+				t.Fatalf("expected rate-limit ClientError, got %v", res.Error)
+			}
+			sawRateLimited = true
+			if !res.LeaveVoice {
+				t.Error("rate-limited voice_leave must still set LeaveVoice=true so the client's already-torn-down voice session is reconciled server-side (handlers.go runs handleVoiceLeave only when LeaveVoice is set on an error result)")
+			}
+		}
+	}
+	if !sawRateLimited {
+		t.Fatal("expected voice_leave to be rate limited after the burst")
+	}
+}
+
 // ── chat_command V2 ──────────────────────────────────────────────────────────
 
 func TestChatCommandConstructor_Errors(t *testing.T) {

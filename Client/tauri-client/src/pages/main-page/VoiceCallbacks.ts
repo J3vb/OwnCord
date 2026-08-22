@@ -181,6 +181,13 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
   return {
     onVoiceJoin: (channelId: number) => {
       if (!socketLive()) return;
+      // Already there: a same-channel re-join (e.g. a DM "Start a call"
+      // redial while the caller is still in the call) buys nothing and the
+      // server refuses it with ALREADY_JOINED, which the dispatcher's
+      // catch-all turns into a user-facing error toast (OC-0289). Callers
+      // that used to hand-check this (ChannelSidebar's item click / stream
+      // watch) stay correct since the guard is idempotent with theirs.
+      if (voiceStore.getState().currentChannelId === channelId) return;
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
       ws.send({ type: "voice_join", payload: { channel_id: channelId } });

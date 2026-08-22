@@ -21,12 +21,19 @@ export interface VoiceModMenuOptions {
   readonly onDisconnect: () => void;
 }
 
+/**
+ * `lifetimeSignal` should be the sidebar's own factory-lifetime signal
+ * (aborted only on sidebar destroy), NOT a per-render signal that gets
+ * replaced on every redraw — this menu is mounted on document.body,
+ * independent of any one render, and must not be torn down by an unrelated
+ * re-render (OC-0282).
+ */
 export function showUserVolumeMenu(
   userId: number,
   username: string,
   x: number,
   y: number,
-  signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   mod?: VoiceModMenuOptions,
 ): void {
   // Remove any existing context menus and abort their dismiss controllers
@@ -131,9 +138,9 @@ export function showUserVolumeMenu(
   // Also clean up if the parent component is destroyed. Tied to dismissAc's
   // own signal (mirrors context-menu.ts's menuAc pattern) so this bridge
   // listener is torn down with the menu itself — otherwise it never runs
-  // (the parent signal is long-lived) and every right-click permanently
+  // (the lifetime signal is long-lived) and every right-click permanently
   // accumulates one closure retaining a detached .user-vol-menu subtree.
-  signal.addEventListener(
+  lifetimeSignal.addEventListener(
     "abort",
     () => {
       menu.remove();

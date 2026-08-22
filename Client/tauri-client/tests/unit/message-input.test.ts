@@ -1415,5 +1415,14 @@ describe("MessageInput", () => {
       const result = wrapWithMarker("**bold**", 0, 8, "*");
       expect(result.value).toBe("***bold***");
     });
+
+    it("wraps rather than downgrades bold text when italicizing a double-clicked word", () => {
+      // Selecting only the word (as a double-click would), not the "**"
+      // markers themselves: start/end land just inside the bold pair, so
+      // the single "*" immediately outside each edge belongs to a "**"
+      // pair rather than being a matching "*" marker of its own.
+      const result = wrapWithMarker("**bold**", 2, 6, "*");
+      expect(result.value).toBe("***bold***");
+    });
   });
 });

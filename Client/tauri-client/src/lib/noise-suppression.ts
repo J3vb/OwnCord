@@ -235,13 +235,25 @@ async function createScriptProcessorPipeline(
  */
 export function createRNNoiseProcessor(): TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
   let pipeline: ProcessingPipeline | null = null;
+  // Cached across init()/restart() calls: livekit-client's ONLY
+  // processor.restart() call site (LocalTrack.setMediaStreamTrack(), reached
+  // via restartTrack() on a device switch, mic replug, or an AEC/NS/AGC
+  // constraint toggle) sends `{track, kind, element, localTrack}` with no
+  // `audioContext` — only setProcessor() supplies one. Without this cache,
+  // restart() would try to build a new pipeline from `undefined` and reject,
+  // leaving `pipeline` null and the mic silently unpublished.
+  let cachedCtx: AudioContext | null = null;
 
   return {
     name: "rnnoise",
 
     async init(opts: AudioProcessorOptions): Promise<void> {
       log.debug("RNNoise processor init", { audioWorkletSupported: supportsAudioWorklet() });
-      const ctx = opts.audioContext;
+      const ctx = opts.audioContext ?? cachedCtx;
+      if (ctx == null) {
+        throw new Error("RNNoise processor: no AudioContext available");
+      }
+      cachedCtx = ctx;
 
       if (supportsAudioWorklet()) {
         try {

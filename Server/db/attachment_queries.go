@@ -184,10 +184,18 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 	return result, nil
 }
 
-// DeleteOrphanedAttachments atomically removes attachment records where
-// message_id IS NULL and uploaded_at is older than the given cutoff. Live
-// avatars are excluded by the query itself. Returns the stored_as filenames
-// of deleted records so the caller can remove files.
+// DeleteOrphanedAttachments atomically removes attachment records that are
+// either unlinked (message_id IS NULL) or linked to a message that has since
+// been soft-deleted (messages.deleted = 1), and whose uploaded_at is older
+// than the given cutoff. Live avatars are excluded by the query itself.
+// Returns the stored_as filenames of deleted records so the caller can
+// remove files.
+//
+// OC-0279: a message delete is a soft delete -- the messages row survives
+// with deleted=1 -- so its attachments never go through message_id IS NULL
+// on their own. The second half of the query's WHERE clause is what lets
+// this sweep reclaim those files too, since serveFileResolve already treats
+// them as unservable once the owning message is deleted.
 //
 // The cutoff is a time.Time, not a string, because uploaded_at is stored in
 // SQLite's own 'YYYY-MM-DD HH:MM:SS' shape and the comparison is bytewise:

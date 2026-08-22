@@ -1761,7 +1761,19 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0239] a stale voice_leave must not retire a peer's key when the caller's pre-mutation roster snapshot still listed them as present", async () => {
+  // OC-0239 tried to have the caller pass a pre-mutation "was this peer
+  // still in the roster?" snapshot into handleParticipantLeft so a stale,
+  // superseded-rejoin voice_leave (OC-0213) would not retire a peer's live
+  // key. OC-0283 found that snapshot is true on every genuine departure too
+  // — a departing peer's roster entry is only ever removed by the very
+  // voice_leave event being handled, so a read taken relative to it, before
+  // or after the mutation, cannot distinguish the two cases. Threading that
+  // flag through therefore disabled the OC-0020 retirement defense in
+  // production outright. The parameter is gone; this test now pins the
+  // corrected behavior: a genuine departure retires the key even though the
+  // roster looked "still present" right up until this event, matching what
+  // production's real (post-mutation) roster read looks like.
+  it("[OC-0283] retires a departed peer's key even though the roster listed them as present right up until this event", async () => {
     const ws = { send: vi.fn() };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
@@ -1776,29 +1788,22 @@ describe("E2EEManager", () => {
     const KEY = "b2xk";
 
     try {
-      // The peer's rejoin announce (carrying a fresh key) arrives first — same
-      // OC-0213 reordering.
       await mgr.handleAnnounce(PEER_ID, KEY, "sig");
       expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
 
       // Reproduce dispatcher.ts's real VOICE_LEAVE ordering: removeVoiceUser()
       // deletes the peer from the roster BEFORE handleParticipantLeft runs, so
-      // by the time this fires the local roster no longer lists them — the
-      // OC-0213 guard's own `channelUsers?.has(userId)` read is unreachable in
-      // production. The caller must instead pass a snapshot taken BEFORE that
-      // mutation, which is what `stillInRoster` carries here.
+      // by the time this fires the local roster no longer lists them.
       mockVoiceState.voiceUsers.set(1, new Map()); // peer already removed from roster
-      await mgr.handleParticipantLeft(PEER_ID, /* stillInRoster */ true);
+      await mgr.handleParticipantLeft(PEER_ID);
 
-      // Removed from the live peer map (unchanged behavior)...
+      // Removed from the live peer map...
       expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
 
-      // ...but the key must not be permanently retired: the peer's own,
-      // still-valid re-announce of the SAME key must be accepted again, not
-      // rejected as a replay of a "retired" key — otherwise the peer is
-      // stranded, un-re-announceable, for the rest of the call.
+      // ...AND retired: a replay of the peer's old, still-validly-signed
+      // announce must now be rejected, not accepted as if they never left.
       await mgr.handleAnnounce(PEER_ID, KEY, "sig");
-      expect(mgr.peerPublicKeys.get(PEER_ID)).toEqual({ type: `peer-key-${KEY}` });
+      expect(mgr.peerPublicKeys.get(PEER_ID)).toBeUndefined();
     } finally {
       vi.mocked(importPublicKey).mockImplementation(
         async () => ({ type: "public" }) as unknown as CryptoKey,

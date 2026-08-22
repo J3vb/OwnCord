@@ -263,6 +263,56 @@ func TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind(t *testing.T) {
 	}
 }
 
+// TestDecrementMentionCounts_SkipsNeverCountedBlockedMention locks OC-0293:
+// applyMentionCounts (service/mentions.go) excludes the author's blockers from
+// the recipient set before calling IncrementMentionCounts, but
+// insertMentionRows stores every resolved mention id regardless of blocks.
+// DecrementMentionCounts must mirror that same exclusion, or deleting a
+// message from a blocked author reverses a mention_count bump that message
+// never made -- wiping out an unrelated, genuine mention badge sitting on the
+// same read_states row.
+func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
+	database := newMigratedTestDB(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	// Bob (2) blocks Alice (1).
+	if err := database.BlockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+
+	// Carol's earlier message gives Bob a genuine, unrelated mention badge.
+	earlierMsg, err := database.CreateMessage(ctx, 1, 3, "hey @bob standup?", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(earlier): %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 1, earlierMsg, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
+		t.Fatalf("precondition: bob mention_count = %d, want 1", n)
+	}
+
+	// Alice, blocked by Bob, posts a message mentioning him. Storage still
+	// records the row (fan-out, not storage, excludes blockers), but the
+	// service layer never calls IncrementMentionCounts for Bob because he
+	// blocked Alice -- so no increment ever landed for this message.
+	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+
+	// Alice deletes her message. DecrementMentionCounts must not touch Bob's
+	// mention_count: that message never contributed to it.
+	if err := database.DecrementMentionCounts(ctx, 1, []int64{blockedMsg.ID}); err != nil {
+		t.Fatalf("DecrementMentionCounts: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
+		t.Errorf("bob mention_count = %d after deleting a blocked-author's message, want 1 (Carol's genuine badge must survive)", n)
+	}
+}
+
 func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
 	database := newMigratedTestDB(t)
 	seedMentionFixture(t, database)

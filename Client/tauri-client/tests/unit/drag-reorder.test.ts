@@ -113,7 +113,7 @@ function buildRig(channels: Channel[]): Rig {
     const el = document.createElement("div");
     container.appendChild(el);
     stubRowRect(el, idx);
-    attachDragHandlers(el, ch, container, channels, abort.signal, onReorder);
+    attachDragHandlers(el, ch, container, channels, abort.signal, abort.signal, onReorder);
     items.set(ch.id, el);
   });
 
@@ -136,7 +136,15 @@ function rebuildContainer(
     const el = document.createElement("div");
     container.appendChild(el);
     stubRowRect(el, idx);
-    attachDragHandlers(el, ch, container, channels, rig.abort.signal, rig.onReorder);
+    attachDragHandlers(
+      el,
+      ch,
+      container,
+      channels,
+      rig.abort.signal,
+      rig.abort.signal,
+      rig.onReorder,
+    );
     items.set(ch.id, el);
   });
 
@@ -248,7 +256,8 @@ describe("attachDragHandlers permission gate", () => {
     const el = document.createElement("div");
     container.appendChild(el);
 
-    attachDragHandlers(el, makeCh(1, 0), container, [makeCh(1, 0)], new AbortController().signal);
+    const noopAc = new AbortController();
+    attachDragHandlers(el, makeCh(1, 0), container, [makeCh(1, 0)], noopAc.signal, noopAc.signal);
 
     expect(el.classList.contains("channel-draggable")).toBe(false);
     expect(el.dataset.dragChannelId).toBeUndefined();
@@ -615,6 +624,78 @@ describe("mid-drag sidebar re-render", () => {
     expect(rig.onReorder).not.toHaveBeenCalled();
     expect(document.body.classList.contains("channel-reordering")).toBe(false);
   });
+
+  // OC-0296: ChannelSidebar.renderChannels() aborts and replaces a fresh,
+  // per-render AbortController on every store-driven re-render, while the
+  // sidebar's own lifetime controller (`ac`) is untouched — the two are never
+  // the same signal. `rebuildContainer` above re-attaches every row under one
+  // constant `rig.abort.signal` across "renders", which models the sidebar's
+  // *lifetime* signal, not this per-render one, so it cannot catch a bug that
+  // only shows up when the render-scoped signal itself is what gets aborted
+  // and replaced mid-drag.
+  it("survives a mid-drag re-render that aborts only the render-scoped signal, leaving the sidebar's own lifetime signal untouched", () => {
+    signIn("owner");
+    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
+    setStoreChannels(channels);
+
+    // The sidebar's own lifetime controller (ChannelSidebar's `ac`) — never
+    // aborted by a re-render, only by the sidebar's own destroy().
+    const lifetimeAc = new AbortController();
+    rigAborts.push(lifetimeAc);
+
+    let renderAc = new AbortController();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const items = new Map<number, HTMLElement>();
+    const onReorder = vi.fn();
+    channels.forEach((ch, idx) => {
+      const el = document.createElement("div");
+      container.appendChild(el);
+      stubRowRect(el, idx);
+      attachDragHandlers(
+        el,
+        ch,
+        container,
+        channels,
+        renderAc.signal,
+        lifetimeAc.signal,
+        onReorder,
+      );
+      items.set(ch.id, el);
+    });
+
+    const source = items.get(1)!;
+    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
+    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    expect(source.classList.contains("dragging")).toBe(true);
+
+    // A store-driven re-render: renderChannels() aborts ONLY the previous
+    // render's controller (never the sidebar's lifetime one) and attaches
+    // fresh rows under a brand-new render controller.
+    renderAc.abort();
+    renderAc = new AbortController();
+    container.remove();
+    const live = document.createElement("div");
+    live.className = "category-channels-container";
+    document.body.appendChild(live);
+    const liveItems = new Map<number, HTMLElement>();
+    channels.forEach((ch, idx) => {
+      const el = document.createElement("div");
+      live.appendChild(el);
+      stubRowRect(el, idx);
+      attachDragHandlers(el, ch, live, channels, renderAc.signal, lifetimeAc.signal, onReorder);
+      liveItems.set(ch.id, el);
+    });
+
+    // Release over the bottom half of row 1 (ch2): ch1 lands after ch2.
+    document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "bottom")));
+
+    expect(onReorder).toHaveBeenCalledTimes(1);
+    const reorders = onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+    expect(positionsOf(reorders)).toEqual({ 2: 0, 1: 1 });
+    expect(liveItems.get(1)?.classList.contains("dragging")).toBe(false);
+    expect(document.body.classList.contains("channel-reordering")).toBe(false);
+  });
 });
 
 // ── listener lifecycle ─────────────────────────────────────────────────────
@@ -634,7 +715,15 @@ describe("global listener ownership", () => {
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     for (const [id, el] of rig.items) {
       const ch = rig.channels.find((c) => c.id === id)!;
-      attachDragHandlers(el, ch, rig.container, rig.channels, rig.abort.signal, rig.onReorder);
+      attachDragHandlers(
+        el,
+        ch,
+        rig.container,
+        rig.channels,
+        rig.abort.signal,
+        rig.abort.signal,
+        rig.onReorder,
+      );
     }
 
     rig.abort.abort();

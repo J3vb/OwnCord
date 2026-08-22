@@ -38,6 +38,19 @@ export interface UserBarOptions {
   readonly presenceSender?: PresenceSender | null;
 }
 
+/**
+ * The signed-in user's custom status as the server told it to us, or `null`
+ * when no user is loaded yet (before the first `ready`/auth_ok). `null` is
+ * the only case callers should fall back to the localStorage pref for —
+ * once a user is loaded, its `custom_status` (even "") is authoritative and
+ * must not be second-guessed against a value that may belong to a different
+ * account or server (OC-0310).
+ */
+function serverCustomStatus(): string | null {
+  const user = authStore.getState().user;
+  return user !== null ? (user.custom_status ?? "") : null;
+}
+
 /** Status labels for the line under the username. */
 const STATUS_TEXT: Readonly<Record<UserStatus, string>> = {
   online: "Online",
@@ -167,7 +180,15 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       // Start from the stored selection, not a hardcoded "online" — otherwise
       // this picker and the settings Account tab show different statuses.
       currentStatus: loadUserStatus(),
-      currentCustomStatus: loadCustomStatus(),
+      // The server's own auth_ok.user.custom_status is authoritative (OC-0310):
+      // the localStorage pref is only a same-window fallback for before the
+      // first `ready` arrives. Once authStore has a user, its custom_status —
+      // even null/"" meaning "no status set" — wins outright; falling through
+      // to the pref there (via `??`) would let a stale value from a previous
+      // account/server on this machine leak back in exactly when the server
+      // says there is nothing to show, which is the one case that must render
+      // empty for the picker's clear-it flow to work at all.
+      currentCustomStatus: serverCustomStatus() ?? loadCustomStatus(),
       onStatusChange: (status: UserStatus) => {
         saveUserStatus(status);
         updateFromState();
@@ -250,11 +271,19 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     // Initial render
     updateFromState();
 
-    // Subscribe to auth changes
+    // Subscribe to auth changes. Also reflects a custom_status that arrives
+    // (or changes) through authStore — a later auth_ok, or the settings
+    // Account tab's own presence send being echoed back — into the picker,
+    // using the same setCustomStatus() the seed above trusts (OC-0310). The
+    // null-safe read happens inside the callback so both "no user yet" and
+    // "user with no custom status" collapse to the same "" default.
     disposable.onStoreChange(
       authStore,
       (s) => s.user,
-      () => updateFromState(),
+      () => {
+        updateFromState();
+        statusPicker?.setCustomStatus(serverCustomStatus() ?? "");
+      },
     );
 
     container.appendChild(root);

@@ -164,7 +164,16 @@ export function updateDmLastMessage(
 
 /** Update last message preview for a DM channel without incrementing unread count.
  *  Used for own messages and messages in the currently focused DM.
- *  Moves the channel to the top of the list so active conversations stay visible. */
+ *  Moves the channel to the top of the list so active conversations stay visible.
+ *
+ *  OC-0301: guarded by the same message-id monotonicity check as its sibling
+ *  `updateDmLastMessage`. A queued chat_message frame can be redelivered for
+ *  an id already behind the channel's current `lastMessageId` (e.g. a `ready`
+ *  snapshot lands mid-burst and advances the watermark past a message that
+ *  is still queued behind it) — applying it here would roll the watermark
+ *  backwards, which `updateDmLastMessage`'s own replay guard on the *next*
+ *  frame in the burst depends on being monotonic, and would also regress the
+ *  visible preview text/timestamp and wrongly re-sort the channel to the top. */
 export function updateDmLastMessagePreview(
   channelId: number,
   messageId: number,
@@ -174,6 +183,7 @@ export function updateDmLastMessagePreview(
   dmStore.setState((prev) => {
     const updated = prev.channels.find((c) => c.channelId === channelId);
     if (updated === undefined) return prev;
+    if (updated.lastMessageId !== null && messageId <= updated.lastMessageId) return prev;
     const rest = prev.channels.filter((c) => c.channelId !== channelId);
     return {
       channels: [

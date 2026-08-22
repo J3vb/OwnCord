@@ -4,6 +4,7 @@
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
+import { resolveEmoji } from "@stores/emoji.store";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -517,7 +518,19 @@ function getRecentEmoji(): string[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((e): e is string => typeof e === "string").slice(0, MAX_RECENT);
+    return (
+      parsed
+        .filter((e): e is string => typeof e === "string")
+        // A `:shortcode:`-shaped entry is only meaningful when it still
+        // resolves on *this* server — the recent list is global (unscoped by
+        // host), so a custom emoji clicked on one server would otherwise leak
+        // as dead literal text into every other server's picker, and a
+        // deleted emoji would do the same on its own server forever after.
+        // Plain unicode entries (no colons) are never shortcode-shaped and
+        // pass through untouched.
+        .filter((e) => !(e.startsWith(":") && e.endsWith(":")) || resolveEmoji(e) !== null)
+        .slice(0, MAX_RECENT)
+    );
   } catch {
     return [];
   }
@@ -571,6 +584,27 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   root.appendChild(scrollArea);
   enableRovingNavigation(scrollArea, ".ep-emoji", signal);
 
+  // Single delegated listener for the whole grid, registered once at mount
+  // time. renderAllCategories() discards and rebuilds every cell on each
+  // search keystroke (~250 cells per render); a listener bound directly to
+  // each cell would register (and, since it lives on the picker-lifetime
+  // `signal`, never release) one abort algorithm per discarded cell for the
+  // rest of the picker's life — the same pattern SearchOverlay.ts's
+  // handleResultsClick already fixes for its rows.
+  scrollArea.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const cell = target.closest<HTMLElement>(".ep-emoji");
+      if (cell === null) return;
+      const emoji = cell.dataset.emoji;
+      if (emoji === undefined) return;
+      handleEmojiClick(emoji);
+    },
+    { signal },
+  );
+
   // Build categories with recent + custom
   function getAllCategories(): readonly EmojiCategory[] {
     const recent = getRecentEmoji();
@@ -606,6 +640,9 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       // Mirrors the title (the character or :shortcode: token) — e2e specs
       // select cells by title, so the accessible name must never diverge.
       "aria-label": emoji,
+      // Read by the delegated click handler on scrollArea (see mount-time
+      // listener above) instead of a per-cell listener.
+      "data-emoji": emoji,
     });
     // A `:shortcode:` entry shows its image; everything else is the character
     // itself. An unresolvable shortcode falls back to the text, which is what
@@ -617,7 +654,6 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     } else {
       setText(span, emoji);
     }
-    span.addEventListener("click", () => handleEmojiClick(emoji), { signal });
     return span;
   }
 

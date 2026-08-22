@@ -340,6 +340,7 @@ describe("createSidebarVoiceCallbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUiGetState.mockReturnValue({ connectionStatus: "connected" });
+    mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
   });
 
   it("onVoiceJoin sends voice_join and updates store", () => {
@@ -353,6 +354,22 @@ describe("createSidebarVoiceCallbacks", () => {
       type: "voice_join",
       payload: { channel_id: 42 },
     });
+  });
+
+  it("onVoiceJoin is a no-op when already in the requested voice channel (OC-0289)", () => {
+    // A redial into a live call (e.g. DM "Start a call" clicked again to
+    // nudge a callee who hasn't answered) must not re-send voice_join for the
+    // channel this client already occupies -- the server refuses a
+    // same-channel re-join with ALREADY_JOINED, which the dispatcher's
+    // catch-all turns into a user-facing error toast.
+    mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: 42 }));
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceJoin(42);
+
+    expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
   });
 
   it("onVoiceLeave sends voice_leave and cleans up", () => {

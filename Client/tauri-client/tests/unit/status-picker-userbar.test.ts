@@ -8,15 +8,27 @@ import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
-import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
+import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/userStatus";
 import { createPresenceSender } from "@lib/presence";
 import { createPresenceLimiter } from "@lib/rate-limiter";
 import type { WsClient } from "@lib/ws";
 
-function setAuthState(user: { username: string } | null, isAuthenticated: boolean): void {
+function setAuthState(
+  user: { username: string; custom_status?: string | null } | null,
+  isAuthenticated: boolean,
+): void {
   authStore.setState(() => ({
     token: isAuthenticated ? "tok" : null,
-    user: user !== null ? { id: 1, username: user.username, avatar: null, role: "member" } : null,
+    user:
+      user !== null
+        ? {
+            id: 1,
+            username: user.username,
+            avatar: null,
+            role: "member",
+            custom_status: user.custom_status,
+          }
+        : null,
     serverName: "TestServer",
     motd: null,
     isAuthenticated,
@@ -232,6 +244,55 @@ describe("StatusPicker wired to UserBar", () => {
 
     const checks = container.querySelectorAll(".status-picker-option-check");
     expect((checks[2] as HTMLElement).style.display).toBe("");
+  });
+
+  // OC-0310: the custom-status input must be seeded from the server's
+  // authoritative auth_ok.user.custom_status, not from the unscoped
+  // localStorage pref — otherwise a fresh install (or a different account on
+  // the same machine) shows an empty/wrong input while the server still
+  // holds a real custom status, and the picker's own equality guard
+  // (StatusPicker.ts commit(): `text === lastCommittedCustom`) makes that
+  // status permanently unclearable.
+  it("seeds the custom-status input from the server's custom_status, not the local pref", () => {
+    // The local pref disagrees with the server — e.g. a previous account on
+    // this machine, or a stale write from before a clean reinstall.
+    saveCustomStatus("stale local value");
+    setAuthState({ username: "alice", custom_status: "In a meeting" }, true);
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    dot.click();
+    const input = container.querySelector(
+      "[data-testid='custom-status-input']",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("In a meeting");
+  });
+
+  // Companion to "follows a status change made elsewhere" above, but for the
+  // custom-status text: a value that arrives on the auth store after mount
+  // (e.g. a later auth_ok on reconnect) must reach the already-open picker,
+  // or the input goes stale until the whole bar remounts.
+  it("follows a custom-status change delivered through the auth store", async () => {
+    setAuthState({ username: "alice", custom_status: "" }, true);
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    dot.click();
+
+    authStore.setState((s) => ({
+      ...s,
+      user: s.user ? { ...s.user, custom_status: "Brewing coffee" } : s.user,
+    }));
+    authStore.flush();
+
+    const input = container.querySelector(
+      "[data-testid='custom-status-input']",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("Brewing coffee");
   });
 
   it("status picker is disabled without a ws send path even when connected", () => {

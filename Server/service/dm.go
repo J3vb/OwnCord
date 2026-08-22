@@ -14,11 +14,74 @@ import (
 // DMService handles direct message channel operations.
 type DMService struct {
 	st Store
+	// online reports whether userID currently holds a live WebSocket
+	// connection. It is wired by the ws layer (Hub.IsUserConnected) after
+	// both are constructed, mirroring MessageService.online (see its doc
+	// comment in message.go) — so every DM payload this service builds can
+	// apply the same "no live connection is offline, whatever users.status
+	// stores" rule ws/serve_ready.go's presentableMembers/
+	// presentableDMChannels apply to the ready payload and members list.
+	// users.status keeps a *chosen* idle/dnd/invisible across a disconnect by
+	// design (MarkUserDisconnected only ever rewrites "online" ->
+	// "offline"), so without this a signed-out user's last chosen status
+	// leaks into the DM sidebar as if they were still connected. nil (the
+	// zero value, e.g. in tests and any caller with no hub) means "no
+	// live-connection information available" and applies no extra
+	// narrowing, preserving prior behavior.
+	online func(userID int64) bool
 }
 
 // NewDMService creates a DMService.
 func NewDMService(st Store) *DMService {
 	return &DMService{st: st}
+}
+
+// SetOnlineChecker wires the live-connection predicate every DM payload this
+// service builds consults in addition to users.status. Passing nil clears
+// it. Safe to call once at startup (the ws layer, after constructing both
+// the Hub and the Services) or from a test.
+func (s *DMService) SetOnlineChecker(online func(userID int64) bool) {
+	s.online = online
+}
+
+// PresentableStatus narrows status to db.StatusOffline when subjectID holds
+// no live connection, whatever status says — the second half of the rule
+// ws/serve_ready.go's presentableMembers documents: users.status keeps a
+// *chosen* idle/dnd/invisible across a disconnect (MarkUserDisconnected only
+// ever rewrites "online" -> "offline") so the next connect can honour it,
+// which means every read path must apply this narrowing itself rather than
+// trusting the stored value alone. Exported so a caller that hand-builds a
+// db.DMUser outside this package (POST /dms) applies the identical rule
+// DMSummaryFor/ListDMs/CreateGroupDM apply via presentableDMChannelInfo
+// below. A checker that was never wired (SetOnlineChecker not called, e.g.
+// in most tests) leaves status untouched.
+func (s *DMService) PresentableStatus(subjectID int64, status string) string {
+	if s.online != nil && !s.online(subjectID) {
+		return db.StatusOffline
+	}
+	return status
+}
+
+// presentableDMUser applies PresentableStatus to one DM participant.
+func (s *DMService) presentableDMUser(u db.DMUser) db.DMUser {
+	u.Status = s.PresentableStatus(u.ID, u.Status)
+	return u
+}
+
+// presentableDMChannelInfo applies PresentableStatus to every participant of
+// a DM payload — Recipient (the legacy single-recipient field) and every
+// entry of Recipients, since a 1:1 DM's Recipient is a copy of
+// Recipients[0], not a shared reference. Mirrors Hub.presentableDMChannels
+// (ws/serve_ready.go) at the service layer so every REST response and push
+// event built from a db.DMChannelInfo need not duplicate the rule itself.
+func (s *DMService) presentableDMChannelInfo(info db.DMChannelInfo) db.DMChannelInfo {
+	if info.Recipient.ID != 0 {
+		info.Recipient = s.presentableDMUser(info.Recipient)
+	}
+	for i := range info.Recipients {
+		info.Recipients[i] = s.presentableDMUser(info.Recipients[i])
+	}
+	return info
 }
 
 // CreateDMResult holds the result of creating or fetching a DM channel.
@@ -90,6 +153,12 @@ func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelIn
 	dms, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list DMs: %v", ErrInternal, err)
+	}
+	// GetUserDMChannels only applies db.StatusForViewer (invisible ->
+	// offline); apply the "no live connection" half too, see
+	// presentableDMChannelInfo.
+	for i := range dms {
+		dms[i] = s.presentableDMChannelInfo(dms[i])
 	}
 	return dms, nil
 }
@@ -289,6 +358,11 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		slog.Error("DMService.CreateGroupDM: failed to read participants after commit", "err", err, "channel_id", ch.ID)
 		participants = nil
 	}
+	// See presentableDMChannelInfo: a participant with no live connection
+	// must read as offline, whatever users.status stored for them.
+	for i := range participants {
+		participants[i] = s.presentableDMUser(participants[i])
+	}
 
 	return &CreateGroupDMResult{
 		Channel:        ch,
@@ -363,7 +437,11 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	if err != nil {
 		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
 	}
-	return db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID), nil
+	// See presentableDMChannelInfo: this is the single place broadcastDMOpen
+	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
+	// build their payload from, so applying the "no live connection" rule
+	// here covers every push of a DM's membership.
+	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID)), nil
 }
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,

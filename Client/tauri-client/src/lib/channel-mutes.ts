@@ -95,9 +95,18 @@ function readMuted(): ReadonlySet<number> {
   // and persist the result under the scoped key so the read-through isn't
   // repeated. A different host with its OWN explicit (even empty) mute list
   // is not touched by this — it never reaches this branch.
+  //
+  // The legacy key is then consumed (removed) so this migration can only
+  // ever apply to the FIRST host connected to post-upgrade. Channel ids are
+  // per-server autoincrement integers, so leaving the legacy key in place
+  // would let every subsequent brand-new host also miss its own scoped key,
+  // read through to the same legacy list, and inherit server A's mutes as
+  // its own (OC-0288) — every host after that falls through to `new Set()`
+  // instead.
   if (keyExists(MUTED_KEY)) {
     const legacy = parseMutedIds(loadPref<unknown[]>(MUTED_KEY, []));
     writeMuted(legacy);
+    localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);
     return legacy;
   }
 

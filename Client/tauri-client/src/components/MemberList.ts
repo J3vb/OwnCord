@@ -462,11 +462,30 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   /** Rendered rows by user id \u2014 lets presence-only updates patch in place. */
   const rowsByUserId = new Map<number, HTMLDivElement>();
   let prevMembers: ReadonlyMap<number, Member> = new Map();
+  // renderList() rebuilds every row from scratch on every non-presence-only
+  // membersStore change and on every roles_update. Per-row listeners (click,
+  // contextmenu) must NOT be registered on the component-lifetime
+  // `disposable.signal`, which only aborts once, at destroy() --
+  // addEventListener({ signal }) keeps a detached row alive via that signal's
+  // own retained "abort" listener list until it fires, so every rebuild would
+  // otherwise leak one full set of detached rows (OC-0295), exactly the
+  // defect already fixed in ChannelSidebar (renderAc, OC-0229) and
+  // MessageList (OC-0286). renderAc is aborted and replaced at the top of
+  // every render, so only the CURRENT render's rows stay reachable.
+  let renderAc: AbortController | null = null;
+
+  function render(): void {
+    if (root === null) return;
+    renderAc?.abort();
+    const currentRenderAc = new AbortController();
+    renderAc = currentRenderAc;
+    renderList(root, opts, currentRenderAc.signal, rowsByUserId);
+  }
 
   function mount(container: Element): void {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
     prevMembers = membersStore.getState().members;
-    renderList(root, opts, disposable.signal, rowsByUserId);
+    render();
 
     disposable.onStoreChange<MembersState, ReadonlyMap<number, Member>>(
       membersStore,
@@ -476,7 +495,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
           if (isPresenceOnlyChange(prevMembers, members)) {
             patchPresence(prevMembers, members, rowsByUserId);
           } else {
-            renderList(root, opts, disposable.signal, rowsByUserId);
+            render();
           }
         }
         prevMembers = members;
@@ -491,9 +510,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
       channelsStore,
       (s) => s.roles,
       () => {
-        if (root !== null) {
-          renderList(root, opts, disposable.signal, rowsByUserId);
-        }
+        render();
       },
     );
 
@@ -505,6 +522,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     closeActivePopup();
     document.removeEventListener("mousedown", handleOutsideClick);
     disposable.destroy();
+    renderAc?.abort();
+    renderAc = null;
     rowsByUserId.clear();
     if (root !== null) {
       root.remove();

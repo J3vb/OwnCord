@@ -83,6 +83,68 @@ func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsConnectivity_HonoursTrustedProxies reproduces OC-0305: behind
+// a configured trusted reverse proxy, the diagnostics endpoint must report the
+// real client address from X-Forwarded-For, not the proxy's own RemoteAddr —
+// matching the same route's RateLimitMiddleware, which already honours
+// cfg.Server.TrustedProxies.
+func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Name:           "Test Server",
+			Port:           8443,
+			TrustedProxies: []string{"127.0.0.1/32"},
+		},
+	}
+
+	handler, _, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil)
+	t.Cleanup(cleanup)
+
+	uid, _ := database.CreateUser(context.Background(), "diagproxyuser", "$2a$12$fake", 1)
+	token := "diagtest-proxy-token"
+	hash := auth.HashToken(token)
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
+		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
+		uid, hash,
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.RemoteAddr = "127.0.0.1:9999" // the trusted reverse proxy's own hop
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	client, _ := resp["client"].(map[string]any)
+	if client["remote_addr"] != "203.0.113.9" {
+		t.Errorf("client.remote_addr = %v, want 203.0.113.9 (the real client behind the trusted proxy)", client["remote_addr"])
+	}
+	if isPrivate, _ := client["is_private_network"].(bool); isPrivate {
+		t.Errorf("client.is_private_network = true, want false for public client 203.0.113.9")
+	}
+}
+
 func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 	router, _, _ := setupDiagnosticsRouter(t)
 

@@ -305,6 +305,16 @@ func GetClientVoiceJoinTokenForTest(c *Client) string {
 	return c.voiceJoinToken
 }
 
+// PeekClientPendingModFlagsForTest reads the moderator-stash flags
+// (pendingModServerMuted/pendingModServerDeafened) without consuming them,
+// unlike takePendingModFlags. Lets a test assert what a handler left behind
+// without also clearing it out from under a later assertion.
+func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.pendingModServerMuted, c.pendingModServerDeafened
+}
+
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {

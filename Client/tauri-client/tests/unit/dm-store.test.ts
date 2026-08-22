@@ -408,6 +408,43 @@ describe("dmStore", () => {
       const after = dmStore.getState();
       expect(after).toBe(before);
     });
+
+    // OC-0301: lastMessageId must stay monotonic — updateDmLastMessage's
+    // replay guard (messageId <= lastMessageId) depends on it. A queued
+    // chat_message frame for an id below the current watermark (e.g. a
+    // burst draining after `ready` already advanced lastMessageId past it)
+    // must not roll the watermark backwards, or the next frame in the same
+    // burst slips past the sibling's guard and double-counts.
+    it("does not regress lastMessageId when the incoming id is behind the current watermark", () => {
+      setDmChannels([
+        makeDm({
+          channelId: 5,
+          lastMessageId: 500,
+          lastMessage: "peer message",
+          lastMessageAt: "2026-03-28T16:00:00Z",
+          unreadCount: 3,
+        }),
+      ]);
+      updateDmLastMessagePreview(
+        5,
+        495,
+        "own message replayed after ready",
+        "2026-03-28T15:00:00Z",
+      );
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.lastMessageId).toBe(500);
+      expect(ch.lastMessage).toBe("peer message");
+      expect(ch.lastMessageAt).toBe("2026-03-28T16:00:00Z");
+      expect(ch.unreadCount).toBe(3);
+    });
+
+    it("still updates when the incoming id is ahead of the current watermark", () => {
+      setDmChannels([makeDm({ channelId: 5, lastMessageId: 100 })]);
+      updateDmLastMessagePreview(5, 101, "newer own message", "2026-03-28T17:01:00Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.lastMessageId).toBe(101);
+      expect(ch.lastMessage).toBe("newer own message");
+    });
   });
 
   // ── updateDmLastMessage — channel reordering ──────────
