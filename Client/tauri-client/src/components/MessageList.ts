@@ -243,6 +243,23 @@ export type MessageListComponent = MountableComponent & {
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const ac = new AbortController();
   const unsubscribers: Array<() => void> = [];
+  /**
+   * Scopes the *current* rendered window's row listeners (react/reply/pin/
+   * edit/delete/copy-link, reply-ref, reaction chips, ...). `renderWindow`
+   * aborts and replaces this before every full rebuild, so a discarded row's
+   * listeners are dropped immediately instead of accumulating on `ac` for
+   * the whole component lifetime — every row used to register against
+   * `ac.signal` directly, and nothing aborted a stale render's registrations
+   * short of `destroy()`, retaining a full window of detached rows (and
+   * everything they reference: videos, images, embeds, tooltips) per rebuild
+   * (OC-0286). Mirrors ChannelSidebar's `renderAc` (OC-0229) and
+   * SettingsOverlay's `renderAC`.
+   */
+  let rowAc: AbortController | null = null;
+  /** Signal handed to row renderers — combines `ac.signal` (component
+   *  lifetime) with `rowAc.signal` (current window) so either one aborts a
+   *  row's listeners. Starts as plain `ac.signal` before the first render. */
+  let rowSignal: AbortSignal = ac.signal;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -329,7 +346,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
-    return renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal);
+    return renderMessage(item.message, item.isGrouped, allMessages, options, rowSignal);
   }
 
   function itemKey(index: number): string {
@@ -488,6 +505,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  /** Abort the previous window's row-scoped listeners and start a fresh
+   *  signal for the rows about to replace them. Must run before every
+   *  `clearChildren(contentContainer)` that discards rendered rows, so a
+   *  stale row can never outlive the render that replaced it (OC-0286) — the
+   *  incremental append fast path (tryAppendMessages) deliberately does NOT
+   *  call this, since it appends to rows that stay live until the next
+   *  rebuild and must keep using the current window's signal. */
+  function beginRowRender(): void {
+    rowAc?.abort();
+    rowAc = new AbortController();
+    rowSignal = AbortSignal.any([ac.signal, rowAc.signal]);
+  }
+
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
 
@@ -500,6 +530,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (virtualItems.length === 0) {
       releaseTrackedMedia();
+      beginRowRender();
       clearChildren(contentContainer);
       // With no rows, the region shows the fetch state: an in-region loading
       // placeholder, an inline error + Retry, or the welcome/empty state once
@@ -561,6 +592,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
       // Rebuild content
       releaseTrackedMedia();
+      beginRowRender();
       clearChildren(contentContainer);
       const fragment = document.createDocumentFragment();
       for (let i = start; i < end; i++) {
@@ -1011,6 +1043,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver = null;
     }
     ac.abort();
+    // rowSignal (AbortSignal.any([ac.signal, rowAc.signal])) already aborts
+    // as soon as ac does, but abort + drop the reference too so a stray
+    // beginRowRender() after destroy (there shouldn't be one) can't resurrect
+    // a live-looking controller.
+    rowAc?.abort();
+    rowAc = null;
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);
       scrollRafId = 0;
