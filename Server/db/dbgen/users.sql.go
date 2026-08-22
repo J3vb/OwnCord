@@ -37,9 +37,20 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const countUsersWithoutTOTP = `-- name: CountUsersWithoutTOTP :one
-SELECT COUNT(*) FROM users WHERE banned = 0 AND totp_secret IS NULL
+SELECT COUNT(*) FROM users
+WHERE (banned = 0
+       OR (ban_expires IS NOT NULL
+           AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
+  AND totp_secret IS NULL
 `
 
+// A lapsed temporary ban must not hide a TOTP-less user from this count: the
+// ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause /
+// ListMembers above), which treats an elapsed ban as "not banned" and lets
+// the user log in. Without it, require_2fa can be enabled while such a user
+// still exists, and their next login is refused forever with no recovery
+// path. The replace() normalises the space-separator form of ban_expires to
+// 'T' before comparing, because ' ' sorts below 'T'.
 func (q *Queries) CountUsersWithoutTOTP(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUsersWithoutTOTP)
 	var count int64

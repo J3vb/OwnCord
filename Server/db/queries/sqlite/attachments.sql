@@ -19,9 +19,25 @@ WHERE a.id = ?;
 -- users.avatar URL is what keeps them alive and authorizes serving them
 -- (migration 027). Excluding them here is what stops the sweep from destroying
 -- every avatar in the instance. idx_users_avatar makes the lookup cheap.
+--
+-- OC-0279: a message delete is a soft delete (messages.deleted=1, the row
+-- survives), so an attachment linked to a deleted message keeps a non-NULL
+-- message_id forever -- message_id IS NULL alone never matches it, so its
+-- file was permanently unreclaimable even though serveFileResolve already
+-- 404s it once the owning message is deleted. The second EXISTS below
+-- catches that case by joining back to messages.deleted instead. Matching on
+-- messages.deleted=1 here (rather than unlinking message_id in the delete
+-- path) is deliberate: unlinking would move the row onto the "unlinked
+-- attachment" access branch in serveFileAuthorize and make it downloadable
+-- again by the uploader.
 DELETE FROM attachments
-WHERE message_id IS NULL
-  AND uploaded_at < ?
+WHERE uploaded_at < ?
+  AND (
+    message_id IS NULL
+    OR EXISTS (
+      SELECT 1 FROM messages m WHERE m.id = attachments.message_id AND m.deleted = 1
+    )
+  )
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
   )
