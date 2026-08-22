@@ -611,6 +611,36 @@ describe("MemberList", () => {
     expect(headerTexts.find((t) => t?.includes("ADMIN"))).toContain("3");
   });
 
+  // OC-0295: renderList -> appendGroup -> createMemberItem hands every row's
+  // click/contextmenu listeners to the component-lifetime `disposable.signal`,
+  // which only aborts in destroy(). A full rebuild (any non-presence-only
+  // membersStore change, e.g. a role change) discards the old rows' DOM but
+  // never aborts their listeners, so a stale, detached row's listener keeps
+  // firing — and keeps the row (and everything it closed over) reachable —
+  // for the component's entire lifetime, exactly the defect already fixed in
+  // ChannelSidebar (renderAc, OC-0229) and MessageList (OC-0286).
+  it("aborts a discarded row's listeners on a full rebuild instead of retaining them for the component's lifetime (OC-0295)", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    const eveRowBefore = container.querySelector('[data-testid="member-5"]') as HTMLDivElement;
+    expect(eveRowBefore).not.toBeNull();
+
+    // Structural change (role change) -> renderList rebuild, discarding the
+    // old row in favor of a freshly rendered one.
+    updateMemberRole(5, "admin");
+    membersStore.flush();
+    expect(container.contains(eveRowBefore)).toBe(false);
+
+    // The row element is detached, but nothing detaches its listener from the
+    // underlying signal until destroy() -- clicking the stale, discarded row
+    // must not still reach the handler it closed over.
+    eveRowBefore.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
+  });
+
   it("re-renders when store updates to a different member set", () => {
     setTestMembers(testMembers);
     memberList.mount(container);
