@@ -282,6 +282,47 @@ describe("DmProfileSidebar", () => {
     localStorage.removeItem("owncord:dm-note:a.example.com:5");
   });
 
+  // -------------------------------------------------------------------------
+  // OC-0309: the panel has no store subscription of its own (by design --
+  // it's presentational) and is only ever painted once at mount from an
+  // open-time snapshot. update() is the mechanism its owner (MainPage) uses
+  // to repaint it in place when the underlying user's status/name changes
+  // while it stays open, so the panel doesn't disagree with the chat header
+  // it was opened from indefinitely.
+  // -------------------------------------------------------------------------
+  it("repaints name, avatar initial and status (dot + label) in place via update()", () => {
+    const user = makeUser({ id: 7, username: "bob", displayName: null, status: "online" });
+    const sidebar = createDmProfileSidebar(makeOptions({ user }));
+    sidebar.mount(container);
+
+    expect(container.querySelector('[data-testid="dps-username"]')!.textContent).toBe("bob");
+    expect(container.querySelector('[data-testid="dps-status"]')!.textContent).toContain("Online");
+    expect(container.querySelector('[data-testid="dps-avatar"]')!.textContent).toContain("B");
+
+    sidebar.update({ ...user, displayName: "Bobby", status: "offline" });
+
+    expect(container.querySelector('[data-testid="dps-username"]')!.textContent).toBe("Bobby");
+    expect(container.querySelector('[data-testid="dps-status"]')!.textContent).toContain("Offline");
+    expect(container.querySelector('[data-testid="dps-avatar"]')!.textContent).toContain("B");
+
+    // Repainted in place -- the panel element itself was never rebuilt.
+    expect(container.querySelectorAll('[data-testid="dm-profile-sidebar"]')).toHaveLength(1);
+
+    sidebar.destroy?.();
+  });
+
+  it("does not throw and is a no-op when update() is called before mount or after destroy", () => {
+    const user = makeUser({ id: 8 });
+    const sidebar = createDmProfileSidebar(makeOptions({ user }));
+
+    expect(() => sidebar.update({ ...user, status: "dnd" })).not.toThrow();
+
+    sidebar.mount(container);
+    sidebar.destroy?.();
+
+    expect(() => sidebar.update({ ...user, status: "idle" })).not.toThrow();
+  });
+
   it("falls back to the legacy unscoped key to migrate a note saved before host-scoping", () => {
     const user = makeUser({ id: 42 });
     localStorage.setItem("owncord:dm-note:42", "Pre-existing note");

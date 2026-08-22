@@ -50,6 +50,18 @@ export interface DmProfileSidebarOptions {
 
 export type DmProfileSidebarComponent = MountableComponent & {
   readonly isOpen: () => boolean;
+  /**
+   * Repaint the name, avatar initial and status (dot + label, both the
+   * avatar-corner one and the inline one) from a fresher `DmProfileData`,
+   * in place -- without rebuilding the panel and losing the note textarea's
+   * focus/selection. The panel itself has no subscription to any store (it
+   * is intentionally presentational); the owner is expected to call this
+   * when the underlying user's presence or identity changes while the panel
+   * stays open, mirroring how ChannelController keeps the DM chat header
+   * live across the same events (see ChannelController.ts's refreshDmHeader).
+   * A no-op before mount() or after destroy().
+   */
+  readonly update: (user: DmProfileData) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -124,10 +136,20 @@ export function createDmProfileSidebar(
 ): DmProfileSidebarComponent {
   const ac = new AbortController();
   const { signal } = ac;
-  const { user, onClose, host = "" } = options;
+  const { onClose, host = "" } = options;
+  let user = options.user;
 
   let panel: HTMLDivElement | null = null;
   let open = false;
+
+  // Live-updatable node refs, populated on mount() and cleared on destroy()
+  // -- see the `update()` doc comment on DmProfileSidebarComponent for why
+  // these are repainted in place instead of the whole panel being rebuilt.
+  let nameNode: HTMLDivElement | null = null;
+  let avatarLetterNode: HTMLSpanElement | null = null;
+  let statusDotNode: HTMLDivElement | null = null;
+  let statusDotInlineNode: HTMLSpanElement | null = null;
+  let statusTextNode: HTMLSpanElement | null = null;
 
   function isOpen(): boolean {
     return open;
@@ -158,6 +180,7 @@ export function createDmProfileSidebar(
     wrapper.style.background = "var(--accent, #5865f2)";
     const initial = avatarInitial(user);
     const letter = createElement("span", {}, initial);
+    avatarLetterNode = letter;
     wrapper.appendChild(letter);
 
     if (isRenderableAvatar(user.avatar)) {
@@ -189,6 +212,7 @@ export function createDmProfileSidebar(
     statusDot.style.border = "3px solid var(--bg-secondary, #111214)";
     statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     statusDot.title = STATUS_LABELS[user.status] ?? "Offline";
+    statusDotNode = statusDot;
     wrapper.appendChild(statusDot);
 
     return wrapper;
@@ -266,6 +290,7 @@ export function createDmProfileSidebar(
     nameEl.style.color = "var(--text-primary, #f2f3f5)";
     nameEl.style.marginBottom = "4px";
     setText(nameEl, resolveDisplayName(user));
+    nameNode = nameEl;
 
     // Status line
     const statusLine = createElement("div", {
@@ -286,8 +311,10 @@ export function createDmProfileSidebar(
     statusDotInline.style.borderRadius = "50%";
     statusDotInline.style.display = "inline-block";
     statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
+    statusDotInlineNode = statusDotInline;
 
     const statusText = createElement("span", {}, STATUS_LABELS[user.status] ?? "Offline");
+    statusTextNode = statusText;
     appendChildren(statusLine, statusDotInline, statusText);
 
     appendChildren(content, nameEl, statusLine);
@@ -413,7 +440,41 @@ export function createDmProfileSidebar(
       panel.remove();
       panel = null;
     }
+    nameNode = null;
+    avatarLetterNode = null;
+    statusDotNode = null;
+    statusDotInlineNode = null;
+    statusTextNode = null;
   }
 
-  return { mount, destroy, isOpen };
+  function update(nextUser: DmProfileData): void {
+    user = nextUser;
+    // Not mounted (or already torn down) -- nothing to repaint. mount() will
+    // paint the fresh `user` from scratch if it is called afterwards.
+    if (panel === null) return;
+
+    if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
+
+    const color = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
+    const label = STATUS_LABELS[user.status] ?? "Offline";
+
+    if (statusDotNode !== null) {
+      statusDotNode.style.background = color;
+      statusDotNode.title = label;
+    }
+    if (statusDotInlineNode !== null) {
+      statusDotInlineNode.style.background = color;
+    }
+    if (statusTextNode !== null) setText(statusTextNode, label);
+
+    // Only repaint the fallback letter if it is still showing -- once the
+    // fetched avatar image swaps in, buildAvatar() removes the letter node
+    // from the DOM (see above), and a stale identity's initial no longer
+    // matters (or exists) to update.
+    if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
+      setText(avatarLetterNode, avatarInitial(user));
+    }
+  }
+
+  return { mount, destroy, isOpen, update };
 }

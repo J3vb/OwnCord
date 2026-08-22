@@ -187,7 +187,7 @@ import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/c
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceUserProfile } from "../../src/stores/voice.store";
-import { dmStore } from "../../src/stores/dm.store";
+import { dmStore, updateDmParticipant } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
@@ -663,6 +663,52 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          10,
+          {
+            id: 10,
+            username: "alice_1998",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+            displayName: "Ali",
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+      roleRevision: 0,
+    }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    // Alice (10) has set a nickname of "Ali" -- every other identity surface
+    // (voice roster, member list, DM header) resolves through it, so the
+    // ring must too instead of showing the raw handle.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice_1998" });
+
+    const title = document.querySelector('[data-testid="incoming-call-title"]') as HTMLElement;
+    expect(title.textContent).toBe("Ali is calling");
+  });
+
+  it("falls back to the raw username on the incoming-call banner when the caller isn't in the members store (OC-0303)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 999, username: "stranger" });
+
+    const title = document.querySelector('[data-testid="incoming-call-title"]') as HTMLElement;
+    expect(title.textContent).toBe("stranger is calling");
+  });
+
   it("does not cancel an incoming ring when a fellow group-DM callee declines, only when the actual ringer does (OC-0114)", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -851,6 +897,53 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       localStorage.removeItem("owncord:dm-note:chat.example.com:5");
       localStorage.removeItem("owncord:dm-note:5");
     }
+  });
+
+  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(70, dmChannel(70, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: 70 };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 70,
+          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
+          name: "bob",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
+    chatAreaOpts.onToggleDmProfile();
+
+    const slot = capturedChatAreaRef.current!.dmProfileSlot;
+    const statusEl = slot.querySelector('[data-testid="dps-status"]') as HTMLElement;
+    const nameEl = slot.querySelector('[data-testid="dps-username"]') as HTMLElement;
+    expect(statusEl.textContent).toContain("Online");
+    expect(nameEl.textContent).toBe("bob");
+
+    // Bob goes offline and sets a nickname while the panel stays open, via
+    // the same updateDmParticipant call dispatcher.ts's PRESENCE and
+    // USER_UPDATE handlers make. The chat header this panel was opened from
+    // already stays live across this (ChannelController.ts:621-638) — the
+    // profile panel beside it must not be left showing the opposite.
+    updateDmParticipant(7, { status: "offline", displayName: "Bobby" });
+    dmStore.flush();
+
+    expect(statusEl.textContent).toContain("Offline");
+    expect(nameEl.textContent).toBe("Bobby");
   });
 });
 

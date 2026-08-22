@@ -60,7 +60,7 @@ import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
-import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
+import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
 import { createRingController } from "@lib/call-ring";
@@ -170,6 +170,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM profile sidebar (right panel, toggled via DM header click)
   let dmProfileSidebar: DmProfileSidebarComponent | null = null;
   let dmProfileSlot: HTMLDivElement | null = null;
+  /** Tears down the store subscriptions that keep an open profile panel's
+   *  status/name live (see toggleDmProfile) -- null while the panel is
+   *  closed. Always cleared alongside dmProfileSidebar itself. */
+  let dmProfileUnsub: (() => void) | null = null;
 
   // DM calls: the banner draws a ring, the controller owns its lifetime.
   let callBanner: IncomingCallBannerComponent | null = null;
@@ -233,14 +237,55 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     return channelName;
   }
 
+  /**
+   * Build the profile panel's data from the live stores for a 1:1 DM channel.
+   * Null for a group (no single "recipient" -- see the caller) or a channel
+   * that is no longer a DM. Shared by the initial open and by the live
+   * refresh below so the two can never disagree on how a status/name is
+   * derived.
+   */
+  function buildDmProfileUser(channelId: number): DmProfileData | null {
+    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    // A group has no single "recipient" — dm.store.ts documents .recipient as
+    // just the first of .participants for a group, with group-correct code
+    // expected to read .participants instead. A 1:1 profile panel built from
+    // it would present one arbitrary member's identity as the conversation.
+    if (dmChannel === undefined || dmChannel.isGroup) return null;
+
+    const recipient = dmChannel.recipient;
+    // Prefer membersStore's status, like the chat header's refreshDmHeader
+    // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
+    // this correct even for a DM partner who isn't a guild member.
+    const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
+    const status =
+      rawStatus === "online" ||
+      rawStatus === "idle" ||
+      rawStatus === "dnd" ||
+      rawStatus === "offline"
+        ? rawStatus
+        : ("offline" as const);
+
+    return {
+      id: recipient.id,
+      username: recipient.username,
+      // The DM header this panel opens from renders through dmDisplayName,
+      // which prefers the nickname -- drop it here and the panel shows a
+      // different identity from the header the reader just clicked.
+      displayName: recipient.displayName ?? null,
+      avatar: recipient.avatar || null,
+      status,
+      about: null,
+      joinDate: null,
+    };
+  }
+
   /** Toggle the DM profile sidebar open/closed for the current DM partner. */
   function toggleDmProfile(): void {
     if (dmProfileSlot === null) return;
 
     // If already open, close it
     if (dmProfileSidebar !== null) {
-      dmProfileSidebar.destroy?.();
-      dmProfileSidebar = null;
+      closeDmProfile();
       return;
     }
 
@@ -248,42 +293,42 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
 
-    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === active.id);
-    // A group has no single "recipient" — dm.store.ts documents .recipient as
-    // just the first of .participants for a group, with group-correct code
-    // expected to read .participants instead. A 1:1 profile panel built from
-    // it would present one arbitrary member's identity as the conversation.
-    if (dmChannel === undefined || dmChannel.isGroup) return;
-
-    const recipient = dmChannel.recipient;
-    const status =
-      recipient.status === "online" ||
-      recipient.status === "idle" ||
-      recipient.status === "dnd" ||
-      recipient.status === "offline"
-        ? recipient.status
-        : ("offline" as const);
+    const channelId = active.id;
+    const profileUser = buildDmProfileUser(channelId);
+    if (profileUser === null) return;
 
     dmProfileSidebar = createDmProfileSidebar({
-      user: {
-        id: recipient.id,
-        username: recipient.username,
-        // The DM header this panel opens from renders through dmDisplayName,
-        // which prefers the nickname -- drop it here and the panel shows a
-        // different identity from the header the reader just clicked.
-        displayName: recipient.displayName ?? null,
-        avatar: recipient.avatar || null,
-        status,
-        about: null,
-        joinDate: null,
-      },
+      user: profileUser,
       host: apiConfig.host ?? "",
       onClose: () => {
-        dmProfileSidebar?.destroy?.();
-        dmProfileSidebar = null;
+        closeDmProfile();
       },
     });
     dmProfileSidebar.mount(dmProfileSlot);
+
+    // Keep the panel's status and name live across presence/rename/nickname
+    // changes for as long as it stays open on this DM -- otherwise it is
+    // painted once from this open-time snapshot and never updated until
+    // re-mounted, leaving it disagreeing with the chat header it was opened
+    // from (which ChannelController.ts:621-638 already keeps live the same
+    // way). Torn down in closeDmProfile.
+    const recipientId = profileUser.id;
+    const refresh = (): void => {
+      const next = buildDmProfileUser(channelId);
+      if (next !== null) dmProfileSidebar?.update(next);
+    };
+    const unsubMembers = membersStore.subscribeSelector(
+      (s) => s.members.get(recipientId)?.status,
+      refresh,
+    );
+    const unsubDm = dmStore.subscribeSelector(
+      (s) => s.channels.find((c) => c.channelId === channelId),
+      refresh,
+    );
+    dmProfileUnsub = () => {
+      unsubMembers();
+      unsubDm();
+    };
   }
 
   /**
@@ -311,6 +356,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   /** Close the DM profile sidebar if open. */
   function closeDmProfile(): void {
+    if (dmProfileUnsub !== null) {
+      dmProfileUnsub();
+      dmProfileUnsub = null;
+    }
     if (dmProfileSidebar !== null) {
       dmProfileSidebar.destroy?.();
       dmProfileSidebar = null;
@@ -600,10 +649,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // A call in the DM you are already sitting in still rings: the
           // channel being open does not mean the app has focus, and Discord
           // rings there too.
+          // Resolve through the members store, same as every other identity
+          // surface (voice roster, member list, DM header) -- the raw wire
+          // username is only a fallback for a caller this client hasn't
+          // seen yet (OC-0303).
+          const caller = membersStore.getState().members.get(payload.from_user);
           ringCtrl?.incoming({
             channelId: payload.channel_id,
             fromUserId: payload.from_user,
-            fromUsername: payload.username,
+            fromUsername: caller !== undefined ? memberDisplayName(caller) : payload.username,
           });
         } catch (err) {
           log.error("call_incoming handler error", err);
