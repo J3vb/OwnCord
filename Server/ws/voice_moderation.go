@@ -187,6 +187,20 @@ func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serve
 	}
 }
 
+// clearPendingModFlags unconditionally wipes any stash left by
+// stashPendingModFlags. Unlike stashPendingModFlags it cannot early-return on
+// "both false" — false/false IS the clear — so it calls the setter directly.
+// Used when a move that stashed flags in anticipation of an eviction turns
+// out not to have evicted anyone (OC-0278): without this, a refused move
+// leaves an unbound, unexpiring stash that the target's next unrelated
+// voice_join (taken with no live row to read the real flags from) would
+// re-apply as a server mute/deafen nobody currently ordered.
+func clearPendingModFlags(mod VoiceModerator, targetID int64) {
+	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
+		setter.SetPendingVoiceModFlags(targetID, false, false)
+	}
+}
+
 // handleVoiceModMuteV2 processes a voice_mod_mute command. The DB row is the
 // authority for the UI; the SFU mute is what makes it more than cosmetic, so a
 // LiveKit failure is logged but does not fail the action — the persisted
@@ -445,7 +459,12 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
 		// target left the checked channel while this handler was deciding, in
-		// which case the move must not follow them.
+		// which case the move must not follow them. Either way the eviction
+		// that would have justified the stash above never happened, so undo
+		// it (OC-0278): left in place, it has no expiry and no binding to
+		// this move, and the target's next unrelated voice_join would consume
+		// it as if a moderator had just muted them.
+		clearPendingModFlags(d.Mod, c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	d.Mod.SendToUser(c.TargetID(), buildVoiceMoved(c.ToChannelID()))

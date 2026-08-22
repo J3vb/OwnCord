@@ -721,6 +721,54 @@ func TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel(t *testing.T) {
 	}
 }
 
+// TestVoiceMod_Move_RefusedMoveClearsPendingModStash locks OC-0278:
+// handleVoiceModMoveV2 stashes the target's server_muted/server_deafened onto
+// their live connection (stashPendingModFlags) BEFORE the eviction that is
+// supposed to justify it. When the target switched channels concurrently —
+// staged here the same way TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel
+// stages it, since the interleaving itself cannot be forced from a test — the
+// scoped eviction (DisconnectFromVoiceInChannel) refuses and the move errors
+// out, but nothing undoes the stash. The residue has no expiry and no binding
+// to this move: the target's next voice_join taken with no live row
+// (currentChID == 0) re-applies a server mute nobody currently ordered,
+// silently reverting whatever happened to server_muted in the meantime.
+//
+// A correct refusal must leave no residue: the stash should only survive a
+// move that actually evicted the target.
+func TestVoiceMod_Move_RefusedMoveClearsPendingModStash(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanA := seedVoiceChan(t, database, "vc-move-stash-a")
+	chanB := seedVoiceChan(t, database, "vc-move-stash-b") // where target "concurrently" switched to
+	chanC := seedVoiceChan(t, database, "vc-move-stash-c") // intended destination of the move
+	actor := seedVoiceUserWithRole(t, database, "admin-move-stash", 2)
+	target := seedVoiceUserWithRole(t, database, "member-move-stash", 4)
+
+	targetClient, _ := joinVoice(t, hub, target, chanA)
+	if _, err := database.SetVoiceServerMute(context.Background(), target.ID, chanA, true); err != nil {
+		t.Fatalf("SetVoiceServerMute: %v", err)
+	}
+	// Stage the concurrent switch: the DB row (what voiceModTarget authorizes
+	// against) still names chanA, but the client's live connection — the only
+	// thing the eviction below reads — already names chanB.
+	ws.SetClientVoiceStateForTest(targetClient, chanB, "join-token-b")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, chanA, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, chanC))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+		t.Fatalf("error code = %q, want VOICE_ERROR (move must refuse when the target left the authorized channel)", code)
+	}
+	if gotMuted, gotDeafened := ws.PeekClientPendingModFlagsForTest(targetClient); gotMuted || gotDeafened {
+		t.Errorf("pending mod stash after a refused move = (muted=%v, deafened=%v), want (false, false): "+
+			"a refused move must leave no residue for an unrelated later join to re-apply",
+			gotMuted, gotDeafened)
+	}
+}
+
 // ─── self-service controls under a server mute ───────────────────────────────
 
 func TestVoiceMute_SelfUnmuteWhileServerMuted_Refused(t *testing.T) {
