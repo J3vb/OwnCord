@@ -425,7 +425,12 @@ describe("dmStore", () => {
           unreadCount: 3,
         }),
       ]);
-      updateDmLastMessagePreview(5, 495, "own message replayed after ready", "2026-03-28T15:00:00Z");
+      updateDmLastMessagePreview(
+        5,
+        495,
+        "own message replayed after ready",
+        "2026-03-28T15:00:00Z",
+      );
       const ch = dmStore.getState().channels[0]!;
       expect(ch.lastMessageId).toBe(500);
       expect(ch.lastMessage).toBe("peer message");
