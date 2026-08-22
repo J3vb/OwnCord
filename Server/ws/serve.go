@@ -371,11 +371,16 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database *db.DB, c *Clien
 		return fmt.Errorf("refreshUserSnapshot: user %d is banned", c.userID)
 	}
 	if user.RoleID != c.user.RoleID {
-		roleName := "member"
-		if role, roleErr := database.GetRoleByID(ctx, user.RoleID); roleErr == nil && role != nil {
-			roleName = strings.ToLower(role.Name)
+		// Fail closed like the sibling lookups in upgradeAndAuth and
+		// handleFreshConnect: c.roleName is authoritative on the wire
+		// (auth_ok, member_join, every chat_message), so a lookup failure
+		// must not silently substitute "member" and pin the session to a
+		// fabricated role (OC-0299).
+		role, roleErr := database.GetRoleByID(ctx, user.RoleID)
+		if roleErr != nil || role == nil {
+			return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, roleErr)
 		}
-		c.roleName = roleName
+		c.roleName = strings.ToLower(role.Name)
 	}
 	c.user = user
 	return nil
@@ -714,6 +719,13 @@ func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
 	status := db.ConnectStatus(c.user.Status)
 	if updateErr := database.UpdateUserStatus(ctx, c.userID, status); updateErr != nil {
 		slog.Warn("ws UpdateUserStatus", "err", updateErr)
+		// Do not stamp c.user.Status on a failed write: it would make the
+		// auth_ok reply and the presence broadcast below both claim a value
+		// that users.status disagrees with, and buildReady's ListMembers read
+		// of users.status (via presentableMembers, which only ever downgrades
+		// a connected user to offline, never upgrades one) would then never
+		// self-correct for the rest of this session (OC-0298).
+		return
 	}
 	c.user.Status = status
 }
