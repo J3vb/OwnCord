@@ -209,6 +209,82 @@ func TestDeleteAccount_SoftDeletesMessages(t *testing.T) {
 	}
 }
 
+// TestDeleteAccount_ReversesMentionCounts locks OC-0294: DeleteAccount
+// soft-deletes every message the departing user wrote, but unlike
+// DeleteMessage and PurgeMessages (OC-0275) it never calls
+// DecrementMentionCounts. The live unread count excludes deleted rows, but
+// read_states.mention_count is a stored counter -- so a mention badge from a
+// message that no longer exists must be reversed here too, or it survives
+// forever on a channel with nothing unread.
+func TestDeleteAccount_ReversesMentionCounts(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	alice := seedUser(t, database, "alice-mention")
+	bob := seedUser(t, database, "bob-mention")
+	chID := seedChannel(t, database, "general-mention")
+
+	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, chID, msg.ID, []int64{bob}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 1 {
+		t.Fatalf("precondition: bob mention_count = %d, want 1", n)
+	}
+
+	if err := database.DeleteAccount(ctx, alice); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 0 {
+		t.Errorf("bob mention_count = %d after alice's account deletion, want 0 (phantom badge on a channel with nothing unread)", n)
+	}
+}
+
+// TestDeleteAccount_MentionCounts_PreservesOthersContribution is the control
+// for the fix above: it must reverse only the departing user's own mentions,
+// not blanket-zero the recipient's mention_count. Bob has two independent
+// mention badges in the same channel; deleting alice's account must leave
+// carol's genuine, unrelated badge standing.
+func TestDeleteAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	alice := seedUser(t, database, "alice-mention2")
+	carol := seedUser(t, database, "carol-mention2")
+	bob := seedUser(t, database, "bob-mention2")
+	chID := seedChannel(t, database, "general-mention2")
+
+	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions(alice): %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, chID, msgAlice.ID, []int64{bob}); err != nil {
+		t.Fatalf("IncrementMentionCounts(alice): %v", err)
+	}
+
+	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions(carol): %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, chID, msgCarol.ID, []int64{bob}); err != nil {
+		t.Fatalf("IncrementMentionCounts(carol): %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 2 {
+		t.Fatalf("precondition: bob mention_count = %d, want 2", n)
+	}
+
+	if err := database.DeleteAccount(ctx, alice); err != nil {
+		t.Fatalf("DeleteAccount: %v", err)
+	}
+
+	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 1 {
+		t.Errorf("bob mention_count = %d after alice's account deletion, want 1 (carol's genuine mention must survive)", n)
+	}
+}
+
 func TestDeleteAccount_NonexistentUser(t *testing.T) {
 	database := openMigratedMemory(t)
 
