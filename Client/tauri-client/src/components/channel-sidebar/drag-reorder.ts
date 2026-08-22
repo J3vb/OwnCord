@@ -226,13 +226,22 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
   );
 }
 
-/** Make a channel element draggable via mousedown (MANAGE_CHANNELS only). */
+/** Make a channel element draggable via mousedown (MANAGE_CHANNELS only).
+ *  `signal` is per-render — it is aborted and replaced on every sidebar
+ *  re-render, so it scopes only this row's own mousedown/mousemove/mouseup
+ *  listeners (OC-0229: a stale row must not outlive the render that replaced
+ *  it). `lifetimeSignal` is the sidebar's lifetime controller and is what
+ *  owns the shared document-level drag listeners (see the module comment on
+ *  `listenerOwners`): a mid-drag re-render must not tear those down or
+ *  cancel the in-flight drag, or `retargetDetachedDrag` never gets a chance
+ *  to run (OC-0296). */
 export function attachDragHandlers(
   el: HTMLElement,
   channel: Channel,
   containerEl: HTMLElement,
   channels: readonly Channel[],
   signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
 ): void {
   if (onReorderChannel === undefined) {
@@ -246,7 +255,7 @@ export function attachDragHandlers(
     return;
   }
 
-  ensureGlobalDragListeners(signal);
+  ensureGlobalDragListeners(lifetimeSignal);
 
   el.classList.add("channel-draggable");
   el.dataset.dragChannelId = String(channel.id);
@@ -293,7 +302,7 @@ export function attachDragHandlers(
         containerEl,
         channels,
         onReorder: onReorderChannel,
-        owner: signal,
+        owner: lifetimeSignal,
       };
       el.classList.add("dragging");
       document.body.classList.add("channel-reordering");

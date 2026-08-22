@@ -49,7 +49,11 @@ afterEach(() => {
 function openMenu(ch: Channel): HTMLElement {
   const el = document.createElement("div");
   container.appendChild(el);
-  attachChannelContextMenu(el, ch, ac.signal);
+  // Same signal for both the row-level listener and the menu's own lifetime
+  // here — this suite doesn't exercise the render-vs-sidebar distinction
+  // (see ChannelSidebar.test.ts's OC-0282 coverage for that), and `ac.abort()`
+  // below still needs to close the menu.
+  attachChannelContextMenu(el, ch, ac.signal, ac.signal);
   el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
   return el;
 }

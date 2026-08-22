@@ -21,11 +21,22 @@ import { appendPurgeSection } from "@components/purge-prompt";
 /** Bubbles from a channel row when its mute is toggled. */
 export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
 
-/** Attach a right-click context menu to a channel element for edit/delete/purge. */
+/**
+ * Attach a right-click context menu to a channel element for edit/delete/purge.
+ *
+ * `signal` governs only the row-level `contextmenu` listener below, so it
+ * dies with the row that created it on the next re-render (OC-0229).
+ * `lifetimeSignal` is the sidebar's own factory-lifetime signal (aborted only
+ * on sidebar destroy) and owns everything INSIDE the opened menu instead --
+ * the menu is mounted on document.body, independent of the row's render, and
+ * must not be torn down (or have its item clicks silently detached) by an
+ * unrelated re-render (OC-0282).
+ */
 export function attachChannelContextMenu(
   el: HTMLElement,
   channel: Channel,
   signal: AbortSignal,
+  lifetimeSignal: AbortSignal,
   onEdit?: (channel: Channel) => void,
   onDelete?: (channel: Channel) => void,
   onPurge?: (channel: Channel, count: number) => Promise<void>,
@@ -85,7 +96,7 @@ export function attachChannelContextMenu(
               closeMenu();
               markChannelRead(channel.id);
             },
-            { signal },
+            { signal: lifetimeSignal },
           );
         }
         menu.appendChild(markItem);
@@ -117,7 +128,7 @@ export function attachChannelContextMenu(
               }),
             );
           },
-          { signal },
+          { signal: lifetimeSignal },
         );
         menu.appendChild(muteItem);
       }
@@ -138,7 +149,7 @@ export function attachChannelContextMenu(
             closeMenu();
             onEdit(channel);
           },
-          { signal },
+          { signal: lifetimeSignal },
         );
         menu.appendChild(editItem);
       }
@@ -158,7 +169,7 @@ export function attachChannelContextMenu(
             closeMenu();
             onDelete(channel);
           },
-          { signal },
+          { signal: lifetimeSignal },
         );
         menu.appendChild(deleteItem);
       }
@@ -169,7 +180,7 @@ export function attachChannelContextMenu(
           dangerItemClass: "context-menu-item danger",
           separatorClass: showEdit || showDelete ? "context-menu-sep" : "",
           onPurge: (count) => onPurge(channel, count),
-          signal,
+          signal: lifetimeSignal,
           onDone: () => closeMenu(),
         });
       }
@@ -185,7 +196,10 @@ export function attachChannelContextMenu(
       // Tie this bridge listener's own lifetime to menuAc so it does not
       // outlive the menu it belongs to — closeMenu (which aborts menuAc)
       // already fires far more often than the sidebar's own teardown.
-      signal.addEventListener("abort", closeMenu, { signal: menuAc.signal });
+      // lifetimeSignal (not the per-render `signal`): the menu is mounted on
+      // document.body, independent of the row that opened it, so an unrelated
+      // re-render must not close it (OC-0282).
+      lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuAc.signal });
       // Defer so this click event doesn't immediately close it
       setTimeout(() => {
         if (menuAc.signal.aborted) return;

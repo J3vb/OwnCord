@@ -2238,6 +2238,105 @@ describe("ChannelSidebar voice identity badge", () => {
   });
 });
 
+// ── Identity-mismatch modal must not be bound to the per-render signal (OC-0281) ──
+//
+// openIdentityMismatchModal used to receive renderChannels()'s render-scoped
+// AbortSignal (aborted and replaced on EVERY re-render), not the sidebar's own
+// lifetime signal. That means any unrelated re-render -- a message landing in
+// another channel, a voice peer toggling mute, the WS flipping to
+// reconnecting -- tears the open re-pin prompt down, and a re-render landing
+// during the async fingerprint compute makes the click a silent no-op.
+describe("ChannelSidebar identity-mismatch modal lifetime (OC-0281)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  beforeEach(() => {
+    resetStores();
+    setChannels(testChannels);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  });
+
+  function badgeFor(userId: number): HTMLElement | null {
+    return container.querySelector(`.voice-user-item[data-voice-uid="${userId}"] .vu-verify`);
+  }
+
+  it("keeps the mismatch modal open across a sidebar re-render unrelated to the modal", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+
+    // Unrelated re-render, the same shape as a message landing in another
+    // channel (dispatcher -> incrementUnread -> new channels Map ->
+    // renderChannels()). Nothing about the open modal should care.
+    setChannels(testChannels);
+    channelsStore.flush();
+
+    expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+  });
+
+  it("still opens the mismatch modal when an unrelated re-render lands during the fingerprint compute", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    // Hold the fingerprint compute open so a re-render can land mid-flight.
+    let resolveFingerprint: (v: string) => void = () => {};
+    (computeKeyFingerprint as any).mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFingerprint = resolve;
+        }),
+    );
+
+    (badgeFor(10) as HTMLElement).click();
+
+    // Let the click's async handler actually reach the (held-open) fingerprint
+    // compute before landing the re-render, so the re-render provably lands
+    // mid-flight rather than before the compute even started.
+    await vi.waitFor(() => {
+      expect(computeKeyFingerprint).toHaveBeenCalled();
+    });
+
+    // Unrelated re-render lands while the click's async fingerprint compute
+    // is still in flight.
+    setChannels(testChannels);
+    channelsStore.flush();
+
+    resolveFingerprint("FEED FACE 1234 5678");
+
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+  });
+});
+
 // ── Channel feature flags in the sidebar ──
 //
 // nsfw and voice_max_users reach the sidebar through the channel store, so
@@ -2513,5 +2612,97 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );
     expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+  });
+});
+
+// ── Sidebar popovers must not close on an unrelated re-render (OC-0282) ──
+//
+// The channel context menu and the voice-user volume/moderation menu bridge
+// their "close if the sidebar goes away" listener onto renderChannels()'s
+// render-scoped AbortSignal, not the sidebar's own lifetime signal. Since
+// renderChannels() aborts and replaces that signal on EVERY re-render, an
+// open popover is torn down by events that have nothing to do with it -- a
+// message in another channel, a peer toggling their mic, a category
+// collapsing.
+describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".channel-ctx-menu, .user-vol-menu").forEach((el) => el.remove());
+  });
+
+  it("keeps the channel context menu open across a re-render unrelated to the menu", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
+    );
+    expect(document.querySelector('[data-testid="channel-context-menu"]')).not.toBeNull();
+
+    // Unrelated re-render, the same shape as a message landing in another
+    // channel (dispatcher -> incrementUnread -> new channels Map ->
+    // renderChannels()). The open menu has nothing to do with this.
+    setChannels(testChannels);
+    channelsStore.flush();
+
+    expect(document.querySelector('[data-testid="channel-context-menu"]')).not.toBeNull();
+  });
+
+  it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", () => {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Me", avatar: null, role: "member" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 80,
+      username: "OtherUser",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const voiceRow = container.querySelector(
+      '.voice-user-item[data-voice-uid="80"]',
+    ) as HTMLElement;
+    voiceRow.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 150, clientY: 250 }),
+    );
+    expect(document.querySelector(".user-vol-menu")).not.toBeNull();
+
+    // Unrelated re-render: a DIFFERENT peer joins/toggles state in the same
+    // channel, firing the voice store's structural-signature subscription.
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 81,
+      username: "AnotherUser",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.flush();
+
+    expect(document.querySelector(".user-vol-menu")).not.toBeNull();
   });
 });
