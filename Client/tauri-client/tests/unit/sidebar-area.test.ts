@@ -924,6 +924,85 @@ describe("SidebarArea", () => {
   });
 
   // -------------------------------------------------------------------------
+  // DM search preservation across refresh (OC-0280)
+  //
+  // refreshDmSidebar() destroys and recreates the whole DM sidebar subtree on
+  // every dmStore.channels change (presence flips, new messages, unread
+  // clears — not just "the DM list changed"). Real DmSidebar keeps the
+  // "Find a conversation" filter text and focus only in its own destroyed
+  // DOM, so a naive rebuild wipes both mid-typing. This mock stands in for
+  // the real component closely enough to pin that: a `.dm-search` input that
+  // SidebarArea can read/restore across the destroy+recreate cycle.
+  // -------------------------------------------------------------------------
+
+  describe("DM search preservation across refresh (OC-0280)", () => {
+    function mockDmSidebarWithSearchInput(): void {
+      (createDmSidebar as MockedFn).mockImplementation(() => {
+        let root: HTMLDivElement | null = null;
+        return {
+          mount: vi.fn((mountContainer: HTMLElement) => {
+            root = document.createElement("div");
+            const input = document.createElement("input");
+            input.className = "dm-search";
+            input.placeholder = "Find a conversation";
+            root.appendChild(input);
+            mountContainer.appendChild(root);
+          }),
+          destroy: vi.fn(() => {
+            root?.remove();
+            root = null;
+          }),
+        };
+      });
+    }
+
+    it("keeps the search filter text after a DM store change destroys/recreates the sidebar", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      mockDmSidebarWithSearchInput();
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+      expect(searchInput).not.toBeNull();
+      searchInput.value = "ali";
+
+      // A DM partner's presence flip / new message rebuilds dmStore.channels
+      // even though the user typed nothing and did not touch the DM list.
+      addDmChannel(makeDm({ channelId: 100 }));
+      dmStore.flush();
+
+      const newSearchInput = container.querySelector(".dm-search") as HTMLInputElement;
+      expect(newSearchInput).not.toBeNull();
+      expect(newSearchInput.value).toBe("ali");
+
+      cleanup(result);
+    });
+
+    it("keeps keyboard focus on the search input after a DM store change", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      mockDmSidebarWithSearchInput();
+
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
+      searchInput.focus();
+      expect(document.activeElement).toBe(searchInput);
+
+      addDmChannel(makeDm({ channelId: 100 }));
+      dmStore.flush();
+
+      const newSearchInput = container.querySelector(".dm-search") as HTMLInputElement;
+      expect(newSearchInput).not.toBeNull();
+      expect(newSearchInput).not.toBe(searchInput);
+      expect(document.activeElement).toBe(newSearchInput);
+
+      cleanup(result);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Member picker modal
   // -------------------------------------------------------------------------
 

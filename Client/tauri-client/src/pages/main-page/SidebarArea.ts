@@ -660,8 +660,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
        * entire DM sidebar on every store change. For a small number of DMs this
        * is acceptable, but should be optimized to diff/patch individual DM items
        * once the DM list grows or store updates become more frequent.
+       *
+       * dmStore.channels changes far more often than "the DM list changed" —
+       * a DM partner's presence flip or a new message rebuilds it too — so the
+       * "Find a conversation" filter text and input focus (state that lives
+       * only in the destroyed subtree) are captured here and restored onto
+       * the freshly-mounted input rather than silently dropped (OC-0280).
        */
       function refreshDmSidebar(): void {
+        const oldSearchInput = contentSlot.querySelector<HTMLInputElement>(".dm-search");
+        const savedQuery = oldSearchInput?.value ?? "";
+        const hadFocus = oldSearchInput !== null && document.activeElement === oldSearchInput;
+        const savedCaret = oldSearchInput?.selectionStart ?? null;
+
         if (activeSidebarContent !== null) {
           activeSidebarContent.destroy?.();
         }
@@ -673,6 +684,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         freshDm.mount(freshSlot);
         activeSidebarContent = freshDm;
         contentSlot.appendChild(freshSlot);
+
+        const newSearchInput = freshSlot.querySelector<HTMLInputElement>(".dm-search");
+        if (newSearchInput !== null) {
+          if (savedQuery !== "") {
+            newSearchInput.value = savedQuery;
+            newSearchInput.dispatchEvent(new Event("input"));
+          }
+          if (hadFocus) {
+            newSearchInput.focus();
+            if (savedCaret !== null) {
+              newSearchInput.setSelectionRange(savedCaret, savedCaret);
+            }
+          }
+        }
       }
 
       refreshDmSidebarRef = refreshDmSidebar;
