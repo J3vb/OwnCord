@@ -108,11 +108,37 @@ export function wrapWithMarker(
     };
   }
   if (value.slice(start - len, start) === marker && value.slice(end, end + len) === marker) {
-    return {
-      value: value.slice(0, start - len) + selected + value.slice(end + len),
-      selectionStart: start - len,
-      selectionEnd: start - len + selected.length,
+    // The characters immediately outside the selection match this marker,
+    // but matching alone doesn't prove they *are* this marker rather than
+    // the edge of a longer run of the same repeated character — e.g. the
+    // single "*" bordering a double-clicked word inside "**bold**" matches
+    // the italic marker "*", but it's really one half of a "**" bold pair.
+    // Compare the full contiguous run of the marker's character against
+    // exactly one marker-width: a run that's a whole marker-width *longer*
+    // means the true neighbour is a bigger marker, so unwrapping here would
+    // tear it apart. Fall through to wrapping (adding this marker as an
+    // extra layer) instead.
+    const markerChar = marker[0];
+    const runLength = (index: number, step: -1 | 1): number => {
+      let i = index;
+      let count = 0;
+      while (value[i] === markerChar) {
+        count++;
+        i += step;
+      }
+      return count;
     };
+    const leftRun = runLength(start - 1, -1);
+    const rightRun = runLength(end, 1);
+    const leftIsLongerMarker = leftRun - len === len;
+    const rightIsLongerMarker = rightRun - len === len;
+    if (!leftIsLongerMarker && !rightIsLongerMarker) {
+      return {
+        value: value.slice(0, start - len) + selected + value.slice(end + len),
+        selectionStart: start - len,
+        selectionEnd: start - len + selected.length,
+      };
+    }
   }
 
   return {
