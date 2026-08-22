@@ -499,16 +499,16 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 
 	// Send existing channel voice states to the joiner.
 	//
-	// OC-0172: this read is the ONLY place the server ever relays an existing
-	// participant's stored ECDH public key (voice_e2ee_announce) to a joiner
-	// — mid-call peers never counter-announce, they only answer an offer. A
-	// swallowed error here used to just `return`, leaving the joiner's own
-	// voice_state already broadcast to everyone (above) but the joiner
-	// itself blind to who else is in the channel and unable to complete the
-	// E2EE key exchange: it times out ~15s later with no explanation. Treat
-	// this the same as every other post-commit failure in this handler
-	// (rollbackVoiceJoin + an error frame), broadcasting the compensating
-	// voice_leave for the voice_state that already went out.
+	// OC-0172: this is the ONLY place a brand-new voice_join relays an
+	// existing participant's stored ECDH public key (voice_e2ee_announce) to
+	// a joiner — mid-call peers never counter-announce, they only answer an
+	// offer. A swallowed error here used to just `return`, leaving the
+	// joiner's own voice_state already broadcast to everyone (above) but the
+	// joiner itself blind to who else is in the channel and unable to
+	// complete the E2EE key exchange: it times out ~15s later with no
+	// explanation. Treat this the same as every other post-commit failure in
+	// this handler (rollbackVoiceJoin + an error frame), broadcasting the
+	// compensating voice_leave for the voice_state that already went out.
 	existing, err := h.db.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", err)
@@ -521,13 +521,14 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 			continue
 		}
 		c.sendMsg(buildVoiceState(vs))
-		// Send existing participant's ECDH public key (and its identity
-		// signature, F3 TOFU) so the joiner can participate in the
-		// client-side E2EE key exchange.
-		if pubKey, sig := h.getClientE2EEPubKey(vs.UserID); pubKey != "" {
-			c.sendMsg(buildVoiceE2EEAnnounce(vs.UserID, pubKey, sig))
-		}
 	}
+	// Send every other current participant's ECDH public key (and its
+	// identity signature, F3 TOFU) so the joiner can complete the E2EE key
+	// exchange. Factored into sendVoicePeerKeys (voice_e2ee.go) so the WS
+	// resume path (registerNow, hub.go) can reuse the exact same relay for a
+	// reconnecting client — voice_e2ee_announce itself is an unsequenced
+	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
+	h.sendVoicePeerKeys(c, channelID)
 
 	// Send voice_config to the joiner.
 	quality := "medium"

@@ -292,3 +292,44 @@ func (h *Hub) GetClientE2EEPubKeyForTest(userID int64) string {
 	key, _ := h.getClientE2EEPubKey(userID)
 	return key
 }
+
+// voiceChannelPeerUserIDs returns the user IDs of every currently connected
+// client in channelID, excluding excludeUserID. Callers must not already
+// hold h.mu (this takes h.mu.RLock itself).
+func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var ids []int64
+	for uid, c := range h.clients {
+		if uid != excludeUserID && c.getVoiceChID() == channelID {
+			ids = append(ids, uid)
+		}
+	}
+	return ids
+}
+
+// sendVoicePeerKeys sends c the current stored ECDH public key (and its F3
+// TOFU identity signature) for every other client currently in channelID.
+//
+// This is the server's only re-sync path for a client's local peer-key map,
+// factored out of voiceJoinComplete's per-participant relay loop
+// (voice_join.go) so both a brand-new voice_join AND a WS reconnect/resume
+// can use it. voice_e2ee_announce itself is delivered as an unsequenced
+// pub/sub frame (sendToVoiceChannelExcept -> h.pubsub.Publish, bypassing
+// deliverBroadcast entirely) — it never gets a seq, is never pushed to
+// h.replayBuf, and is never persisted, so neither reconnect replay tier
+// (buffer or DB) can ever redeliver one that was queued for a socket that
+// was down when it was sent. Before this existed, a client that blipped and
+// resumed permanently lost every peer key (or mid-call key rotation)
+// announced while its socket was down — its voice roster (voice_state,
+// which IS sequenced and replayed) stayed correct while its E2EE peer-key
+// map silently desynced from it (OC-0276). See registerNow
+// (hub.go), which calls this for every WS (re)registration that leaves the
+// client in a voice channel.
+func (h *Hub) sendVoicePeerKeys(c *Client, channelID int64) {
+	for _, uid := range h.voiceChannelPeerUserIDs(channelID, c.userID) {
+		if pubKey, sig := h.getClientE2EEPubKey(uid); pubKey != "" {
+			c.sendMsg(buildVoiceE2EEAnnounce(uid, pubKey, sig))
+		}
+	}
+}

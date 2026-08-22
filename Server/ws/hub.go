@@ -184,6 +184,11 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		// from one who is actually still connected — the same live-connection
 		// rule presentableMembers applies to the members array.
 		svc.Messages.SetOnlineChecker(h.IsUserConnected)
+		// So every DM payload DMService builds (GET/POST /dms, POST
+		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
+		// applies the same live-connection rule instead of only the ready
+		// payload's presentableDMChannels doing so (OC-0304).
+		svc.DMs.SetOnlineChecker(h.IsUserConnected)
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -640,6 +645,24 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// ordering dependency on pub/sub subscriptions.
 	if replacedVoiceChID != 0 {
 		h.updateKeyHolder(replacedVoiceChID)
+	}
+
+	// Re-sync this connection's local E2EE peer-key map now that it is
+	// reachable (OC-0276). voice_e2ee_announce is delivered as an
+	// unsequenced pub/sub frame (sendToVoiceChannelExcept, voice_e2ee.go),
+	// bypassing deliverBroadcast/h.replayBuf entirely — so on a network
+	// reconnect (the transfer above), neither reconnect replay tier can ever
+	// redeliver a peer's key, or a mid-call key rotation, that was announced
+	// while this socket was down. voiceJoinComplete's relay
+	// (voice_join.go) only runs on a brand-new voice_join, never here, so
+	// without this call a resumed connection's peer-key map would silently
+	// and permanently desync from its (correctly replayed) voice roster.
+	// c.getVoiceChID() reflects the transfer above, so this covers a
+	// resumed connection as well as a client pre-set into a voice channel
+	// (e.g. NewTestClientWithChannel); it is a no-op whenever c is not
+	// currently in a voice channel, which is the common case (fresh login).
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		h.sendVoicePeerKeys(c, voiceChID)
 	}
 }
 
