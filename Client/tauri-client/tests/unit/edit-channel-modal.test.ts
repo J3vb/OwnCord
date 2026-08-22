@@ -259,7 +259,7 @@ describe("EditChannelModal", () => {
 
   it("disables save button and shows 'Saving...' during save", async () => {
     let resolveSave: (() => void) | undefined;
-    const onSave = vi.fn<any>(
+    const onSave = vi.fn<(data: EditChannelData) => Promise<void>>(
       () =>
         new Promise<void>((resolve) => {
           resolveSave = resolve;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 const { mockVoiceGetState } = vi.hoisted(() => ({
   mockVoiceGetState: vi.fn(() => ({ currentChannelId: null as number | null })),
@@ -20,18 +20,18 @@ vi.mock("@stores/voice.store", () => ({
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
 
 function makeHandlers(): {
-  onSearch: ReturnType<typeof vi.fn>;
-  onToggleMute: ReturnType<typeof vi.fn>;
-  onToggleDeafen: ReturnType<typeof vi.fn>;
-  onToggleCamera: ReturnType<typeof vi.fn>;
-  onUploadFile: ReturnType<typeof vi.fn>;
+  onSearch: Mock<() => void>;
+  onToggleMute: Mock<() => void>;
+  onToggleDeafen: Mock<() => void>;
+  onToggleCamera: Mock<() => void>;
+  onUploadFile: Mock<() => void>;
 } {
   return {
-    onSearch: vi.fn(),
-    onToggleMute: vi.fn(),
-    onToggleDeafen: vi.fn(),
-    onToggleCamera: vi.fn(),
-    onUploadFile: vi.fn(),
+    onSearch: vi.fn<() => void>(),
+    onToggleMute: vi.fn<() => void>(),
+    onToggleDeafen: vi.fn<() => void>(),
+    onToggleCamera: vi.fn<() => void>(),
+    onUploadFile: vi.fn<() => void>(),
   };
 }
 

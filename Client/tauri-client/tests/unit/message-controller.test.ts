@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -72,11 +72,11 @@ function makeAbort(): { signal: AbortSignal; abort: () => void } {
 // ---------------------------------------------------------------------------
 
 describe("createMessageController", () => {
-  let showError: ReturnType<typeof vi.fn>;
+  let showError: Mock<(msg: string) => void>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    showError = vi.fn();
+    showError = vi.fn<(msg: string) => void>();
     mockIsChannelLoaded.mockReturnValue(false);
     mockGetChannelMessages.mockReturnValue([]);
   });

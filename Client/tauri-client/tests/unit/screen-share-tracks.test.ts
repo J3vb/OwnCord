@@ -12,7 +12,7 @@
  * test would sail straight past.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -114,16 +114,16 @@ function fakeDeps(
   hasWs = true,
 ): VideoTrackDeps & {
   wsSend: ReturnType<typeof vi.fn>;
-  onError: ReturnType<typeof vi.fn>;
-  reapplyAudioPipeline: ReturnType<typeof vi.fn>;
+  onError: Mock<(message: string) => void>;
+  reapplyAudioPipeline: Mock<() => void>;
 } {
   const wsSend = vi.fn();
   const ws = hasWs ? ({ send: wsSend } as unknown as WsClient) : null;
   return {
     getRoom: () => room,
     getWs: () => ws,
-    onError: vi.fn(),
-    reapplyAudioPipeline: vi.fn(),
+    onError: vi.fn<(message: string) => void>(),
+    reapplyAudioPipeline: vi.fn<() => void>(),
     wsSend,
   };
 }

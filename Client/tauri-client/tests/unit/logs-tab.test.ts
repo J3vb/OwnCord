@@ -45,7 +45,9 @@ describe("LogsTab", () => {
   let controller: AbortController;
 
   beforeEach(() => {
-    vi.restoreAllMocks();
+    // vitest 4's restoreAllMocks no longer resets vi.fn() state — reset
+    // explicitly so call counts don't accumulate across tests.
+    vi.resetAllMocks();
     controller = new AbortController();
     mockGetLogBuffer.mockReturnValue([]);
     mockAddLogListener.mockReturnValue(() => {});

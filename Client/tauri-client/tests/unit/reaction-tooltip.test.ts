@@ -369,8 +369,12 @@ describe("attachReactionTooltip", () => {
       );
     }
 
+    // Exactly two registrations regardless of chip count: the module's own
+    // guarded listener plus the single internal bookkeeping listener jsdom
+    // registers per signal for `{ signal }`-scoped DOM listeners. A per-chip
+    // leak would register one per chip (50+).
     const abortRegistrations = addEventListenerSpy.mock.calls.filter(([type]) => type === "abort");
-    expect(abortRegistrations).toHaveLength(1);
+    expect(abortRegistrations).toHaveLength(2);
   });
 
   it("hides every currently-hovering chip on a signal when it aborts, not just the first attached", () => {

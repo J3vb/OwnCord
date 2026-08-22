@@ -47,7 +47,10 @@ const mockRoom = vi.hoisted(() => ({
 }));
 
 vi.mock("livekit-client", () => ({
-  Room: vi.fn(() => mockRoom),
+  // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
+  Room: vi.fn(function () {
+    return mockRoom;
+  }),
   RoomEvent: {
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
@@ -77,11 +80,14 @@ vi.mock("livekit-client", () => ({
     h1080fps30: { resolution: { width: 1920, height: 1080 } },
   },
   DisconnectReason: { CLIENT_INITIATED: 0 },
-  ExternalE2EEKeyProvider: vi.fn(() => ({
-    setKey: vi.fn(),
-    getKeys: vi.fn().mockReturnValue([]),
-    removeAllListeners: vi.fn(),
-  })),
+  // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
+  ExternalE2EEKeyProvider: vi.fn(function () {
+    return {
+      setKey: vi.fn(),
+      getKeys: vi.fn().mockReturnValue([]),
+      removeAllListeners: vi.fn(),
+    };
+  }),
   createLocalVideoTrack: vi.fn(async () => ({
     kind: "video",
     mediaStreamTrack: new MediaStreamTrack(),

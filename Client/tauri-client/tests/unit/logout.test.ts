@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 // clearAuth pulls in voice/livekit/notification teardown; stub it so this test
 // stays a pure unit test of the best-effort revoke-then-teardown ordering.
@@ -9,7 +9,7 @@ vi.mock("@stores/auth.store", () => ({
 
 import { logout } from "../../src/lib/logout";
 
-function makeApi(logoutImpl: () => Promise<void>): { logout: ReturnType<typeof vi.fn> } {
+function makeApi(logoutImpl: () => Promise<void>): { logout: Mock<() => Promise<void>> } {
   return { logout: vi.fn(logoutImpl) };
 }
 

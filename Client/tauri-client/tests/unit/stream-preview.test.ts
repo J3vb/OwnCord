@@ -361,8 +361,12 @@ describe("streamPreview", () => {
     // A re-render re-attaches the same row to the same sidebar-lifetime signal.
     attachStreamPreview(row1, 1, "Alice", false, true, ac.signal);
 
+    // Exactly two registrations regardless of attach count: the module's own
+    // guarded listener plus the single internal bookkeeping listener jsdom
+    // registers per signal for `{ signal }`-scoped DOM listeners. A
+    // per-attach leak would register one per attach call.
     const abortCalls = addSpy.mock.calls.filter(([type]) => type === "abort");
-    expect(abortCalls).toHaveLength(1);
+    expect(abortCalls).toHaveLength(2);
   });
 
   // v091: a structural re-render (clearChildren + rebuild) detaches the old
