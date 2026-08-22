@@ -6541,7 +6541,7 @@
    "fix": {
     "commit": "201e2bc",
     "test": "Server/ws/oc_0276_voice_e2ee_resync_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6564,7 +6564,7 @@
    "fix": {
     "commit": "15d65e1",
     "test": "Client/tauri-client/tests/unit/noise-suppression-restart.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6587,7 +6587,7 @@
    "fix": {
     "commit": "66681d1",
     "test": "Server/ws/voice_moderation_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6610,7 +6610,7 @@
    "fix": {
     "commit": "140633a",
     "test": "Server/db/attachment_orphan_softdelete_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6633,7 +6633,7 @@
    "fix": {
     "commit": "4da361a",
     "test": "Client/tauri-client/tests/unit/sidebar-area.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6656,7 +6656,7 @@
    "fix": {
     "commit": "0e3435a",
     "test": "Client/tauri-client/tests/unit/channel-sidebar.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6679,7 +6679,7 @@
    "fix": {
     "commit": "0e3435a",
     "test": "Client/tauri-client/tests/unit/channel-sidebar.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6702,7 +6702,7 @@
    "fix": {
     "commit": "3767be1",
     "test": "Client/tauri-client/tests/unit/dispatcher.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6725,7 +6725,7 @@
    "fix": {
     "commit": "d08c7e0",
     "test": "Server/service/mentions_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6748,7 +6748,7 @@
    "fix": {
     "commit": "51b3144",
     "test": "Server/ws/handlers_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6771,7 +6771,7 @@
    "fix": {
     "commit": "3bc52ea",
     "test": "Client/tauri-client/tests/unit/message-list-row-listener-leak.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6794,7 +6794,7 @@
    "fix": {
     "commit": "3767be1",
     "test": "Client/tauri-client/tests/unit/livekit-session.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6817,7 +6817,7 @@
    "fix": {
     "commit": "27f42c1",
     "test": "Client/tauri-client/tests/unit/channel-mutes.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6840,7 +6840,7 @@
    "fix": {
     "commit": "f4a60a6",
     "test": "Client/tauri-client/tests/unit/voice-callbacks.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6863,7 +6863,7 @@
    "fix": {
     "commit": "82c202d",
     "test": "Server/ws/handler_v2_migration_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6886,7 +6886,7 @@
    "fix": {
     "commit": "140633a",
     "test": "Server/db/count_users_without_totp_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6909,7 +6909,7 @@
    "fix": {
     "commit": "140633a",
     "test": "Server/admin/api_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6932,7 +6932,7 @@
    "fix": {
     "commit": "582dff6",
     "test": "Server/db/mention_queries_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6955,7 +6955,7 @@
    "fix": {
     "commit": "6b42aeb",
     "test": "Server/db/account_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -6978,7 +6978,7 @@
    "fix": {
     "commit": "7e767fe",
     "test": "Client/tauri-client/tests/unit/member-list.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7001,7 +7001,7 @@
    "fix": {
     "commit": "0e3435a",
     "test": "Client/tauri-client/tests/unit/drag-reorder.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7024,7 +7024,7 @@
    "fix": {
     "commit": "ec6e357",
     "test": "Server/service/user_postcommit_readerror_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7047,7 +7047,7 @@
    "fix": {
     "commit": "e436acd",
     "test": "Server/ws/oc_0298_apply_connect_status_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7070,7 +7070,7 @@
    "fix": {
     "commit": "e436acd",
     "test": "Server/ws/oc_0299_refresh_snapshot_role_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7093,7 +7093,7 @@
    "fix": {
     "commit": "31f73e3",
     "test": "Client/tauri-client/tests/unit/message-input.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7116,7 +7116,7 @@
    "fix": {
     "commit": "770c849",
     "test": "Client/tauri-client/tests/unit/dm-store.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7139,7 +7139,7 @@
    "fix": {
     "commit": "956271f",
     "test": "Server/ws/oc_0302_pending_mod_flags_transfer_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7162,7 +7162,7 @@
    "fix": {
     "commit": "f4a60a6",
     "test": "Client/tauri-client/tests/unit/main-page.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7185,7 +7185,7 @@
    "fix": {
     "commit": "201e2bc",
     "test": "Server/service/dm_test.go; Server/api/dm_handler_presence_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7208,7 +7208,7 @@
    "fix": {
     "commit": "ab4b1ed",
     "test": "Server/api/diagnostics_handler_test.go",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7231,7 +7231,7 @@
    "fix": {
     "commit": "f468bab",
     "test": "Client/tauri-client/tests/unit/emoji-picker.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7254,7 +7254,7 @@
    "fix": {
     "commit": "1158506",
     "test": "Client/tauri-client/tests/unit/quick-switcher.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7277,7 +7277,7 @@
    "fix": {
     "commit": "f468bab",
     "test": "Client/tauri-client/tests/unit/emoji-picker.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7300,7 +7300,7 @@
    "fix": {
     "commit": "f4a60a6",
     "test": "Client/tauri-client/tests/unit/main-page.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   },
   {
@@ -7323,7 +7323,7 @@
    "fix": {
     "commit": "d0791c4",
     "test": "Client/tauri-client/tests/unit/status-picker-userbar.test.ts",
-    "revertProof": "self-reported"
+    "revertProof": "pass"
    }
   }
  ]

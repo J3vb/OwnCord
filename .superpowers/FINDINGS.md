@@ -7064,7 +7064,7 @@ Server/ws/hub.go:559 — registerNow discards everything queued for the replaced
 
 **Suggested fix:** Factor voice_join.go:520-530's per-participant relay loop (voice_state + buildVoiceE2EEAnnounce for each other participant with a stored key) into one helper, e.g. func (h *Hub) sendVoicePeerKeys(ctx, c *Client, channelID int64), and call it from the resume path in serve.go once registerNow has restored the client's voice channel — so BOTH reconnect tiers re-sync every current peer's ECDH public key. One shared call on the resume path fixes arrivals, re-announces missed during the outage, and the LiveKit-reconnect variant at once; making announces sequenced/replayable is a much larger change and not required.
 
-**Fixed:** `201e2bc` · test `Server/ws/oc_0276_voice_e2ee_resync_test.go` · revert-proof self-reported
+**Fixed:** `201e2bc` · test `Server/ws/oc_0276_voice_e2ee_resync_test.go` · revert-proof pass
 
 ### OC-0277 — high — RNNoise processor's restart() destroys the pipeline and then rebuilds it from `opts.audioContext`, which livekit-client never sends on restart — any mic restart while Enhanced Noise Suppression is on permanently publishes silence
 
@@ -7108,7 +7108,7 @@ esm.mjs:20597 (LocalTrack.restart) stops the old raw mic track *before* acquirin
 
 **Suggested fix:** Cache the AudioContext in the processor closure so restart() can reuse it. In createRNNoiseProcessor add `let ctx: AudioContext | null = null;` alongside `pipeline`, and in init() replace `const ctx = opts.audioContext;` with `const audioCtx = opts.audioContext ?? ctx; if (audioCtx == null) throw new Error("RNNoise processor: no AudioContext available"); ctx = audioCtx;` then pass `audioCtx` to both createWorkletPipeline/createScriptProcessorPipeline. One guard in the shared init() covers restart() too. (Optionally also build the new pipeline before destroying the old one so a future failure is not destructive, but the ctx cache alone fixes the reported defect.)
 
-**Fixed:** `15d65e1` · test `Client/tauri-client/tests/unit/noise-suppression-restart.test.ts` · revert-proof self-reported
+**Fixed:** `15d65e1` · test `Client/tauri-client/tests/unit/noise-suppression-restart.test.ts` · revert-proof pass
 
 ### OC-0278 — medium — voice_mod_move stashes the server-mute before the eviction that justifies it, so a refused move leaves a phantom mute that fires on an unrelated later join
 
@@ -7143,7 +7143,7 @@ The stash is unconditional and unscoped (voice_moderation.go:181-188, client.go:
 
 **Suggested fix:** Clear the stash on the refusal branch in handleVoiceModMoveV2 - one guard in the shared handler, not in the consumer: change voice_moderation.go:444-450 to call stashPendingModFlags(d.Mod, c.TargetID(), false, false) (or a dedicated clearPendingModFlags helper, since stashPendingModFlags early-returns when both flags are false - so a small clearPendingModFlags that calls setter.SetPendingVoiceModFlags(target, false, false) unconditionally is needed) immediately before `return Result{Error: ... "user is not connected"}`. Moving the stash to after the successful disconnect is not equivalent: the target could send an unrelated voice_join in the gap between the eviction and the stash, leaving the same residue.
 
-**Fixed:** `66681d1` · test `Server/ws/voice_moderation_test.go` · revert-proof self-reported
+**Fixed:** `66681d1` · test `Server/ws/voice_moderation_test.go` · revert-proof pass
 
 ### OC-0279 — medium — Deleting a message strands its uploaded attachment files on disk forever — the only reaper requires message_id IS NULL
 
@@ -7167,7 +7167,7 @@ Contrast — the project treats this exact invariant as load-bearing elsewhere: 
 
 **Suggested fix:** Widen the single shared reaper instead of editing every delete path: in Server/db/queries/sqlite/attachments.sql, change DeleteOrphanedAttachments' predicate to `WHERE uploaded_at < ? AND (message_id IS NULL OR EXISTS (SELECT 1 FROM messages m WHERE m.id = attachments.message_id AND m.deleted = 1)) AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)` and regenerate via the db-change skill. That covers single delete, purge and account deletion at once, keeps the avatar guard, and does not reopen the serve path (unlinking message_id instead would make the file downloadable again by the uploader and by admins via serveFileAuthorize's ChannelID==nil branch, upload_handler.go:429-458).
 
-**Fixed:** `140633a` · test `Server/db/attachment_orphan_softdelete_test.go` · revert-proof self-reported
+**Fixed:** `140633a` · test `Server/db/attachment_orphan_softdelete_test.go` · revert-proof pass
 
 ### OC-0280 — medium — Any DM-store change destroys and recreates the whole DM sidebar, wiping the "Find a conversation" filter and stealing keyboard focus mid-typing
 
@@ -7196,7 +7196,7 @@ dm.store.ts:189-195  clearDmUnread -> always maps to a new object for the matchi
 
 **Suggested fix:** Preserve the search state across the rebuild in the single shared place, `refreshDmSidebar`: before `activeSidebarContent.destroy?.()`, capture `const oldInput = contentSlot.querySelector<HTMLInputElement>(".dm-search"); const q = oldInput?.value ?? ""; const hadFocus = oldInput !== null && document.activeElement === oldInput; const caret = oldInput?.selectionStart ?? null;` and after `freshDm.mount(freshSlot)` restore it: `const newInput = freshSlot.querySelector<HTMLInputElement>(".dm-search"); if (newInput !== null && q !== "") { newInput.value = q; newInput.dispatchEvent(new Event("input")); } if (newInput !== null && hadFocus) { newInput.focus(); if (caret !== null) newInput.setSelectionRange(caret, caret); }`. (A cleaner long-term variant is an `initialQuery` option on `createDmSidebar` plus a `dmQuery` variable in `createSidebarArea`, but the above needs no signature change and fixes every refresh path — dmStore, activeChannelId, and the mute-toggle `refreshDmSidebarRef?.()` at SidebarArea.ts:543 — at once.)
 
-**Fixed:** `4da361a` · test `Client/tauri-client/tests/unit/sidebar-area.test.ts` · revert-proof self-reported
+**Fixed:** `4da361a` · test `Client/tauri-client/tests/unit/sidebar-area.test.ts` · revert-proof pass
 
 ### OC-0281 — medium — Voice E2EE identity-mismatch modal is bound to the sidebar's per-render signal, so an unrelated re-render destroys the TOFU re-pin prompt (or swallows it before it opens)
 
@@ -7214,7 +7214,7 @@ ChannelSidebar.ts:152        signal.addEventListener("abort", closeIdentityModal
 
 **Suggested fix:** Give openIdentityMismatchModal the sidebar-lifetime signal instead of the render signal: thread `ac.signal` down beside the per-render one (a single extra parameter through renderCategoryGroup/renderChannelItem/renderVoiceChannelItem) and use it only for the :152 abort bridge; keep `{ signal }` (per-render) on the badge's click listener at :497 so OC-0229's retention fix stays intact.
 
-**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/channel-sidebar.test.ts` · revert-proof self-reported
+**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/channel-sidebar.test.ts` · revert-proof pass
 
 ### OC-0282 — medium — Sidebar right-click popovers (channel context menu, voice-user volume/moderation menu) close themselves on any unrelated sidebar re-render
 
@@ -7232,7 +7232,7 @@ ChannelSidebar.ts:795  renderAc?.abort();   // fires both bridges on every rende
 
 **Suggested fix:** Same single root fix: thread the sidebar-lifetime `ac.signal` down alongside the per-render signal and hand it to attachChannelContextMenu and showUserVolumeMenu as the teardown-bridge owner (context-menu.ts:188, volume-menu.ts:136) and as the owner of the context menu's item click listeners; keep the per-render signal on the row-level `contextmenu` listener (context-menu.ts:53) so the OC-0229 retention fix and its test still hold.
 
-**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/channel-sidebar.test.ts` · revert-proof self-reported
+**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/channel-sidebar.test.ts` · revert-proof pass
 
 ### OC-0283 — medium — OC-0239's `stillInRoster` parameter is true for every genuine departure, so the departed-peer key retirement (OC-0020) never runs in production
 
@@ -7254,7 +7254,7 @@ livekitE2EE.ts:836 `if (!isDuplicate) { this._peerPublicKeys.set(userId, peerKey
 
 **Suggested fix:** Delete the `!stillInRoster` term at livekitE2EE.ts:1298 (and the now-unused parameter plus the dispatcher.ts:1062-1063 snapshot), restoring unconditional retirement on leave — it is the only replay defence and the roster cannot distinguish the two cases it was added to separate, since the pre-mutation snapshot is identical for a genuine departure and for a stale superseded leave. The OC-0213 stale-leave case needs a discriminator the roster does not carry: have the server stamp the join instance on `voice_leave` (an epoch/join id, matching what `_peerOfferEpochs` already tracks) and drop a leave whose epoch is older than the peer's current announce, rather than suppressing retirement.
 
-**Fixed:** `3767be1` · test `Client/tauri-client/tests/unit/dispatcher.test.ts` · revert-proof self-reported
+**Fixed:** `3767be1` · test `Client/tauri-client/tests/unit/dispatcher.test.ts` · revert-proof pass
 
 ### OC-0284 — medium — chat_delete is idempotent-but-not-guarded, so a repeated delete decrements mention_count again and wipes an unrelated, genuinely-unread mention badge
 
@@ -7274,7 +7274,7 @@ Server/db/mention_queries.go:274-281 — `UPDATE read_states SET mention_count =
 
 **Suggested fix:** Make the soft delete a compare-and-set and skip the mention reversal when it did not transition, which fixes both the sequential repeat and the concurrent race in one place. In Server/db/queries/sqlite/messages.sql change SoftDeleteMessage to `-- name: SoftDeleteMessage :execresult` / `UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;`, regenerate via the db-change skill, then in db.DeleteMessage (Server/db/message_queries.go:189-206) check RowsAffected() == 0 and return a sentinel (ErrNotFound or a new ErrAlreadyDeleted). MessageService.DeleteMessage then returns ErrDeletedMessage on that sentinel before reaching the DecrementMentionCounts call at message_crud.go:477. Adding `if msg.Deleted { return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage) }` after message_crud.go:422 is a cheap complement that saves the extra round trip, but it is not sufficient on its own.
 
-**Fixed:** `d08c7e0` · test `Server/service/mentions_test.go` · revert-proof self-reported
+**Fixed:** `d08c7e0` · test `Server/service/mentions_test.go` · revert-proof pass
 
 ### OC-0285 — medium — kickClient never stops readPump, so a banned / revoked WS principal keeps executing fully authorized commands after the server decides to cut it off
 
@@ -7313,7 +7313,7 @@ serve_pumps.go:15-23 — every drained frame is written under writeTimeout (serv
 
 **Suggested fix:** Add one guard at the top of the shared dispatch function instead of at each kick site — in Server/ws/handlers.go, first statement of handleMessage: `if c.isSendClosed() { return }`, before the handleMessageSessionRecheck call. c.isSendClosed() is already the canonical 'this client has been cut off' flag (set by closeSend under c.mu, the same flag pubsub.Subscribe uses as its re-take guard), it is set synchronously by kickClient before it returns, and handleMessage is the only path a frame reaches a handler through. This drops every post-kick frame regardless of which goroutine kicked, without touching writePump's drain-before-close contract that TestWritePump_DrainsQueuedFramesAfterCloseSend locks. It also makes the msgCount reset harmless. Optionally pair it with a conn close-deadline in kickClient, but that is not required to close the hole.
 
-**Fixed:** `51b3144` · test `Server/ws/handlers_test.go` · revert-proof self-reported
+**Fixed:** `51b3144` · test `Server/ws/handlers_test.go` · revert-proof pass
 
 ### OC-0286 — medium — MessageList registers every message row's listeners on the component-lifetime AbortSignal, so each rebuild permanently retains a full window of detached rows
 
@@ -7337,7 +7337,7 @@ MessageList.ts:563-569
 
 **Suggested fix:** Add a render-scoped controller in createMessageList and scope row listeners to it, mirroring SettingsOverlay's pattern rather than patching each renderer: `let rowAc: AbortController | null = null; let rowSignal: AbortSignal = ac.signal;` then, immediately before each `clearChildren(contentContainer)` rebuild in renderWindow (MessageList.ts:502 and :563), do `rowAc?.abort(); rowAc = new AbortController(); rowSignal = AbortSignal.any([ac.signal, rowAc.signal]);`. Change renderVirtualItem (:332) to `renderMessage(item.message, item.isGrouped, allMessages, options, rowSignal)` so the append fast path keeps using the current window's signal (it appends to rows that are still live and must not be aborted until the next rebuild). Also `rowAc?.abort(); rowAc = null;` in destroy() alongside `ac.abort()`. One change in the shared renderVirtualItem covers every row renderer; no signature changes to renderers.ts/reactions.ts are needed.
 
-**Fixed:** `3bc52ea` · test `Client/tauri-client/tests/unit/message-list-row-listener-leak.test.ts` · revert-proof self-reported
+**Fixed:** `3bc52ea` · test `Client/tauri-client/tests/unit/message-list-row-listener-leak.test.ts` · revert-proof pass
 
 ### OC-0287 — medium — An unmute that cannot acquire the microphone fails silently — the client reports itself unmuted to the server and every peer while publishing no audio, with no error and no recovery button
 
@@ -7372,7 +7372,7 @@ Contrast restoreLocalVoiceState (livekitSession.ts:925-931), which does it right
 
 **Suggested fix:** Wrap only the re-enable branch in applyMicMuteState (livekitSession.ts:1640-1642) — one guard in the shared function covers setMuted, setDeafened, ptt.ts and roomEventHandlers: `try { await room.localParticipant.setMicrophoneEnabled(true); this._audioPipeline.setupAudioPipeline(); } catch (err) { setListenOnly(true); setLocalMuted(true); log.warn(...); this.onErrorCallback?.("Microphone unavailable — you are muted"); }`. setLocalMuted(true) stops the widget claiming a live mic and setListenOnly(true) reveals the existing Grant Microphone button; re-sending voice_mute{muted:true} to resync the server is the follow-on, but the shared catch is the minimum that removes the silent state.
 
-**Fixed:** `3767be1` · test `Client/tauri-client/tests/unit/livekit-session.test.ts` · revert-proof self-reported
+**Fixed:** `3767be1` · test `Client/tauri-client/tests/unit/livekit-session.test.ts` · revert-proof pass
 
 ### OC-0288 — medium — Pre-scoping mute list is copied into every server the user connects to, silently muting unrelated channels on each new host
 
@@ -7399,7 +7399,7 @@ Nothing ever removes `owncord:settings:mutedChannels`, so keyExists(MUTED_KEY) s
 
 **Suggested fix:** Consume the legacy key on migration — in the branch at channel-mutes.ts:98-102, after `writeMuted(legacy)` add `localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);` (STORAGE_PREFIX is already imported at line 21). One removal in the shared read-through makes the migration fire exactly once; every later host then falls through to `cache = new Set()` at line 104.
 
-**Fixed:** `27f42c1` · test `Client/tauri-client/tests/unit/channel-mutes.test.ts` · revert-proof self-reported
+**Fixed:** `27f42c1` · test `Client/tauri-client/tests/unit/channel-mutes.test.ts` · revert-proof pass
 
 ### OC-0289 — medium — The DM "Start a call" button has no already-in-this-voice-channel guard, so a redial inside a live call errors with ALREADY_JOINED
 
@@ -7425,7 +7425,7 @@ Client/tauri-client/src/lib/dispatcher.ts:1355 — the catch-all: showToast(payl
 
 **Suggested fix:** Add the guard once in the shared function rather than in startCall: at Client/tauri-client/src/pages/main-page/VoiceCallbacks.ts:183, right after the socketLive() check, `if (voiceStore.getState().currentChannelId === channelId) return;` (voiceStore is already imported at line 8). That covers startCall and any future caller, matches what ChannelSidebar.ts:535/564 already do by hand, and leaves the call_ring nudge in startCall intact.
 
-**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/voice-callbacks.test.ts` · revert-proof self-reported
+**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/voice-callbacks.test.ts` · revert-proof pass
 
 ### OC-0290 — medium — A rate-limited voice_leave leaves the user permanently stuck in voice — client tears down unconditionally, server keeps the membership, and rejoin is refused with ALREADY_JOINED
 
@@ -7478,7 +7478,7 @@ Client/tauri-client/src/lib/dispatcher.ts:1298-1354 (rollback branch is gated on
 
 handlers.go:96 already runs h.handleVoiceLeave for an error result carrying LeaveVoice, and handleVoiceLeave is a documented no-op when the client is not in voice (voice_leave.go:28-32), so a burst of spurious leaves stays free. The fan-out this limiter guards is still capped, because every leave that actually broadcasts requires a preceding join and voice_join has its own 5/s limiter (voice_join.go:90-94). Note the alternative — only consuming the limiter when info.VoiceChannelID != 0 — does NOT fully close it: an initial join that predates the 1s window still allows a 6th in-window in-voice leave. Existing test handler_v2_migration_test.go:69-90 stays green either way.
 
-**Fixed:** `82c202d` · test `Server/ws/handler_v2_migration_test.go` · revert-proof self-reported
+**Fixed:** `82c202d` · test `Server/ws/handler_v2_migration_test.go` · revert-proof pass
 
 ### OC-0291 — medium — require_2fa's "all users enrolled" gate ignores lapsed temporary bans, permanently locking those users out of their own account
 
@@ -7512,7 +7512,7 @@ Contrast: Server/db/queries/sqlite/users.sql:58 (ListMembers) and apitokens.sql:
 
 **Suggested fix:** Give CountUsersWithoutTOTP the same lapsed-ban predicate every other user-visibility query uses, in the one shared query rather than at the call site — Server/db/queries/sqlite/users.sql:65 becomes `SELECT COUNT(*) FROM users WHERE (banned = 0 OR (ban_expires IS NOT NULL AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))) AND totp_secret IS NULL;` then regenerate the sqlc layer via the db-change skill (Server/db/dbgen/users.sql.go).
 
-**Fixed:** `140633a` · test `Server/db/count_users_without_totp_test.go` · revert-proof self-reported
+**Fixed:** `140633a` · test `Server/db/count_users_without_totp_test.go` · revert-proof pass
 
 ### OC-0292 — medium — Every settings PATCH is gated on the 2FA-enrollment precondition even when require_2fa is not being changed, wedging the whole Settings page
 
@@ -7543,7 +7543,7 @@ No test locks this: Server/admin/api_test.go:1021-1057 (AcceptsAllWhitelistedKey
 
 **Suggested fix:** Scope the enrollment gate to requests that actually set require_2fa, leaving the registration_open cross-check on the resulting state. In validateRequire2FAUpdate, guard lines 133-139: `if _, changing := updates["require_2fa"]; !changing { return nil }` placed immediately before the CountUsersWithoutTOTP call.
 
-**Fixed:** `140633a` · test `Server/admin/api_test.go` · revert-proof self-reported
+**Fixed:** `140633a` · test `Server/admin/api_test.go` · revert-proof pass
 
 ### OC-0293 — low — DecrementMentionCounts reverses mentions that were never counted, wiping a blocker's genuine mention badge
 
@@ -7570,7 +7570,7 @@ No test covers DecrementMentionCounts (no `_test.go` in Server/ mentions it).
 
 **Suggested fix:** Mirror the increment's blocker exclusion inside the shared statement (Server/db/mention_queries.go:274-281) rather than in each caller: add `AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id = read_states.user_id AND b.blocked_id = (SELECT user_id FROM messages WHERE id = ?))`, binding msgID a third time (user_blocks columns per migrations/012_user_blocks.sql:4-9; idx_user_blocks_blocked covers the lookup). The fully symmetric fix is to persist which ids IncrementMentionCounts actually bumped (e.g. a `counted` column on message_mentions) and decrement only those, which would also close the non-reader case and make the decrement idempotent.
 
-**Fixed:** `582dff6` · test `Server/db/mention_queries_test.go` · revert-proof self-reported
+**Fixed:** `582dff6` · test `Server/db/mention_queries_test.go` · revert-proof pass
 
 ### OC-0294 — low — Account deletion soft-deletes every message the user wrote but never reverses their mention counts, leaving permanent phantom badges
 
@@ -7595,7 +7595,7 @@ Server/db/message_queries.go:629-634 shows unread is live-computed (`m.deleted =
 
 **Suggested fix:** Do it inside DeleteAccount's existing transaction — DecrementMentionCounts opens its own writer tx and would contend with it. Immediately before the soft-delete at account.go:72-79 (while the rows still have deleted = 0), run one clamped UPDATE: `UPDATE read_states SET mention_count = MAX(0, mention_count - (SELECT COUNT(*) FROM message_mentions mm JOIN messages m ON m.id = mm.message_id WHERE mm.mentioned_user_id = read_states.user_id AND m.channel_id = read_states.channel_id AND m.user_id = ? AND m.deleted = 0 AND m.id > read_states.last_message_id)) WHERE mention_count > 0`, binding the departing userID — the `m.id > last_message_id` term reproduces the same guard IncrementMentionCounts/DecrementMentionCounts use, and MAX(0, …) keeps it monotonic.
 
-**Fixed:** `6b42aeb` · test `Server/db/account_test.go` · revert-proof self-reported
+**Fixed:** `6b42aeb` · test `Server/db/account_test.go` · revert-proof pass
 
 ### OC-0295 — low — MemberList re-registers per-row click/contextmenu listeners on the component-lifetime AbortSignal on every rebuild, permanently retaining every discarded row set
 
@@ -7615,7 +7615,7 @@ ChannelSidebar.ts:758  let renderAc: AbortController | null = null;   // "aborte
 
 **Suggested fix:** Mirror the OC-0229 fix in the one shared place. In `createMemberList` add `let renderAc: AbortController | null = null;` and wrap the render: at the top of `renderList` (or in a small wrapper called from all three sites at MemberList.ts:469/479/495) do `renderAc?.abort(); renderAc = new AbortController();` and pass `renderAc.signal` instead of `disposable.signal`; add `renderAc?.abort(); renderAc = null;` beside `disposable.destroy()` in `destroy()`. One change covers both per-row listeners for every group.
 
-**Fixed:** `7e767fe` · test `Client/tauri-client/tests/unit/member-list.test.ts` · revert-proof self-reported
+**Fixed:** `7e767fe` · test `Client/tauri-client/tests/unit/member-list.test.ts` · revert-proof pass
 
 ### OC-0296 — low — Channel drag-reorder registers the per-render signal as its global-listener "owner", so a mid-drag re-render cancels the drag and makes retargetDetachedDrag unreachable
 
@@ -7633,7 +7633,7 @@ ChannelSidebar.ts:795  renderAc?.abort();
 
 **Suggested fix:** Own the global drag listeners with the sidebar-lifetime signal, not the render signal: pass `ac.signal` as the owner argument to attachDragHandlers/ensureGlobalDragListeners (and store it as DragState.owner) while keeping the per-render `signal` for the three row-scoped mousedown/mousemove/mouseup listeners at drag-reorder.ts:256/268/304. That restores the module comment's stated invariant and re-enables retargetDetachedDrag.
 
-**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/drag-reorder.test.ts` · revert-proof self-reported
+**Fixed:** `0e3435a` · test `Client/tauri-client/tests/unit/drag-reorder.test.ts` · revert-proof pass
 
 ### OC-0297 — low — Avatar upload deletes the newly stored file on an error path where users.avatar has already committed to it — the avatar is permanently broken and the row can never be reclaimed
 
@@ -7668,7 +7668,7 @@ WHERE message_id IS NULL AND uploaded_at < ?
 
 **Suggested fix:** Make the post-commit re-read non-fatal in UserService.UpdateProfile (Server/service/user.go:236-239): the row is already committed, so on re-read failure return a locally merged *db.User (current with username/avatar/displayName/about applied) instead of ErrInternal. One change in the shared service fixes the handler's bogus delete and the missing user_update broadcast at once, and no caller has to learn to distinguish pre- from post-commit errors.
 
-**Fixed:** `ec6e357` · test `Server/service/user_postcommit_readerror_test.go` · revert-proof self-reported
+**Fixed:** `ec6e357` · test `Server/service/user_postcommit_readerror_test.go` · revert-proof pass
 
 ### OC-0298 — low — applyConnectStatus swallows the UpdateUserStatus failure but still stamps and broadcasts the new status, leaving users.status permanently disagreeing with the live roster
 
@@ -7695,7 +7695,7 @@ Server/ws/serve_ready.go:65-76 (only downgrades, never upgrades)
 
 **Suggested fix:** Only stamp the new value when the write succeeded: move `c.user.Status = status` inside the success path of applyConnectStatus (Server/ws/serve.go:713-719). On failure the client and the broadcast then keep the value that is actually in users.status, so auth_ok, the presence broadcast and every later ready agree instead of diverging.
 
-**Fixed:** `e436acd` · test `Server/ws/oc_0298_apply_connect_status_test.go` · revert-proof self-reported
+**Fixed:** `e436acd` · test `Server/ws/oc_0298_apply_connect_status_test.go` · revert-proof pass
 
 ### OC-0299 — low — refreshUserSnapshot silently substitutes role name "member" on a role lookup failure — the exact fail-open that upgradeAndAuth 230 lines above was fixed to reject
 
@@ -7724,7 +7724,7 @@ compare Server/ws/serve.go:145-151 (the fail-closed sibling)
 
 **Suggested fix:** Return an error instead of defaulting: in Server/ws/serve.go:373-379 do `role, roleErr := database.GetRoleByID(ctx, user.RoleID); if roleErr != nil || role == nil { return fmt.Errorf("refreshUserSnapshot GetRoleByID: %w", roleErr) }` before assigning c.roleName. Both callers are already fail-closed on this function's error (handleFreshConnect closes the conn, reconnectPrecheck falls back to full ready), so the one guard is enough.
 
-**Fixed:** `e436acd` · test `Server/ws/oc_0299_refresh_snapshot_role_test.go` · revert-proof self-reported
+**Fixed:** `e436acd` · test `Server/ws/oc_0299_refresh_snapshot_role_test.go` · revert-proof pass
 
 ### OC-0300 — low — Ctrl+I on a double-clicked bold word downgrades it to italic — the outer-unwrap check matches one asterisk of a `**` pair
 
@@ -7744,7 +7744,7 @@ compare Server/ws/serve.go:145-151 (the fail-closed sibling)
 
 **Suggested fix:** In wrapWithMarker's second branch, count the contiguous run of the marker's rune immediately left of `start` and right of `end` (all markers are one repeated char), and take the unwrap path only when `run - len !== len` on both sides — a run whose residue is exactly another whole marker means the neighbours are a *different* emphasis marker (`**` seen from `*`), so fall through to the wrap branch. Checks out on every shipped marker: `**bold**`+`*` run=2 → wrap → `***bold***`; `***bold***`+`*` run=3 → unwrap → `**bold**`; `***bold***`+`**` run=3 → unwrap → `*bold*`; `__u__`+`__` run=2,len=2 → unwrap → `u`. One guard in the shared function, no caller changes.
 
-**Fixed:** `31f73e3` · test `Client/tauri-client/tests/unit/message-input.test.ts` · revert-proof self-reported
+**Fixed:** `31f73e3` · test `Client/tauri-client/tests/unit/message-input.test.ts` · revert-proof pass
 
 ### OC-0301 — low — updateDmLastMessagePreview writes lastMessageId with no monotonicity guard, so it can regress the watermark updateDmLastMessage's replay guard depends on
 
@@ -7767,7 +7767,7 @@ channels: [
 
 **Suggested fix:** Give the preview writer the same watermark guard as its sibling — inside updateDmLastMessagePreview's setState, after resolving `updated`, add `if (updated.lastMessageId !== null && messageId <= updated.lastMessageId) return prev;`. That keeps lastMessageId monotonic (so updateDmLastMessage's OC-0242 guard stays sound) and also stops the stale preview text and stale reorder. All existing preview tests start from lastMessageId: null and stay green.
 
-**Fixed:** `770c849` · test `Client/tauri-client/tests/unit/dm-store.test.ts` · revert-proof self-reported
+**Fixed:** `770c849` · test `Client/tauri-client/tests/unit/dm-store.test.ts` · revert-proof pass
 
 ### OC-0302 — low — registerNow's client-replacement transfer still misses pendingModServerMuted/pendingModServerDeafened, so a WS blip during a voice_mod_move silently lifts the moderator's mute
 
@@ -7787,7 +7787,7 @@ The `c.lastSeq > 0` transfer block in registerNow hands the replacement connecti
 
 Put it right after the `oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()` line (~hub.go:500). take-and-clear keeps the old client from double-serving it; both helpers take c.voiceMu, the same lock order registerNow already uses for getE2EEPubKey/clearVoiceState under h.mu, so no new lock-order edge. One guard in the shared replacement path covers every reconnect flavor; no caller-side change needed.
 
-**Fixed:** `956271f` · test `Server/ws/oc_0302_pending_mod_flags_transfer_test.go` · revert-proof self-reported
+**Fixed:** `956271f` · test `Server/ws/oc_0302_pending_mod_flags_transfer_test.go` · revert-proof pass
 
 ### OC-0303 — low — Incoming-call banner prints the caller's raw username, ignoring the nickname every other identity surface shows
 
@@ -7812,7 +7812,7 @@ Compare Client/tauri-client/src/pages/main-page/ChannelController.ts:617 (`dmDis
 
 **Suggested fix:** Resolve at the construction site in MainPage.ts:603-607, exactly as OC-0233 was fixed: `const m = membersStore.getState().members.get(payload.from_user); ... fromUsername: m !== undefined ? memberDisplayName(m) : payload.username`. Leaves RingState, the banner and the protocol untouched, and keeps the raw username as the fallback for a caller who is not in the members store.
 
-**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/main-page.test.ts` · revert-proof self-reported
+**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/main-page.test.ts` · revert-proof pass
 
 ### OC-0304 — low — dm_channel_open (and POST /dms) report a DM partner's stale saved idle/dnd status, contradicting the member list, which shows them offline
 
@@ -7832,7 +7832,7 @@ Client render path: dispatcher.ts → `addDmChannel` (dm.store.ts:70) takes `cha
 
 **Suggested fix:** Apply the existing "no live connection means offline" rule at the shared DM-payload choke point instead of only in ws. Mirror the existing precedent at Server/ws/hub.go:186 (svc.Messages.SetOnlineChecker(h.IsUserConnected)): give DMService an `online func(int64) bool` and one unexported helper that rewrites any participant with no live connection to db.StatusOffline, then run DMSummaryFor's and ListDMs' db.DMChannelInfo through it (that covers GET /dms, POST /dms/group, PATCH /dms/{id} and every broadcastDMOpen). handleCreateDM's hand-built db.DMUser at dm_handler.go:163-170 and the group branch at Server/ws/handlers_chat.go:88-90 must go through the same helper (the ws side can simply reuse Hub.presentableDMChannels). Once the service-level rule exists, presentableDMChannels in serve_ready.go becomes a redundant second application rather than the only one.
 
-**Fixed:** `201e2bc` · test `Server/service/dm_test.go; Server/api/dm_handler_presence_test.go` · revert-proof self-reported
+**Fixed:** `201e2bc` · test `Server/service/dm_test.go; Server/api/dm_handler_presence_test.go` · revert-proof pass
 
 ### OC-0305 — low — Diagnostics endpoint reports the reverse proxy's address as the client address, ignoring the trusted_proxies config its own rate limiter uses
 
@@ -7861,7 +7861,7 @@ func clientIP(r *http.Request) string { return clientIPWithProxies(r, nil) }
 
 **Suggested fix:** In Server/api/diagnostics_handler.go, parse the CIDR list once at handler construction and use the proxy-aware resolver: inside handleDiagnosticsConnectivity, before the returned closure, add `proxyNets := parseCIDRList(cfg.Server.TrustedProxies)`, then change line 46 to `clientAddr := clientIPWithProxies(r, proxyNets)`. One change in the single handler; no caller or signature changes (cfg is already passed in).
 
-**Fixed:** `ab4b1ed` · test `Server/api/diagnostics_handler_test.go` · revert-proof self-reported
+**Fixed:** `ab4b1ed` · test `Server/api/diagnostics_handler_test.go` · revert-proof pass
 
 ### OC-0306 — low — EmojiPicker re-registers every emoji cell's click listener on the picker-lifetime AbortSignal on each search keystroke, permanently retaining every discarded cell set
 
@@ -7894,7 +7894,7 @@ searchInput.addEventListener("input", () => {
 
 **Suggested fix:** Match the SearchOverlay.ts:196-250 fix: drop the per-span listener at :620, give each span a `data-emoji` attribute (the emoji string) in buildEmojiSpan, and register one delegated handler once at picker construction — `scrollArea.addEventListener("click", (e) => { const cell = (e.target as HTMLElement | null)?.closest<HTMLElement>(".ep-emoji"); if (cell?.dataset.emoji !== undefined) handleEmojiClick(cell.dataset.emoji); }, { signal });`
 
-**Fixed:** `f468bab` · test `Client/tauri-client/tests/unit/emoji-picker.test.ts` · revert-proof self-reported
+**Fixed:** `f468bab` · test `Client/tauri-client/tests/unit/emoji-picker.test.ts` · revert-proof pass
 
 ### OC-0307 — low — QuickSwitcher re-registers every result row's click listener on the overlay-lifetime AbortSignal on each keystroke and each arrow key
 
@@ -7922,7 +7922,7 @@ if (e.key === "ArrowUp")   { ... renderResults(); return; }   // line 133
 
 **Suggested fix:** One delegated listener instead of one per row: delete the addEventListener block at :81-89 and register once in mount (next to the other `{ signal }` listeners at :219-223) — `resultsDiv.addEventListener("click", (e) => { const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(".quick-switcher__item"); const id = row?.dataset.channelid; if (id !== undefined) { options.onSelectChannel(Number(id)); options.onClose(); } }, { signal });` — each row already carries `data-channelid` (:59), so no other change is needed.
 
-**Fixed:** `1158506` · test `Client/tauri-client/tests/unit/quick-switcher.test.ts` · revert-proof self-reported
+**Fixed:** `1158506` · test `Client/tauri-client/tests/unit/quick-switcher.test.ts` · revert-proof pass
 
 ### OC-0308 — low — Recent-emoji list is a single unscoped localStorage key that stores server-specific `:shortcode:` tokens, so one server's custom emoji leak into every other server's picker (and can be posted there as a permanent literal-text reaction)
 
@@ -7940,7 +7940,7 @@ custom-emoji.ts:111-114 `buildCustomEmojiNode` returns null when `resolveEmoji` 
 
 **Suggested fix:** One guard in the shared reader: in `getRecentEmoji()` (EmojiPicker.ts:513-524) drop entries that are shortcode-shaped but unresolvable, e.g. after the existing string filter add `.filter((e) => !(e.startsWith(":") && e.endsWith(":")) || resolveEmoji(e) !== null)` (importing `resolveEmoji` from @stores/emoji.store). That fixes both the cross-server leak and the deleted-emoji case in one place; host-scoping the key alone would not fix the deleted-emoji case.
 
-**Fixed:** `f468bab` · test `Client/tauri-client/tests/unit/emoji-picker.test.ts` · revert-proof self-reported
+**Fixed:** `f468bab` · test `Client/tauri-client/tests/unit/emoji-picker.test.ts` · revert-proof pass
 
 ### OC-0309 — low — DM profile sidebar renders the partner's status and name from an open-time snapshot and never subscribes, so it sits beside a live chat header showing the opposite for as long as it stays open
 
@@ -7957,7 +7957,7 @@ Contrast ChannelController.ts:621-638: `// Keep the subtitle live across presenc
 
 **Suggested fix:** Keep the component presentational and fix it once at the owner: in MainPage.toggleDmProfile, after `dmProfileSidebar.mount(dmProfileSlot)`, push a subscription (torn down in closeDmProfile alongside the destroy) on `membersStore.subscribeSelector((s) => s.members.get(recipient.id)?.status, ...)` and the matching dmStore selector, whose callback re-reads the recipient and rebuilds the panel (destroy + createDmProfileSidebar + mount) — mirroring ChannelController.ts:621-638. Alternatively expose an `update(user: DmProfileData)` on the component and repaint the three nodes in place to avoid losing the note field's focus.
 
-**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/main-page.test.ts` · revert-proof self-reported
+**Fixed:** `f4a60a6` · test `Client/tauri-client/tests/unit/main-page.test.ts` · revert-proof pass
 
 ### OC-0310 — low — The status picker's custom-status input is seeded only from an unscoped localStorage pref, never from the server's authoritative auth_ok.user.custom_status — so it disagrees with every other surface, leaks across servers, and cannot clear a status the server still holds
 
@@ -7980,7 +7980,7 @@ Server/service/channel.go:218  if customStatus == nil { return storedCustomStatu
 
 **Suggested fix:** Seed and sync from the store instead of the pref, in UserBar.ts only. Replace line 170 with `currentCustomStatus: authStore.getState().user?.custom_status ?? loadCustomStatus(),` and add one subscription beside the existing auth subscription (UserBar.ts:254-258): `disposable.onStoreChange(authStore, (s) => s.user?.custom_status ?? "", (text) => statusPicker?.setCustomStatus(text))` — that reuses the already-built, already-tested setCustomStatus and needs no change in StatusPicker.
 
-**Fixed:** `d0791c4` · test `Client/tauri-client/tests/unit/status-picker-userbar.test.ts` · revert-proof self-reported
+**Fixed:** `d0791c4` · test `Client/tauri-client/tests/unit/status-picker-userbar.test.ts` · revert-proof pass
 
 ## Declined
 
