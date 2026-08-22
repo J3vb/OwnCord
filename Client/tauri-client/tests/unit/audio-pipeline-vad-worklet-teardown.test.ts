@@ -81,19 +81,28 @@ describe("AudioPipeline VAD worklet teardown (OC-0231)", () => {
 
     vi.stubGlobal(
       "AudioWorkletNode",
-      vi.fn().mockImplementation(() => ({
-        port: {
-          postMessage: vi.fn(),
-          onmessage: null as ((event: MessageEvent) => void) | null,
-        },
-        connect: vi.fn(),
-        disconnect: vi.fn(),
-      })),
+      vi.fn(function () {
+        return {
+          port: {
+            postMessage: vi.fn(),
+            onmessage: null as ((event: MessageEvent) => void) | null,
+          },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      }),
     );
-    vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(function () {
+        return mockAudioCtx;
+      }),
+    );
     vi.stubGlobal(
       "MediaStream",
-      vi.fn().mockImplementation(() => ({})),
+      vi.fn(function () {
+        return {};
+      }),
     );
 
     mockRoom = {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
 vi.mock("@lib/livekitSession", () => ({
@@ -101,11 +101,11 @@ describe("Screen Share Button in VoiceWidget", () => {
   let container: HTMLDivElement;
   let comp: ReturnType<typeof createVoiceWidget>;
   let handlers: {
-    onDisconnect: ReturnType<typeof vi.fn>;
-    onMuteToggle: ReturnType<typeof vi.fn>;
-    onDeafenToggle: ReturnType<typeof vi.fn>;
-    onCameraToggle: ReturnType<typeof vi.fn>;
-    onScreenshareToggle: ReturnType<typeof vi.fn>;
+    onDisconnect: Mock<() => void>;
+    onMuteToggle: Mock<() => void>;
+    onDeafenToggle: Mock<() => void>;
+    onCameraToggle: Mock<() => void>;
+    onScreenshareToggle: Mock<() => void>;
   };
 
   beforeEach(() => {
@@ -113,11 +113,11 @@ describe("Screen Share Button in VoiceWidget", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     handlers = {
-      onDisconnect: vi.fn(),
-      onMuteToggle: vi.fn(),
-      onDeafenToggle: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
+      onDisconnect: vi.fn<() => void>(),
+      onMuteToggle: vi.fn<() => void>(),
+      onDeafenToggle: vi.fn<() => void>(),
+      onCameraToggle: vi.fn<() => void>(),
+      onScreenshareToggle: vi.fn<() => void>(),
     };
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import type { QuickSwitcherOptions } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
@@ -24,16 +24,16 @@ const testChannels: ReadyChannel[] = [
 describe("QuickSwitcher", () => {
   let container: HTMLDivElement;
   let switcher: ReturnType<typeof createQuickSwitcher>;
-  let onSelectChannel: ReturnType<typeof vi.fn>;
-  let onClose: ReturnType<typeof vi.fn>;
+  let onSelectChannel: Mock<(channelId: number) => void>;
+  let onClose: Mock<() => void>;
 
   beforeEach(() => {
     resetStore();
     setChannels(testChannels);
     container = document.createElement("div");
     document.body.appendChild(container);
-    onSelectChannel = vi.fn();
-    onClose = vi.fn();
+    onSelectChannel = vi.fn<(channelId: number) => void>();
+    onClose = vi.fn<() => void>();
     switcher = createQuickSwitcher({ onSelectChannel, onClose });
   });
 

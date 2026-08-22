@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock, putSpy } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
-  putSpy: vi.fn<any>(),
+  putSpy: vi.fn<(value: string, key: string) => void>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({

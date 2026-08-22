@@ -443,7 +443,7 @@ describe("TOTP Settings", () => {
       // Simulate MainPage's onConfirmTotp: it calls updateUser after API success
       const options = makeOptions({
         onConfirmTotp: vi.fn().mockImplementation(async () => {
-          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: true });
+          updateUser({ totp_enabled: true });
         }),
       });
       const overlay = createSettingsOverlay(options);
@@ -659,7 +659,7 @@ describe("TOTP Settings", () => {
       // Simulate MainPage's onDisableTotp: it calls updateUser after API success
       const options = makeOptions({
         onDisableTotp: vi.fn().mockImplementation(async () => {
-          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: false });
+          updateUser({ totp_enabled: false });
         }),
       });
       const overlay = createSettingsOverlay(options);
@@ -706,7 +706,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions({
         onConfirmTotp: vi.fn().mockImplementation(async () => {
           // MainPage calls updateUser here — this is the single owner
-          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: true });
+          updateUser({ totp_enabled: true });
         }),
       });
       const overlay = createSettingsOverlay(options);
@@ -751,7 +751,7 @@ describe("TOTP Settings", () => {
       mockTotpEnabled = true;
       const options = makeOptions({
         onDisableTotp: vi.fn().mockImplementation(async () => {
-          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: false });
+          updateUser({ totp_enabled: false });
         }),
       });
       const overlay = createSettingsOverlay(options);

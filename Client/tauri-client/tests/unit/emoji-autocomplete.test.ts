@@ -4,7 +4,7 @@
  * how it shares the composer with the @-mention popup).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
@@ -32,6 +32,7 @@ import {
   MIN_EMOJI_QUERY,
 } from "../../src/components/EmojiAutocomplete";
 import { createMessageInput } from "../../src/components/MessageInput";
+import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
 
@@ -336,12 +337,12 @@ describe("createEmojiAutocomplete combobox wiring", () => {
 describe("composer :shortcode integration", () => {
   let container: HTMLDivElement;
   let input: ReturnType<typeof createMessageInput>;
-  let onSend: ReturnType<typeof vi.fn>;
+  let onSend: Mock<MessageInputOptions["onSend"]>;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    onSend = vi.fn();
+    onSend = vi.fn<MessageInputOptions["onSend"]>();
     input = createMessageInput({
       channelId: 1,
       channelName: "general",

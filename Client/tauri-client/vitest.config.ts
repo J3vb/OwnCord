@@ -4,11 +4,11 @@ import { resolve } from "path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@lib": resolve(__dirname, "src/lib"),
-      "@stores": resolve(__dirname, "src/stores"),
-      "@components": resolve(__dirname, "src/components"),
-      "@pages": resolve(__dirname, "src/pages"),
-      "@styles": resolve(__dirname, "src/styles"),
+      "@lib": resolve(import.meta.dirname, "src/lib"),
+      "@stores": resolve(import.meta.dirname, "src/stores"),
+      "@components": resolve(import.meta.dirname, "src/components"),
+      "@pages": resolve(import.meta.dirname, "src/pages"),
+      "@styles": resolve(import.meta.dirname, "src/styles"),
     },
   },
   test: {

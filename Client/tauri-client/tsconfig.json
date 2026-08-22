@@ -12,6 +12,11 @@
     "isolatedModules": true,
     "noEmit": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // TypeScript 6 defaults "types" to [] and vitest 4 no longer references
+    // @types/node itself, so the Node globals (node:fs, __dirname) used by
+    // unit tests must be pulled in explicitly. tsconfig.build.json resets
+    // this to [] so app code cannot use Node globals.
+    "types": ["node"],
     "paths": {
       "@lib/*": ["./src/lib/*"],
       "@stores/*": ["./src/stores/*"],

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // Mock the Tauri HTTP plugin — vi.hoisted ensures the fn is available when
 // vi.mock's factory runs (hoisted above all imports).
@@ -19,7 +19,7 @@ vi.mock("../../src/lib/httpProxy", () => ({
   stopHttpProxy: () => Promise.resolve(),
 }));
 
-import { createApiClient, ApiClientError } from "../../src/lib/api";
+import { createApiClient, ApiClientError, type OnUnauthorized } from "../../src/lib/api";
 
 function jsonResponse(data: unknown, status = 200): Response {
   return {
@@ -54,11 +54,11 @@ function brokenJsonErrorResponse(status: number, statusText: string): Response {
 
 describe("API Client", () => {
   let api: ReturnType<typeof createApiClient>;
-  let onUnauthorized: ReturnType<typeof vi.fn>;
+  let onUnauthorized: Mock<OnUnauthorized>;
 
   beforeEach(() => {
     mockFetch.mockReset();
-    onUnauthorized = vi.fn();
+    onUnauthorized = vi.fn<OnUnauthorized>();
     api = createApiClient({ host: "localhost:8443", token: "test-token" }, onUnauthorized);
   });
 

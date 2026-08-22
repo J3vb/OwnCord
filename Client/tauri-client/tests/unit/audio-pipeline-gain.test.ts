@@ -234,10 +234,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
     });
 

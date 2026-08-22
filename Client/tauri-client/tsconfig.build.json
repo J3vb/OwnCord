@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "include": [
-    "src"
-  ],
+  // App code is browser-only: reset the "types": ["node"] the dev config
+  // needs for unit tests, so Node globals stay unavailable in src/.
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src"],
   "exclude": []
 }

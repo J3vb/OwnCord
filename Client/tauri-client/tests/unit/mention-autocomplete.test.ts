@@ -3,7 +3,7 @@
  * entries, keyboard navigation, and composer integration.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
@@ -21,6 +21,7 @@ import {
   MAX_MENTION_SUGGESTIONS,
 } from "../../src/components/MentionAutocomplete";
 import { createMessageInput } from "../../src/components/MessageInput";
+import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
@@ -132,13 +133,13 @@ describe("filterMentionSuggestions", () => {
 });
 
 describe("createMentionAutocomplete", () => {
-  let onSelect: ReturnType<typeof vi.fn>;
-  let onClose: ReturnType<typeof vi.fn>;
+  let onSelect: Mock<(token: string) => void>;
+  let onClose: Mock<() => void>;
   let popup: ReturnType<typeof createMentionAutocomplete>;
 
   beforeEach(() => {
-    onSelect = vi.fn();
-    onClose = vi.fn();
+    onSelect = vi.fn<(token: string) => void>();
+    onClose = vi.fn<() => void>();
     popup = createMentionAutocomplete({ onSelect, onClose });
     document.body.appendChild(popup.element);
   });
@@ -317,12 +318,12 @@ describe("createMentionAutocomplete combobox wiring", () => {
 describe("composer integration", () => {
   let container: HTMLDivElement;
   let input: ReturnType<typeof createMessageInput>;
-  let onSend: ReturnType<typeof vi.fn>;
+  let onSend: Mock<MessageInputOptions["onSend"]>;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    onSend = vi.fn();
+    onSend = vi.fn<MessageInputOptions["onSend"]>();
     input = createMessageInput({
       channelId: 1,
       channelName: "general",

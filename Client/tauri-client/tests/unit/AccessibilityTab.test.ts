@@ -32,7 +32,9 @@ describe("AccessibilityTab — reduced-motion arbitration (OC-0232)", () => {
   beforeEach(() => {
     matchMediaListeners = new Map();
 
-    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    // jsdom does not implement matchMedia, and vitest 4's spyOn refuses to spy
+    // on undefined, so stub the global instead.
+    vi.stubGlobal("matchMedia", (query: string) => {
       const mql = {
         matches: matchMediaMatches,
         media: query,
@@ -62,6 +64,7 @@ describe("AccessibilityTab — reduced-motion arbitration (OC-0232)", () => {
     document.documentElement.classList.remove("reduced-motion");
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("keeps reduced-motion applied when OS sync is on and the OS still prefers it, even after a manual Reduce Motion toggle is switched off", () => {

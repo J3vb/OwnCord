@@ -9,22 +9,27 @@ describe("syncOsMotionListener", () => {
     matchMediaListeners = new Map();
     matchMediaMatches = false;
 
-    // Mock matchMedia to return a controllable MediaQueryList
-    vi.spyOn(window, "matchMedia").mockImplementation((_query: string) => {
-      const mql = {
-        matches: matchMediaMatches,
-        media: _query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn((type: string, handler: Function, _opts?: any) => {
-          matchMediaListeners.set(type, handler);
-        }),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(() => true),
-      } as unknown as MediaQueryList;
-      return mql;
-    });
+    // Mock matchMedia to return a controllable MediaQueryList. jsdom does not
+    // implement matchMedia, and vitest 4's spyOn refuses to spy on undefined,
+    // so stub the global instead.
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((_query: string) => {
+        const mql = {
+          matches: matchMediaMatches,
+          media: _query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn((type: string, handler: Function, _opts?: any) => {
+            matchMediaListeners.set(type, handler);
+          }),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(() => true),
+        } as unknown as MediaQueryList;
+        return mql;
+      }),
+    );
 
     // Clean up any leftover class/storage from previous tests
     document.documentElement.classList.remove("reduced-motion");
@@ -35,6 +40,7 @@ describe("syncOsMotionListener", () => {
     // Disable the listener to clean up internal state
     syncOsMotionListener(false);
     document.documentElement.classList.remove("reduced-motion");
+    vi.unstubAllGlobals();
   });
 
   it("adds reduced-motion class when OS prefers reduced motion", () => {

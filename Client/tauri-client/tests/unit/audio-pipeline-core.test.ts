@@ -279,10 +279,17 @@ describe("AudioPipeline", () => {
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
       };
 
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       mockRoom = {
@@ -458,7 +465,7 @@ describe("AudioPipeline", () => {
     it("handles AudioContext constructor failure gracefully", () => {
       vi.stubGlobal(
         "AudioContext",
-        vi.fn(() => {
+        vi.fn(function () {
           throw new Error("AudioContext not supported");
         }),
       );
@@ -591,10 +598,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation((tracks: unknown) => ({ tracks })),
+        vi.fn(function (tracks: unknown) {
+          return { tracks };
+        }),
       );
       return { mockSender };
     }
@@ -676,7 +690,10 @@ describe("AudioPipeline", () => {
     });
 
     it("creates AudioContext with sampleRate 48000", () => {
-      const AudioContextSpy = vi.fn().mockReturnValue({
+      const AudioContextSpy = vi.fn(function () {
+        return audioCtxForSpy;
+      });
+      const audioCtxForSpy = {
         resume: vi.fn().mockResolvedValue(undefined),
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue({
@@ -699,11 +716,13 @@ describe("AudioPipeline", () => {
         close: vi.fn().mockResolvedValue(undefined),
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
-      });
+      };
       vi.stubGlobal("AudioContext", AudioContextSpy);
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -749,10 +768,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -798,10 +824,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -846,10 +879,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -911,10 +951,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -968,10 +1015,17 @@ describe("AudioPipeline", () => {
         state: "running",
         audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no")) },
       };
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(function () {
+          return mockAudioCtx;
+        }),
+      );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       const mockRoom = {
@@ -1046,7 +1100,9 @@ describe("AudioPipeline", () => {
       );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       pipeline.setRoom(mockRoom);
@@ -1114,7 +1170,9 @@ describe("AudioPipeline", () => {
       );
       vi.stubGlobal(
         "MediaStream",
-        vi.fn().mockImplementation(() => ({})),
+        vi.fn(function () {
+          return {};
+        }),
       );
 
       pipeline.setRoom(mockRoom);
