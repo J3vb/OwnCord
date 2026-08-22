@@ -260,6 +260,18 @@ func (d *DB) IncrementMentionCounts(ctx context.Context, channelID, msgID int64,
 // holds resolved @user mentions, and the everyone/here fan-out is filtered by
 // presence at send time (OC-0223) rather than persisted — so this reverses
 // only stored direct mentions. That is a smaller, but never wrong, correction.
+//
+// message_mentions stores every resolved mention id, blockers of the author
+// included (insertMentionRows deliberately does not filter — the fan-out,
+// not storage, is what excludes them). But the increment side
+// (applyMentionCounts in service/mentions.go) deletes the author's blockers
+// from the recipient set before ever calling IncrementMentionCounts, so a
+// blocker's read_states row was never bumped for this message. The NOT
+// EXISTS below mirrors that same exclusion here (OC-0293): without it, a
+// blocker who happens to have an unrelated, genuine mention badge on this
+// same channel — from some other message — has that real badge wiped out
+// when the blocked author's message is deleted, because the UPDATE cannot
+// otherwise tell "never counted" apart from "counted, now reversing".
 func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
 	if len(msgIDs) == 0 {
 		return nil
@@ -277,8 +289,13 @@ func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs
 			 WHERE channel_id = ?
 			   AND mention_count > 0
 			   AND last_message_id < ?
-			   AND user_id IN (SELECT mentioned_user_id FROM message_mentions WHERE message_id = ?)`,
-			channelID, msgID, msgID,
+			   AND user_id IN (SELECT mentioned_user_id FROM message_mentions WHERE message_id = ?)
+			   AND NOT EXISTS (
+			       SELECT 1 FROM user_blocks b
+			       WHERE b.blocker_id = read_states.user_id
+			         AND b.blocked_id = (SELECT user_id FROM messages WHERE id = ?)
+			   )`,
+			channelID, msgID, msgID, msgID,
 		); err != nil {
 			return fmt.Errorf("DecrementMentionCounts: %w", err)
 		}
