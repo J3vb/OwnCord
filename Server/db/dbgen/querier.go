@@ -272,7 +272,7 @@ type Querier interface {
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
-	SoftDeleteMessage(ctx context.Context, id int64) error
+	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
 	TouchAPIToken(ctx context.Context, tokenHash string) error
 	TouchSession(ctx context.Context, token string) error
 	UnbanUser(ctx context.Context, id int64) error

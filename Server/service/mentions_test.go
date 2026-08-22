@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -543,6 +544,50 @@ func TestDeleteMessage_ClearsMentionCount(t *testing.T) {
 
 	if got := mentionCount(t, database, 2); got != 0 {
 		t.Errorf("after deleting the only mentioning message, bob mention_count = %d, want 0", got)
+	}
+}
+
+// TestDeleteMessage_RepeatedDeleteDoesNotDecrementMentionCountTwice is
+// OC-0284: DeleteMessage has no `msg.Deleted` guard and every layer beneath
+// it is silently idempotent (SoftDeleteMessage is a bare UPDATE with no
+// `deleted = 0` filter), so a second chat_delete for the same message id
+// succeeds and runs DecrementMentionCounts a second time. That statement has
+// no per-message idempotence — it just decrements every recipient row whose
+// last_message_id < msgID and mention_count > 0 — so the second run eats a
+// mention raised by a *different, still-live* message instead of being
+// rejected as a no-op.
+func TestDeleteMessage_RepeatedDeleteDoesNotDecrementMentionCountTwice(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	m1 := sendAs(t, svc, 1, "@bob first")
+	m2 := sendAs(t, svc, 1, "@bob second")
+	if got := mentionCount(t, database, 2); got != 2 {
+		t.Fatalf("setup: bob mention_count = %d, want 2", got)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, m1.MessageID); err != nil {
+		t.Fatalf("first DeleteMessage: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("after first delete, bob mention_count = %d, want 1", got)
+	}
+
+	// Repeating the delete for the same (already-deleted) message must be
+	// rejected rather than silently re-running the mention reversal — m2 is
+	// still live and unread, so its mention must survive.
+	if _, err := svc.DeleteMessage(context.Background(), 1, m1.MessageID); !errors.Is(err, ErrDeletedMessage) {
+		t.Fatalf("repeated DeleteMessage: err = %v, want ErrDeletedMessage", err)
+	}
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("after repeated delete of m1, bob mention_count = %d, want 1 (m2's mention must survive)", got)
+	}
+
+	// m2's mention must still be reversible by its own (first) delete.
+	if _, err := svc.DeleteMessage(context.Background(), 1, m2.MessageID); err != nil {
+		t.Fatalf("DeleteMessage(m2): %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("after deleting m2, bob mention_count = %d, want 0", got)
 	}
 }
 

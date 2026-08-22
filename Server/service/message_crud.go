@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -420,6 +421,15 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
+	// OC-0284: GetMessage returns tombstones (so callers can broadcast the
+	// deletion event), and every layer beneath a plain re-delete is silently
+	// idempotent. Without this guard a second chat_delete for the same
+	// message reaches DecrementMentionCounts below a second time, which has
+	// no per-message idempotence of its own and eats a mention raised by a
+	// different, still-live message. Mirrors EditMessage's msg.Deleted guard.
+	if msg.Deleted {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+	}
 
 	// Fail closed, mirroring EditMessage: a lookup failure must not fall
 	// through to the non-DM permission branch (skipping the DM-participant
@@ -461,6 +471,17 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	}
 
 	if err := s.st.DeleteMessage(ctx, msgID, userID, isMod); err != nil {
+		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
+		// so a message that raced this request to the writer between the
+		// msg.Deleted check above and this write surfaces here as
+		// db.ErrNotFound. Map it to ErrDeletedMessage rather than the generic
+		// ErrForbidden below so the caller sees the same taxonomy as the
+		// sequential-repeat guard above, and so this request never reaches the
+		// DecrementMentionCounts call past this point for a delete that did
+		// not actually happen.
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+		}
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 

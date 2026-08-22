@@ -20,8 +20,8 @@ UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
           mentions_everyone;
 
--- name: SoftDeleteMessage :exec
-UPDATE messages SET deleted = 1 WHERE id = ?;
+-- name: SoftDeleteMessage :execresult
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;
 
 -- name: SetMessagePinned :execresult
 UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0;
