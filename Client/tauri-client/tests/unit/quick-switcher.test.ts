@@ -366,6 +366,29 @@ describe("QuickSwitcher", () => {
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   });
 
+  it("aborts a discarded row's click listener on a full rebuild instead of retaining it for the overlay's lifetime (OC-0307)", () => {
+    switcher.mount(container);
+    const staleFirstItem = container.querySelector(".quick-switcher__item") as HTMLDivElement;
+
+    // ArrowDown does not change the result set, but renderResults() still
+    // tears down every row and rebuilds it from scratch just to move the
+    // highlight. The pre-rebuild row is now detached from the DOM.
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(container.contains(staleFirstItem)).toBe(false);
+
+    // If the discarded row's listener is still registered against the
+    // overlay-lifetime signal (instead of being torn down with the row),
+    // dispatching a click directly on the stale node still reaches it.
+    staleFirstItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onSelectChannel).not.toHaveBeenCalled();
+
+    // A live row must still work after the rebuild.
+    const liveItem = container.querySelector(".quick-switcher__item") as HTMLDivElement;
+    liveItem.click();
+    expect(onSelectChannel).toHaveBeenCalledOnce();
+  });
+
   it("moves focus into the dialog on mount and restores it on destroy", () => {
     const opener = document.createElement("button");
     document.body.appendChild(opener);

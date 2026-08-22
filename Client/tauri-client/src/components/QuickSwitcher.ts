@@ -80,15 +80,6 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
       appendChildren(item, ...parts);
 
-      item.addEventListener(
-        "click",
-        () => {
-          options.onSelectChannel(ch.id);
-          options.onClose();
-        },
-        { signal },
-      );
-
       resultsDiv.appendChild(item);
     }
 
@@ -221,6 +212,25 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     input.addEventListener("keydown", handleKeydown, { signal });
     root.addEventListener("click", handleBackdropClick, { signal });
     document.addEventListener("keydown", handleGlobalKeydown, { signal });
+
+    // Delegated row click — renderResults() rebuilds every row from scratch
+    // on each keystroke, arrow key, and store refresh, so a per-row listener
+    // registered against this overlay-lifetime `signal` would never be freed
+    // until the overlay closes (OC-0307). One listener on the (stable)
+    // container instead, keyed off the data-channelid each row already
+    // carries.
+    resultsDiv.addEventListener(
+      "click",
+      (e) => {
+        const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(".quick-switcher__item");
+        const id = row?.dataset.channelid;
+        if (id !== undefined) {
+          options.onSelectChannel(Number(id));
+          options.onClose();
+        }
+      },
+      { signal },
+    );
 
     // Subscribe to store changes
     unsubscribe = channelsStore.subscribeSelector((s) => s.channels, refreshFromStore);
