@@ -252,27 +252,55 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
-  it("OC-0217: repeated jumps do not each register a permanent abort listener on the component-lifetime signal", () => {
+  it("OC-0217/OC-0286: repeated jumps do not each register a permanent row listener on the component-lifetime signal", () => {
     // As a user clicking a reply bar's jump arrow, a search hit, or a pinned
     // entry repeatedly does across a live session.
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage({ id: i + 1 }));
     setMessages(1, messages);
     msgList.mount(container);
 
+    // Row listeners are registered as addEventListener(type, fn, { signal }).
     // Installed after mount() so it only observes what scrollToMessage does,
-    // not mount's own (single, expected) abort registration.
-    const addEventListenerSpy = vi.spyOn(AbortSignal.prototype, "addEventListener");
+    // not mount's own (single, expected) registrations.
+    const addEventListenerSpy = vi.spyOn(EventTarget.prototype, "addEventListener");
 
-    for (let i = 1; i <= 5; i++) {
-      expect(msgList.scrollToMessage(i)).toBe(true);
+    /** Distinct AbortSignals handed to row listeners since the previous call. */
+    function rowSignalsSinceLastRender(): AbortSignal[] {
+      const signals = addEventListenerSpy.mock.calls
+        .map((call) => call[2])
+        .filter(
+          (opts): opts is AddEventListenerOptions =>
+            typeof opts === "object" && opts !== null && "signal" in opts,
+        )
+        .map((opts) => opts.signal)
+        .filter((signal): signal is AbortSignal => signal != null);
+      addEventListenerSpy.mockClear();
+      return [...new Set(signals)];
     }
 
-    // Each jump's highlight-flash cleanup must not add a new listener to the
-    // whole-lifetime AbortSignal — that accumulates one listener (and pins
-    // one detached row element through its closure) per jump, released only
-    // when the channel unmounts, not when that jump's flash finishes.
-    const abortRegistrations = addEventListenerSpy.mock.calls.filter(([type]) => type === "abort");
-    expect(abortRegistrations.length).toBe(0);
+    const windowSignals: AbortSignal[] = [];
+    for (let i = 1; i <= 5; i++) {
+      expect(msgList.scrollToMessage(i)).toBe(true);
+      const [signal, ...extra] = rowSignalsSinceLastRender();
+      // Every row in a rendered window shares that window's single signal.
+      expect(extra).toHaveLength(0);
+      if (signal === undefined) throw new Error(`jump ${i} rendered no row listeners`);
+      windowSignals.push(signal);
+    }
+
+    // Each jump renders against a fresh signal, so nothing accumulates row
+    // listeners on one long-lived signal.
+    expect(new Set(windowSignals).size).toBe(windowSignals.length);
+
+    // A superseded window is released by the render that replaced it, not
+    // deferred to destroy(). Before OC-0286 rows registered directly against
+    // the component-lifetime signal (`ac.signal`), so all five of these would
+    // still be live here, each pinning a whole window of detached rows and
+    // everything they reference — videos, images, embeds, tooltips.
+    const superseded = windowSignals.slice(0, -1);
+    const current = windowSignals[windowSignals.length - 1];
+    expect(superseded.every((signal) => signal.aborted)).toBe(true);
+    expect(current?.aborted).toBe(false);
 
     addEventListenerSpy.mockRestore();
   });
