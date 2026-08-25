@@ -5800,8 +5800,8 @@
     "semantic_hash": ""
   },
   "docs/plans/audit-2026-08-19-remediation.md": {
-    "mtime": 1787315994.6150818,
-    "ast_hash": "b6379e0a3ccbb5a0fbeceff9297ac504",
+    "mtime": 1787681881.467493,
+    "ast_hash": "d195e5f29ce1da5cf819ed9bf11daa84",
     "semantic_hash": ""
   },
   "Client/tauri-client/tests/unit/attachments-ipv6-host.test.ts": {
@@ -5940,8 +5940,8 @@
     "semantic_hash": ""
   },
   "docs/plans/b0-baseline-2026-08-25.md": {
-    "mtime": 1787681545.8761492,
-    "ast_hash": "ebc54ee5b366da31c11dbcedcd481872",
+    "mtime": 1787681896.2575617,
+    "ast_hash": "a18b8d5bdfe0179c1f593d379a6637cb",
     "semantic_hash": ""
   },
   "docs/plans/beta-product-requirements-2026-08-23.md": {
@@ -5962,6 +5962,11 @@
   "docs/plans/repo-health-roadmap-2026-08-23.md": {
     "mtime": 1787494273.5659218,
     "ast_hash": "654c5dd6e06767af7cd3a4b5f8d335f5",
+    "semantic_hash": ""
+  },
+  "docs/plans/README.md": {
+    "mtime": 1787681873.978382,
+    "ast_hash": "2ccde857b78f53592c50cdad51f456fb",
     "semantic_hash": ""
   }
 }
