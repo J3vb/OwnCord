@@ -92,8 +92,8 @@ keyring = { version = "3", default-features = false, features = [
 zeroize = "1"
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
-base64 = "0.22"
-rfd = { version = "0.16", default-features = false }
+base64 = "0.23"
+rfd = { version = "0.17", default-features = false }
 
 # Desktop-only plugins (no mobile bundle target). single-instance carries the
 # "deep-link" feature so an owncord:// link fired at a running app is forwarded
@@ -105,17 +105,17 @@ tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store. Version tracks keyring's own windows-sys dep so the
 # two share one build of the crate.
-windows-sys = { version = "0.60", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-device_query = "2"
+device_query = "4"
 # Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
 # denies getUserMedia/enumerateDevices permission requests by default (wry
 # installs no handler on Linux, unlike its macOS backend which auto-grants),
