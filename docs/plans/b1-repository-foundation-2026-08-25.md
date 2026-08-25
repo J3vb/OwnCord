@@ -55,15 +55,27 @@ documents rather than the single artifact the hold point requires.
    knowing which jobs *never report* on a dev-targeted PR — pinning one of those
    deadlocks every PR.
 
+   The exact reporting set was observed on a live dev-targeted PR (#1410), not
+   inferred from `ci.yml` — which matters, because **three of them exist in no
+   workflow file**: CodeQL runs from GitHub default setup, so reading `.github/`
+   alone would have missed them.
+
    Pin: `Server Build & Test (windows-latest)`, `Server Build & Test
    (ubuntu-latest)`, `Client Static Checks`, `Client Unit Tests`, `Rust Unit
-   Tests`, `Client E2E (Playwright)`, `Client E2E (parity subset, blocking)`.
+   Tests`, `Client E2E (Playwright)`, `Client E2E (parity subset, blocking)`,
+   `Analyze (go)`, `Analyze (javascript-typescript)`, `Analyze (actions)`.
 
-   Do **not** pin: `Server Docker Build (verify)` (`if: ref_name=='main' ||
-   base_ref=='main'`), `Tauri Full Build (*)` (`if: base_ref=='main'`),
-   `Admin Panel E2E (real server, non-blocking)` (`continue-on-error: true`, so
-   it reports success unconditionally — requiring it is theatre; that is `R-01`,
-   B10 work).
+   Do **not** pin:
+   - `Server Docker Build (verify)` — observed as **skipping** on a dev PR
+     (`if: ref_name=='main' || base_ref=='main'`).
+   - `Tauri Full Build (*)` — does not appear in the check list at all on a dev
+     PR; the job is never created (`if: base_ref=='main'`).
+   - `Admin Panel E2E (real server, non-blocking)` — `continue-on-error: true`,
+     so it reports success unconditionally. Requiring it is theatre; that is
+     `R-01`, B10 work.
+
+   Re-observe with `gh pr checks <n>` on a dev PR before writing the list: a
+   name that never reports deadlocks every future PR.
 
    Extend [`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh) with a
    `required_status_checks` block rather than adding a second script.
