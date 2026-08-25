@@ -1,7 +1,9 @@
 # Audit 2026-08-19 Remediation — Phased Plan
 
-**Status:** in progress 2026-08-19 — phases execute in order; each phase's
-status is updated in place when it lands.
+**Status:** in progress — phases 1–6 landed 2026-08-20 (merged as `03fcb7d5`,
+PR #1396); **phase 7 is still pending**. Phases execute in order; each phase's
+status is updated in place when it lands, so the table below is authoritative
+for per-phase state. Indexed in [README.md](README.md).
 **Source:** [audit-2026-08-19.md](../audit-2026-08-19.md) — this plan executes
 its §8 MUST-fix verdict and §9.1 fix order verbatim. Items outside that list
 (§6 DEBT beyond D-01..D-05, §9.2 alpha-exit work) are deliberately NOT in
