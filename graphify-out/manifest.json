@@ -65,13 +65,13 @@
     "semantic_hash": ""
   },
   "Client/tauri-client/playwright.config.prod.ts": {
-    "mtime": 1786170197.4131606,
-    "ast_hash": "0dac892deba2829313ccdf6c143c71f2",
+    "mtime": 1787679075.9573913,
+    "ast_hash": "f05b50cd3b34b2ba5e73c392855e5295",
     "semantic_hash": ""
   },
   "Client/tauri-client/playwright.config.ts": {
-    "mtime": 1786170197.4131606,
-    "ast_hash": "bfe3a55de10fbd49b10ec64a82dda72a",
+    "mtime": 1787680447.7455137,
+    "ast_hash": "2a719ee4664789fa46b6f3485b642f1f",
     "semantic_hash": ""
   },
   "Client/tauri-client/public/rnnoise-worklet.js": {
@@ -265,7 +265,7 @@
     "semantic_hash": ""
   },
   "Client/tauri-client/src/components/MessageList.ts": {
-    "mtime": 1787374179.4595952,
+    "mtime": 1787677584.0872686,
     "ast_hash": "7e6c97785402409dfbb86f2ab93b8898",
     "semantic_hash": ""
   },
@@ -1765,8 +1765,8 @@
     "semantic_hash": ""
   },
   "Client/tauri-client/tests/unit/message-list.test.ts": {
-    "mtime": 1787315994.5674324,
-    "ast_hash": "60e418a9cea78f3fb87cc2dc2a953c10",
+    "mtime": 1787677629.307052,
+    "ast_hash": "075f30e7cfd293f2f431dcb433c038fc",
     "semantic_hash": ""
   },
   "Client/tauri-client/tests/unit/messages-store-detached.test.ts": {
@@ -5481,17 +5481,17 @@
   },
   "Client/tauri-client/src-tauri/capabilities/default.json": {
     "mtime": 1786272933.6755219,
-    "ast_hash": "",
+    "ast_hash": "72fd589daf6497717ac840ef00c9660f",
     "semantic_hash": ""
   },
   "Server/plugin/examples/hello/plugin.json": {
     "mtime": 1784557739.5584006,
-    "ast_hash": "",
+    "ast_hash": "bdf9b835ac2e05602839d0ceb9a9b6d0",
     "semantic_hash": ""
   },
   "docs/protocol-schema.json": {
     "mtime": 1786170197.508181,
-    "ast_hash": "",
+    "ast_hash": "98858de1d31ba62f7d0b036816f97123",
     "semantic_hash": ""
   },
   ".superpowers/render-ledger.mjs": {
@@ -5511,12 +5511,12 @@
   },
   "Client/tauri-client/src-tauri/tauri.conf.json": {
     "mtime": 1786894298.5036547,
-    "ast_hash": "",
+    "ast_hash": "f05bbc86946be8157b818eb83315c87f",
     "semantic_hash": ""
   },
   ".superpowers/findings-ledger.json": {
-    "mtime": 1787315994.518129,
-    "ast_hash": "",
+    "mtime": 1787475158.2240584,
+    "ast_hash": "a375ce7a17d27b0056c17a85b67faa9e",
     "semantic_hash": ""
   },
   "Client/tauri-client/src/lib/hostValidation.ts": {
@@ -5736,7 +5736,7 @@
   },
   ".claude/settings.json": {
     "mtime": 1787315994.513591,
-    "ast_hash": "",
+    "ast_hash": "738882db20f8c5b64daeaa6ed3e72975",
     "semantic_hash": ""
   },
   "Client/tauri-client/tests/unit/AccessibilityTab.test.ts": {
@@ -5870,8 +5870,8 @@
     "semantic_hash": ""
   },
   "Client/tauri-client/tests/unit/noise-suppression-restart.test.ts": {
-    "mtime": 1787374179.4701009,
-    "ast_hash": "d8061747a815edeb02095d26b7f45623",
+    "mtime": 1787677273.8526669,
+    "ast_hash": "24adbd03c9de64abe3df0869698d5390",
     "semantic_hash": ""
   },
   "Server/api/dm_handler_presence_test.go": {
@@ -5912,6 +5912,56 @@
   "Server/ws/oc_0302_pending_mod_flags_transfer_test.go": {
     "mtime": 1787374179.4826498,
     "ast_hash": "a5fb5a398f57ae453e1a778447c08097",
+    "semantic_hash": ""
+  },
+  "Client/tauri-client/.claude/settings.local.json": {
+    "mtime": 1787679067.8054585,
+    "ast_hash": "2173c4505a11b9c6e4c16b7c9bb6b7c6",
+    "semantic_hash": ""
+  },
+  "Client/tauri-client/tests/e2e/global-teardown.ts": {
+    "mtime": 1787680865.5704248,
+    "ast_hash": "68f60f8ff871057aee63f8e813f254e1",
+    "semantic_hash": ""
+  },
+  "docs/plans/b0-dev-branch-protection.sh": {
+    "mtime": 1787681445.4251657,
+    "ast_hash": "fa5fc5fa5c7f031681283d63cdf07470",
+    "semantic_hash": ""
+  },
+  "docs/audit-2026-08-23-repository-health.md": {
+    "mtime": 1787494372.0207314,
+    "ast_hash": "424f7648e41f710a015d99c6c5c049d8",
+    "semantic_hash": ""
+  },
+  "docs/audit-2026-08-23-repository-layout.md": {
+    "mtime": 1787494273.40985,
+    "ast_hash": "4b36fce2100ea3cd57fe81f616b2fbfe",
+    "semantic_hash": ""
+  },
+  "docs/plans/b0-baseline-2026-08-25.md": {
+    "mtime": 1787681545.8761492,
+    "ast_hash": "ebc54ee5b366da31c11dbcedcd481872",
+    "semantic_hash": ""
+  },
+  "docs/plans/beta-product-requirements-2026-08-23.md": {
+    "mtime": 1787494273.3761857,
+    "ast_hash": "30d40fa62d41c9ef8a3e29598a87d7aa",
+    "semantic_hash": ""
+  },
+  "docs/plans/beta-requirements-traceability-2026-08-23.md": {
+    "mtime": 1787494273.594238,
+    "ast_hash": "aa9e767f7ac04b2990839b55ca3b358b",
+    "semantic_hash": ""
+  },
+  "docs/plans/repo-health-issue-register-2026-08-23.md": {
+    "mtime": 1787494273.477049,
+    "ast_hash": "8eb081fa6b652a1d888aaac433b629d6",
+    "semantic_hash": ""
+  },
+  "docs/plans/repo-health-roadmap-2026-08-23.md": {
+    "mtime": 1787494273.5659218,
+    "ast_hash": "654c5dd6e06767af7cd3a4b5f8d335f5",
     "semantic_hash": ""
   }
 }
