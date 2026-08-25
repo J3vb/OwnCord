@@ -1,0 +1,330 @@
+# OwnCord repository-health issue register
+
+**As of:** 2026-08-23  
+**Audited head:** `5cc0888964e26276d1aca145e83270a2c1b9febd` (`dev`)  
+**Release target:** first public beta, quality-gated with no calendar deadline  
+**Purpose:** exhaustive, public-safe planning index for bringing the server,
+desktop client, browser/PWA client, repository, and release process to the
+approved beta bar.
+
+Companion documents:
+
+- [Beta product requirements](beta-product-requirements-2026-08-23.md)
+- [Repository-layout audit](../audit-2026-08-23-repository-layout.md)
+- [Phased beta roadmap](repo-health-roadmap-2026-08-23.md)
+
+This document is a planning view, not a replacement for
+`.superpowers/findings-ledger.json`. The ledger remains authoritative for
+`OC-*` finding status. Security-sensitive reproduction detail belongs in a
+private GitHub Security Advisory; this public register contains only opaque
+work packages and non-sensitive acceptance criteria.
+
+## Overall status
+
+**OwnCord is not beta-ready at this audited head.** The server has a strong
+tested foundation, but security remediation, compatibility, deployment,
+capacity, identity, recovery, deletion, retention, and moderation work remain.
+The desktop client has broad automated coverage, but its required unit-coverage
+gate is red and its full Playwright run does not terminate. The approved
+browser/PWA/phone/tablet client is mostly not implemented.
+
+| Surface                  | Evidence at the audited head                                                                                                                                                | Health conclusion                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Server builds            | Default, OpenTelemetry, Wazero, and combined build-tag variants pass; `go vet` passes                                                                                       | Strong                                                 |
+| Server behavior          | Full race suite, deadlock suite, and tagged tests pass; CI-style aggregate coverage is 74.6%                                                                                | Strong, with missing coverage/performance gates        |
+| Server local limitations | Docker daemon was unavailable; local `golangci-lint` could not load because its Go 1.26.5 build mismatched the module's Go 1.26.7 toolchain                                 | CI/container evidence still required for the exact SHA |
+| Client static/build      | App and E2E typechecks, ESLint, Prettier, Knip, production dependency audit, Vite build, Rust Clippy, and 115 Rust tests pass                                               | Healthy foundation                                     |
+| Client unit coverage     | 5,255 tests pass and 2 fail (`message-list` and `noise-suppression-restart`)                                                                                                | Required gate red                                      |
+| Client browser tests     | Three Chromium browser tests pass                                                                                                                                           | Useful but too narrow                                  |
+| Client Playwright        | All 293 test start markers appeared with no reported assertion failure, but the run never exited; an isolated five-test voice-widget run also hung                          | Cannot be claimed green                                |
+| Client bundles           | Build succeeds, but RNNoise/live-session output is about 2.0 MB minified / 1.345 MB gzip and Vite reports oversized/dynamic-import warnings                                 | Performance work required                              |
+| Browser/PWA/mobile       | No standalone browser production target, optional server hosting, PWA, Web Push, or beta-quality phone/tablet navigation exists                                             | Major beta capability gap                              |
+| Security                 | A private current-HEAD source review identified unresolved security-boundary work; public tracking uses opaque remediation families while detailed evidence remains private | Beta blocker; details remain private                   |
+| Repository/release       | Exact `dev` SHA has no Actions run; supported ARM64 and multi-architecture release coverage is incomplete                                                                   | Beta blocker                                           |
+
+## Classification and counting rules
+
+Priority:
+
+- **P0:** a required gate is red or the audited integration cannot be released.
+- **P1:** close before beta; security, authorization, data safety, compatibility,
+  or major reliability/release risk.
+- **P2:** scheduled architecture, performance, accessibility, operational, or
+  contributor-experience debt.
+- **P3:** low-risk cleanup, monitoring, or an explicitly recorded decision.
+
+State:
+
+- **confirmed:** reproduced, validated, or directly observed at the audited head.
+- **verify:** credible evidence exists, but a focused reproduction is required.
+- **decision:** the owner must select and record one supported direction.
+- **watch:** an upstream or accepted risk has no demonstrated reachable defect.
+- **resolved/superseded:** the original observation is no longer current; a
+  broader active item owns any remaining work.
+
+The tables deliberately separate four kinds of work. They must not be added
+together as if each row were a unique defect:
+
+1. `OC-*` rows are the canonical open defect ledger.
+2. `G/C/S/R/L-*` rows are audit work packages, guardrails, or architecture debt.
+3. `SEC-*` rows are opaque security-remediation families; duplicates are
+   explicitly named.
+4. `BG-*` rows are approved beta capabilities that are absent or incomplete,
+   not regressions in an already-complete feature.
+
+## Canonical findings-ledger truth
+
+| Status    |   Count |
+| --------- | ------: |
+| Fixed     |     306 |
+| Open      |      38 |
+| Declined  |       3 |
+| Duplicate |       1 |
+| **Total** | **348** |
+
+All 38 open records are listed below. Closing a planning row does not close an
+`OC-*` record: the implementation, regression test, focused verification, full
+required gates, and ledger update must land together.
+
+## Immediate gate and truth issues
+
+| ID   | Pri | State     | Issue and evidence                                                                                                                                                    | Phase | Closure evidence                                                                                                                    |
+| ---- | --: | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| G-01 |  P0 | confirmed | `message-list.test.ts` expects zero abort registrations while current row-scoped cancellation registers five; the full coverage run fails.                            | B0    | Test states the intended row-lifetime invariant, proves the historical leak shape, and passes in the complete Node 24/Vitest 4 run. |
+| G-02 |  P0 | confirmed | `noise-suppression-restart.test.ts` supplies a non-constructible arrow-function mock for `MediaStream`; Vitest 4 rejects it.                                          | B0    | Constructible test double, meaningful RED proof, and complete coverage run green.                                                   |
+| G-03 |  P0 | confirmed | Current `dev` SHA has no Actions run because ordinary `dev` pushes are not covered by the complete push matrix. This is the canonical owner for layout finding RL-14. | B0/B1 | Every integration SHA receives the protected full blocking matrix; this exact SHA or its superseding remediation SHA is green.      |
+| G-04 |  P1 | confirmed | The ledger now correctly exposes 38 open items, but older plans/snapshots still claim zero open or leave shipped phases pending.                                      | B0/B1 | Active-plan index identifies current, complete, and superseded documents; automated checks prevent conflicting status/count claims. |
+
+## Canonical open defect ledger
+
+The wording below is intentionally concise. The ledger contains the detailed
+evidence, reproduction, and suggested fix for each record.
+
+| ID      | Sev    | Area                    | Public-safe defect summary                                                                                                  | Phase  | Required closure evidence                                                                                                            |
+| ------- | ------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| OC-0311 | Medium | Client voice/E2EE       | A leave event from another readable voice channel can mutate the active call's peer-key state.                              | B2/B7  | Scope leave handling to the active channel and cover reordered leave/join/replay sequences.                                          |
+| OC-0312 | Medium | Client PTT              | Binding push-to-talk during a call can clear mute ownership before the deferred mute applies, leaving PTT unusable.         | B7     | Preserve the PTT ownership transition atomically and test mid-call binding/restart.                                                  |
+| OC-0313 | Medium | Client profiles         | Legacy per-user volume fallback is repeatedly copied across server profiles instead of being consumed once.                 | B4/B7  | One-time scoped migration, legacy-key removal, and cross-server isolation tests.                                                     |
+| OC-0314 | Medium | Client identity         | The client discards the server's partial-success warning when a credential change succeeds but session revocation does not. | B4/B9  | Surface warnings for password/TOTP changes with an action to review sessions; test all affected endpoints.                           |
+| OC-0315 | Medium | Client replay           | Replay-gate timestamps mix naive UTC server values with local wall-clock parsing.                                           | B2/B7  | One UTC parsing contract and timezone-varied replay boundary tests.                                                                  |
+| OC-0316 | Medium | Server/client E2EE      | WebSocket resume restores peer public keys but not a room key rotated during the outage.                                    | B2/B7  | Resume re-establishes the current room key and the security indicator cannot claim success prematurely; rotation/outage test passes. |
+| OC-0317 | Medium | Client DM state         | The replay path can regress a DM's `lastMessageId`, undermining duplicate-count protection.                                 | B2/B7  | Monotonic last-message updates with duplicate, out-of-order, and reconnect tests.                                                    |
+| OC-0318 | Medium | Server plugins          | Install-time and restart-time plugin manifest precedence differs between JSON and TOML.                                     | B2     | One canonical manifest contract or explicit ambiguity rejection; install/restart parity test.                                        |
+| OC-0319 | Medium | Client accessibility    | The Large Font preference is overridden by a higher-priority inline font-size value.                                        | B9     | Verified text-scale change across restart, zoom, responsive layouts, and accessibility checks.                                       |
+| OC-0320 | Medium | Server updater          | Server self-update selects Linux AMD64 independently of the running architecture.                                           | B6/B10 | Architecture-aware manifest selection and signed update/rollback smoke on every supported server target.                             |
+| OC-0321 | Medium | Server TOTP             | A TOTP key-file read failure can be treated as absence and lead to key replacement.                                         | B4     | Generate only on confirmed non-existence; all other read errors fail closed without modifying the file.                              |
+| OC-0322 | Low    | Client connection       | TypeScript host validation accepts a hostname form rejected by the native proxy.                                            | B2/B7  | Shared validation corpus produces identical browser, desktop, and Rust decisions.                                                    |
+| OC-0323 | Low    | Server unread state     | Mark-read/channel-focus can overwrite a mention count from a newer message using a stale snapshot.                          | B3/B5  | Atomic/monotonic read-state update with concurrent-message regression coverage.                                                      |
+| OC-0324 | Low    | Server auth             | Login rate-limit identity folding differs from SQLite account lookup semantics.                                             | B4     | Account lookup and limiter use one tested canonical identity rule, including Unicode collision cases.                                |
+| OC-0325 | Low    | Client search           | Search results parse naive UTC timestamps as local time.                                                                    | B7/B9  | Shared UTC parser and timezone/day-boundary rendering tests.                                                                         |
+| OC-0326 | Low    | Client pins             | Pinned-message timestamps parse naive UTC values as local time.                                                             | B7/B9  | Shared UTC parser and timezone/day-boundary rendering tests.                                                                         |
+| OC-0327 | Low    | Server voice moderation | Server mute/deafen also affects screen-share audio contrary to the product contract.                                        | B5     | Effective moderation applies only to intended media sources; SFU and client-policy tests agree.                                      |
+| OC-0328 | Low    | Client unread state     | Channel badges lack the message-ID replay guard already used by DMs.                                                        | B2/B7  | Monotonic channel replay guard with duplicate/out-of-order/reconnect tests.                                                          |
+| OC-0329 | Low    | Client privacy          | Legacy DM profile notes fall back across servers indefinitely.                                                              | B4/B7  | One-time server-scoped migration, old-key removal, and cross-server privacy test.                                                    |
+| OC-0330 | Low    | Client pins             | Pinned messages discard author identity and therefore cannot resolve nicknames.                                             | B7/B9  | Preserve author ID and render the same display identity as ordinary messages.                                                        |
+| OC-0331 | Low    | Server admin UI         | API-token Created/Last Used values parse naive UTC timestamps as local time.                                                | B6/B9  | Shared UTC contract and timezone/day-boundary admin tests.                                                                           |
+| OC-0332 | Low    | Client updater          | Bare IPv6 server addresses produce an invalid updater URL.                                                                  | B6/B10 | Central URL builder brackets IPv6 literals and passes domain/IPv4/IPv6/update smoke tests.                                           |
+| OC-0333 | Low    | Client voice UI         | Voice-roster render identity does not change when a participant is renamed mid-call.                                        | B7/B9  | Reactive identity signature and rename-in-call test.                                                                                 |
+| OC-0334 | Low    | Client PTT              | Escape closes Settings and can simultaneously be saved as the captured PTT key.                                             | B7/B9  | Escape cancels capture without persistence; teardown and timeout paths are tested.                                                   |
+| OC-0335 | Low    | Client lifecycle        | Each Add Server modal retains listeners and its removed subtree for the connect-page lifetime.                              | B7     | Modal-owned abort lifecycle; repeated open/close instrumentation shows no accumulation.                                              |
+| OC-0336 | Low    | Client lifecycle        | Server-profile rows re-register page-lifetime listeners on every render.                                                    | B7     | Row/render ownership prevents accumulation under repeated updates and teardown.                                                      |
+| OC-0337 | Low    | Server replay           | Cold-tier voice replay truncation can discard the newest events and reconstruct the wrong roster.                           | B2/B3  | Ordered, bounded replay retains the correct window; boundary/resume tests reconstruct the authoritative roster.                      |
+| OC-0338 | Low    | Server plugins          | TOML plugin manifests can omit configured memory and CPU resource limits.                                                   | B2/B3  | Explicit TOML mapping and JSON/TOML resource-limit parity tests.                                                                     |
+| OC-0339 | Low    | Server config           | A valid but empty configuration section is reported as an unknown ineffective key.                                          | B6     | Empty known sections are accepted; true unknown keys remain actionable and tested.                                                   |
+| OC-0340 | Low    | Server CLI              | A negative API-token expiry can create a token that never expires.                                                          | B4/B6  | CLI and HTTP share positive-expiry validation; negative/zero/boundary tests fail safely.                                             |
+| OC-0341 | Low    | Server CLI              | A numeric token label cannot be revoked because parsing commits to the ID path.                                             | B4/B6  | Unambiguous ID/label selection or safe fallback with numeric-label regression tests.                                                 |
+| OC-0342 | Low    | Client voice UI         | Voice avatar letter/color derives from username while the adjacent label may be a nickname.                                 | B9     | Avatar and label consistently derive from the displayed identity.                                                                    |
+| OC-0343 | Low    | Desktop shell           | Clicking the tray icon can hide a minimized window instead of restoring it.                                                 | B7/B9  | Minimized windows unminimize and focus; only visible, non-minimized windows toggle hidden.                                           |
+| OC-0344 | Low    | Server TLS              | Automatic HTTP-to-HTTPS redirect assumes port 443 instead of the configured HTTPS endpoint.                                 | B6     | Redirect derives the configured public origin/port and passes default/custom/domain/IP tests.                                        |
+| OC-0345 | Low    | Server owner auth       | Owner middleware repeats a role read and maps a transient read failure to forbidden.                                        | B3/B4  | Reuse the authenticated context and preserve correct unavailable/unauthorized distinctions in failure tests.                         |
+| OC-0346 | Low    | Server telemetry        | Panic recovery reads trace context before tracing middleware creates it.                                                    | B3/B6  | Middleware order gives recoveries the active trace ID; panic-path structured-log test passes.                                        |
+| OC-0347 | Low    | Client DM voice UI      | A DM call label reads but does not subscribe to DM state, so it remains stale.                                              | B7/B9  | Subscribe to the owning state and test mid-call rename/update.                                                                       |
+| OC-0348 | Low    | Client presence         | The online-count header includes the local invisible user while the member list presents that user as offline.              | B7/B9  | Count and list share one visibility policy with invisible-status regression tests.                                                   |
+
+## Public-safe security remediation
+
+An independent current-HEAD security review produced detailed reports that
+remain untracked/private until fixed or coordinated through private advisories.
+This register carries only non-sensitive security properties and opaque
+remediation families; an apparently related engineering row is not evidence
+that any private report is fixed.
+
+| ID     | Pri | State     | Opaque remediation family                                 | Phase | Public closure evidence                                                                                                                           |
+| ------ | --: | --------- | --------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SEC-01 |  P1 | confirmed | Atomic concurrent password-confirmation admission.        | B4    | One server-owned admission decision, bounded concurrent attempts, and race/load regression coverage.                                              |
+| SEC-02 |  P1 | confirmed | Effective channel-level voice moderation permissions.     | B5    | Voice moderation delegates to the same effective-permission policy as the authoritative channel action, with override and denial tests.           |
+| SEC-03 |  P1 | confirmed | Bounded per-response and aggregate preview/media reads.   | B2/B5 | Streaming limits are enforced before buffering; aggregate memory/concurrency budgets, timeout, cancellation, and adversarial boundary tests pass. |
+| SEC-04 |  P1 | confirmed | Durable per-user/server storage quotas and disk headroom. | B3/B6 | Transaction-safe quotas cover files and cumulative storage; low-disk behavior fails safely and is exercised by restart/concurrency tests.         |
+
+## Client engineering issues
+
+These are broader gates and work packages; canonical `OC-*` defects above are
+not recounted here.
+
+| ID   | Pri | State     | Issue and evidence                                                                                                                             | Phase    | Closure evidence                                                                                                                                 |
+| ---- | --: | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C-01 |  P1 | confirmed | `.nvmrc`/active docs use Node 20, while CI uses Node 24 and package metadata does not enforce the intended runtime. Canonical owner for RL-17. | B1       | One Node/npm source of truth drives local setup, packages, CI, release, and docs; wrong majors fail fast.                                        |
+| C-02 |  P1 | confirmed | Oxlint exits zero with 471 warnings, concentrated in LiveKit/E2EE bindings.                                                                    | B7       | Narrowly allow intentional generated/external names, fix actionable warnings, and make the blocking invocation warning-free.                     |
+| C-03 |  P1 | confirmed | Coverage cannot complete because G-01/G-02 fail, and exercised entry/orchestration files remain excluded.                                      | B0/B7    | Green full report includes exercised production files; exclusions are minimal and documented; thresholds ratchet from an honest baseline.        |
+| C-04 |  P2 | confirmed | Unit/E2E runs emit expected warnings and large expected debug/error output, obscuring unexpected failures.                                     | B7       | Expected logs are captured/asserted; a green run has no unexplained runtime warnings or log flood.                                               |
+| C-05 |  P3 | confirmed | Knip passes with four configuration hints.                                                                                                     | B7       | No hints, or each retained exception has a current inline rationale.                                                                             |
+| C-06 |  P0 | confirmed | Full Playwright and an isolated voice-widget subset fail to terminate on Windows after their observed test activity.                           | B0/B10   | Playwright exits unaided locally and in CI; the cause is regression-tested and no child process remains.                                         |
+| C-07 |  P1 | confirmed | Static RNNoise inclusion creates an approximately 2.0 MB minified / 1.345 MB gzip feature chunk.                                               | B7/B9    | Load on demand, cache after first use, and prove voice/noise restart/fallback behavior.                                                          |
+| C-08 |  P2 | confirmed | Vite warns about oversized chunks, but no startup/route/feature bundle budget blocks regressions.                                              | B7/B9    | Recorded gzip budgets fail CI on regression and distinguish startup from lazy feature cost.                                                      |
+| C-09 |  P1 | confirmed | Desktop external-preview destination policy is not fully centralized at the native trust boundary.                                             | B2/B7    | One native policy owns resolution, redirects, destinations, time/body limits, and parsing; broad capability scope is removed.                    |
+| C-10 |  P1 | confirmed | Client CSP permits broad HTTPS/WSS destinations and lacks a generated per-deployment allowlist contract.                                       | B2/B7/B8 | Required origins/protocols are inventoried and minimized for desktop/browser modes with functional regression tests.                             |
+| C-11 |  P2 | confirmed | Four production import cycles remain in LiveKit/audio and message attachment/media/embed code.                                                 | B7       | Production graph is acyclic or an approved seam and boundary test documents each unavoidable cycle.                                              |
+| C-12 |  P2 | confirmed | High-change client modules remain very large, including LiveKit/E2EE, dispatcher, and settings surfaces.                                       | B7/B9    | Responsibility maps guide cohesive extractions behind stable tested seams without behavior or coverage regression.                               |
+| C-13 |  P2 | confirmed | Duplicated color/host literals, many timer call sites, and an O(n) sidebar DOM-rebuild TODO remain.                                            | B7/B9    | Shared tokens/config, lifecycle-owned timers, and measured incremental sidebar updates replace the duplication/hot path.                         |
+| C-14 |  P1 | confirmed | Native smoke configuration exists but is absent from blocking CI because it needs a built app and real server.                                 | B10      | Release candidates run packaged native smoke on the supported Windows/Linux architecture matrix.                                                 |
+| C-15 |  P1 | confirmed | Full Tauri packaging is not a routine exact-SHA integration gate.                                                                              | B1/B10   | Cost-conscious integration/nightly/RC jobs package without exposing signing secrets to untrusted dependency PRs.                                 |
+| C-16 |  P2 | confirmed | Mutation fixes landed after the last measured 67.04% baseline; the suite was not rerun.                                                        | B7/B10   | Fresh baseline, survivor triage, and ratcheted targets for critical transport/auth/E2EE modules.                                                 |
+| C-17 |  P3 | confirmed | Direct real-browser coverage is only three Chromium tests and is concentrated on RNNoise.                                                      | B8/B10   | Browser-only API risk inventory drives blocking Chromium/Firefox/WebKit coverage plus real-device qualification where emulation is insufficient. |
+| C-18 |  P3 | watch     | Cargo has no known reachable vulnerability, but allowed unmaintained transitive crates and compatible patches require ownership.               | B10      | Compatible patches are reviewed; warnings are revisited each dependency cycle; platform migration path is recorded.                              |
+
+## Server engineering issues
+
+| ID   | Pri | State     | Issue and evidence                                                                                                                  | Phase  | Closure evidence                                                                                                                                              |
+| ---- | --: | --------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S-01 |  P1 | confirmed | Typing currently checks a weaker permission than posting.                                                                           | B2/B3  | Typing delegates to the same send-policy predicate; denial, announcement, and override tests prevent drift.                                                   |
+| S-02 |  P1 | confirmed | Invite create/revoke are privileged mutations without the audit coverage used by sibling mutation families.                         | B4/B5  | Successful create/revoke produce safe, non-secret audit events; failure behavior is tested.                                                                   |
+| S-03 |  P2 | confirmed | Admin channel name/topic/category validation lacks one explicit rune/normalization contract.                                        | B3/B5  | Shared limits cover admin and user writers; boundary tests count runes, not bytes.                                                                            |
+| S-04 |  P2 | confirmed | Sibling admin channel lookups expose inconsistent DM/not-found response contracts.                                                  | B3     | One non-DM resolution policy and response contract covers both paths.                                                                                         |
+| S-05 |  P2 | confirmed | Repository-wide Go formatting is not a required gate.                                                                               | B1     | Tree is formatted and a fast required gate fails future drift.                                                                                                |
+| S-06 |  P2 | confirmed | Server coverage is uploaded without a global or core-package regression floor; current aggregate is 74.6%.                          | B3/B10 | Documented baseline/exclusions and ratcheted global/core thresholds.                                                                                          |
+| S-07 |  P2 | confirmed | Thousands of tests and 17 fuzz targets exist, but there are no Go benchmarks for hub/replay, permission, DB, or fan-out hot paths.  | B6/B10 | Stable microbenchmarks and reference load baselines cover the highest-risk paths.                                                                             |
+| S-08 |  P2 | confirmed | Large lifecycle/hub/serve files remain structural hotspots.                                                                         | B3     | Cohesive extractions preserve lifecycle, locking, race, and deadlock invariants.                                                                              |
+| S-09 |  P2 | confirmed | API/admin/WebSocket layers still contain many direct database call sites.                                                           | B3     | Each use moves behind a narrow service/store seam or is documented as an intentional transaction/composition boundary.                                        |
+| S-10 |  P2 | confirmed | Auth routes still consume raw database ownership and are the first intended S-09 migration slice.                                   | B3/B4  | Tested AuthService/narrow interfaces preserve enumeration and sentinel-error behavior.                                                                        |
+| S-11 |  P2 | confirmed | Hub construction uses post-construction collaborator setters, leaving required wiring temporally coupled to `Run`.                  | B3     | Required collaborators are validated constructor/options inputs; only genuinely dynamic dependencies remain mutable.                                          |
+| S-12 |  P2 | confirmed | Ready/refresh/WebSocket paths mirror message send-permission policy by hand.                                                        | B3     | All paths delegate to one value-taking predicate with parity tests.                                                                                           |
+| S-13 |  P2 | confirmed | Durable TOTP used-code and partial-auth persister work remains incomplete.                                                          | B4     | Hash-only persistence, expiry, restart, and failure-mode tests land without persisting sliding rate-limit windows.                                            |
+| S-14 |  P1 | confirmed | Load tooling exists, but no supported capacity result is published for the approved 250 users / 100 connections / 25 voice profile. | B6/B10 | Reproducible report states hardware/software, CPU, memory, DB waits, p95/p99 latency, and pass/fail thresholds.                                               |
+| S-15 |  P3 | verify    | `voice_speakers` and `member_leave` remain reserved protocol entries with no production emit site.                                  | B2     | Compatibility review removes unused entries before the epoch freeze or explicitly reserves and fixtures them; schema, generated types, docs, and tests agree. |
+| S-16 |  P3 | verify    | Voice key-holder TOCTOU hardening remains a documented follow-up without a demonstrated contract failure.                           | B2/B3  | Threat-model review either records why outer checks suffice or adds an in-function recheck and race-focused private test.                                     |
+| S-17 |  P3 | watch     | Vulnerability tooling found no reachable Go advisory, while non-called/unmaintained upstream paths remain.                          | B6/B10 | Dependency path is monitored, compatible fixes are applied, and reachable-symbol scanning remains required.                                                   |
+
+## Repository, CI, documentation, and supply chain
+
+| ID   | Pri | State               | Issue and evidence                                                                                                                                                   | Phase     | Closure evidence                                                                                                                        |
+| ---- | --: | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| R-01 |  P1 | confirmed           | Real-server admin E2E remains job-level non-blocking; its approximately 30-green graduation evidence is not recorded.                                                | B10       | Thirty consecutive required integration runs or an equivalent statistically justified criterion passes before the job becomes blocking. |
+| R-02 |  P2 | confirmed           | Active documents disagree whether contributors branch/PR against `main` or `dev`.                                                                                    | B0/B1     | One protected branch model is reflected in docs, automation, templates, and repository settings.                                        |
+| R-03 |  P2 | resolved/superseded | The graph was refreshed at the audited head, resolving the old stale-SHA observation; generated-artifact ownership and local launcher portability remain under L-06. | B1        | No separate action; L-06 owns the remaining artifact-policy exit gate.                                                                  |
+| R-04 |  P1 | confirmed           | Build/runtime container references use mutable tags without complete digest-refresh ownership. Canonical beta owner for the release supply-chain portion of RL-18.   | B1/B6     | Reviewed immutable digests or automated digest PRs with smoke tests cover release/runtime images.                                       |
+| R-05 |  P2 | confirmed           | Repeated API/schema/protocol prose drift is guarded mostly by a PR checkbox.                                                                                         | B1/B2     | Generated inventories/contract tests cover machine-checkable facts and the remaining prose has an explicit review gate.                 |
+| R-06 |  P2 | confirmed           | Active, completed, historical, and superseded plans are not indexed consistently.                                                                                    | B0/B1     | Docs landing page and plan index expose status; link/status checks catch contradictions.                                                |
+| R-07 |  P2 | confirmed           | Major dependency, license, SBOM, and provenance review lacks one documented cadence across all dependency roots.                                                     | B1/B6/B10 | Automated coverage plus a dated recurring major/license review and signed release SBOM/provenance.                                      |
+| R-08 |  P1 | confirmed           | No single beta scorecard defines allowed open priorities, platform coverage, security sign-off, soak, upgrade/restore drills, or performance evidence.               | B0/B10    | Owner-approved scorecard is green after the release-candidate soak and links every evidence artifact.                                   |
+| R-09 |  P1 | confirmed           | A version tag can publish without proof that the exact tagged SHA completed the protected beta gate. Canonical owner for RL-16.                                      | B1/B10    | Publication consumes immutable exact-SHA gate evidence and a protected release approval.                                                |
+
+## Repository layout and contributor experience
+
+The layout audit recommends a targeted, isolated migration—not a wholesale
+monorepo/server rewrite. Pure moves, mechanical path rewrites, and
+behavior-changing work must remain in separate reviewable commits.
+
+| ID   | Pri | Source | Required work                                                                                                                              | Phase | Closure evidence                                                                                                        |
+| ---- | --: | ------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ----- | ----------------------------------------------------------------------------------------------------------------------- |
+| L-01 |  P1 | RL-01  | Flatten `Client/tauri-client/` to `Client/` as two adjacent non-functional commits: pure file moves, then mechanical active-path rewrites. | B1    | History/release asset names are preserved and the full baseline is unchanged after both commits.                        |
+| L-02 |  P1 | RL-02  | Record the browser/desktop platform-contract map in B1, then introduce typed adapters for native-dependent frontend services.              | B7    | The same adapter contract suite passes for desktop and browser implementations.                                         |
+| L-03 |  P1 | RL-03  | Establish independent `build:web` and `build:desktop` contracts from one shared UI after server-first phases close.                        | B7    | Both production builds are required and target-specific behavior is isolated.                                           |
+| L-04 |  P2 | RL-04  | Add cross-platform root bootstrap, format, generation, scoped, and full verification commands.                                             | B1    | Fresh Windows/Linux contributors can discover and run the intended checks; Go-only direct commands remain supported.    |
+| L-05 |  P2 | RL-05  | Record the workspace decision and cover every lock root with deterministic install/dependency automation.                                  | B1    | Measured rationale, immutable installs, and update coverage for all package roots.                                      |
+| L-06 |  P2 | RL-06  | Make large Graphify payloads reproducible CI artifacts; retain only a compact deterministic report if needed.                              | B1    | Portable local/CI generation works, committed report drift is checked, and published history is not rewritten.          |
+| L-07 |  P2 | RL-07  | Remove the tracked duplicate human rendering after deterministic on-demand/CI rendering and a drift check exist.                           | B1    | The JSON ledger remains canonical; a downloadable rendering is reproducible and CI rejects generation failure or drift. |
+| L-08 |  P2 | RL-08  | Keep the example WASM source, stop tracking its prebuilt output, and compile/verify it in CI or release checks.                            | B1/B2 | Deterministic source build passes and no stable plugin API promise is implied.                                          |
+| L-09 |  P2 | RL-09  | Move protocol schema/generator ownership to a root protocol/tool boundary.                                                                 | B1/B2 | One command generates Go and TypeScript consumers with zero drift.                                                      |
+| L-10 |  P1 | RL-10  | Move executable tooling under conventional command ownership and remove package-discovery filesystem side effects.                         | B1    | Broad Go discovery is read-only and tool execution is explicit/tested.                                                  |
+| L-11 |  P2 | RL-11  | Reclassify cross-stack invariants under an explicit owner or root system-contract tier.                                                    | B1    | Test names/location/commands expose ownership and CI runs the correct tier.                                             |
+| L-12 |  P2 | RL-13  | Align the Go module namespace to `github.com/J3vb/OwnCord/Server` in an isolated mechanical change.                                        | B1    | Imports, generators, build tags, source archives, and downstream instructions agree.                                    |
+| L-13 |  P2 | RL-19  | Add an editor baseline and repository gates for Markdown, YAML, JSON, CSS, Rust, Go, shell, and workflows.                                 | B1    | Cross-platform fast checks cover material tracked sources with explicit generated/vendor exclusions.                    |
+| L-14 |  P2 | RL-20  | Make hooks portable and remove undocumented `make`/POSIX assumptions on Windows.                                                           | B1    | Hooks are thin optional wrappers around cross-platform root commands; prerequisites are explicit.                       |
+| L-15 |  P2 | RL-21  | Route ideas/feedback to Discussions and modernize issue forms for browser, ARM64, deployment mode, and security reporting.                 | B1    | Intake matches BPR-100..102 and captures reproducible environment details.                                              |
+| L-16 |  P1 | RL-22  | Harden authorization for externally triggered paid automation.                                                                             | B1    | Trusted authorization, least privilege, and cost-abuse regression tests are required.                                   |
+
+Layout findings reconciled elsewhere: RL-12 is owned by R-06; RL-14 by G-03;
+RL-15 by BG-20; RL-16 by R-09; RL-17 by C-01; and RL-18 by L-05,
+R-04, and R-07.
+
+## Approved beta capability gaps
+
+Every row below is required by the frozen beta product requirements. These are
+feature-completion gaps, not additions beyond scope.
+
+| ID    | Pri | State     | Missing or incomplete beta capability                                                                                                     | Phase     | Exit evidence                                                                                                                                             |
+| ----- | --: | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BG-01 |  P1 | confirmed | Optional server-hosted browser client, disabled by default.                                                                               | B5/B8     | Owner opt-in controls hosting; disabled mode exposes no app route/assets; enabled mode passes upgrade/security smoke.                                     |
+| BG-02 |  P1 | confirmed | Installable PWA with safe shell caching, icons, standalone presentation, and update behavior.                                             | B8        | Manifest/installability audits pass; service worker never caches API/messages/credentials and handles version changes safely.                             |
+| BG-03 |  P1 | confirmed | Beta-quality responsive phone/tablet navigation, touch, keyboard, safe-area, and media UX.                                                | B8/B9     | Real-device and emulated phone/tablet matrix passes defined journeys and accessibility checks.                                                            |
+| BG-04 |  P1 | confirmed | Browser parity for credentials, transport, notifications, media/calls/E2EE, files, and safe external content where browser APIs allow.    | B7/B8/B9  | Shared behavior/contract suite passes; every unavoidable browser limitation is explicit and safely degraded.                                              |
+| BG-05 |  P1 | confirmed | Per-server owner/user opt-in Web Push without an OwnCord-operated relay.                                                                  | B5/B8     | Per-server keys/subscriptions, permission UX, unsubscribe/cleanup, privacy defaults, and supported-platform delivery tests pass.                          |
+| BG-06 |  P1 | confirmed | Secure browser deployment for domains, raw public IPs, LAN, and offline modes without a required reverse proxy or routine manual renewal. | B6/B8     | Domain/IP automated TLS, private-LAN local-trust onboarding, manual-cert escape hatch, renewal/restart tests, and honest limitations are documented.      |
+| BG-07 |  P1 | confirmed | Explicit server/current-and-previous-two-client protocol negotiation and safe rejection.                                                  | B2/B7/B10 | N/N-1/N-2 compatibility matrix passes; out-of-window clients fail with an actionable update requirement.                                                  |
+| BG-08 |  P1 | confirmed | New-login notices and sign-out-everywhere UI; per-session list/revoke backend exists but is not a complete user journey.                  | B4/B9     | Multi-device list, individual/all revocation, notices, stale-device handling, and audit tests pass.                                                       |
+| BG-09 |  P1 | confirmed | Offline recovery kit, audited admin-assisted reset, and optional SMTP recovery.                                                           | B4/B9     | Non-reversible server storage, one-time rotation, session revocation, rate limits, operator/user UX, and restore tests pass.                              |
+| BG-10 |  P1 | confirmed | Complete closed/invite/approval/open registration modes with invite-only default.                                                         | B4/B9     | Mode transitions, approvals, abuse limits, invitations, audit, and migration tests pass.                                                                  |
+| BG-11 |  P1 | confirmed | Full account erasure and backup non-resurrection.                                                                                         | B4        | Profile/auth/session/message/reaction/upload deletion is transactional/resumable, integrity logs are deidentified, and restore honors deletion markers.   |
+| BG-12 |  P1 | confirmed | Configurable server/channel retention with corresponding attachment cleanup.                                                              | B4/B5/B9  | Default indefinite retention remains; scheduled deletion, holds, audit, storage cleanup, backup/restore, and boundary tests pass.                         |
+| BG-13 |  P1 | confirmed | Discord-style Message Requests for first-time DMs.                                                                                        | B5/B9     | Preview/accept/ignore/delete/block/trust relationship behavior is abuse-resistant and consistent across desktop/browser/PWA.                              |
+| BG-14 |  P1 | confirmed | Local reports, permission-gated Moderation Center, workflow/audit history, moderator actions, and appeals.                                | B5/B9     | Report/evidence/assignment/status/notes/actions/appeal journeys enforce narrow permissions and immutable audit records.                                   |
+| BG-15 |  P1 | confirmed | Privacy-safe support bundle and verified zero automatic telemetry.                                                                        | B6/B9     | Redaction tests and user preview/consent protect secrets/content; network audit proves no automatic product telemetry.                                    |
+| BG-16 |  P1 | confirmed | English-only but translation-ready user-facing text organization.                                                                         | B7/B9     | User-visible strings are inventoried/extracted or deliberately exempted; locale/time/plural formatting has a stable seam.                                 |
+| BG-17 |  P1 | confirmed | Plugin-candidate boundary audit and consistent experimental/disabled labeling.                                                            | B2        | Candidate integrations are documented for post-beta; beta core security/identity/update/moderation/deletion remains core; no compatibility promise leaks. |
+| BG-18 |  P1 | confirmed | NSFW consent must prevent fetch/render leakage before acknowledgement, not merely overlay already-mounted content.                        | B5/B9     | No content, preview, attachment, or third-party request occurs pre-consent; blur/gate/revoke tests pass.                                                  |
+| BG-19 |  P1 | confirmed | Secure polish for link previews, GIFs, YouTube, and rich media.                                                                           | B5/B9     | Provider boundaries, privacy controls, bounded retrieval, consent, caching, failure UX, and offline behavior pass shared tests.                           |
+| BG-20 |  P1 | confirmed | Public-beta packaging/update matrix for Windows x64/ARM64, Linux x64/ARM64, server binaries, and multi-architecture Docker.               | B6/B10    | Build, install/boot, signature/checksum, manifest, in-place alpha upgrade, rollback, and update tests pass on every approved architecture.                |
+
+## Discovery passes required before claiming exhaustive coverage
+
+No finite static audit proves the absence of every latent defect. The strongest
+defensible completion claim is that each defined risk surface was inspected,
+candidates were independently validated, and accepted risks have owners. The
+following focused passes are mandatory during B0 through B10:
+
+1. Authentication, session, recovery, TOTP, registration, and authorization
+   sibling sweep.
+2. WebSocket sequencing, replay, replacement, compatibility, and lock-order
+   simulation.
+3. Voice/LiveKit/E2EE lifecycle, moderation, resume, and fault injection.
+4. Client async lifetimes, detached DOM/listeners, timers, cancellation, and
+   stale snapshots.
+5. Desktop proxy/TOFU/updater/signing, browser TLS/PWA/push, secure-context, and
+   secrets-at-rest threat review.
+6. Database migrations, account deletion, retention, backup/restore,
+   non-resurrection, disk-full, and crash consistency.
+7. Release supply chain, container provenance, dependency licenses, SBOM, and
+   exact-SHA publication controls.
+8. Performance/memory profiling for startup, large histories, reconnect storms,
+   100 connections, 25 voice participants, media restart, and long sessions.
+9. Keyboard, focus, screen reader, reduced motion, contrast, zoom, touch,
+   phone/tablet layout, virtual keyboard, and destructive UX journeys.
+10. API/protocol/schema/config/documentation contract diff, including
+    N/N-1/N-2 compatibility fixtures.
+11. Test-quality audit: stale assertions, tests that cannot fail, mutation
+    survivors, fuzz targets, real-browser/native gaps, and shutdown leaks.
+12. Operational drills: unhealthy DB/disk/hub, certificate renewal, offline/LAN
+    trust, backup recovery, updater rollback, and release artifact boot/install.
+
+Each pass returns **confirmed / refuted / duplicate / accepted / blocked**.
+Security-sensitive confirmed detail moves to a private advisory before public
+planning or implementation discussion.
+
+## Explicitly outside beta
+
+Do not convert these into health-remediation work unless they reveal a defect
+in an approved beta contract:
+
+- federation, cross-server identity, or cross-server messaging;
+- more than one active server connection per client;
+- anonymous guests or a centralized server directory;
+- native macOS, iOS, or Android applications;
+- a stable plugin API or bundled third-party plugins;
+- OwnCord-operated hosting, identity, push relay, telemetry, or moderation;
+- unrelated feature expansion after the frozen scope.
+
+Good post-beta plugin candidates include GIF/embed providers, slash
+commands/bots/automation, webhooks/integrations, optional moderation automation
+with human/audit control retained, UI tabs, import/export bridges, and
+observability exporters. Authentication, authorization, TLS, safe fetch,
+quotas, E2EE, updates, moderation audit, deletion, and recovery remain beta core.

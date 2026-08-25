@@ -40,7 +40,10 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run preview",
+    // Spawn Vite directly rather than through npm — see the note in
+    // playwright.config.ts: an `npm run` wrapper leaves vite alive as an
+    // orphaned grandchild on teardown and the runner never exits.
+    command: "npx vite preview",
     url: "http://localhost:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

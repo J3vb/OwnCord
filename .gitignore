@@ -28,6 +28,12 @@ docs/research/
 docs/superpowers/
 /skills/
 
+# Detailed security reports for findings that are not yet fixed. This repo is
+# public (docs/security.md): reproduction traces for a live defect must never
+# be committed. Findings are coordinated through private GitHub Security
+# Advisories; only opaque identifiers and safe status go in tracked plans.
+docs/security-findings/
+
 # Mutation-testing output (npm run test:mutate). Local-only by design: a
 # surviving-mutant report maps exactly which behaviour nothing tests.
 Client/tauri-client/.stryker-tmp/

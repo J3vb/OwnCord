@@ -60,9 +60,19 @@ function makeFakeAudioContext() {
 
 describe("createRNNoiseProcessor restart (OC-0277)", () => {
   beforeEach(() => {
+    // Must be a real constructor: noise-suppression.ts calls
+    // `new MediaStream([inputTrack])` before handing the result to the (mocked,
+    // argument-ignoring) createMediaStreamSource. A vi.fn() whose
+    // implementation is an arrow function is not constructible, so Vitest 4
+    // throws "is not a constructor" there instead of running the assertions.
     vi.stubGlobal(
       "MediaStream",
-      vi.fn().mockImplementation((tracks: unknown[]) => ({ tracks })),
+      class {
+        tracks: unknown[];
+        constructor(tracks: unknown[] = []) {
+          this.tracks = tracks;
+        }
+      },
     );
   });
 

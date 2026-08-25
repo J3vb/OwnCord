@@ -43,8 +43,16 @@ export default defineConfig({
     },
   ],
 
+  // Kills the dev server the runner cannot kill itself; without it the suite
+  // passes and then hangs forever. See tests/e2e/global-teardown.ts.
+  globalTeardown: "./tests/e2e/global-teardown.ts",
+
   webServer: {
-    command: "npm run dev",
+    // Run Vite's entry point directly so the listening process IS Playwright's
+    // child — globalTeardown kills the listener, which only releases the
+    // runner's ChildProcess handle if that listener is the child itself. Going
+    // through `npm run dev` would leave the npm process holding it open.
+    command: "node node_modules/vite/bin/vite.js",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
