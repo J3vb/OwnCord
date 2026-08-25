@@ -2,7 +2,8 @@
 
 **Drafted:** 2026-08-25
 **Base commit:** `6a1561fa` (`dev`, post-PR #1409)
-**Status:** proposed; **not started — blocked on HP-0 acceptance** (see below)
+**Status:** proposed; **entry gate met — HP-0 accepted 2026-08-25**. B1-0 is
+complete; B1-1 is the next step.
 
 Primary inputs:
 
@@ -31,9 +32,10 @@ This plan therefore does two things the roadmap's workstream list does not: it
 specifies a *mechanical* proof that each of the two flatten commits changed
 nothing.
 
-## Blocking: HP-0 was never formally accepted
+## Entry gate: HP-0 — was not accepted, now is
 
-The roadmap's B1 entry gate reads `- HP-0 is accepted.` It is not.
+When this plan was drafted, the roadmap's B1 entry gate (`- HP-0 is accepted.`)
+was **unmet**, and nothing in the repository recorded otherwise:
 
 | Evidence | Finding |
 | --- | --- |
@@ -68,8 +70,12 @@ documents rather than the single artifact the hold point requires.
    Do **not** pin:
    - `Server Docker Build (verify)` — observed as **skipping** on a dev PR
      (`if: ref_name=='main' || base_ref=='main'`).
-   - `Tauri Full Build (*)` — does not appear in the check list at all on a dev
-     PR; the job is never created (`if: base_ref=='main'`).
+   - `Tauri Full Build (${{ matrix.os }})` — reports **skipping** on a dev PR,
+     under the *unexpanded* matrix name, because the job is skipped before matrix
+     expansion. (An earlier revision of this plan said it does not appear at all;
+     that was wrong — observed on PR #1410.)
+   - `CodeQL` — a default-setup aggregate over the three `Analyze` jobs. Pinning
+     those three is sufficient; the aggregate is redundant.
    - `Admin Panel E2E (real server, non-blocking)` — `continue-on-error: true`,
      so it reports success unconditionally. Requiring it is theatre; that is
      `R-01`, B10 work.
@@ -93,6 +99,19 @@ documents rather than the single artifact the hold point requires.
 
 Then add one dated acceptance line to the baseline document. **No B1 source
 change starts before that line exists.**
+
+### Status: all five closed, HP-0 accepted 2026-08-25
+
+| # | Item | Outcome |
+| --- | --- | --- |
+| 1 | Scorecard | [hp-0-scorecard-2026-08-25.md](hp-0-scorecard-2026-08-25.md) written; part-closes `R-08`. |
+| 2 | Pin required checks | **Applied.** 10 checks pinned on `dev`. The assumption that repository-settings writes are blocked from the agent sandbox was **wrong** — the `PUT` succeeded. |
+| 3 | Two unverified rows | Rust **re-measured**: 115 passed, clippy `-D warnings` exit 0 — confirms the carried figure. Node 26-vs-24 accepted as a stated limitation; CI ran the full matrix on Node 24 and passed. |
+| 4 | 38 open findings | Accepted as counted, non-stale, assigned. 11 medium / 27 low, **zero high or critical**, **0 dead paths across all 348** re-verified at `6a1561fa`, and **none assigned to B1**. |
+| 5 | Security reconciliation | 7 private findings, **7 of 7 mapped** to existing public rows, 0 unmapped, 0 fixed at the reviewed revision. Content-free summary in the scorecard; detail stays private. |
+
+Also corrected while closing item 2: the live check list is **not** what
+`ci.yml` implies. See the amended table above.
 
 ## What B0 already closed — do not redo
 
@@ -218,6 +237,14 @@ Two rules, applied to an **explicit allow-list of files**, never repo-wide:
 
 A repo-wide `sed` is the wrong tool: it would corrupt the dated audits that are
 the record authorising this move.
+
+**Build the inventory with `git grep` or ripgrep, never `grep -r` from the repo
+root.** `git worktree list` shows a locked stale worktree under
+`.claude/worktrees/`, holding a full second copy of the repository — its own
+`Server/go.mod`, its own `Client/tauri-client/`. It is correctly gitignored and
+harmless to the move, but a raw recursive grep walks into it and roughly doubles
+every count, which is exactly how a reference inventory ends up wrong in a way
+nobody notices.
 
 **R1 — active automation:** `.github/workflows/ci.yml` (24 refs — seven
 `working-directory`, five `cache-dependency-path`, two `workspaces`, seven
