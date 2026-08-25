@@ -18,12 +18,27 @@
 #       Applies to you too. With `false` an admin silently bypasses the PR
 #       requirement, which on a solo-admin repo makes the whole guard
 #       decorative. Toggle it off any time if you need an emergency push.
-#   required_status_checks: null
-#       Deliberately not set yet. Requiring check names that never report
-#       deadlocks every PR, so pin them only after confirming the exact job
-#       names from a green run:
-#           gh api repos/J3vb/OwnCord/commits/dev/check-runs \
-#             -q '.check_runs[].name'
+#   required_status_checks
+#       Pinned 2026-08-25 (HP-0 step 2). The names below were read off a live
+#       dev-targeted PR with `gh pr checks <n>`, NOT inferred from ci.yml --
+#       three of them exist in no workflow file at all, because CodeQL runs
+#       from GitHub default setup configured in repository settings.
+#
+#       Deliberately NOT pinned, and why:
+#         Server Docker Build (verify)  reports "skipping" on a dev PR
+#                                       (if: ref_name=='main' || base_ref=='main')
+#         Tauri Full Build (...)        reports "skipping" on a dev PR, under the
+#                                       UNEXPANDED matrix name -- the job is
+#                                       skipped before matrix expansion
+#         Admin Panel E2E               continue-on-error: true, so it reports
+#                                       success unconditionally; requiring it is
+#                                       theatre (that is R-01, B10 work)
+#         CodeQL                        default-setup aggregate over the three
+#                                       Analyze jobs; pinning those is enough
+#
+#       A required check that never reports blocks every PR forever. Re-read the
+#       list before changing it:
+#           gh pr checks <a recent dev PR>
 #
 # To undo:
 #   gh api -X DELETE repos/J3vb/OwnCord/branches/dev/protection
@@ -33,7 +48,21 @@ REPO="${REPO:-J3vb/OwnCord}"
 
 gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
 {
-  "required_status_checks": null,
+  "required_status_checks": {
+    "strict": false,
+    "contexts": [
+      "Server Build & Test (ubuntu-latest)",
+      "Server Build & Test (windows-latest)",
+      "Client Static Checks",
+      "Client Unit Tests",
+      "Rust Unit Tests",
+      "Client E2E (Playwright)",
+      "Client E2E (parity subset, blocking)",
+      "Analyze (go)",
+      "Analyze (javascript-typescript)",
+      "Analyze (actions)"
+    ]
+  },
   "enforce_admins": true,
   "required_pull_request_reviews": {
     "required_approving_review_count": 0,
@@ -54,4 +83,5 @@ gh api "repos/${REPO}/branches/dev/protection" -q '
   "  PR required:      " + ((.required_pull_request_reviews != null)|tostring),
   "  approvals needed: " + (.required_pull_request_reviews.required_approving_review_count|tostring),
   "  applies to admins:" + (.enforce_admins.enabled|tostring),
-  "  force pushes:     " + (.allow_force_pushes.enabled|tostring)'
+  "  force pushes:     " + (.allow_force_pushes.enabled|tostring),
+  "  required checks:  " + ((.required_status_checks.contexts // []) | length | tostring)'
