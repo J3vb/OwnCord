@@ -9,7 +9,7 @@ adds nothing to the server binary — it is a thin wrapper over OwnCord's existi
 the client's on-disk log.
 
 - **Code:** `tools/mcp-introspect/index.mjs` (one file, ~270 lines)
-- **Runtime:** Node ≥ 20, ESM. One real dependency: `@modelcontextprotocol/sdk` (+ `zod`)
+- **Runtime:** Node ≥ 24, ESM. One real dependency: `@modelcontextprotocol/sdk` (+ `zod`)
 - **Registration:** `/.mcp.json` (committed) and `.claude/settings.local.json` (local)
 
 ---

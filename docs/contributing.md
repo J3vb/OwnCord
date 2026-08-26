@@ -13,7 +13,8 @@ How to set up the development environment and contribute to OwnCord.
 | Linux ARM64 | ✅ | ✅ (CI only) |
 
 - **Go 1.26+** (server)
-- **Node.js 20+** (client)
+- **Node.js 24+** (client) — pinned in `Client/.nvmrc`; `engine-strict` makes a
+  wrong major a hard failure, not a warning
 - **Rust / Cargo** (Tauri client — not needed for server-only work)
 - **Docker + Compose v2** (optional — alternative to building the server locally)
 
@@ -210,7 +211,9 @@ closing audit findings 2026-04-07 #8 / DC-11):
   triaged in the workflow comment instead of blocking on unfixable pins),
   `govulncheck` for Go, `cargo audit` for Rust, and `knip` refuses unused
   client dependencies outright.
-- **Version skew is pinned at the toolchain level** too: `.nvmrc` + CI both
-  say Node 20, `Server/sqlc.version` pins sqlc, Go pins via `go.mod`
-  (`GOTOOLCHAIN=auto`), and GitHub Actions are SHA-pinned with Dependabot
-  bumping the pins.
+- **Version skew is pinned at the toolchain level** too: `Client/.nvmrc`, every
+  `actions/setup-node` in CI, and an `engines` block in all three
+  `package.json` files say Node 24 — with `engine-strict=true` in each
+  package's `.npmrc`, so a wrong major fails the install instead of warning.
+  `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
+  and GitHub Actions are SHA-pinned with Dependabot bumping the pins.

@@ -1,5 +1,9 @@
 {
   "private": true,
+  "engines": {
+    "node": ">=24",
+    "npm": ">=10"
+  },
   "scripts": {
     "changelog": "changelogen",
     "release": "changelogen --release",
