@@ -86,7 +86,9 @@ static CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
 /// distrust) rather than propagated, so a panic inside one command cannot
 /// permanently wedge every credential operation for the rest of the process.
 fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = CREDENTIAL_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = CREDENTIAL_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     f()
 }
 
@@ -353,8 +355,14 @@ mod tests {
     fn account_names_keep_the_port_that_distinguishes_hosts() {
         // Two servers on one machine differ only by port; dropping it would
         // make them share an identity key.
-        assert_ne!(login_account("localhost:8443"), login_account("localhost:9443"));
-        assert_eq!(identity_account("localhost:8443"), "identity:localhost:8443");
+        assert_ne!(
+            login_account("localhost:8443"),
+            login_account("localhost:9443")
+        );
+        assert_eq!(
+            identity_account("localhost:8443"),
+            "identity:localhost:8443"
+        );
     }
 
     #[test]
@@ -374,7 +382,9 @@ mod tests {
 
     #[test]
     fn parse_credential_blob_rejects_malformed_input() {
-        assert!(parse_credential_blob("not json").unwrap_err().contains("not valid JSON"));
+        assert!(parse_credential_blob("not json")
+            .unwrap_err()
+            .contains("not valid JSON"));
         assert!(parse_credential_blob(r#"{"token":"tok"}"#)
             .unwrap_err()
             .contains("missing 'username'"));

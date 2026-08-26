@@ -144,20 +144,19 @@ pub async fn ws_connect<R: Runtime>(
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth();
 
-    let connector =
-        tokio_tungstenite::Connector::Rustls(Arc::new(tls_config));
+    let connector = tokio_tungstenite::Connector::Rustls(Arc::new(tls_config));
 
-    let connect_future = tokio_tungstenite::connect_async_tls_with_config(
-        &url,
-        None,
-        false,
-        Some(connector),
-    );
+    let connect_future =
+        tokio_tungstenite::connect_async_tls_with_config(&url, None, false, Some(connector));
 
     let (ws_stream, _response) = tokio::time::timeout(CONNECT_TIMEOUT, connect_future)
         .await
         .map_err(|_| {
-            error!("[ws_proxy] connect timed out after {}s to {}", CONNECT_TIMEOUT.as_secs(), url);
+            error!(
+                "[ws_proxy] connect timed out after {}s to {}",
+                CONNECT_TIMEOUT.as_secs(),
+                url
+            );
             format!("ws connect timed out after {}s", CONNECT_TIMEOUT.as_secs())
         })?
         .map_err(|e| {
@@ -182,19 +181,28 @@ pub async fn ws_connect<R: Runtime>(
     match tofu::evaluate(&app, &host, &fingerprint)? {
         TofuOutcome::Trusted => {
             info!("[ws_proxy] TOFU check passed for {}", host);
-            emit_cert_tofu(&app, serde_json::json!({
-                "host": host,
-                "fingerprint": fingerprint,
-                "status": "trusted",
-            }));
+            emit_cert_tofu(
+                &app,
+                serde_json::json!({
+                    "host": host,
+                    "fingerprint": fingerprint,
+                    "status": "trusted",
+                }),
+            );
         }
         TofuOutcome::FirstUse => {
-            info!("[ws_proxy] first-use cert for {} — awaiting user confirmation", host);
-            emit_cert_tofu(&app, serde_json::json!({
-                "host": host,
-                "fingerprint": fingerprint,
-                "status": "first_use",
-            }));
+            info!(
+                "[ws_proxy] first-use cert for {} — awaiting user confirmation",
+                host
+            );
+            emit_cert_tofu(
+                &app,
+                serde_json::json!({
+                    "host": host,
+                    "fingerprint": fingerprint,
+                    "status": "first_use",
+                }),
+            );
             // Do not open the socket: the user must confirm the fingerprint
             // (accept_cert_fingerprint) before anything is sent over it.
             return Err(format!(
@@ -203,15 +211,21 @@ pub async fn ws_connect<R: Runtime>(
         }
         TofuOutcome::Mismatch { stored } => {
             let msg = tofu::mismatch_message(&host, &stored, &fingerprint);
-            warn!("[ws_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch", host);
+            warn!(
+                "[ws_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
+                host
+            );
             debug!("[ws_proxy] TOFU detail: {}", msg);
-            emit_cert_tofu(&app, serde_json::json!({
-                "host": host,
-                "fingerprint": fingerprint,
-                "status": "mismatch",
-                "message": msg,
-                "storedFingerprint": stored,
-            }));
+            emit_cert_tofu(
+                &app,
+                serde_json::json!({
+                    "host": host,
+                    "fingerprint": fingerprint,
+                    "status": "mismatch",
+                    "message": msg,
+                    "storedFingerprint": stored,
+                }),
+            );
             // Reject the connection — do not proceed.
             return Err(msg);
         }
@@ -311,10 +325,7 @@ pub async fn ws_connect<R: Runtime>(
 
 /// Send a text message through the proxy WebSocket.
 #[tauri::command]
-pub async fn ws_send(
-    state: tauri::State<'_, WsState>,
-    message: String,
-) -> Result<(), String> {
+pub async fn ws_send(state: tauri::State<'_, WsState>, message: String) -> Result<(), String> {
     let tx_lock = state.tx.lock().await;
     if let Some(tx) = tx_lock.as_ref() {
         match tx.try_send(message) {
@@ -395,8 +406,12 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         // fingerprint would be trusted in-process even though it was never
         // persisted to certs.json.
         match old_value {
-            Some(v) => { store.set(&host, v); }
-            None    => { let _ = store.delete(&host); }
+            Some(v) => {
+                store.set(&host, v);
+            }
+            None => {
+                let _ = store.delete(&host);
+            }
         }
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to persist pin for {host}: {e}");
         return Err(format!("failed to persist cert fingerprint: {e}"));
@@ -591,7 +606,10 @@ mod tests {
         let got = tokio::time::timeout(Duration::from_secs(1), rx.recv())
             .await
             .expect("write task would hang forever: channel still open after disconnect");
-        assert_eq!(got, None, "rx.recv() must yield None so the write task exits");
+        assert_eq!(
+            got, None,
+            "rx.recv() must yield None so the write task exits"
+        );
     }
 
     // B4_conn_ipc-9: ws_disconnect must invalidate an in-flight ws_connect

@@ -38,8 +38,12 @@ pub fn enable_media_capture(app: &AppHandle) {
         webview.connect_permission_request(|_, request| {
             // UserMediaPermissionRequest covers getUserMedia (mic/camera);
             // DeviceInfoPermissionRequest covers enumerateDevices labels.
-            let is_media = request.downcast_ref::<UserMediaPermissionRequest>().is_some()
-                || request.downcast_ref::<DeviceInfoPermissionRequest>().is_some();
+            let is_media = request
+                .downcast_ref::<UserMediaPermissionRequest>()
+                .is_some()
+                || request
+                    .downcast_ref::<DeviceInfoPermissionRequest>()
+                    .is_some();
             if is_media {
                 request.allow();
                 return true;

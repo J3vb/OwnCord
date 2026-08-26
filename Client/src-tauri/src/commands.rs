@@ -10,13 +10,11 @@ const MAX_SETTINGS_KEY_LEN: usize = 128;
 /// Allowed key prefixes and exact keys for the settings store.
 /// Keys must either match an exact entry or start with an allowed prefix.
 const ALLOWED_SETTINGS_PREFIXES: &[&str] = &[
-    "owncord:",      // owncord:profiles, owncord:settings:*, owncord:recent-emoji
-    "userVolume_",   // per-user volume: userVolume_{userId}
+    "owncord:",    // owncord:profiles, owncord:settings:*, owncord:recent-emoji
+    "userVolume_", // per-user volume: userVolume_{userId}
 ];
 
-const ALLOWED_SETTINGS_EXACT: &[&str] = &[
-    "windowState",
-];
+const ALLOWED_SETTINGS_EXACT: &[&str] = &["windowState"];
 
 fn is_settings_key_allowed(key: &str) -> bool {
     if key.len() > MAX_SETTINGS_KEY_LEN || key.is_empty() {
@@ -25,7 +23,9 @@ fn is_settings_key_allowed(key: &str) -> bool {
     if ALLOWED_SETTINGS_EXACT.contains(&key) {
         return true;
     }
-    ALLOWED_SETTINGS_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+    ALLOWED_SETTINGS_PREFIXES
+        .iter()
+        .any(|prefix| key.starts_with(prefix))
 }
 
 // ---------------------------------------------------------------------------
@@ -61,9 +61,12 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
         return Err(format!("unknown settings key: {key}"));
     }
 
-    let store = app
-        .store(SETTINGS_STORE)
-        .map_err(|e| log_cmd_err("save_settings", format!("failed to open settings store: {e}")))?;
+    let store = app.store(SETTINGS_STORE).map_err(|e| {
+        log_cmd_err(
+            "save_settings",
+            format!("failed to open settings store: {e}"),
+        )
+    })?;
 
     store.set(&key, value);
     store
@@ -87,7 +90,10 @@ fn validate_cert_pin(host: &str, fingerprint: &str) -> Result<(), String> {
         return Err("host must be 1-253 characters".into());
     }
     // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
         return Err("host contains invalid characters".into());
     }
     if fingerprint.is_empty() {
@@ -112,7 +118,10 @@ pub fn store_cert_fingerprint(
     validate_cert_pin(&host, &fingerprint)?;
 
     let store = app.store(CERTS_STORE).map_err(|e| {
-        log_cmd_err("store_cert_fingerprint", format!("failed to open certs store: {e}"))
+        log_cmd_err(
+            "store_cert_fingerprint",
+            format!("failed to open certs store: {e}"),
+        )
     })?;
 
     // Capture old value before mutating so we can restore it if save fails.
@@ -123,8 +132,12 @@ pub fn store_cert_fingerprint(
         // existed, or delete if there was none. Without this, a failed save
         // during cert rotation would silently lose the previously trusted cert.
         match old_value {
-            Some(v) => { store.set(&host, v); }
-            None    => { let _ = store.delete(&host); }
+            Some(v) => {
+                store.set(&host, v);
+            }
+            None => {
+                let _ = store.delete(&host);
+            }
         }
         return Err(log_cmd_err(
             "store_cert_fingerprint",
@@ -135,10 +148,7 @@ pub fn store_cert_fingerprint(
 }
 
 #[tauri::command]
-pub fn get_cert_fingerprint(
-    app: tauri::AppHandle,
-    host: String,
-) -> Result<Option<String>, String> {
+pub fn get_cert_fingerprint(app: tauri::AppHandle, host: String) -> Result<Option<String>, String> {
     if host.is_empty() {
         return Err("host must not be empty".into());
     }
@@ -188,13 +198,19 @@ pub fn store_identity_pin(
         return Err("host must be 1-253 characters".into());
     }
     // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
         return Err("host contains invalid characters".into());
     }
     if user_id.is_empty() || user_id.len() > 64 {
         return Err("user_id must be 1-64 characters".into());
     }
-    if !user_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+    if !user_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
         return Err("user_id contains invalid characters".into());
     }
     if pin.is_empty() || pin.len() > MAX_IDENTITY_PIN_LEN {
@@ -202,7 +218,10 @@ pub fn store_identity_pin(
     }
     // Base64 charset (standard + url-safe + padding). Guards against garbage/DoS;
     // the actual key parsing/verification happens on the JS side.
-    if !pin.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_')) {
+    if !pin
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_'))
+    {
         return Err("pin contains invalid characters".into());
     }
 
@@ -218,8 +237,12 @@ pub fn store_identity_pin(
         // Restore previous in-memory state so a failed save during a re-pin
         // doesn't silently drop the previously trusted identity key.
         match old_value {
-            Some(v) => { store.set(&store_key, v); }
-            None    => { let _ = store.delete(&store_key); }
+            Some(v) => {
+                store.set(&store_key, v);
+            }
+            None => {
+                let _ = store.delete(&store_key);
+            }
         }
         return Err(format!("failed to persist identity pin: {e}"));
     }
@@ -374,7 +397,13 @@ mod tests {
 
     #[test]
     fn identity_pin_key_combines_host_and_user() {
-        assert_eq!(identity_pin_key("chat.example.com", "42"), "chat.example.com:42");
-        assert_eq!(identity_pin_key("192.168.1.10:8443", "u_7"), "192.168.1.10:8443:u_7");
+        assert_eq!(
+            identity_pin_key("chat.example.com", "42"),
+            "chat.example.com:42"
+        );
+        assert_eq!(
+            identity_pin_key("192.168.1.10:8443", "u_7"),
+            "192.168.1.10:8443:u_7"
+        );
     }
 }

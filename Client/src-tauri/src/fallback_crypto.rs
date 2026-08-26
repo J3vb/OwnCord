@@ -200,7 +200,10 @@ mod tests {
         tampered[last] ^= 0x01;
         assert!(unprotect(&key, &tampered, b"aad").is_err());
 
-        assert!(unprotect(&key, &blob[..NONCE_LEN], b"aad").is_err(), "truncated blob");
+        assert!(
+            unprotect(&key, &blob[..NONCE_LEN], b"aad").is_err(),
+            "truncated blob"
+        );
     }
 
     #[test]
@@ -213,10 +216,8 @@ mod tests {
 
     #[test]
     fn creates_and_reuses_the_key_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "owncord-fallback-key-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("owncord-fallback-key-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
 
         let first = load_or_create_key(&dir).unwrap();
@@ -259,7 +260,10 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("failed to write"), "unexpected error: {err}");
-        assert!(!path.exists(), "a failed write must not leave a partial key file behind");
+        assert!(
+            !path.exists(),
+            "a failed write must not leave a partial key file behind"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

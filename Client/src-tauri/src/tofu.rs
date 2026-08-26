@@ -80,7 +80,12 @@ pub(crate) struct CaptureVerifier {
 impl CaptureVerifier {
     pub(crate) fn new() -> (Self, CapturedFingerprint) {
         let fp = Arc::new(std::sync::Mutex::new(None));
-        (Self { captured: fp.clone() }, fp)
+        (
+            Self {
+                captured: fp.clone(),
+            },
+            fp,
+        )
     }
 }
 
@@ -134,7 +139,9 @@ pub(crate) struct PinnedVerifier {
 
 impl PinnedVerifier {
     pub(crate) fn new(expected_fingerprint: String) -> Self {
-        Self { expected_fingerprint }
+        Self {
+            expected_fingerprint,
+        }
     }
 }
 
@@ -203,7 +210,11 @@ impl HostScopedVerifier {
         )
         .build()
         .map_err(|e| format!("failed to build web-PKI verifier: {e}"))?;
-        Ok(Self::with_default(pinned_host, expected_fingerprint, default))
+        Ok(Self::with_default(
+            pinned_host,
+            expected_fingerprint,
+            default,
+        ))
     }
 
     /// Seam for tests: inject the verifier used for non-pinned hosts.
@@ -247,11 +258,21 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
         now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         if self.is_pinned_host(server_name) {
-            self.pinned
-                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+            self.pinned.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            )
         } else {
-            self.default
-                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+            self.default.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            )
         }
     }
 
@@ -410,7 +431,9 @@ mod tests {
     fn decide_mismatch_when_pin_differs() {
         assert_eq!(
             decide(Some("aa:bb".into()), "cc:dd"),
-            TofuOutcome::Mismatch { stored: "aa:bb".into() }
+            TofuOutcome::Mismatch {
+                stored: "aa:bb".into()
+            }
         );
     }
 
@@ -430,7 +453,10 @@ mod tests {
     // own distinct key, matching the un-bracketed "host:port" behavior above.
     #[test]
     fn cert_store_key_treats_bracketed_and_bare_ipv6_as_the_same_host() {
-        assert_eq!(cert_store_key("[2001:db8::1]"), cert_store_key("2001:db8::1"));
+        assert_eq!(
+            cert_store_key("[2001:db8::1]"),
+            cert_store_key("2001:db8::1")
+        );
         assert_eq!(cert_store_key("2001:db8::1"), "2001:db8::1");
         assert_eq!(cert_store_key("[2001:db8::1]"), "2001:db8::1");
         // The default-port livekit form ("[host]:443") also collapses to the
@@ -478,7 +504,10 @@ mod tests {
     #[test]
     fn extract_host_variants() {
         assert_eq!(extract_host("wss://example.com/chat"), "example.com");
-        assert_eq!(extract_host("wss://example.com:8443/chat"), "example.com:8443");
+        assert_eq!(
+            extract_host("wss://example.com:8443/chat"),
+            "example.com:8443"
+        );
         assert_eq!(extract_host("wss://example.com:443/chat"), "example.com");
         assert_eq!(extract_host("wss://example.com"), "example.com");
         assert_eq!(extract_host("example.com/path"), "example.com");
@@ -577,7 +606,9 @@ mod tests {
         HostScopedVerifier::with_default(
             pinned_host.to_string(),
             fingerprint_hex(cert_bytes),
-            Arc::new(StubVerifier { accept: stub_accepts }),
+            Arc::new(StubVerifier {
+                accept: stub_accepts,
+            }),
         )
     }
 
