@@ -29,3 +29,18 @@ docs/audit-*.md
 # never be able to turn a shared gate red.
 .remember/
 **/.remember/
+
+# Build output and per-tool scratch. Every path below is gitignored -- but by a
+# NESTED .gitignore, and Prettier honours only the root one. Without these
+# entries the gate goes red the moment a contributor runs a build: `cargo test`
+# alone drops ~850 formattable files into src-tauri/target/.
+# Mirrors Client/.gitignore, .serena/.gitignore and .superpowers/sdd/.gitignore.
+Client/dist/
+Client/coverage/
+Client/playwright-report/
+Client/test-results/
+Client/.vite/
+Client/src-tauri/target/
+Client/src-tauri/gen/
+.serena/
+.superpowers/sdd/
