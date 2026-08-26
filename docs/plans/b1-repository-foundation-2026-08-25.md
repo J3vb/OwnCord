@@ -2,8 +2,9 @@
 
 **Drafted:** 2026-08-25
 **Base commit:** `6a1561fa` (`dev`, post-PR #1409)
-**Status:** proposed; **entry gate met — HP-0 accepted 2026-08-25**. B1-0 is
-complete; B1-1 is the next step.
+**Status:** in progress; **entry gate met — HP-0 accepted 2026-08-25**. B1-0
+(#1410), B1-1 (#1411), B1-2 (#1412) and B1-3 are complete; B1-4 is the next
+step.
 
 Primary inputs:
 
