@@ -252,3 +252,26 @@ closing audit findings 2026-04-07 #8 / DC-11):
   package's `.npmrc`, so a wrong major fails the install instead of warning.
   `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
   and GitHub Actions are SHA-pinned with Dependabot bumping the pins.
+- **Three package roots, not an npm workspace** — measured 2026-08-26 (npm
+  11.17, Node 26), not decided on principle. Making `/`, `/Client` and
+  `/tools/mcp-introspect` npm workspaces buys one 298 KB lockfile instead of
+  three (17 KB / 253 KB / 42 KB) and dedupes 614 resolved packages to 582 — 32
+  packages, 5.2%. Client install time is unchanged: 5642 ms against 5667 ms.
+  The things you would expect to break do not: `npm ci` inside `Client/` still
+  exits 0, `npm run <script>` still resolves the hoisted binaries (npm prepends
+  every ancestor `node_modules/.bin` to `PATH`), and `engine-strict` still
+  fails the install on a wrong Node major. The costs that are real:
+  - Ten CI steps key on `cache-dependency-path: Client/package-lock.json` —
+    six in `ci.yml`, four in the tag-only, CI-ungated `release.yml`. That file
+    stops existing, and four of the ten have no gate that would catch it.
+  - Repository Hygiene installs root-only on purpose (prettier is all it
+    needs). Under workspaces that grows 970 ms → 6172 ms and 39 → 318
+    packages, unless every call site gains `--workspaces=false` — the
+    mitigation works (1112 ms, 38 packages) but has to be remembered forever.
+  - One lockfile puts all three npm Dependabot groups back into the same file.
+    They rewrite three disjoint files today; undoing that reinstates the
+    merge-then-rebase-then-re-run-CI storm the grouping comment at the top of
+    `.github/dependabot.yml` exists to prevent.
+
+  Thirty-two deduped packages does not pay for that. The roots stay separate,
+  `npm run bootstrap` installs all three, and Dependabot covers all three.
