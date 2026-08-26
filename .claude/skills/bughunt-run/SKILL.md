@@ -185,6 +185,15 @@ points: the fix stage (before any prove agent runs) and inside the prove loop.
 being on the wrong branch, a broken test runner, or ledger coordinates gone stale
 after a rebase. Re-running without fixing the cause just spends the budget again.
 
+**Re-verify a blocked finding against HEAD before fixing it.** A deferred item
+ages against a moving codebase: later hunts routinely fix a blocked finding as a
+side effect of an overlapping sibling, and a saved debris patch stops applying
+once a refactor rewrites the files it touched. Check the _mechanism_ still exists
+at HEAD, not just the line coordinates. If it is already covered, mark it fixed
+with a pointer to the covering commit instead of re-fixing it. Of 6 findings
+blocked on 2026-08-14, 2 were already fixed 5 days later and the debris patch no
+longer applied at all.
+
 Findings from clusters the run never reached come back `blocked` with a rationale
 naming the breaker. Set those back to `open` once the underlying problem is fixed
 — they were never attempted. Their edits are sitting uncommitted in the working

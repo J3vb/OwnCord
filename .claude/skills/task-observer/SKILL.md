@@ -176,6 +176,14 @@ checkpoints; piggy-backing the flush onto them means the write happens as a
 side effect of work you were doing anyway, rather than depending on a separate
 act of memory.
 
+**Your own delegates are concurrent writers.** A subagent dispatched into the
+same project has this skill active in its own context and appends to the same
+log, so it consumes numbers between your read and your write. Collisions are
+structural in any fan-out workflow, not a rare parallel-human accident — which
+is exactly why the pre-write assertion below matters most in the workflows that
+spawn helpers. When dispatching, say who owns logging for the session, or two
+writers record the same incident from different angles under different numbers.
+
 **Numbering discipline (mandatory, every append):**
 
 1. _Pre-check:_ read the actual log and find the highest existing number —

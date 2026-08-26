@@ -200,6 +200,17 @@ perf: cache role permissions in memory
 ci: add lint step to GitHub Actions
 ```
 
+For anything non-trivial the body carries the reasoning, not a restatement of
+the diff: what was wrong, why the obvious fix is wrong, what was done, concrete
+numbers, and a `Verified:` paragraph proving both directions — that the defect
+was present before and is absent after.
+
+End with an explicit **`Not included:`** line naming adjacent scope you
+deliberately left out, and why. A written deferral is a deliverable: it is what
+separates considered-and-declined from silently-missed, and it means adjacent
+work you spotted mid-change does not have to become either scope creep or a
+blocking question. Put it in the commit that noticed it.
+
 ## Pull Request Process
 
 See [Branch and PR model](#branch-and-pr-model) above for what to branch from

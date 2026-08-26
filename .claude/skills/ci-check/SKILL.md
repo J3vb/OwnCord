@@ -9,6 +9,12 @@ description: Run the local mirror of OwnCord's CI gates before pushing. Use when
 
 Run only the sections your change touches. Server and client are independent.
 
+**A step added only to `release.yml` first runs at tag time.** `release.yml` is
+tag-triggered and never gated by a PR, so a smoke/sign/strip step added there is
+untested code on the critical path — its own bugs surface on the release, not on
+a PR. Extract it to a script `ci.yml` also runs (`Server/scripts/docker-smoke.sh`
+is the worked example) or duplicate it into `ci.yml` before merge.
+
 From the repository root, `npm run check` runs all of it, and
 `check:server` / `check:client` / `check:rust` / `check:hygiene` run one stack.
 `node scripts/run.mjs --list` prints the exact command each step runs and the
@@ -95,13 +101,63 @@ it inside `golangci-lint run`, and `.githooks/pre-commit` catches staged files.
 cargo fmt --all -- --check               # runs ahead of clippy in CI
 cargo test --lib                         # CI runs --lib; plain `cargo test` also builds the bin target
 cargo clippy --all-targets -- -D warnings
+cargo install cargo-audit@0.22.1 --quiet && cargo audit   # CI runs this in tauri-build
 ```
+
+`cargo audit` is the one gate here that turns red with **zero** local changes —
+an advisory published upstream breaks a branch that was clean yesterday. Check the
+advisory date before hunting your diff. It is skipped on Dependabot PRs by design
+(it overlaps the scanning that opened them), so a clean Dependabot run does not
+mean the advisory set is clean. The client equivalents, `npm audit --omit=dev
+--audit-level=high` and `knip`, are advisory in CI.
 
 `fallback_crypto` is `cfg(not(windows))`, so its tests compile to nothing on a
 Windows box and only run on the Linux/macOS runners.
 
 Do not attempt `npm run tauri build` locally — the full desktop build runs in
 CI on PRs to `main` and pulls heavy system dependencies.
+
+## Reading a red check
+
+**Causality before forensics.** Before opening a failing job's log, diff the
+PR's changed-file set against that job's input surface and ask whether the change
+could reach it. A diff touching only `.github/workflows/*.yml` cannot cause a Go
+goroutine leak — that failure is pre-existing or flaky by construction. Re-run
+first, and check `dev`/`main` is green to tell "flaky" from "already red". Only
+start log-reading once the change plausibly reaches the job.
+
+**Compare against the baseline, never against zero.** For any gate a repo
+knowingly runs red, the unit of verification is the _delta_ from a recorded
+baseline, not pass/fail — absolute pass/fail only means something when the
+intended state is zero. Get the delta with `git stash && <gate> > /tmp/base &&
+git stash pop && <gate> | diff /tmp/base -`. This repo currently carries **no**
+known-red gate: `golangci-lint`'s complexity backlog was cleared to zero, so a
+red `golangci-lint` is now genuinely yours. If a budget is ever retuned upward,
+record the new baseline here next to the command or the gate reports nothing.
+
+**A dependency bump that breaks the build may be a fork, not a version.** When an
+updated dependency suddenly demands configuration it never needed, suspect it was
+inheriting that configuration from a shared resolution with another dependent.
+Diff the lockfile _entry count_ for that dependency between base and PR: a 1 → 2
+transition means the update forked it into two semver-incompatible copies, feature
+unification stopped crossing the boundary, and the fix is to restore version
+alignment with whatever else requires it — not to set the feature the new copy
+asks for.
+
+### Known infra flakes
+
+Not your change. Match the signature, then recover.
+
+| Signature                                                                                                                                                                                      | Verdict / recovery                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `windows-latest` `-race` fault in `ws`: `runtime.scanstack`, `runtime.(*unwinder).next`, or `unexpected fault address 0xffffffffffffffff` / `fatal error: fault` inside ordinary stdlib frames | Go runtime GC fault, not your code — see the Server section. `gh run rerun --job <id>`                                                                             |
+| `##[error]The operation was canceled.` + `Terminate orphan process: ... playwright install --with-deps` + a wall of `Ign:N http://azure.archive.ubuntu.com/...` and no Playwright summary line | Runner apt-mirror outage during "Install Linux system dependencies". The job was **canceled by timeout**, not failed. `gh run cancel` then `gh run rerun --failed` |
+| Red `Lint` step with zero linters actually run                                                                                                                                                 | `golangci-lint`'s network schema fetch failed. Re-run                                                                                                              |
+
+`gh run view --log` refuses while a run is in progress; `gh api
+repos/<owner>/<repo>/actions/jobs/<id>/logs` works. A job cannot be rerun while
+its parent run is still in progress. `tauri-build` has no `timeout-minutes`, so a
+hung apt step can hold a run open for the 6 h default — cancel it rather than wait.
 
 ## Hooks
 
