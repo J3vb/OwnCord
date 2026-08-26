@@ -36,8 +36,8 @@ docs/security-findings/
 
 # Mutation-testing output (npm run test:mutate). Local-only by design: a
 # surviving-mutant report maps exactly which behaviour nothing tests.
-Client/tauri-client/.stryker-tmp/
-Client/tauri-client/reports/
+Client/.stryker-tmp/
+Client/reports/
 
 # Server runtime artifacts
 Server/chatserver.exe
@@ -65,7 +65,7 @@ Client/login-mockup.html
 Client/ui-mockup.html
 
 # Tauri typegen (auto-generated IPC bindings)
-Client/tauri-client/src/generated/
+Client/src/generated/
 .typecache
 
 # Node modules
@@ -103,7 +103,7 @@ Client/CLIENT-REVIEW.md
 .serena/
 
 # Client env (holds API keys - never commit)
-Client/tauri-client/.env
+Client/.env
 
 # Rust review output
 .rust-review-results/

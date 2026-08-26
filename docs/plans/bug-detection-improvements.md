@@ -3,7 +3,7 @@
 Date: 2026-08-08
 Status: partially implemented (verified 2026-08-19) — Tier 1a's `make fuzz`
 target exists (`Server/Makefile`) and Tier 2's five custom ESLint rules
-shipped 2026-08-08 (`Client/tauri-client/eslint-rules.js`), so the gap table
+shipped 2026-08-08 (`Client/eslint-rules.js`), so the gap table
 below is stale for those two rows; Tiers 1b/1c are on-demand npm scripts;
 Tiers 3–4 remain unimplemented.
 
@@ -76,7 +76,7 @@ has no native Windows support (WSL or Docker only), so on this machine it would
 join `make` as tooling that cannot be run locally. ESLint flat config supports
 an inline plugin, so custom rules cost no new dependency — and `npx eslint
 src/` is already a blocking CI gate, which removes the promotion step entirely.
-Rules live in `Client/tauri-client/eslint-rules.js`, tested with `RuleTester`
+Rules live in `Client/eslint-rules.js`, tested with `RuleTester`
 in `tests/unit/eslint-rules.test.ts`. See "Tier 2 — delivered" below.
 
 ## Tier 1 — Turn on what already exists
@@ -135,7 +135,7 @@ configured surface that observes that class.
 
 ### 1d. Prerequisite
 
-Confirm `Client/tauri-client/reports/`, `Client/tauri-client/.stryker-tmp/`,
+Confirm `Client/reports/`, `Client/.stryker-tmp/`,
 `Server/coverage-all.out`, and `Server/**/testdata/fuzz/` interim output are
 covered by `.gitignore` before running any of the above. Add entries where
 they are missing.

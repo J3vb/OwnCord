@@ -1,9 +1,9 @@
 # OwnCord
 
 Self-hosted chat platform (alpha). `Server/` is a Go 1.26 REST + WebSocket
-server over SQLite with LiveKit voice/video; `Client/tauri-client/` is a Tauri
+server over SQLite with LiveKit voice/video; `Client/` is a Tauri
 v2 desktop app (TypeScript frontend, thin Rust backend). Per-component detail
-lives in `Server/CLAUDE.md` and `Client/tauri-client/CLAUDE.md`; the protocol
+lives in `Server/CLAUDE.md` and `Client/CLAUDE.md`; the protocol
 and schema are documented in `docs/protocol.md`, `docs/schema.md`, and
 `docs/architecture/README.md`.
 
@@ -14,8 +14,8 @@ CI fails on drift, and the next generator run silently discards your edit.
 | Generated | Source of truth | Workflow |
 | --- | --- | --- |
 | `Server/db/dbgen/` | `Server/db/queries/*.sql`, `Server/migrations/` | `db-change` skill |
-| `Server/ws/message_types.go` **and** `Client/tauri-client/src/lib/protocolTypes.ts` | `docs/protocol-schema.json` | `protocol-change` skill |
-| `Client/tauri-client/src/generated/` | `tauri-typegen` | CI patches known typegen bugs — see `.github/workflows/ci.yml` |
+| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts` | `docs/protocol-schema.json` | `protocol-change` skill |
+| `Client/src/generated/` | `tauri-typegen` | CI patches known typegen bugs — see `.github/workflows/ci.yml` |
 
 ## Knowledge graph (graphify)
 

@@ -286,7 +286,7 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 // returning a genuine error rather than sql.ErrNoRows) must NOT be reported
 // as the terminal auth_error frame. The client treats auth_error as
 // non-recoverable — it stops reconnecting and clears the user's stored
-// credentials (see Client/tauri-client/src/lib/ws.ts and dispatcher.ts) — so
+// credentials (see Client/src/lib/ws.ts and dispatcher.ts) — so
 // collapsing "DB unreachable" into "bad token" force-logs-out every client
 // that reconnects during a sub-second SQLite hiccup even though its session
 // row is perfectly valid. A DB error must surface as a non-terminal error

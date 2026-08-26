@@ -62,7 +62,7 @@ cd Server
 CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.3" .
 
 # Client
-cd Client/tauri-client
+cd Client
 npm install
 npm run tauri build
 ```

@@ -208,8 +208,8 @@ namespace collisions are confusing for users.
 | `Server/plugin/manifest.go` | Add `Commands []CommandSpec` to `Manifest`, `validateCommands()`, and a `Manifest.Command(name)` lookup. |
 | `Server/store/sqlite_plugin_commands.go` | **New file.** CRUD over the `plugin_commands` table. |
 | `Server/migrations/016_plugin_commands.sql` | New migration. |
-| `Client/tauri-client/src/state/commands.ts` | **New module.** Caches per-server command list (fetched at `auth_ok` time via a new `commands_list` REST endpoint), feeds the autocomplete UI. |
-| `Client/tauri-client/src/components/Composer/SlashCommandPopup.tsx` | New component — autocomplete dropdown that opens when the message buffer starts with `/`. |
+| `Client/src/state/commands.ts` | **New module.** Caches per-server command list (fetched at `auth_ok` time via a new `commands_list` REST endpoint), feeds the autocomplete UI. |
+| `Client/src/components/Composer/SlashCommandPopup.tsx` | New component — autocomplete dropdown that opens when the message buffer starts with `/`. |
 | `docs/protocol.md` | Document the four new wire messages. |
 
 ### Permission model
@@ -341,7 +341,7 @@ Each step is independently shippable.
 - [ ] `Server/ws/deps.go` — `CommandDeps`
 - [ ] `Server/ws/handlers_command_test.go`
 - [ ] `Server/api/router.go` — `GET /api/v1/commands` (cached schema dump)
-- [ ] `Client/tauri-client/src/state/commands.ts`
-- [ ] `Client/tauri-client/src/components/Composer/SlashCommandPopup.tsx`
+- [ ] `Client/src/state/commands.ts`
+- [ ] `Client/src/components/Composer/SlashCommandPopup.tsx`
 - [ ] `docs/protocol.md` — four new wire messages
 - [ ] `CHANGELOG.md` — Phase D entry

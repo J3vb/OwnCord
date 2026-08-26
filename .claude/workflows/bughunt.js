@@ -87,7 +87,7 @@ const VERDICTS = {
 // ---------- rules ----------
 const RULES = `
 Repo: OwnCord, checked out at your current working directory (the repo root - do not assume any absolute
-path; run every command from there and use repo-relative paths). Go 1.26 server in Server/, Tauri v2 client in Client/tauri-client/
+path; run every command from there and use repo-relative paths). Go 1.26 server in Server/, Tauri v2 client in Client/
 (Rust in src-tauri/src/, TypeScript in src/lib/ and src/stores/).
 
 You are hunting REAL BUGS: wrong behavior, not style. In scope:
@@ -132,8 +132,8 @@ const SURFACE_LENSES = [
     key: 'voice-e2ee',
     prompt:
       `Surface: voice/video E2EE key lifecycle, spanning three languages. Files: Server/ws/handler_v2_voice*.go and ` +
-      `any Server/ws/*voice*.go or *e2ee*.go; Client/tauri-client/src/lib/e2eeCrypto.ts, livekitE2EE.ts, ` +
-      `livekitSession.ts, identity.ts; Client/tauri-client/src-tauri/src/tofu.rs, secret_store.rs, fallback_crypto.rs, dpapi.rs.\n\n` +
+      `any Server/ws/*voice*.go or *e2ee*.go; Client/src/lib/e2eeCrypto.ts, livekitE2EE.ts, ` +
+      `livekitSession.ts, identity.ts; Client/src-tauri/src/tofu.rs, secret_store.rs, fallback_crypto.rs, dpapi.rs.\n\n` +
       `Hunt specifically for: a key-rotation window where a participant can decrypt after they should be excluded; ` +
       `TOFU pin re-check that reads state captured before a rotation (time-of-check/time-of-use); a participant ` +
       `joining mid-rotation getting the wrong epoch key; key material outliving the session; an error path that ` +
@@ -167,7 +167,7 @@ const SURFACE_LENSES = [
   {
     key: 'tauri-rust',
     prompt:
-      `Surface: the Tauri Rust backend. Files: Client/tauri-client/src-tauri/src/*.rs.\n\n` +
+      `Surface: the Tauri Rust backend. Files: Client/src-tauri/src/*.rs.\n\n` +
       `Hunt specifically for: a panic reachable from a Tauri command (unwrap/expect on attacker- or ` +
       `environment-controlled input) - a panic here can take down the app; a lock held across .await; ` +
       `state in tauri::State mutated from two commands without coordination; the http_proxy / livekit_proxy / ` +
@@ -178,7 +178,7 @@ const SURFACE_LENSES = [
   {
     key: 'client-state',
     prompt:
-      `Surface: TypeScript client state and event handling. Files: Client/tauri-client/src/lib/*.ts and ` +
+      `Surface: TypeScript client state and event handling. Files: Client/src/lib/*.ts and ` +
       `src/stores/*.ts - prioritize dispatcher.ts, reconcile.ts, read-state.ts, router.ts, roomEventHandlers.ts, ` +
       `navigation-guard.ts, rate-limiter.ts, channel-navigation.ts, and whatever the churn recon flagged.\n\n` +
       `Hunt specifically for: a listener/interval/observer registered without a matching teardown (check ` +
@@ -505,8 +505,8 @@ const recon = await parallel([
       `${RULES}\n\nRECON TASK (mechanical, do not hunt bugs yourself):\n` +
         `Inventory the concurrency and lifecycle surface so the finders know where to look. Report:\n` +
         `  (a) every Server/ non-test .go file containing "go func", "sync.", "chan ", "select {", or "context.WithCancel"\n` +
-        `  (b) every Client/tauri-client/src/**/*.ts (non-test) containing "addEventListener", "setInterval", "setTimeout", or "new AbortController"\n` +
-        `  (c) every Client/tauri-client/src-tauri/src/*.rs containing "unsafe", "Mutex", "RwLock", "spawn", or "unwrap()"\n` +
+        `  (b) every Client/src/**/*.ts (non-test) containing "addEventListener", "setInterval", "setTimeout", or "new AbortController"\n` +
+        `  (c) every Client/src-tauri/src/*.rs containing "unsafe", "Mutex", "RwLock", "spawn", or "unwrap()"\n` +
         `For each file give the path and a rough hit count. Return plain text grouped under (a)/(b)/(c). No commentary, no analysis.`,
       { label: 'recon:surface', phase: 'Recon', model: 'haiku', effort: 'xhigh' },
     ),

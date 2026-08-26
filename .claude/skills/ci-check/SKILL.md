@@ -34,7 +34,7 @@ fault, same verdict, especially when the diff touches no Go code. Rerun the
 job (`gh run rerun --job <id>`); a job cannot be rerun while its parent run is
 still in progress.
 
-## Client (from `Client/tauri-client/`)
+## Client (from `Client/`)
 
 ```bash
 NODE_OPTIONS=--no-experimental-webstorage npm test
@@ -47,7 +47,7 @@ The `NODE_OPTIONS` flag is mandatory on Node 22+ — see the client CLAUDE.md.
 
 `npm audit --audit-level=high` and `knip` also run in CI but are advisory.
 
-## Rust (from `Client/tauri-client/src-tauri/`)
+## Rust (from `Client/src-tauri/`)
 
 ```bash
 cargo test

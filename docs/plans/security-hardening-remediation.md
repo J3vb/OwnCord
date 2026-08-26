@@ -81,7 +81,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 
 ### W1-2. E2EE key rotation drops peers in 7+ participant calls
 - **Files:** `Server/ws/voice_e2ee.go` (~line 151);
-  `Client/tauri-client/src/lib/livekitSession.ts` (~lines 1317-1349)
+  `Client/src/lib/livekitSession.ts` (~lines 1317-1349)
 - **Root cause:** the `voice_e2ee_offer` limit is 5/sec, but the key holder
   loops over every peer sending one offer each, back-to-back, with no pacing
   and no retry on `RATE_LIMITED`. With 6+ peers, offers to the 6th+ peer are

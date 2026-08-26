@@ -35,8 +35,8 @@ This is a continuation/handoff doc: what is done, what remains, and how to resum
 ## Resume checklist (do these first)
 
 1. **Confirm the F4/F8 Rust compiles.** It could not be built in the dev sandbox
-   (no local Tauri builds per `Client/tauri-client/CLAUDE.md`). Run
-   `cd Client/tauri-client/src-tauri && cargo clippy -- -D warnings` (or push and
+   (no local Tauri builds per `Client/CLAUDE.md`). Run
+   `cd Client/src-tauri && cargo clippy -- -D warnings` (or push and
    let CI do it). Pure `tofu` logic has `#[cfg(test)]` unit tests; the frontend is
    covered by the 3311-green unit suite.
 2. ~~**Then F3**~~ — **DONE 2026-07-23** on branch `feat/e2ee-identity-tofu` (see the

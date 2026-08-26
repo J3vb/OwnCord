@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_DIR="$(cd "$SCRIPT_DIR/../../../../../Server" && pwd)"
+SERVER_DIR="$(cd "$SCRIPT_DIR/../../../../Server" && pwd)"
 PORT="${OWNCORD_ADMIN_E2E_PORT:-18446}"
 
 RUN_DIR="$(mktemp -d -t owncord-admin-e2e-XXXXXX)"

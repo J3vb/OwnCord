@@ -40,7 +40,7 @@ type schema struct {
 func main() {
 	schemaPath := flag.String("schema", "../docs/protocol-schema.json", "path to protocol-schema.json")
 	goOut := flag.String("go-out", "ws/message_types.go", "path to the generated Go file")
-	tsOut := flag.String("ts-out", "../Client/tauri-client/src/lib/protocolTypes.ts", "path to the generated TypeScript file")
+	tsOut := flag.String("ts-out", "../Client/src/lib/protocolTypes.ts", "path to the generated TypeScript file")
 	flag.Parse()
 
 	raw, err := os.ReadFile(*schemaPath)

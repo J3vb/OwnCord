@@ -107,4 +107,4 @@ Revisit when that commitment is on the table.
 
 **Source of truth:** `Server/main.go`, `Server/config/config.go`,
 `Server/docker-compose.yml`, `docs/deployment.md`, `docs/server-configuration.md`,
-`Client/tauri-client/src-tauri/src/lib.rs`.
+`Client/src-tauri/src/lib.rs`.

@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of truth for WebSocket protocol message-type constants. Server/ws/message_types.go and Client/tauri-client/src/lib/protocolTypes.ts are generated from this file — edit here, then run `make protocol-generate` in Server/. CI runs `make protocol-verify` to reject drift.",
+  "$comment": "Single source of truth for WebSocket protocol message-type constants. Server/ws/message_types.go and Client/src/lib/protocolTypes.ts are generated from this file — edit here, then run `make protocol-generate` in Server/. CI runs `make protocol-verify` to reject drift.",
   "version": 1,
   "client_to_server": [
     { "wire": "auth", "go": "MsgTypeAuth", "ts": "AUTH" },

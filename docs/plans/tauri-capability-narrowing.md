@@ -1,7 +1,7 @@
 # Tauri HTTP Capability Narrowing — Design
 
 **Status:** implemented (2026-07-20), re-verified 2026-08-04 — the Decision
-below landed in `Client/tauri-client/src-tauri/capabilities/default.json`,
+below landed in `Client/src-tauri/capabilities/default.json`,
 guarded by `tests/unit/capabilities-scope.test.ts`. The follow-up at the end
 of this document (move the link-preview fetch behind a Rust command that
 resolves DNS and rejects private/loopback IPs, closing DNS rebinding and
@@ -13,7 +13,7 @@ the remaining outbound host set enumerable.
 
 ## Problem
 
-`Client/tauri-client/src-tauri/capabilities/default.json` grants three HTTP
+`Client/src-tauri/capabilities/default.json` grants three HTTP
 identifiers — `http:allow-fetch`, `http:allow-fetch-send`,
 `http:allow-fetch-read-body` — each scoped to `https://*`, `https://*:*` and
 `http://127.0.0.1:*`. In practice that is "the renderer may reach any host on

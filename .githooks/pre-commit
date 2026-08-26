@@ -51,13 +51,13 @@ if printf '%s\n' "$staged" | grep -qE '^(docs/protocol-schema\.json|Server/scrip
 fi
 
 # ---------- Client (TypeScript) ----------
-ts_staged=$(printf '%s\n' "$staged" | grep -E '^Client/tauri-client/(src|tests)/.*\.ts$' | grep -v '/generated/')
+ts_staged=$(printf '%s\n' "$staged" | grep -E '^Client/(src|tests)/.*\.ts$' | grep -v '/generated/')
 if [ -n "$ts_staged" ]; then
-    if [ ! -d Client/tauri-client/node_modules ]; then
-        printf 'pre-commit: WARNING: node_modules missing in Client/tauri-client; skipping client checks (run npm install there).\n' >&2
+    if [ ! -d Client/node_modules ]; then
+        printf 'pre-commit: WARNING: node_modules missing in Client; skipping client checks (run npm install there).\n' >&2
     else
-        rel=$(printf '%s\n' "$ts_staged" | sed 's|^Client/tauri-client/||')
-        cd Client/tauri-client || exit 1
+        rel=$(printf '%s\n' "$ts_staged" | sed 's|^Client/||')
+        cd Client || exit 1
         # shellcheck disable=SC2086
         npx oxlint $rel || fail "oxlint"
         # shellcheck disable=SC2086
