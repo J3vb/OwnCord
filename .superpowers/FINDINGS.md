@@ -4742,7 +4742,7 @@ saveChannelPerms writes the quick "Can access" toggles first (PUT allow=0/deny=0
 
 **Suggested fix:** In saveChannelPerms, record the role IDs the quick-toggle loop actually wrote and skip the matrix step when the selected target is one of them — one guard in the one function: collect `const touched=new Set()` in the loop (add role.role_id on each PUT/DELETE), then wrap the matrix block in `if(path && !(permTargetPath().indexOf('/permissions/')>-1 && touched.has(tid)))`. Cleanest variant: give the quick checkbox an onchange that patches the in-memory role.allow/role.deny in state.permChannel and calls renderPermMatrix(), so the matrix always reflects the pending toggle instead of the stale snapshot.
 
-**Fixed:** `69258a51` · test `Client/tests/unit/admin-static-channel-perms.test.ts` · revert-proof pass
+**Fixed:** `69258a51` · test `Client/tests/contract/server-admin-static-channel-perms.test.ts` · revert-proof pass
 
 ### OC-0155 — medium — Room-key offer pacing budget is per-call, so two back-to-back rotations blow the server's per-second offer cap and strand peers on a dead key
 

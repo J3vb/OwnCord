@@ -1,3 +1,8 @@
+// CONTRACT TEST. The artifact under test is owned by Server/admin; the runner
+// lives here because placement follows capability, not ownership — the Go
+// module carries no JavaScript engine, so nothing under Server/ can execute
+// this SPA. See docs/contributing.md#testing for the membership rule.
+//
 // Loads the real Server/admin/static/index.html (the Go admin panel's
 // single-file SPA) into a scripted jsdom window and drives its inline
 // channel-permissions logic directly, the same way a browser would.
@@ -5,6 +10,9 @@
 // There is no bundler or module system for this file — it is one inline
 // <script> executed as a classic script — so the only faithful way to test
 // it is to actually run it, not to re-implement its logic in TypeScript.
+// A text-level assertion is not a substitute: Server/admin/perm_grid_test.go
+// greps the same file, but flipping the guard at index.html:1182 to `false`
+// reintroduces the bug while leaving every greppable identifier intact.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";

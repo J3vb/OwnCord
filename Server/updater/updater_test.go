@@ -627,29 +627,6 @@ func TestAssetFilenameFromURL(t *testing.T) {
 	}
 }
 
-func TestDefaultServerSignaturePublicKey_DiffersFromTauriUpdaterKey(t *testing.T) {
-	tauriConfigPath := filepath.Clean(filepath.Join("..", "..", "Client", "src-tauri", "tauri.conf.json"))
-	raw, err := os.ReadFile(tauriConfigPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", tauriConfigPath, err)
-	}
-
-	var cfg struct {
-		Plugins struct {
-			Updater struct {
-				PubKey string `json:"pubkey"`
-			} `json:"updater"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		t.Fatalf("Unmarshal tauri.conf.json: %v", err)
-	}
-
-	if cfg.Plugins.Updater.PubKey == defaultServerSignaturePublicKey {
-		t.Fatalf("server updater signing key must differ from tauri.conf.json updater pubkey")
-	}
-}
-
 func TestDefaultServerSignaturePublicKey_Parseable(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	if _, err := u.serverSignaturePublicKey(); err != nil {

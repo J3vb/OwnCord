@@ -92,8 +92,10 @@ next section, and using them directly is equally correct.
 | `npm test`                 | Run all tests (vitest)                 |
 | `npm run test:unit`        | Unit tests only                        |
 | `npm run test:integration` | Integration tests only                 |
+| `npm run test:contract`    | Cross-component contract tests only    |
 | `npm run test:e2e`         | Playwright E2E (mocked Tauri)          |
 | `npm run test:e2e:native`  | Playwright E2E (real Tauri exe + CDP)  |
+| `npm run test:e2e:admin`   | Playwright E2E (real Go server + SPA)  |
 | `npm run test:e2e:prod`    | Playwright E2E (prod build)            |
 | `npm run test:e2e:ui`      | Playwright UI mode                     |
 | `npm run test:watch`       | Vitest watch mode                      |
@@ -229,6 +231,56 @@ The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;
 the Go suite has deliberately no floor (T-2026-07-25-19) — use `make cover-all`
 to see the honest cross-package number. Follow a test-driven workflow and never
 lower a threshold to make a change fit.
+
+### Tiers
+
+| Tier                       | Command                    | CI job                                      | Blocking |
+| -------------------------- | -------------------------- | ------------------------------------------- | -------- |
+| `Client/tests/unit`        | `npm run test:unit`        | Client Unit Tests                           | yes      |
+| `Client/tests/integration` | `npm run test:integration` | Client Unit Tests                           | yes      |
+| `Client/tests/contract`    | `npm run test:contract`    | Client Unit Tests                           | yes      |
+| `Client/tests/browser`     | `npm run test:browser`     | —                                           | no       |
+| `Client/tests/e2e`         | `npm run test:e2e`         | Client E2E (Playwright)                     | yes      |
+| `Client/tests/e2e` @parity | —                          | Client E2E (parity subset, blocking)        | yes      |
+| `Client/tests/e2e/native`  | `npm run test:e2e:native`  | —                                           | no       |
+| `Client/tests/e2e/admin`   | `npm run test:e2e:admin`   | Admin Panel E2E (real server, non-blocking) | **no**   |
+| `Server/**/*_test.go`      | `make test`                | Server Build & Test                         | yes      |
+| `Client/src-tauri`         | `cargo test --lib`         | Rust Unit Tests                             | yes      |
+
+`npm test` — not `npm run test:unit` — is what CI runs and what
+`npm run check:client` invokes, so it is the command that covers
+`tests/contract`.
+
+### What belongs in `tests/contract`
+
+A test is a **contract test** when its assertions read, import or execute an
+artifact owned by a _different top-level component_ (`Server/`, `Client/`, root
+`protocol/`) than the one its runner lives in. A comment referencing the other
+side does not count.
+
+1. **Placement follows capability, not ownership.** A contract test lives in the
+   tier whose runtime can execute or parse the artifact. If the owning component
+   can execute it, it stays in that component's own suite —
+   `Server/updater/tauri_key_contract_test.go` reads
+   `Client/src-tauri/tauri.conf.json` and stays in Go, because Go parses JSON
+   fine and the assertion is about a server constant.
+2. **Ownership is declared in the name, never in the directory.** The file name
+   and the top-level `describe`/`Test` name must name the owned artifact's path.
+3. **A contract test may only live in a blocking tier.** A non-blocking job is
+   not coverage. `Admin Panel E2E` is `continue-on-error: true`
+   (`.github/workflows/ci.yml`), so it is ineligible however well it fits
+   topically — until it graduates.
+4. `Client/` is one component: its TypeScript frontend and its thin Rust backend
+   in `src-tauri/` are the same side of the boundary, so a `tests/unit` test that
+   reads `src-tauri/tauri.conf.json` is an ordinary unit test. The same goes for a
+   Go test reading its own package's embedded assets
+   (`Server/admin/perm_grid_test.go`).
+
+E2E is _runtime_ coupling rather than artifact coupling; it stays in `tests/e2e`.
+
+If a tier ever gains a runner of its own, model its anti-vacuity guard on
+`Server/invariants/invariants_test.go` — it fails loudly when a configured scope
+resolves to nothing, rather than passing on an empty set.
 
 ## Code Style
 

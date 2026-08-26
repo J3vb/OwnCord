@@ -22,6 +22,11 @@ prometheus.
 - Build tags gate whole files, so all four variants must compile: default,
   `-tags otel`, `-tags wazero`, `-tags otel,wazero`. Tests must also pass under
   `-race` and under `-tags deadlock`. The `ci-check` skill has the commands.
+- `admin/static/index.html` is server-owned, and its invariants are locked from
+  two places: text-level ones from `admin/perm_grid_test.go` and
+  `admin/emoji_section_test.go`, execution-level ones from
+  `Client/tests/contract/` — Go has no JS engine, so a Go port could only grep.
+  Do not "fix" that split by rewriting the contract test as a regex.
 - `ws` is the hub: broadcast fan-out, per-client send queues, replay, and voice
   state all interact under several locks. Sequenced frames share one per-client
   FIFO because clients ack only `max(seq)` — a frame that skips the queue, or a

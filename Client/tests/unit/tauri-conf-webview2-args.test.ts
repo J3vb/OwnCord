@@ -12,6 +12,8 @@
 
 import { describe, expect, it } from "vitest";
 
+// Asserts src-tauri/tauri.conf.json, which is inside the Client component —
+// not a cross-component contract test. See docs/contributing.md#testing.
 import tauriConf from "../../src-tauri/tauri.conf.json";
 
 describe("tauri.conf.json — Windows WebView2 additionalBrowserArgs", () => {

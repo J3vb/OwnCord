@@ -120,7 +120,7 @@ Method:
      structural reference is evidence of coupling, not of a bug; open the cited file and confirm.
   2. For every candidate, grep for ALL callers before judging - a guard may already live upstream.
   3. Check whether an existing test already locks the behavior you think is wrong. If a test asserts it,
-     it is intended behavior, not a bug. Test files are *_test.go and tests/unit/*.test.ts.
+     it is intended behavior, not a bug. Test files are *_test.go, tests/unit/*.test.ts and tests/contract/*.test.ts.
   4. Report EVERY finding you can prove - there is no cap. The quality bar stays: zero findings is a
      valid, respectable answer, and each finding needs file, line, and a concrete repro.
 
@@ -200,7 +200,7 @@ const SURFACE_LENSES = [
       `an entity when events arrive out of order; read-state that can mark unread messages read, or lose an unread ` +
       `count, across a reconnect; an async handler whose await lets stale state be written after a newer update ` +
       `(last-write-wins race); a route guard bypassable by a rapid navigation sequence.\n` +
-      `Check tests/unit/ before reporting - much of this behavior is already test-locked.`,
+      `Check tests/unit/ and tests/contract/ before reporting - much of this behavior is already test-locked.`,
   },
 ];
 

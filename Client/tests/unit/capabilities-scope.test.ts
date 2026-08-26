@@ -10,6 +10,9 @@
 
 import { describe, expect, it } from "vitest";
 
+// Asserts src-tauri/capabilities/default.json, which is inside the Client
+// component — not a cross-component contract test. See
+// docs/contributing.md#testing.
 import capabilityJson from "../../src-tauri/capabilities/default.json";
 
 interface ScopeEntry {

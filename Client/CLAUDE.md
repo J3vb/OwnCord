@@ -9,8 +9,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `src/pages/`, `src/components/` UI
 - `src/lib/protocolTypes.ts` and `src/generated/` are generated — see the root
   CLAUDE.md
-- `tests/unit`, `tests/integration` (vitest, jsdom) · `tests/e2e` (Playwright) ·
+- `tests/unit`, `tests/integration`, `tests/contract` (vitest, jsdom) ·
+  `tests/e2e`, `tests/e2e/admin`, `tests/e2e/native` (Playwright) ·
   `tests/browser` (vitest browser mode)
+- A test whose assertions read, import or execute a **`Server/`-owned**
+  artifact belongs in `tests/contract`, not `tests/unit` — `src-tauri/` is
+  part of this component, so reading it is an ordinary unit test. The rule
+  is in [docs/contributing.md](../docs/contributing.md#testing)
 
 ## Gotchas
 
