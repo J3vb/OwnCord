@@ -10,7 +10,9 @@ prometheus.
   `permissions/` role checks · `service/` domain logic shared by both entry points
 - `db/` hand-written query wrappers; `db/dbgen/` is generated (see `db-change`)
 - `cmd/` executable tooling, one `package main` per subdirectory —
-  `cmd/genprotocol/` regenerates the protocol constants from `protocol/schema.json`
+  `cmd/genprotocol/` regenerates the protocol constants from `protocol/schema.json`,
+  `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`).
+  `scripts/` holds shell/JS tooling only; no Go entry point lives there
 - `admin/` web admin panel · `updater/` self-update + signature verification ·
   `plugin/` WASM plugin runtime (`-tags wazero`) · `telemetry/` OTel (`-tags otel`)
 - `syncutil/` lock helpers that gain deadlock detection under `-tags deadlock`
