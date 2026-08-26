@@ -252,12 +252,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+
+      # Ahead of clippy: a formatting failure is cheap to produce and cheap to
+      # fix, and there is no reason to spend a clippy pass to surface one.
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
 
       - name: Clippy lint (including test targets)
         run: cargo clippy --all-targets -- -D warnings

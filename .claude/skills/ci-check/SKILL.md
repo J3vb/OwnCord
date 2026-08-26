@@ -92,6 +92,7 @@ it inside `golangci-lint run`, and `.githooks/pre-commit` catches staged files.
 ## Rust (from `Client/src-tauri/`)
 
 ```bash
+cargo fmt --all -- --check               # runs ahead of clippy in CI
 cargo test --lib                         # CI runs --lib; plain `cargo test` also builds the bin target
 cargo clippy --all-targets -- -D warnings
 ```

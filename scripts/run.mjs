@@ -99,6 +99,7 @@ const CHECK_CLIENT = [
 // Matches ci.yml's Rust Unit Tests job exactly: --lib for tests, --all-targets
 // for clippy. They differ deliberately; do not "align" them.
 const CHECK_RUST = [
+  step("cargo", ["fmt", "--all", "--", "--check"], "Client/src-tauri"),
   step("cargo", ["test", "--lib"], "Client/src-tauri"),
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
 ];
@@ -156,6 +157,7 @@ const TASKS = {
   format: [
     step("npx", ["prettier", "--write", "."], "."),
     optional("gofmt", "gofmt", ["-w", "."], "Server", "gofmt not on PATH"),
+    step("cargo", ["fmt", "--all"], "Client/src-tauri"),
   ],
   "release:preflight": [
     ...CHECK_DOCS,
