@@ -30,6 +30,12 @@ const WIN = process.platform === "win32";
 // npm and npx are batch shims on Windows; everything else is a real binary.
 const bin = (c) => (WIN && (c === "npm" || c === "npx") ? `${c}.cmd` : c);
 
+// Node refuses to spawn a .cmd/.bat with shell:false (the CVE-2024-27980
+// mitigation): it fails with EINVAL and a null exit status. So the Windows npm
+// shims need a shell, and only they do -- every other command here is a real
+// binary, and a shell would put its quoting rules between us and the arguments.
+const needsShell = (c) => WIN && (c === "npm" || c === "npx");
+
 /** A step that always runs. */
 const step = (cmd, args, cwd = ".") => ({ cmd, args, cwd });
 
@@ -169,12 +175,15 @@ const TASKS = {
   ],
 };
 
+// Resolve against PATH directly instead of shelling out to `where`/`command`.
+// Both probes were unreliable: `where.exe` lives in C:\WINDOWS\System32, which a
+// Git Bash PATH does not always contain (it can carry only the subdirectories),
+// and a probe that cannot start reports "not installed" for a tool that is. That
+// turned every optional() step into a permanent SKIP on Windows.
 function onPath(cmd) {
-  const probe = spawnSync(WIN ? "where" : "command", WIN ? [cmd] : ["-v", cmd], {
-    stdio: "ignore",
-    shell: !WIN, // `command` is a shell builtin; `where` is a real binary
-  });
-  return probe.status === 0;
+  const exts = WIN ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  const dirs = (process.env.PATH || "").split(WIN ? ";" : ":");
+  return dirs.some((dir) => dir && exts.some((ext) => existsSync(join(dir, cmd + ext))));
 }
 
 function runTask(name) {
@@ -192,11 +201,26 @@ function runTask(name) {
     }
     const where = s.cwd === "." ? "" : `  [in ${s.cwd}]`;
     console.log(`\n--- ${s.cmd} ${s.args.join(" ")}${where}`);
-    const r = spawnSync(bin(s.cmd), s.args, {
-      cwd: join(ROOT, s.cwd),
-      stdio: "inherit",
-      shell: false,
-    });
+    // With shell:true Node deprecates a separate args array (DEP0190), because it
+    // concatenates without escaping. So concatenate deliberately instead: the only
+    // commands that take this branch are the npm shims, and no argument in this
+    // file contains a space.
+    const shell = needsShell(s.cmd);
+    const r = shell
+      ? spawnSync([bin(s.cmd), ...s.args].join(" "), {
+          cwd: join(ROOT, s.cwd),
+          stdio: "inherit",
+          shell: true,
+        })
+      : spawnSync(s.cmd, s.args, {
+          cwd: join(ROOT, s.cwd),
+          stdio: "inherit",
+          shell: false,
+        });
+    if (r.error && r.error.code !== "ENOENT") {
+      console.error(`\nFAILED: ${s.cmd} could not be started: ${r.error.code}`);
+      process.exit(1);
+    }
     if (r.error && r.error.code === "ENOENT") {
       console.error(`\nFAILED: ${s.cmd} is not installed or not on PATH.`);
       process.exit(1);
