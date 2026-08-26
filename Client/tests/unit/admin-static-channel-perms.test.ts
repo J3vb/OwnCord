@@ -10,7 +10,7 @@ import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../../Server/admin/static/index.html");
+const ADMIN_HTML_PATH = path.resolve(__dirname, "../../../Server/admin/static/index.html");
 const ADMIN_HTML_SOURCE = readFileSync(ADMIN_HTML_PATH, "utf8");
 
 // The page's own <script> is a classic (non-module) script, so its top-level

@@ -38,7 +38,7 @@ updates:
 
   # Tauri client npm dependencies
   - package-ecosystem: npm
-    directory: /Client/tauri-client
+    directory: /Client
     schedule:
       interval: weekly
       day: monday
@@ -58,7 +58,7 @@ updates:
 
   # Tauri Rust/Cargo dependencies
   - package-ecosystem: cargo
-    directory: /Client/tauri-client/src-tauri
+    directory: /Client/src-tauri
     schedule:
       interval: weekly
       day: monday

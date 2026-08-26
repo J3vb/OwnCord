@@ -58,7 +58,7 @@ export function makeStub({ hunt, verify, recon = defaultRecon }) {
   }
 }
 export function defaultRecon() {
-  return 'Server/ws/hub.go 12\nServer/api/user.go 9\nClient/tauri-client/src/lib/dispatcher.ts 8'
+  return 'Server/ws/hub.go 12\nServer/api/user.go 9\nClient/src/lib/dispatcher.ts 8'
 }
 export const none = { findings: [] }
 export const finding = (n, over = {}) => ({
@@ -363,7 +363,7 @@ scenarios.s_graph_missing_fallback = async () => {
 scenarios.s7_adaptive_lenses = async () => {
   const A = finding(1, { file: 'Server/ws/hub.go', line: 120, title: 'alpha race window one' })
   const B = finding(2, { file: 'Server/ws/pubsub.go', line: 60, title: 'beta subscription leak two' })
-  const C = finding(3, { file: 'Client/tauri-client/src/lib/livekitE2EE.ts', line: 200, title: 'gamma epoch desync three' })
+  const C = finding(3, { file: 'Client/src/lib/livekitE2EE.ts', line: 200, title: 'gamma epoch desync three' })
   const { result, calls } = await run({
     agentStub: makeStub({
       hunt: (round, key) => {
@@ -380,7 +380,7 @@ scenarios.s7_adaptive_lenses = async () => {
   assert.equal(result.rounds[3].family, 'adaptive')
   const r4Keys = [...new Set(calls.filter((c) => /^r4:hunt:/.test(c.opts.label || '')).map((c) => c.opts.label.split(':')[2]))]
   assert.ok(r4Keys.includes('hotspot-server-ws'), `r4 keys: ${r4Keys}`)
-  assert.ok(r4Keys.includes('hotspot-client-tauri-client-src-lib'), `r4 keys: ${r4Keys}`)
+  assert.ok(r4Keys.includes('hotspot-client-src-lib'), `r4 keys: ${r4Keys}`)
   assert.ok(r4Keys.includes('explore-1'), `r4 keys: ${r4Keys}`)
   const hotspot = calls.find((c) => (c.opts.label || '').includes('hotspot-server-ws'))
   assert.match(hotspot.prompt, /Server\/ws\/hub\.go/)

@@ -86,7 +86,7 @@ protocol-generate:
 
 protocol-verify:
 	go run ./scripts/genprotocol
-	@git diff --exit-code ws/message_types.go ../Client/tauri-client/src/lib/protocolTypes.ts || ( \
+	@git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts || ( \
 		echo "ERROR: generated protocol constants are stale. Run 'make protocol-generate' and commit the result." ; \
 		exit 1 ; \
 	)

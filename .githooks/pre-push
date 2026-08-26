@@ -28,7 +28,7 @@ if [ "$changed" = "__all__" ]; then
     client_changed=1
 else
     if printf '%s\n' "$changed" | grep -q '^Server/'; then server_changed=1; fi
-    if printf '%s\n' "$changed" | grep -q '^Client/tauri-client/'; then client_changed=1; fi
+    if printf '%s\n' "$changed" | grep -q '^Client/'; then client_changed=1; fi
     if printf '%s\n' "$changed" | grep -q '^docs/protocol-schema\.json'; then
         server_changed=1
         client_changed=1
@@ -49,12 +49,12 @@ if [ "$server_changed" = 1 ] && command -v go >/dev/null 2>&1; then
 fi
 
 if [ "$client_changed" = 1 ]; then
-    if [ -d Client/tauri-client/node_modules ]; then
+    if [ -d Client/node_modules ]; then
         echo "pre-push: client typecheck + eslint..."
-        (cd Client/tauri-client && npm run -s typecheck) || fail "tsc --noEmit"
-        (cd Client/tauri-client && npx eslint src/) || fail "eslint"
+        (cd Client && npm run -s typecheck) || fail "tsc --noEmit"
+        (cd Client && npx eslint src/) || fail "eslint"
     else
-        printf 'pre-push: WARNING: node_modules missing in Client/tauri-client; skipping client checks.\n' >&2
+        printf 'pre-push: WARNING: node_modules missing in Client; skipping client checks.\n' >&2
     fi
 fi
 

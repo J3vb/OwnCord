@@ -30,9 +30,9 @@ jobs:
         shell: bash
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          TAURI_VERSION=$(node -p "require('./Client/tauri-client/src-tauri/tauri.conf.json').version")
-          NPM_VERSION=$(node -p "require('./Client/tauri-client/package.json').version")
-          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Client/tauri-client/src-tauri/Cargo.toml | head -1)
+          TAURI_VERSION=$(node -p "require('./Client/src-tauri/tauri.conf.json').version")
+          NPM_VERSION=$(node -p "require('./Client/package.json').version")
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Client/src-tauri/Cargo.toml | head -1)
           fail=0
           for pair in "tauri.conf.json:$TAURI_VERSION" "package.json:$NPM_VERSION" "Cargo.toml:$CARGO_VERSION"; do
             file="${pair%%:*}"; ver="${pair#*:}"
@@ -56,7 +56,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -64,14 +64,14 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: Client/tauri-client/src-tauri
+          workspaces: Client/src-tauri
 
       - name: Install npm dependencies
-        working-directory: Client/tauri-client
+        working-directory: Client
         run: npm ci
 
       - name: Build Tauri app
-        working-directory: Client/tauri-client
+        working-directory: Client
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-staging
-          NSIS_DIR="Client/tauri-client/src-tauri/target/release/bundle/nsis"
+          NSIS_DIR="Client/src-tauri/target/release/bundle/nsis"
           INSTALLER=$(find "$NSIS_DIR" -name "*.exe" | head -1)
           cp "$INSTALLER" release-staging/
           NSIS_ZIP=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip" ! -name "*.sig" | head -1)
@@ -108,7 +108,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install Linux system dependencies
         run: |
@@ -131,14 +131,14 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: Client/tauri-client/src-tauri
+          workspaces: Client/src-tauri
 
       - name: Install npm dependencies
-        working-directory: Client/tauri-client
+        working-directory: Client
         run: npm ci
 
       - name: Build Tauri app (AppImage + deb)
-        working-directory: Client/tauri-client
+        working-directory: Client
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -149,7 +149,7 @@ jobs:
       # EGL_BAD_PARAMETER). Strip them and regenerate the updater artifact +
       # signatures for the patched image.
       - name: Strip host-incompatible libs from AppImage and re-sign
-        working-directory: Client/tauri-client
+        working-directory: Client
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -173,7 +173,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p linux-staging
-          BUNDLE_DIR="Client/tauri-client/src-tauri/target/release/bundle"
+          BUNDLE_DIR="Client/src-tauri/target/release/bundle"
           # AppImage
           APPIMAGE=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" ! -name "*.sig" | head -1)
           if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then cp "$APPIMAGE" linux-staging/; fi
@@ -298,7 +298,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install Linux system dependencies
         run: |
@@ -321,14 +321,14 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: Client/tauri-client/src-tauri
+          workspaces: Client/src-tauri
 
       - name: Install npm dependencies
-        working-directory: Client/tauri-client
+        working-directory: Client
         run: npm ci
 
       - name: Build Tauri app (AppImage + deb)
-        working-directory: Client/tauri-client
+        working-directory: Client
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -336,7 +336,7 @@ jobs:
 
       # Same strip + re-sign as the x86_64 job — see the comment there.
       - name: Strip host-incompatible libs from AppImage and re-sign
-        working-directory: Client/tauri-client
+        working-directory: Client
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p linux-arm64-staging
-          BUNDLE_DIR="Client/tauri-client/src-tauri/target/release/bundle"
+          BUNDLE_DIR="Client/src-tauri/target/release/bundle"
           # AppImage + updater artifact (.tar.gz) + signatures. Every filename
           # must carry the arch: FindClientAssets matches on the
           # _aarch64.AppImage.tar.gz suffix, and arch-less names would collide
@@ -465,7 +465,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Download Windows client assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -532,7 +532,7 @@ jobs:
             "$VERSION" "$WIN_HASH" "$WIN_HASH" "$LINUX_HASH" > windows/server-update-manifest.json
 
       - name: Sign server update assets
-        working-directory: Client/tauri-client
+        working-directory: Client
         shell: bash
         env:
           SERVER_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.SERVER_UPDATE_SIGNING_PRIVATE_KEY }}
@@ -542,8 +542,8 @@ jobs:
           printf '%s' "$SERVER_UPDATE_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
           trap 'rm -f "$KEY_PATH"' EXIT
           npm ci
-          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/chatserver.exe
-          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/server-update-manifest.json
+          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../windows/chatserver.exe
+          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../windows/server-update-manifest.json
 
       # Fail closed before publishing: prove the freshly signed assets verify
       # against the pinned public key that ships inside the server binary.

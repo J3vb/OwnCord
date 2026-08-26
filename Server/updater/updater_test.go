@@ -628,7 +628,7 @@ func TestAssetFilenameFromURL(t *testing.T) {
 }
 
 func TestDefaultServerSignaturePublicKey_DiffersFromTauriUpdaterKey(t *testing.T) {
-	tauriConfigPath := filepath.Clean(filepath.Join("..", "..", "Client", "tauri-client", "src-tauri", "tauri.conf.json"))
+	tauriConfigPath := filepath.Clean(filepath.Join("..", "..", "Client", "src-tauri", "tauri.conf.json"))
 	raw, err := os.ReadFile(tauriConfigPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", tauriConfigPath, err)

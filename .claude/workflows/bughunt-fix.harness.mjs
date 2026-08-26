@@ -46,7 +46,7 @@ export async function run({ agentStub, args = undefined, budget = undefined }) {
 export const rec = (id, over = {}) => ({
   id,
   title: `bug ${id}`,
-  file: 'Client/tauri-client/src/lib/livekitE2EE.ts',
+  file: 'Client/src/lib/livekitE2EE.ts',
   line: 100,
   severity: 'high',
   why: 'w',
@@ -78,7 +78,7 @@ scenarios.f1_clusters_by_file = async () => {
   assert.equal(result.branch, 'fix/test')
   assert.equal(result.clusters.length, 2)
   const byFile = Object.fromEntries(result.clusters.map((c) => [c.file, c.ids]))
-  assert.deepEqual(byFile['Client/tauri-client/src/lib/livekitE2EE.ts'], ['OC-0001', 'OC-0002'])
+  assert.deepEqual(byFile['Client/src/lib/livekitE2EE.ts'], ['OC-0001', 'OC-0002'])
   assert.deepEqual(byFile['Server/ws/hub_sweep.go'], ['OC-0003'])
 }
 
@@ -580,7 +580,7 @@ scenarios.f14_disjoint_touched_paths_both_commit = async () => {
         if (opts.label.includes('livekitE2EE'))
           return {
             results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' }],
-            touchedPaths: ['Client/tauri-client/src/lib/otherHelper.ts'],
+            touchedPaths: ['Client/src/lib/otherHelper.ts'],
           }
         return {
           results: [{ id: 'OC-0003', outcome: 'fixed', testPath: 'Server/ws/hub_sweep_test.go', rationale: '' }],
@@ -616,7 +616,7 @@ scenarios.f15_prove_prompt_names_every_touched_path = async () => {
       if (String(opts.label).startsWith('fix:'))
         return {
           results: [{ id: 'OC-0001', outcome: 'fixed', testPath: 't/OC-0001.test.ts', rationale: '' }],
-          touchedPaths: ['Client/tauri-client/src/lib/sharedCrypto.ts'],
+          touchedPaths: ['Client/src/lib/sharedCrypto.ts'],
         }
       if (String(opts.label).startsWith('prove:')) {
         provePromptText = prompt
@@ -651,8 +651,8 @@ scenarios.f15_prove_prompt_names_every_touched_path = async () => {
 const FOUR_FILES = [
   rec('OC-0001'),
   rec('OC-0002', { file: 'Server/ws/hub_sweep.go' }),
-  rec('OC-0003', { file: 'Client/tauri-client/src/lib/livekitSession.ts' }),
-  rec('OC-0004', { file: 'Client/tauri-client/src/components/VoiceWidget.ts' }),
+  rec('OC-0003', { file: 'Client/src/lib/livekitSession.ts' }),
+  rec('OC-0004', { file: 'Client/src/components/VoiceWidget.ts' }),
 ]
 // A fix stub that reports every id in its prompt as fixed. Ids go through a Set because rec()
 // puts each id in both `id` and `title`, so the raw matchAll yields every id twice.

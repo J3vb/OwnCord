@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -127,7 +127,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install npm dependencies
         run: npm ci
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -185,7 +185,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install npm dependencies
         run: npm ci
@@ -198,7 +198,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-coverage
-          path: Client/tauri-client/coverage/
+          path: Client/coverage/
           retention-days: 7
 
   # Rust unit tests used to live inside tauri-build, which only runs on PRs to
@@ -211,7 +211,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: Client/tauri-client/src-tauri/
+        working-directory: Client/src-tauri/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -236,7 +236,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: Client/tauri-client/src-tauri
+          workspaces: Client/src-tauri
 
       - name: Clippy lint (including test targets)
         run: cargo clippy --all-targets -- -D warnings
@@ -264,7 +264,7 @@ jobs:
     timeout-minutes: 25
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -272,7 +272,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install npm dependencies
         run: npm ci
@@ -295,8 +295,8 @@ jobs:
         with:
           name: playwright-report
           path: |
-            Client/tauri-client/playwright-report/
-            Client/tauri-client/test-results/
+            Client/playwright-report/
+            Client/test-results/
           retention-days: 7
 
   # Admin-panel journey against a REAL server (no mocks): start-server.sh
@@ -318,7 +318,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -331,7 +331,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install npm dependencies
         run: npm ci
@@ -348,8 +348,8 @@ jobs:
         with:
           name: admin-e2e-report
           path: |
-            Client/tauri-client/playwright-report/
-            Client/tauri-client/test-results/
+            Client/playwright-report/
+            Client/test-results/
           retention-days: 7
 
   # Blocking e2e subset: the parity-feature specs (tagged "@parity"), covering
@@ -365,7 +365,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -373,7 +373,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install npm dependencies
         run: npm ci
@@ -390,8 +390,8 @@ jobs:
         with:
           name: playwright-report-parity
           path: |
-            Client/tauri-client/playwright-report/
-            Client/tauri-client/test-results/
+            Client/playwright-report/
+            Client/test-results/
           retention-days: 7
 
   # Image build is verification only, so it is skipped on dev to keep day-to-day
@@ -457,7 +457,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: Client/tauri-client/
+        working-directory: Client/
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -465,7 +465,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Client/tauri-client/package-lock.json
+          cache-dependency-path: Client/package-lock.json
 
       - name: Install Linux system dependencies
         if: startsWith(matrix.os, 'ubuntu')
@@ -491,20 +491,20 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: Client/tauri-client/src-tauri
+          workspaces: Client/src-tauri
 
       - name: Install npm dependencies
         run: npm ci
 
       - name: Clippy lint (Rust)
-        working-directory: Client/tauri-client/src-tauri/
+        working-directory: Client/src-tauri/
         run: cargo clippy -- -D warnings
 
       # Rust unit tests moved to the standalone `rust-tests` job so they run on
       # every event, not just PRs to main.
 
       - name: Security audit (Rust dependencies)
-        working-directory: Client/tauri-client/src-tauri/
+        working-directory: Client/src-tauri/
         run: |
           cargo install cargo-audit@0.22.1 --quiet
           cargo audit

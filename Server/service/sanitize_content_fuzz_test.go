@@ -43,7 +43,7 @@ var onEventAttr = regexp.MustCompile(`(?i)<[a-z/][^>]*\bon\w+\s*=`)
 // Fuzzing confirmed the bare-substring version false-positives on plain
 // text (seed "jAvAsCript:0"), and the client's own markdown renderer
 // independently refuses to autolink a javascript: pseudo-URL (see
-// tauri-client/tests/unit/content-markdown.test.ts, "does not autolink a
+// Client/tests/unit/content-markdown.test.ts, "does not autolink a
 // javascript: pseudo-URL"), so plain-text "javascript:" is not exploitable
 // through any known rendering path.
 var jsURLInTag = regexp.MustCompile(`(?i)<[a-z/][^>]*\bjavascript:`)

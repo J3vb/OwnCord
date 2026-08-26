@@ -150,7 +150,7 @@ function fixPrompt(cluster) {
     `alone, return outcome "declined" with a rationale. Do not invent a fix you do not believe in.\n` +
     `  8. If you cannot fix it for a mechanical reason (missing fixture, unclear repro), return "blocked" ` +
     `with a rationale.\n\n` +
-    `Client tests run from Client/tauri-client with:\n` +
+    `Client tests run from Client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
     `  go test ./<pkg>/ -run <TestName>\n\n` +
@@ -336,7 +336,7 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
     `Co-Authored-By trailer.\n` +
     `  9. Return the short sha.\n\n` +
-    `Client tests run from Client/tauri-client with:\n` +
+    `Client tests run from Client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
     `  go test ./<pkg>/ -run <TestName>`
@@ -433,7 +433,7 @@ function stacksFor(files) {
   const s = new Set()
   for (const f of files) {
     if (f.startsWith('Server/')) s.add('server')
-    else if (f.startsWith('Client/tauri-client/src-tauri/')) s.add('rust')
+    else if (f.startsWith('Client/src-tauri/')) s.add('rust')
     else if (f.startsWith('Client/')) s.add('client')
   }
   return [...s]
@@ -441,7 +441,7 @@ function stacksFor(files) {
 
 const GATE_COMMANDS = {
   client:
-    `From Client/tauri-client:\n` +
+    `From Client:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npm test\n` +
     `  npm run typecheck\n` +
     `  npm run lint\n` +
@@ -456,10 +456,10 @@ const GATE_COMMANDS = {
     `  make sqlc-verify protocol-verify   # generated output must not be stale. If make is not on PATH, ` +
     `run the equivalent commands directly instead: ` +
     `"sqlc generate && git diff --exit-code db/dbgen" and ` +
-    `"go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/tauri-client/src/lib/protocolTypes.ts" ` +
+    `"go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts" ` +
     `- a non-empty diff in either means generated code is stale and the gate fails`,
   rust:
-    `From Client/tauri-client/src-tauri:\n` +
+    `From Client/src-tauri:\n` +
     `  cargo test\n` +
     `  cargo clippy --all-targets -- -D warnings`,
 }
