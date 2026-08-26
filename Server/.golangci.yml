@@ -90,6 +90,21 @@ linters:
       - linters: [funlen, cyclop, nestif, dupl]
         path: _test\.go
 
+# gofmt is the required Go formatting gate (S-05). It lives here rather than as a
+# standalone CI step because `gofmt -l` prints offenders and still exits 0, so a
+# `gofmt -l` step cannot fail a build. Running it as a formatter inside
+# golangci-lint means it reports through the already-pinned Lint check.
+#
+# In v2 the formatters moved out of `linters.enable` into their own section, and
+# they carry their own exclusion list.
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      # sqlc output, verified by `git diff --exit-code db/dbgen` after regeneration.
+      - db/dbgen
+
 # Report every finding. The defaults hide work three separate ways, which is fine
 # when the list is meant to be empty and actively misleading when it is a backlog:
 # "fixed everything shown" would leave more behind. uniq-by-line is the sharp one —
