@@ -121,10 +121,27 @@ functions is equally valid — TinyGo is just the example toolchain used by `exa
 
 ---
 
-## Active Branches
+## Branch and PR model
 
-- `main` -- stable releases
-- `dev` -- active development
+This section is the single source of truth for the branch model. Everywhere
+else -- the root `README.md`, `CLAUDE.md`, the PR template -- summarises it and
+links here rather than restating it.
+
+- `dev` -- the integration branch. **All contributions target `dev`.**
+- `main` -- releases only. `dev` is merged to `main` for a release, and release
+  tags are cut from `main`.
+
+`dev` is protected and PR-only: direct pushes are rejected, ten status checks
+are required, `required_approving_review_count` is 0, and the rule is enforced
+on admins. So a PR is self-mergeable once CI is green, but no commit reaches
+`dev` without CI having run on it. Settings and rationale live in
+[`docs/plans/b0-dev-branch-protection.sh`](plans/b0-dev-branch-protection.sh).
+
+Two consequences worth knowing before you open a PR:
+
+- The Docker and Tauri Full Build jobs are gated on `main` and report as
+  *skipped* on a PR into `dev`. That is expected, not a failure.
+- Squash merge, and a conventional commit subject on the squashed commit.
 
 ## Branch Naming
 
@@ -149,11 +166,15 @@ ci: add lint step to GitHub Actions
 
 ## Pull Request Process
 
-1. Branch from `dev` (the active development branch)
-2. PRs target `dev`; `dev` is merged to `main` for releases, which are cut from tagged commits on `main`
-3. CI must pass (build + test + lint)
+See [Branch and PR model](#branch-and-pr-model) above for what to branch from
+and target.
+
+1. Branch from `dev`
+2. Open the PR against `dev`
+3. All ten required checks must pass -- `dev` is protected, so a red PR cannot
+   merge
 4. Request code review
-5. Squash merge preferred
+5. Squash merge, conventional commit subject
 
 ## Testing
 

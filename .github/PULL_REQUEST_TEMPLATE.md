@@ -1,5 +1,10 @@
 # Pull Request
 
+<!-- Base branch: PRs target `dev`, not `main`. `main` carries releases only.
+     See docs/contributing.md#branch-and-pr-model. The Docker and Tauri Full
+     Build jobs are gated on `main` and report as skipped here — that is
+     expected. -->
+
 ## Summary
 
 <!-- What does this PR do? 1-3 bullet points -->

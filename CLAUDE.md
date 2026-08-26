@@ -60,4 +60,6 @@ else under `.superpowers/` is per-session scratch and stays local.
 - Security issues go through GitHub Security Advisories, never public issues
   (`docs/security.md`). This repo is public — unfixed defects do not belong in
   commits, issues, or PR descriptions.
-- Branch from `main`, PR to `main`, squash merge, conventional commit subjects.
+- Branch from `dev` and PR to `dev` — `dev` is the integration branch and is
+  PR-only; `main` carries releases. Squash merge, conventional commit subjects.
+  Full model: [docs/contributing.md](docs/contributing.md#branch-and-pr-model).
