@@ -30,17 +30,8 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": "v1Compatible",
-    "targets": [
-      "nsis",
-      "appimage",
-      "deb"
-    ],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.ico"
-    ],
+    "targets": ["nsis", "appimage", "deb"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
     "linux": {
       "deb": {
         "depends": [

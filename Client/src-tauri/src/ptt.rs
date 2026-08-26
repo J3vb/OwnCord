@@ -24,8 +24,7 @@ static PTT_VKEY: AtomicI32 = AtomicI32::new(0);
 /// therefore never reset the stop signal that an earlier thread's `join()` is
 /// still waiting on — the lost-signal race (ATOMICRACE-001) that a single
 /// shared flag allowed.
-static PTT_THREAD: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>> =
-    Mutex::new(None);
+static PTT_THREAD: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>> = Mutex::new(None);
 
 /// Returns true if a VK code is allowed for global capture in ptt_listen_for_key.
 ///
@@ -58,7 +57,7 @@ fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
         0x2D | // Insert
         0x2E | // Delete
         0x05 | // Mouse X1
-        0x06   // Mouse X2
+        0x06 // Mouse X2
     )
 }
 
@@ -73,8 +72,7 @@ fn is_key_down(vk: i32) -> bool {
         return false;
     }
     // SAFETY: GetAsyncKeyState is safe to call with valid VK codes 1-254
-    let state =
-        unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) };
+    let state = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) };
     // High-order bit set (negative when interpreted as i16) = key is down
     (state as i16) < 0
 }
@@ -101,7 +99,10 @@ fn is_key_down(vk: i32) -> bool {
     let Some(keycode) = linux::vk_to_keycode(vk) else {
         return false;
     };
-    DEVICE_STATE.with(|ds| ds.as_ref().is_some_and(|ds| ds.get_keys().contains(&keycode)))
+    DEVICE_STATE.with(|ds| {
+        ds.as_ref()
+            .is_some_and(|ds| ds.get_keys().contains(&keycode))
+    })
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -444,7 +445,9 @@ pub fn ptt_stop_internal() {
 #[tauri::command]
 pub fn ptt_set_key(vk_code: i32) -> Result<(), String> {
     if vk_code != 0 && !(1..=254).contains(&vk_code) {
-        return Err(format!("invalid virtual key code: {vk_code} (must be 0 or 1-254)"));
+        return Err(format!(
+            "invalid virtual key code: {vk_code} (must be 0 or 1-254)"
+        ));
     }
     PTT_VKEY.store(vk_code, Ordering::SeqCst);
     Ok(())
@@ -478,8 +481,7 @@ pub async fn ptt_listen_for_key() -> i32 {
                         continue;
                     }
                     // Wait for key release (with its own timeout)
-                    let release_deadline =
-                        std::time::Instant::now() + Duration::from_secs(5);
+                    let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
                     while device_state.get_keys().contains(&key)
                         && std::time::Instant::now() < release_deadline
                     {
@@ -503,8 +505,7 @@ pub async fn ptt_listen_for_key() -> i32 {
                         continue;
                     }
                     if is_key_down(vk) {
-                        let release_deadline =
-                            std::time::Instant::now() + Duration::from_secs(5);
+                        let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
                         while is_key_down(vk) && std::time::Instant::now() < release_deadline {
                             std::thread::sleep(Duration::from_millis(20));
                         }
@@ -576,7 +577,11 @@ mod tests {
     fn ptt_transition_reports_edges_only() {
         assert_eq!(ptt_transition(0x41, true, false), Some(true), "rising edge");
         assert_eq!(ptt_transition(0x41, true, true), None, "still held");
-        assert_eq!(ptt_transition(0x41, false, true), Some(false), "falling edge");
+        assert_eq!(
+            ptt_transition(0x41, false, true),
+            Some(false),
+            "falling edge"
+        );
         assert_eq!(ptt_transition(0x41, false, false), None, "still idle");
     }
 
@@ -635,7 +640,11 @@ mod tests {
         ];
 
         for (keycode, vk) in cases {
-            assert_eq!(keycode_to_vk(&keycode), vk, "keycode_to_vk failed for {keycode:?}");
+            assert_eq!(
+                keycode_to_vk(&keycode),
+                vk,
+                "keycode_to_vk failed for {keycode:?}"
+            );
             assert_eq!(
                 vk_to_keycode(vk),
                 Some(keycode),

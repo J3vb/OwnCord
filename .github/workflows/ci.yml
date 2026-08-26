@@ -159,9 +159,6 @@ jobs:
       - name: ESLint (type-aware rules)
         run: npx eslint src/
 
-      - name: Prettier format check
-        run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
-
       - name: Knip (unused code & deps)
         # Blocking since the 2026-08-04 remediation: the '|| true' era let a
         # real unused-export finding sit invisible in every green run.
@@ -195,6 +192,54 @@ jobs:
 
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
+
+  # Repository-wide formatting, script lint and workflow lint (RL-19 / L-13, S-05).
+  #
+  # Root-scoped and ubuntu-only for the same reason as docs-consistency above:
+  # every gate here is platform-independent text analysis, and .gitattributes
+  # pins eol=lf so a second OS would only re-prove line endings.
+  #
+  # Prettier lives here rather than in client-check because it is no longer a
+  # client gate -- one config at the repository root covers Markdown, YAML,
+  # JSON, CSS and the root scripts as well as client TypeScript.
+  hygiene:
+    name: Repository Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      # Root install only -- prettier is the sole dependency this job needs, and
+      # the client's install is client-check's job.
+      - name: Install root dependencies
+        run: npm ci
+
+      # shellcheck ships in the ubuntu runner image. actionlint does not, so it
+      # is pinned by version and checked by digest: an unpinned installer script
+      # would be the one unverified download in a workflow file that pins every
+      # action by commit SHA.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+          ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" "$url"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Report tool versions
+        run: shellcheck --version && actionlint --version
+
+      # The same entry point a contributor runs. run.mjs takes its shellcheck and
+      # actionlint file lists from `git ls-files`, never a filesystem glob.
+      - name: Formatting, shell and workflow gates
+        run: npm run check:hygiene
 
   client-tests:
     name: Client Unit Tests
@@ -255,12 +300,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+
+      # Ahead of clippy: a formatting failure is cheap to produce and cheap to
+      # fix, and there is no reason to spend a clippy pass to surface one.
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
 
       - name: Clippy lint (including test targets)
         run: cargo clippy --all-targets -- -D warnings

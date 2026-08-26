@@ -47,7 +47,8 @@ impl Drop for OutBlob {
         // Scrub first: on the unprotect path this buffer holds the plaintext
         // identity key, and LocalFree does not zero what it releases.
         // SAFETY: as in `to_vec`, plus the range is ours alone to write.
-        let bytes = unsafe { std::slice::from_raw_parts_mut(self.0.pbData, self.0.cbData as usize) };
+        let bytes =
+            unsafe { std::slice::from_raw_parts_mut(self.0.pbData, self.0.cbData as usize) };
         bytes.zeroize();
         // SAFETY: pbData came from DPAPI's LocalAlloc, and `Drop` runs at most
         // once, so it is freed exactly once.

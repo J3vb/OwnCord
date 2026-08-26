@@ -454,7 +454,14 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [release-client-windows, release-client-linux, release-client-linux-arm64, release-server, release-server-docker]
+    needs:
+      [
+        release-client-windows,
+        release-client-linux,
+        release-client-linux-arm64,
+        release-server,
+        release-server-docker,
+      ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -515,8 +522,8 @@ jobs:
       - name: Generate SHA256 checksums
         shell: bash
         run: |
-          (cd windows && sha256sum *) > checksums.sha256
-          (cd linux && sha256sum *) >> checksums.sha256
+          (cd windows && sha256sum -- *) > checksums.sha256
+          (cd linux && sha256sum -- *) >> checksums.sha256
           sha256sum owncord-src-*.tar.gz >> checksums.sha256
 
       # The legacy top-level asset/sha256 pair stays bound to the Windows

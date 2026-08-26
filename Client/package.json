@@ -29,8 +29,6 @@
     "lint": "oxlint src/ && eslint src/",
     "lint:fix": "eslint src/ --fix",
     "lint:ox": "oxlint src/",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "knip": "knip",
     "test:mutate": "stryker run",
     "test:mutate:dry": "stryker run --dryRunOnly"
@@ -51,20 +49,10 @@
     "jsdom": "^30.0.1",
     "knip": "^6.32.2",
     "oxlint": "^1.79.0",
-    "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
-  },
-  "prettier": {
-    "singleQuote": false,
-    "semi": true,
-    "trailingComma": "all",
-    "printWidth": 100,
-    "tabWidth": 2,
-    "arrowParens": "always",
-    "endOfLine": "lf"
   },
   "dependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",

@@ -14,23 +14,16 @@ const QUIT_ID: &str = "quit";
 pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::Error> {
     let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, "Show/Hide", true, None::<&str>)?;
 
-    let status_online =
-        MenuItem::with_id(app, STATUS_ONLINE_ID, "Online", true, None::<&str>)?;
+    let status_online = MenuItem::with_id(app, STATUS_ONLINE_ID, "Online", true, None::<&str>)?;
     let status_idle = MenuItem::with_id(app, STATUS_IDLE_ID, "Idle", true, None::<&str>)?;
     let status_dnd = MenuItem::with_id(app, STATUS_DND_ID, "Do Not Disturb", true, None::<&str>)?;
-    let status_offline =
-        MenuItem::with_id(app, STATUS_OFFLINE_ID, "Offline", true, None::<&str>)?;
+    let status_offline = MenuItem::with_id(app, STATUS_OFFLINE_ID, "Offline", true, None::<&str>)?;
 
     let status_submenu = Submenu::with_items(
         app,
         "Status",
         true,
-        &[
-            &status_online,
-            &status_idle,
-            &status_dnd,
-            &status_offline,
-        ],
+        &[&status_online, &status_idle, &status_dnd, &status_offline],
     )?;
 
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
@@ -41,7 +34,11 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
     let app_handle_menu = app.clone();
 
     TrayIconBuilder::new()
-        .icon(app.default_window_icon().cloned().unwrap_or_else(|| tauri::image::Image::new(&[], 1, 1)))
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .unwrap_or_else(|| tauri::image::Image::new(&[], 1, 1)),
+        )
         .menu(&menu)
         .tooltip("OwnCord")
         .on_tray_icon_event(move |_tray, event| {

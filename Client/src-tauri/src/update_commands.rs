@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde::Serialize;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -23,9 +23,10 @@ struct DownloadProgress {
 
 /// Extract the host (with port if non-443) from an https:// URL for cert store lookup.
 fn extract_host_for_cert_store(server_url: &str) -> Result<String, String> {
-    let parsed = url::Url::parse(server_url)
-        .map_err(|e| format!("failed to parse server URL: {e}"))?;
-    let host = parsed.host_str()
+    let parsed =
+        url::Url::parse(server_url).map_err(|e| format!("failed to parse server URL: {e}"))?;
+    let host = parsed
+        .host_str()
         .ok_or_else(|| "server URL has no host".to_string())?;
     let port = parsed.port().unwrap_or(443);
     let raw = if port == 443 {
@@ -41,7 +42,10 @@ fn extract_host_for_cert_store(server_url: &str) -> Result<String, String> {
 /// HTTP client also downloads the installer from GitHub, whose certificate
 /// must pass normal web-PKI validation instead (a client-wide pin would
 /// reject it and every install would fail).
-fn build_tls_config(app: &AppHandle, server_url: &str) -> Result<Option<rustls::ClientConfig>, String> {
+fn build_tls_config(
+    app: &AppHandle,
+    server_url: &str,
+) -> Result<Option<rustls::ClientConfig>, String> {
     let store_key = extract_host_for_cert_store(server_url)?;
     let fingerprint = load_stored_fingerprint(app, &store_key)?;
     match fingerprint {
@@ -164,10 +168,7 @@ pub async fn check_client_update(
 /// The frontend should call `relaunch()` from @tauri-apps/plugin-process
 /// after this completes.
 #[tauri::command]
-pub async fn download_and_install_update(
-    app: AppHandle,
-    server_url: String,
-) -> Result<(), String> {
+pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
     let updater = build_updater(&app, &server_url)?;
 
     let update = updater

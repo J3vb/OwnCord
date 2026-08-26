@@ -24,6 +24,11 @@
 #       three of them exist in no workflow file at all, because CodeQL runs
 #       from GitHub default setup configured in repository settings.
 #
+#       Repository Hygiene added 2026-08-26 (B1-3). Same rule: the name was read
+#       off PR #1414 after the job reported `pass`, not copied out of ci.yml.
+#       This is the half of S-05 that makes the gate a gate -- a check that is
+#       present but unpinned lets a formatting regression merge.
+#
 #       Deliberately NOT pinned, and why:
 #         Server Docker Build (verify)  reports "skipping" on a dev PR
 #                                       (if: ref_name=='main' || base_ref=='main')
@@ -35,6 +40,10 @@
 #                                       theatre (that is R-01, B10 work)
 #         CodeQL                        default-setup aggregate over the three
 #                                       Analyze jobs; pinning those is enough
+#         Docs & Ledger Consistency     reports and passes on a dev PR, and is NOT
+#                                       pinned. That looks like an oversight from
+#                                       the 2026-08-25 pass rather than a decision;
+#                                       it belongs to G-04, not to B1-3.
 #
 #       A required check that never reports blocks every PR forever. Re-read the
 #       list before changing it:
@@ -56,6 +65,7 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
       "Client Static Checks",
       "Client Unit Tests",
       "Rust Unit Tests",
+      "Repository Hygiene",
       "Client E2E (Playwright)",
       "Client E2E (parity subset, blocking)",
       "Analyze (go)",

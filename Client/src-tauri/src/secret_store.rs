@@ -272,9 +272,10 @@ fn compiled_backend_persistence() -> (bool, &'static str) {
         CredentialPersistence::UntilDelete => (true, "persists until deleted (on disk)"),
         CredentialPersistence::UntilReboot => (false, "vanishes on reboot (kernel memory)"),
         CredentialPersistence::ProcessOnly => (false, "vanishes when the process exits"),
-        CredentialPersistence::EntryOnly => {
-            (false, "vanishes with the entry object (the in-memory mock store)")
-        }
+        CredentialPersistence::EntryOnly => (
+            false,
+            "vanishes with the entry object (the in-memory mock store)",
+        ),
         _ => (false, "unrecognized persistence class"),
     }
 }
@@ -509,7 +510,10 @@ mod tests {
 
     #[test]
     fn fallback_aad_is_account_specific() {
-        assert_ne!(fallback_aad("host.example"), fallback_aad("identity:host.example"));
+        assert_ne!(
+            fallback_aad("host.example"),
+            fallback_aad("identity:host.example")
+        );
         assert_eq!(fallback_aad("host.example"), fallback_aad("host.example"));
     }
 
@@ -532,13 +536,21 @@ mod tests {
         // indistinguishable from first login, and the E2EE identity keypair
         // loader mints and publishes a brand-new identity key on exactly that
         // signal, invalidating every peer's TOFU pin.
-        let result = get_with("identity:chat.example", |_| Err("keychain locked".to_string()), |_| None);
+        let result = get_with(
+            "identity:chat.example",
+            |_| Err("keychain locked".to_string()),
+            |_| None,
+        );
         assert_eq!(result, Err("keychain locked".to_string()));
     }
 
     #[test]
     fn get_with_prefers_the_live_keyring_value_over_the_fallback() {
-        let result = get_with("acct", |_| Ok(Some("live".to_string())), |_| Some("stale".to_string()));
+        let result = get_with(
+            "acct",
+            |_| Ok(Some("live".to_string())),
+            |_| Some("stale".to_string()),
+        );
         assert_eq!(result, Ok(Some("live".to_string())));
     }
 
@@ -625,7 +637,10 @@ mod tests {
             |_| cleared.set(true),
         );
         assert_eq!(result, Ok(Backend::Keyring));
-        assert!(cleared.get(), "a recovered machine must clear any stale fallback copy");
+        assert!(
+            cleared.get(),
+            "a recovered machine must clear any stale fallback copy"
+        );
     }
 
     #[test]
@@ -657,7 +672,10 @@ mod tests {
             deleted.get(),
             "a mismatched keyring entry must be purged, not left to shadow the fallback"
         );
-        assert!(fallback_written.get(), "the secret must still land in the fallback");
+        assert!(
+            fallback_written.get(),
+            "the secret must still land in the fallback"
+        );
     }
 
     #[test]
@@ -729,7 +747,11 @@ mod tests {
     fn dpapi_round_trips_and_rejects_foreign_entropy() {
         let secret = b"eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2In0";
         let blob = crate::dpapi::protect(secret, &fallback_aad("identity:a.example")).unwrap();
-        assert_ne!(blob.as_slice(), secret.as_slice(), "blob must not be plaintext");
+        assert_ne!(
+            blob.as_slice(),
+            secret.as_slice(),
+            "blob must not be plaintext"
+        );
 
         let back = crate::dpapi::unprotect(&blob, &fallback_aad("identity:a.example")).unwrap();
         assert_eq!(back, secret);

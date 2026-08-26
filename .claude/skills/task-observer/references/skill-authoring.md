@@ -227,6 +227,7 @@ any skill creation or regeneration.
 ## Active Principles
 
 ### 1. [Principle title]
+
 **Added:** [date]
 **Applies to:** [all skills | all open-source skills | all skills with rules]
 **Requirement:** [what it requires]

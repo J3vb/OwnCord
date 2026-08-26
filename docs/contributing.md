@@ -6,11 +6,11 @@ How to set up the development environment and contribute to OwnCord.
 
 ### Prerequisites
 
-| Platform | Server | Client |
-|----------|--------|--------|
-| Windows 10+ x64 | ✅ | ✅ |
-| Linux x64 | ✅ | ✅ |
-| Linux ARM64 | ✅ | ✅ (CI only) |
+| Platform        | Server | Client       |
+| --------------- | ------ | ------------ |
+| Windows 10+ x64 | ✅     | ✅           |
+| Linux x64       | ✅     | ✅           |
+| Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.26+** (server)
 - **Node.js 24+** (client) — pinned in `Client/.nvmrc`; `engine-strict` makes a
@@ -26,18 +26,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command | Description |
-|---------|-------------|
-| `npm run bootstrap` | `npm ci` in all three package roots |
-| `npm run check` | Everything CI gates on: server, client, Rust |
-| `npm run check:server` | Server only — build variants, vet, race, deadlock, lint, generated-output drift |
-| `npm run check:client` | Client only — typecheck, lint, format, unit + integration tests |
-| `npm run check:rust` | Tauri backend — `cargo test --lib` and clippy |
-| `npm run check:docs` | Fail if a watched document states a finding count the ledger contradicts |
-| `npm run format` | Prettier over the client, `gofmt -w` over the server |
-| `npm run generate` | Regenerate protocol constants and the sqlc query layer |
-| `npm run release:preflight` | `check` plus a client production build |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where |
+| Command                       | Description                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                             |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                    |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift |
+| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                 |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                   |
+| `npm run check:docs`          | Fail if a watched document states a finding count the ledger contradicts        |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                            |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                          |
+| `npm run release:preflight`   | `check` plus a client production build                                          |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                              |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.
@@ -48,72 +48,72 @@ next section, and using them directly is equally correct.
 
 #### Server (Go)
 
-| Command | Description |
-|---------|-------------|
-| `go build -o chatserver.exe -ldflags "-s -w" .` | Build server binary (Windows) |
-| `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
-| `go build -tags otel .` | Build with OpenTelemetry SDK (requires `go get` first — see Phase B) |
-| `go build -tags wazero .` | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
-| `go test ./...` | Run all server tests |
-| `go test ./... -cover` | Run server tests with coverage |
-| `go test -race ./...` | Run server tests with race detection |
+| Command                                                   | Description                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `go build -o chatserver.exe -ldflags "-s -w" .`           | Build server binary (Windows)                                            |
+| `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux)                                              |
+| `go build -tags otel .`                                   | Build with OpenTelemetry SDK (requires `go get` first — see Phase B)     |
+| `go build -tags wazero .`                                 | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
+| `go test ./...`                                           | Run all server tests                                                     |
+| `go test ./... -cover`                                    | Run server tests with coverage                                           |
+| `go test -race ./...`                                     | Run server tests with race detection                                     |
 
 **Make targets** (run from `Server/`):
 
-| Command | Description |
-|---------|-------------|
-| `make test` | Run the test suite the way CI does (`-race`, 20 min timeout) |
-| `make test-deadlock` | Run the deadlock-detection pass CI also runs (`-tags deadlock`) |
-| `make cover` | Per-package coverage (what CI uploads) + a function summary |
-| `make cover-all` | Cross-package coverage — the honest number (also lists 0.0% functions) |
-| `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
-| `make sqlc-generate` | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine) |
-| `make sqlc-verify` | Fail if the committed `dbgen` output is stale (used by CI) |
+| Command                  | Description                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| `make test`              | Run the test suite the way CI does (`-race`, 20 min timeout)                        |
+| `make test-deadlock`     | Run the deadlock-detection pass CI also runs (`-tags deadlock`)                     |
+| `make cover`             | Per-package coverage (what CI uploads) + a function summary                         |
+| `make cover-all`         | Cross-package coverage — the honest number (also lists 0.0% functions)              |
+| `make sqlc-install`      | Install the pinned sqlc version into `$GOBIN`                                       |
+| `make sqlc-generate`     | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine)                |
+| `make sqlc-verify`       | Fail if the committed `dbgen` output is stale (used by CI)                          |
 | `make protocol-generate` | Regenerate the WS message-type constants (Go + TS) from `docs/protocol-schema.json` |
-| `make protocol-verify` | Fail if the committed protocol constants are stale (used by CI) |
-| `make otel-up` | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
-| `make otel-down` | Stop and remove the OTel dev containers |
+| `make protocol-verify`   | Fail if the committed protocol constants are stale (used by CI)                     |
+| `make otel-up`           | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development  |
+| `make otel-down`         | Stop and remove the OTel dev containers                                             |
 
 #### Client (Tauri v2)
 
 **Build & dev**
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server with hot reload |
-| `npm run build` | TypeScript check + Vite production build |
-| `npm run tauri dev` | Launch Tauri app in dev mode |
+| Command               | Description                                                      |
+| --------------------- | ---------------------------------------------------------------- |
+| `npm run dev`         | Start Vite dev server with hot reload                            |
+| `npm run build`       | TypeScript check + Vite production build                         |
+| `npm run tauri dev`   | Launch Tauri app in dev mode                                     |
 | `npm run tauri build` | Build release installer (NSIS on Windows, AppImage+deb on Linux) |
 
 **Tests**
 
-| Command | Description |
-|---------|-------------|
-| `npm test` | Run all tests (vitest) |
-| `npm run test:unit` | Unit tests only |
-| `npm run test:integration` | Integration tests only |
-| `npm run test:e2e` | Playwright E2E (mocked Tauri) |
-| `npm run test:e2e:native` | Playwright E2E (real Tauri exe + CDP) |
-| `npm run test:e2e:prod` | Playwright E2E (prod build) |
-| `npm run test:e2e:ui` | Playwright UI mode |
-| `npm run test:watch` | Vitest watch mode |
-| `npm run test:coverage` | Coverage report |
-| `npm run test:mutate` | Stryker mutation testing |
-| `npm run test:mutate:dry` | Stryker dry-run (no mutations applied) |
-| `npm run test:browser` | Vitest browser-mode tests |
+| Command                    | Description                            |
+| -------------------------- | -------------------------------------- |
+| `npm test`                 | Run all tests (vitest)                 |
+| `npm run test:unit`        | Unit tests only                        |
+| `npm run test:integration` | Integration tests only                 |
+| `npm run test:e2e`         | Playwright E2E (mocked Tauri)          |
+| `npm run test:e2e:native`  | Playwright E2E (real Tauri exe + CDP)  |
+| `npm run test:e2e:prod`    | Playwright E2E (prod build)            |
+| `npm run test:e2e:ui`      | Playwright UI mode                     |
+| `npm run test:watch`       | Vitest watch mode                      |
+| `npm run test:coverage`    | Coverage report                        |
+| `npm run test:mutate`      | Stryker mutation testing               |
+| `npm run test:mutate:dry`  | Stryker dry-run (no mutations applied) |
+| `npm run test:browser`     | Vitest browser-mode tests              |
 
 **Type checking, linting & formatting**
 
-| Command | Description |
-|---------|-------------|
-| `npm run typecheck` | Full typecheck (all sources) |
-| `npm run typecheck:build` | Typecheck build config only |
-| `npm run lint` | oxlint + ESLint check (src/) |
-| `npm run lint:fix` | ESLint auto-fix |
-| `npm run lint:ox` | oxlint only (fast correctness checks) |
-| `npm run format` | Prettier format (src/ + tests/) |
-| `npm run format:check` | Prettier check only (no writes) |
-| `npm run knip` | Dead code and unused export detection |
+| Command                   | Description                           |
+| ------------------------- | ------------------------------------- |
+| `npm run typecheck`       | Full typecheck (all sources)          |
+| `npm run typecheck:build` | Typecheck build config only           |
+| `npm run lint`            | oxlint + ESLint check (src/)          |
+| `npm run lint:fix`        | ESLint auto-fix                       |
+| `npm run lint:ox`         | oxlint only (fast correctness checks) |
+| `npm run format`          | Prettier format (src/ + tests/)       |
+| `npm run format:check`    | Prettier check only (no writes)       |
+| `npm run knip`            | Dead code and unused export detection |
 
 ### Git hooks (recommended)
 
@@ -123,10 +123,10 @@ Committed hooks in `.githooks/` catch the most common CI failures locally. Enabl
 npm run hooks:install    # = git config core.hooksPath .githooks
 ```
 
-| Hook | What it runs |
-|------|--------------|
+| Hook         | What it runs                                                                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
-| `pre-push` | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...` |
+| `pre-push`   | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...`                     |
 
 Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` when needed — CI still enforces everything.
 
@@ -146,11 +146,11 @@ See `Server/plugin/examples/hello/README.md` for the full plugin ABI and build i
 
 **Toolchain requirements for building `.wasm` plugins with TinyGo:**
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| TinyGo | 0.40.1 | Supports Go 1.19–1.25 only |
-| Go SDK | 1.25.x | Install alongside the system Go via `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
-| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases |
+| Tool     | Version      | Notes                                                                                               |
+| -------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| TinyGo   | 0.40.1       | Supports Go 1.19–1.25 only                                                                          |
+| Go SDK   | 1.25.x       | Install alongside the system Go via `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
+| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases                    |
 
 Any WASM toolchain (Rust/`wasm32-wasi`, AssemblyScript, etc.) that exports the five ABI
 functions is equally valid — TinyGo is just the example toolchain used by `examples/hello/`.
@@ -176,7 +176,7 @@ on admins. So a PR is self-mergeable once CI is green, but no commit reaches
 Two consequences worth knowing before you open a PR:
 
 - The Docker and Tauri Full Build jobs are gated on `main` and report as
-  *skipped* on a PR into `dev`. That is expected, not a failure.
+  _skipped_ on a PR into `dev`. That is expected, not a failure.
 - Squash merge, and a conventional commit subject on the squashed commit.
 
 ## Branch Naming
@@ -242,7 +242,7 @@ closing audit findings 2026-04-07 #8 / DC-11):
   reading the changelog. Peer-coupled groups (`vitest`/`@vitest/*`,
   `@stryker-mutator/*`) update as one PR so exact peer pins cannot wedge.
 - **Security gates run on every PR:** `npm audit --omit=dev
-  --audit-level=high` (shipped deps only — dev-tooling advisories are
+--audit-level=high` (shipped deps only — dev-tooling advisories are
   triaged in the workflow comment instead of blocking on unfixable pins),
   `govulncheck` for Go, `cargo audit` for Rust, and `knip` refuses unused
   client dependencies outright.

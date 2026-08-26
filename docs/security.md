@@ -39,7 +39,7 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
 
-Note: `backup_restore` is written synchronously to the live database *before*
+Note: `backup_restore` is written synchronously to the live database _before_
 the pre-restore safety copy is taken, so the row survives inside the
 `pre_restore_*.db` backup. The restored database itself will not contain it —
 the restore replaces the database file wholesale.
@@ -49,19 +49,22 @@ the restore replaces the database file wholesale.
 The Tauri desktop client implements the following security measures:
 
 ### Credential Storage
+
 - Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
 - Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript
 - Auto-login uses stored tokens for reconnection, not passwords
 
 ### Tauri Capabilities (Least Privilege)
+
 - Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
 - DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
 - HTTP fetch is restricted to `https://` origins plus `http://127.0.0.1:*` (the Rust TOFU proxy's loopback tunnel), and **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` — no legitimate flow reaches loopback over https, so the deny list keeps the renderer from probing other local services
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
-- The `https://*` wildcard cannot be removed today: link previews (`embeds.ts`) fetch arbitrary user-posted URLs by design, and Tauri scopes per *command*, not per JS caller. Bounded in TypeScript by `isPrivateHost`/`isBlockedForPreview`, a 5 s timeout and a 50 KB body cap; the response is regex-scraped for `og:` tags and never executed
+- The `https://*` wildcard cannot be removed today: link previews (`embeds.ts`) fetch arbitrary user-posted URLs by design, and Tauri scopes per _command_, not per JS caller. Bounded in TypeScript by `isPrivateHost`/`isBlockedForPreview`, a 5 s timeout and a 50 KB body cap; the response is regex-scraped for `og:` tags and never executed
 - Regression-guarded by `tests/unit/capabilities-scope.test.ts`; rationale and the follow-up that would remove the wildcard are in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
 
 ### TLS and Certificate Pinning (TOFU)
+
 - Self-signed certificates are supported via Trust-On-First-Use (TOFU) pinning
 - The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
@@ -69,6 +72,7 @@ The Tauri desktop client implements the following security measures:
 - Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
 
 ### Input Validation
+
 - IPC commands validate host format, string lengths, and character allowlists
 - PTT virtual key codes are validated to the Win32 range (1–254)
 - LiveKit proxy `remote_host` is validated against CRLF injection
@@ -78,6 +82,7 @@ The Tauri desktop client implements the following security measures:
 - Notification titles are sanitized (control chars stripped, length capped)
 
 ### XSS Prevention
+
 - All user-generated content is rendered via `textContent`/`setText` — never `innerHTML`
 - The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
 - URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
@@ -87,6 +92,7 @@ The Tauri desktop client implements the following security measures:
 - Linkified URLs strip trailing punctuation to prevent misleading destinations
 
 ### Search and Rate Limiting
+
 - Client-side search requests are rate-limited (500ms minimum interval + 300ms debounce)
 
 ## Known Limitations

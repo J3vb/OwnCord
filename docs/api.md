@@ -46,19 +46,19 @@ endpoints return plain-text errors — see their section):
 
 ### Error Codes
 
-| Code | HTTP Status | When It Occurs |
-| ---- | ----------- | -------------- |
-| `UNAUTHORIZED` | 401 | Missing/invalid/expired session token |
-| `INVALID_CREDENTIALS` | 401 | Login/register with bad username/password/invite (generic to prevent enumeration) |
-| `FORBIDDEN` | 403 | Insufficient permissions, banned account, or admin IP restriction |
-| `NOT_FOUND` | 404 | Resource (channel, message, user, invite, file, backup) not found |
-| `RATE_LIMITED` | 429 | Too many requests; response includes `Retry-After` header (seconds) |
-| `INVALID_INPUT` / `BAD_REQUEST` | 400 | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
-| `CONFLICT` | 409 | Duplicate username on register, or server already up-to-date on update |
-| `INTERNAL_ERROR` | 500 | Internal server error |
-| `STORAGE_ERROR` | 507 | Upload could not be persisted (storage backend write failure) |
-| `BAD_GATEWAY` | 502 | Upstream failure (GitHub API, LiveKit, GIF provider, asset download) |
-| `GIF_DISABLED` | 503 | GIF proxy is not configured on this server (no `gif.api_key`) |
+| Code                            | HTTP Status | When It Occurs                                                                                                                                                                                                                                   |
+| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                            |
+| `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                |
+| `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
+| `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
+| `RATE_LIMITED`                  | 429         | Too many requests; response includes `Retry-After` header (seconds)                                                                                                                                                                              |
+| `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
+| `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
+| `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
+| `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
+| `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
+| `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 
 ---
 
@@ -81,11 +81,11 @@ Create a new account using an invite code. The first user is created via `/admin
 }
 ```
 
-| Field | Type | Required | Notes |
-| ----- | ---- | -------- | ----- |
-| `username` | string | Yes | HTML-stripped, trimmed. Must be non-empty. |
-| `password` | string | Yes | Validated for strength (min length, complexity). |
-| `invite_code` | string | Yes | Must be a valid, non-expired, non-revoked invite with remaining uses. |
+| Field         | Type   | Required | Notes                                                                 |
+| ------------- | ------ | -------- | --------------------------------------------------------------------- |
+| `username`    | string | Yes      | HTML-stripped, trimmed. Must be non-empty.                            |
+| `password`    | string | Yes      | Validated for strength (min length, complexity).                      |
+| `invite_code` | string | Yes      | Must be a valid, non-expired, non-revoked invite with remaining uses. |
 
 #### Response 201 Created
 
@@ -111,13 +111,13 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `INVALID_INPUT` | Missing username/password/invite_code, or weak password |
-| 400 | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username |
-| 403 | `FORBIDDEN` | Registration is closed or unavailable while server-wide 2FA is required |
-| 429 | `RATE_LIMITED` | Exceeded 3 registrations/minute from this IP |
-| 500 | `INTERNAL_ERROR` | Hashing failure, session creation failure, or DB error |
+| Status | Code                  | Cause                                                                   |
+| ------ | --------------------- | ----------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`       | Missing username/password/invite_code, or weak password                 |
+| 400    | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username          |
+| 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required |
+| 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP                            |
+| 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                  |
 
 ---
 
@@ -173,13 +173,13 @@ If the account has TOTP enabled:
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `INVALID_INPUT` | Missing username or password |
-| 401 | `UNAUTHORIZED` | Wrong username or password |
-| 403 | `FORBIDDEN` | Account is banned/suspended |
-| 429 | `RATE_LIMITED` | IP locked out after 10 consecutive failures (15 min cooldown) |
-| 500 | `INTERNAL_ERROR` | Session creation failure |
+| Status | Code             | Cause                                                         |
+| ------ | ---------------- | ------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Missing username or password                                  |
+| 401    | `UNAUTHORIZED`   | Wrong username or password                                    |
+| 403    | `FORBIDDEN`      | Account is banned/suspended                                   |
+| 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown) |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                      |
 
 ---
 
@@ -223,11 +223,11 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `INVALID_INPUT` | Malformed request body |
-| 401 | `UNAUTHORIZED` | Missing/expired challenge, invalid TOTP code, or challenge consumed |
-| 500 | `INTERNAL_ERROR` | Session creation failure |
+| Status | Code             | Cause                                                               |
+| ------ | ---------------- | ------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Malformed request body                                              |
+| 401    | `UNAUTHORIZED`   | Missing/expired challenge, invalid TOTP code, or challenge consumed |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                            |
 
 ---
 
@@ -257,18 +257,18 @@ Get the current authenticated user's profile.
 This is the canonical **user object**, also returned as `user` by register,
 login and the TOTP challenge.
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `id` | int64 | User ID |
-| `username` | string | Unique handle; the name `@mentions` resolve against |
-| `avatar` | string | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string |
-| `display_name` | string\|null | Nickname rendered instead of `username`; null when unset |
-| `about` | string\|null | Profile bio, max 300 characters; null when unset |
-| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST |
-| `status` | string | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to *anyone else* reports `offline` instead |
-| `role_id` | int64 | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member) |
-| `totp_enabled` | bool | Whether the user has a confirmed TOTP secret |
-| `created_at` | string | ISO 8601 timestamp |
+| Field           | Type         | Description                                                                                                                                                                                                   |
+| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | int64        | User ID                                                                                                                                                                                                       |
+| `username`      | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
+| `avatar`        | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
+| `display_name`  | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
+| `about`         | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
+| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
+| `status`        | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
+| `role_id`       | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
+| `totp_enabled`  | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
+| `created_at`    | string       | ISO 8601 timestamp                                                                                                                                                                                            |
 
 ---
 
@@ -303,12 +303,12 @@ Account deleted successfully. All sessions, messages (soft-deleted), and associa
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `INVALID_INPUT` | Missing or incorrect password |
-| 403 | `FORBIDDEN` | Cannot delete the last admin account |
-| 429 | `RATE_LIMITED` | Locked out after 3 failed password attempts (15 min cooldown) |
-| 500 | `INTERNAL_ERROR` | Database error during deletion |
+| Status | Code             | Cause                                                         |
+| ------ | ---------------- | ------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Missing or incorrect password                                 |
+| 403    | `FORBIDDEN`      | Cannot delete the last admin account                          |
+| 429    | `RATE_LIMITED`   | Locked out after 3 failed password attempts (15 min cooldown) |
+| 500    | `INTERNAL_ERROR` | Database error during deletion                                |
 
 ---
 
@@ -399,13 +399,13 @@ event replaces the client's copy rather than patching it).
 }
 ```
 
-| Field          | Rules                                                                                                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `username`     | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
-| `avatar`       | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
-| `display_name` | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
-| `about`        | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
-| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption). |
+| Field                 | Rules                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
+| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
+| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
+| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).      |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
@@ -476,7 +476,7 @@ client is expected to downscale and square-crop before uploading.
 ### PUT /api/v1/users/me/password
 
 Change the authenticated user's password. Verifies the old password, enforces
-password strength, and revokes all *other* sessions on success.
+password strength, and revokes all _other_ sessions on success.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
@@ -500,11 +500,11 @@ old one).
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `INVALID_INPUT` | Weak new password, or new password equals old |
-| 403 | `FORBIDDEN` | Incorrect old password |
-| 429 | `RATE_LIMITED` | Too many attempts / lockout |
+| Status | Code            | Cause                                         |
+| ------ | --------------- | --------------------------------------------- |
+| 400    | `INVALID_INPUT` | Weak new password, or new password equals old |
+| 403    | `FORBIDDEN`     | Incorrect old password                        |
+| 429    | `RATE_LIMITED`  | Too many attempts / lockout                   |
 
 ---
 
@@ -571,19 +571,19 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `id` | int64 | Channel ID |
-| `name` | string | Channel name |
-| `type` | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic` | string | Channel topic/description |
-| `category` | string | Category grouping |
-| `position` | int | Sort order within category |
-| `slow_mode` | int | Slow-mode delay in seconds (0 = disabled) |
-| `archived` | bool | Whether the channel is archived |
-| `nsfw` | bool | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
-| `voice_max_users` | int | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`) |
-| `voice_max_video` | int | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`) |
+| Field             | Type   | Description                                                                                                                   |
+| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | int64  | Channel ID                                                                                                                    |
+| `name`            | string | Channel name                                                                                                                  |
+| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post)     |
+| `topic`           | string | Channel topic/description                                                                                                     |
+| `category`        | string | Category grouping                                                                                                             |
+| `position`        | int    | Sort order within category                                                                                                    |
+| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                     |
+| `archived`        | bool   | Whether the channel is archived                                                                                               |
+| `nsfw`            | bool   | Age-restriction label. **Stored and shipped only** — the server applies no content behaviour to a flagged channel (see below) |
+| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                              |
+| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                        |
 
 #### The `nsfw` flag
 
@@ -608,10 +608,10 @@ Paginated message history for a channel.
 
 #### Query Parameters
 
-| Param | Type | Default | Range | Description |
-| ----- | ---- | ------- | ----- | ----------- |
-| `before` | int64 | 0 (latest) | >= 0 | Cursor: return messages with ID less than this value |
-| `limit` | int | 50 | 1-100 | Number of messages to return |
+| Param    | Type  | Default    | Range | Description                                          |
+| -------- | ----- | ---------- | ----- | ---------------------------------------------------- |
+| `before` | int64 | 0 (latest) | >= 0  | Cursor: return messages with ID less than this value |
+| `limit`  | int   | 50         | 1-100 | Number of messages to return                         |
 
 #### Response 200 OK
 
@@ -689,9 +689,9 @@ reference, or an `owncord://message/{channelId}/{messageId}` permalink.
 
 #### Query Parameters
 
-| Param | Type | Default | Range | Description |
-| ----- | ---- | ------- | ----- | ----------- |
-| `limit` | int | 50 | 1-100 | Total window size, centre included |
+| Param   | Type | Default | Range | Description                        |
+| ------- | ---- | ------- | ----- | ---------------------------------- |
+| `limit` | int  | 50      | 1-100 | Total window size, centre included |
 
 Half the window sits before the centre and the remainder after it: `limit=50`
 returns up to 25 older messages, the centre, and up to 24 newer ones. Near the
@@ -714,18 +714,18 @@ reactions with the `me` flag, `mentions`, `mentions_everyone`), but is ordered
 
 `has_more_before` / `has_more_after` report whether the channel holds further
 live history on each side of the returned window. A client that renders an
-around-window is *detached* from the live tail while `has_more_after` is true:
+around-window is _detached_ from the live tail while `has_more_after` is true:
 newly broadcast messages belong below the window and are not part of it, so the
 client should offer a "jump to present" affordance that refetches the normal
 `GET /messages` tail.
 
 #### Errors
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `BAD_REQUEST` | `id` or `messageId` is not a positive integer, or `limit` is not a positive integer |
-| 403 | `FORBIDDEN` | The channel exists but `READ_MESSAGES` is denied |
-| 404 | `NOT_FOUND` | The channel does not exist, the caller is not a participant of the DM, or the message does not live in this channel |
+| Status | Code          | When                                                                                                                |
+| ------ | ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | `id` or `messageId` is not a positive integer, or `limit` is not a positive integer                                 |
+| 403    | `FORBIDDEN`   | The channel exists but `READ_MESSAGES` is denied                                                                    |
+| 404    | `NOT_FOUND`   | The channel does not exist, the caller is not a participant of the DM, or the message does not live in this channel |
 
 Soft-deleted messages are 404 here, not an empty window: history omits deleted
 rows, so there is no row to centre on. Deleted messages are also excluded from
@@ -752,10 +752,10 @@ requests are rejected with 403.
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `limit` | integer | Yes | How many messages to delete, 1--100. Values above 100 are clamped; 0 or negative is a 400. |
-| `before` | integer | No | Only delete messages with an id below this one. Omit or `0` to start from the newest. |
+| Field    | Type    | Required | Description                                                                                |
+| -------- | ------- | -------- | ------------------------------------------------------------------------------------------ |
+| `limit`  | integer | Yes      | How many messages to delete, 1--100. Values above 100 are clamped; 0 or negative is a 400. |
+| `before` | integer | No       | Only delete messages with an id below this one. Omit or `0` to start from the newest.      |
 
 #### Response 200 OK
 
@@ -810,11 +810,11 @@ tooltip, not an audit. `users` is always an array (`[]` when nobody used that
 emoji, which is also the answer for an emoji that does not exist). `avatar` is
 `""` when the user has none.
 
-| Status | Error | When |
-|--------|-------|------|
-| 400 | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji |
-| 403 | `FORBIDDEN` | No `READ_MESSAGES` on the channel |
-| 404 | `NOT_FOUND` | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
+| Status | Error         | When                                                                                             |
+| ------ | ------------- | ------------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji              |
+| 403    | `FORBIDDEN`   | No `READ_MESSAGES` on the channel                                                                |
+| 404    | `NOT_FOUND`   | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
 
 ---
 
@@ -864,11 +864,11 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param | Type | Default | Range | Description |
-| ----- | ---- | ------- | ----- | ----------- |
-| `q` | string | (required) | non-empty | Search query (FTS5 syntax) |
-| `channel_id` | int64 | (all channels) | > 0 | Restrict search to a single channel |
-| `limit` | int | 50 | 1-100 | Maximum results to return |
+| Param        | Type   | Default        | Range     | Description                         |
+| ------------ | ------ | -------------- | --------- | ----------------------------------- |
+| `q`          | string | (required)     | non-empty | Search query (FTS5 syntax)          |
+| `channel_id` | int64  | (all channels) | > 0       | Restrict search to a single channel |
+| `limit`      | int    | 50             | 1-100     | Maximum results to return           |
 
 #### Response 200 OK
 
@@ -915,10 +915,10 @@ them against its `klipy.com` CDN allowlist before rendering.
 
 #### Query Parameters
 
-| Param | Type | Default | Range | Description |
-| ----- | ---- | ------- | ----- | ----------- |
-| `q` | string | (required) | 1-100 chars | Search term |
-| `limit` | int | 20 | 1-50 | Maximum results to return |
+| Param   | Type   | Default    | Range       | Description               |
+| ------- | ------ | ---------- | ----------- | ------------------------- |
+| `q`     | string | (required) | 1-100 chars | Search term               |
+| `limit` | int    | 20         | 1-50        | Maximum results to return |
 
 #### Response 200 OK
 
@@ -943,22 +943,22 @@ could not leak it to clients. Results missing either format are omitted.
 
 #### Errors
 
-| Status | Code | When |
-| ------ | ---- | ---- |
-| 400 | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
-| 401 | `UNAUTHORIZED` | No valid session (checked before the disabled check) |
-| 429 | `RATE_LIMITED` | Over 30 requests/minute |
-| 502 | `BAD_GATEWAY` | Upstream error, timeout, or unparseable response |
-| 503 | `GIF_DISABLED` | `gif.api_key` is not configured |
+| Status | Code            | When                                                           |
+| ------ | --------------- | -------------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
+| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)           |
+| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                        |
+| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response               |
+| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                |
 
 ### GET /api/v1/gif/trending
 
 Same auth, rate limit, response shape, and error codes as
 `/api/v1/gif/search`, minus the `q` parameter.
 
-| Param | Type | Default | Range | Description |
-| ----- | ---- | ------- | ----- | ----------- |
-| `limit` | int | 20 | 1-50 | Maximum results to return |
+| Param   | Type | Default | Range | Description               |
+| ------- | ---- | ------- | ----- | ------------------------- |
+| `limit` | int  | 20      | 1-50  | Maximum results to return |
 
 ---
 
@@ -1562,23 +1562,23 @@ Authorization is two-layered:
    users are rejected here even while their session is still valid.
 2. **Per-route bit.** Route groups then require the specific permission below.
    `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on role
-   *position* (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
+   _position_ (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
    substitutes for being the owner.
 
-| Route | Requires |
-| ----- | -------- |
-| `GET /admin/api/me` | perimeter only |
-| `GET /admin/api/stats` | perimeter only |
-| `GET /admin/api/users` | perimeter only |
-| `PATCH /admin/api/users/{id}` | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `DELETE /admin/api/users/{id}/sessions` | `KICK_MEMBERS` |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS` |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`) | `MANAGE_ROLES` |
-| `GET /admin/api/audit-log` | `VIEW_AUDIT_LOG` |
-| `GET/PATCH /admin/api/settings` | `MANAGE_SERVER` |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream` | `ADMINISTRATOR` |
-| `/api/v1/admin/plugins…` | `ADMINISTRATOR` |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…` | Owner role (position 100) |
+| Route                                                                                       | Requires                                                                                     |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /admin/api/me`                                                                         | perimeter only                                                                               |
+| `GET /admin/api/stats`                                                                      | perimeter only                                                                               |
+| `GET /admin/api/users`                                                                      | perimeter only                                                                               |
+| `PATCH /admin/api/users/{id}`                                                               | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions`                                                     | `KICK_MEMBERS`                                                                               |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions` and `/user-permissions`) | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                          | `MANAGE_ROLES`                                                                               |
+| `GET /admin/api/audit-log`                                                                  | `VIEW_AUDIT_LOG`                                                                             |
+| `GET/PATCH /admin/api/settings`                                                             | `MANAGE_SERVER`                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                 | `ADMINISTRATOR`                                                                              |
+| `/api/v1/admin/plugins…`                                                                    | `ADMINISTRATOR`                                                                              |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                        | Owner role (position 100)                                                                    |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -1729,18 +1729,18 @@ List all users with role and ban state.
 
 Array of:
 
-| Field | Type | Notes |
-| ----- | ---- | ----- |
-| `id` | int | |
-| `username` | string | |
-| `avatar` | string? | omitted when unset |
-| `role_id` | int | |
-| `role_name` | string | |
-| `status` | string | presence status |
-| `created_at` | string | |
-| `last_seen` | string? | omitted when never seen |
-| `banned` | bool | |
-| `ban_reason` | string? | omitted when unset |
+| Field         | Type    | Notes                      |
+| ------------- | ------- | -------------------------- |
+| `id`          | int     |                            |
+| `username`    | string  |                            |
+| `avatar`      | string? | omitted when unset         |
+| `role_id`     | int     |                            |
+| `role_name`   | string  |                            |
+| `status`      | string  | presence status            |
+| `created_at`  | string  |                            |
+| `last_seen`   | string? | omitted when never seen    |
+| `banned`      | bool    |                            |
+| `ban_reason`  | string? | omitted when unset         |
 | `ban_expires` | string? | omitted for permanent bans |
 
 Password hashes and TOTP secrets are never included.
@@ -1774,11 +1774,11 @@ omitted or `0` = permanent) and is only meaningful with `banned: true`.
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
-| 403 | `FORBIDDEN` | Missing bit, or the actor does not outrank the target |
-| 404 | `NOT_FOUND` | User not found |
+| Status | Code          | Cause                                                                                        |
+| ------ | ------------- | -------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
+| 403    | `FORBIDDEN`   | Missing bit, or the actor does not outrank the target                                        |
+| 404    | `NOT_FOUND`   | User not found                                                                               |
 
 ---
 
@@ -1873,9 +1873,9 @@ user has TOTP enabled.
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 400 | `BAD_REQUEST` | Unknown key, invalid boolean, or `require_2fa` preconditions not met |
+| Status | Code          | Cause                                                                |
+| ------ | ------------- | -------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Unknown key, invalid boolean, or `require_2fa` preconditions not met |
 
 ---
 
@@ -1949,7 +1949,7 @@ The raw token is shown exactly once and is never recoverable.
 
 #### Response 204 No Content
 
-`404 NOT_FOUND` if there is no *active* token with that id.
+`404 NOT_FOUND` if there is no _active_ token with that id.
 
 ---
 
@@ -2054,10 +2054,10 @@ admin SPA replaces the apply button with an image-upgrade note.
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
-| 502 | `UPDATE_CHECK_FAILED` | GitHub API failure |
+| Status | Code                  | Cause                             |
+| ------ | --------------------- | --------------------------------- |
+| 503    | `UPDATE_UNAVAILABLE`  | Update checking is not configured |
+| 502    | `UPDATE_CHECK_FAILED` | GitHub API failure                |
 
 ---
 
@@ -2077,14 +2077,14 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 
 #### Errors
 
-| Status | Code | Cause |
-| ------ | ---- | ----- |
-| 503 | `CONTAINER_DEPLOYMENT` | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
-| 503 | `UPDATE_UNAVAILABLE` | Update checking is not configured |
-| 409 | `RESTART_PENDING` | A restart from an earlier apply/restore is already pending |
-| 409 | `UPDATE_IN_PROGRESS` | Another restart-sensitive operation (update apply or backup restore) is running |
-| 409 | `NO_UPDATE` | Already up to date |
-| 502 | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure |
+| Status | Code                                                         | Cause                                                                                                                                                       |
+| ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
+| 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
+| 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
+| 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
+| 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |
+| 502    | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure                                                                                                               |
 
 ---
 
@@ -2131,7 +2131,7 @@ Create, edit, delete and reorder roles. The whole group requires
 `MANAGE_ROLES`; `RoleService` then enforces the hierarchy rules below, so a
 principal that clears the bit still cannot escalate through it.
 
-**Rules, all measured against the *actor's* role position:**
+**Rules, all measured against the _actor's_ role position:**
 
 - You may only create, edit, delete or reorder roles positioned **strictly
   below** your own. Equal rank is refused too, so a role cannot rewrite itself.
@@ -2162,8 +2162,24 @@ Roles ordered by position descending, each with its member count.
 
 ```json
 [
-  { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647, "position": 100, "is_default": false, "member_count": 1 },
-  { "id": 4, "name": "Member", "color": null, "permissions": 1635, "position": 40, "is_default": true, "member_count": 12 }
+  {
+    "id": 1,
+    "name": "Owner",
+    "color": "#E74C3C",
+    "permissions": 2147483647,
+    "position": 100,
+    "is_default": false,
+    "member_count": 1
+  },
+  {
+    "id": 4,
+    "name": "Member",
+    "color": null,
+    "permissions": 1635,
+    "position": 40,
+    "is_default": true,
+    "member_count": 12
+  }
 ]
 ```
 
@@ -2180,12 +2196,12 @@ Roles ordered by position descending, each with its member count.
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | 1–32 characters, unique case-insensitively |
-| `color` | string | No | `#rgb`/`#rrggbb`, or `""` for none |
-| `permissions` | integer | No | Bitfield; defaults to `0` |
-| `position` | integer | No | Defaults to one below the actor's own position |
+| Field         | Type    | Required | Description                                    |
+| ------------- | ------- | -------- | ---------------------------------------------- |
+| `name`        | string  | Yes      | 1–32 characters, unique case-insensitively     |
+| `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none             |
+| `permissions` | integer | No       | Bitfield; defaults to `0`                      |
+| `position`    | integer | No       | Defaults to one below the actor's own position |
 
 #### Response 201 Created
 
@@ -2194,10 +2210,10 @@ The created role (`id`, `name`, `color`, `permissions`, `position`,
 
 #### Errors
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position |
-| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
+| Status | Code          | When                                                                                |
+| ------ | ------------- | ----------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Missing/blank/over-long name, duplicate name, bad color, negative position          |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, position at or above your own, or a permission bit you lack |
 
 ### PATCH /admin/api/roles/{id}
 
@@ -2220,11 +2236,11 @@ The updated role.
 
 #### Errors
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `BAD_REQUEST` | The role is the default role, or is the seeded Owner role |
-| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or the role is at or above your own position |
-| 404 | `NOT_FOUND` | No such role |
+| Status | Code          | When                                                                 |
+| ------ | ------------- | -------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The role is the default role, or is the seeded Owner role            |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, or the role is at or above your own position |
+| 404    | `NOT_FOUND`   | No such role                                                         |
 
 ### PATCH /admin/api/roles/reorder
 
@@ -2246,10 +2262,10 @@ The full role list after the reorder, position descending.
 
 #### Errors
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `BAD_REQUEST` | Wrong number of ids, or a duplicate id |
-| 403 | `FORBIDDEN` | Missing `MANAGE_ROLES`, or an id that is unknown or not below your rank |
+| Status | Code          | When                                                                    |
+| ------ | ------------- | ----------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Wrong number of ids, or a duplicate id                                  |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, or an id that is unknown or not below your rank |
 
 ---
 
@@ -2265,11 +2281,11 @@ out-of-range value is refused with `400 INVALID_INPUT` rather than clamped —
 a caller that sent `-1` meant something, and storing `0` would hide it. A
 refused body writes nothing at all:
 
-| Field | Range | Meaning |
-|-------|-------|---------|
-| `slow_mode` | 0…21600 | Cooldown in seconds; 0 = off (6-hour ceiling, as Discord) |
-| `voice_max_users` | 0…99 | Voice capacity; 0 = unlimited |
-| `voice_max_video` | 0…99 | Simultaneous cameras/screen shares; 0 = unlimited |
+| Field             | Range   | Meaning                                                   |
+| ----------------- | ------- | --------------------------------------------------------- |
+| `slow_mode`       | 0…21600 | Cooldown in seconds; 0 = off (6-hour ceiling, as Discord) |
+| `voice_max_users` | 0…99    | Voice capacity; 0 = unlimited                             |
+| `voice_max_video` | 0…99    | Simultaneous cameras/screen shares; 0 = unlimited         |
 
 `nsfw` is a bool and is stored, broadcast and audited only — the server applies
 no content behaviour to a flagged channel (see `GET /api/v1/channels`). The
@@ -2330,12 +2346,24 @@ carries no override) so the panel can render a complete grid; `users` lists
 {
   "channel_id": 4,
   "roles": [
-    { "role_id": 1, "role_name": "Owner", "position": 100, "permissions": 2147483647, "allow": 0, "deny": 0 },
-    { "role_id": 4, "role_name": "Member", "position": 40, "permissions": 1635, "allow": 0, "deny": 514 }
+    {
+      "role_id": 1,
+      "role_name": "Owner",
+      "position": 100,
+      "permissions": 2147483647,
+      "allow": 0,
+      "deny": 0
+    },
+    {
+      "role_id": 4,
+      "role_name": "Member",
+      "position": 40,
+      "permissions": 1635,
+      "allow": 0,
+      "deny": 514
+    }
   ],
-  "users": [
-    { "user_id": 12, "username": "alice", "role_id": 4, "allow": 2, "deny": 0 }
-  ]
+  "users": [{ "user_id": 12, "username": "alice", "role_id": 4, "allow": 2, "deny": 0 }]
 }
 ```
 
@@ -2349,10 +2377,10 @@ Write one override row. Same body for both layers:
 { "allow": 2, "deny": 1 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Field   | Type    | Description                  |
+| ------- | ------- | ---------------------------- |
 | `allow` | integer | Bits granted in this channel |
-| `deny` | integer | Bits refused in this channel |
+| `deny`  | integer | Bits refused in this channel |
 
 Bits outside `permissions.AllPerms` are masked off rather than rejected, so an
 unknown bit can never be persisted. A row with both masks `0` is meaningless —
@@ -2378,12 +2406,12 @@ the role layer, `{user_id, username, role_id, allow, deny}` for the user layer.
 
 #### Errors
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `BAD_REQUEST` | Unparseable id or body |
-| 400 | `INVALID_INPUT` | The channel is a DM |
-| 403 | `FORBIDDEN` | Missing `MANAGE_CHANNELS` |
-| 404 | `NOT_FOUND` | Unknown channel, role or user |
+| Status | Code            | When                          |
+| ------ | --------------- | ----------------------------- |
+| 400    | `BAD_REQUEST`   | Unparseable id or body        |
+| 400    | `INVALID_INPUT` | The channel is a DM           |
+| 403    | `FORBIDDEN`     | Missing `MANAGE_CHANNELS`     |
+| 404    | `NOT_FOUND`     | Unknown channel, role or user |
 
 ### DELETE /admin/api/channels/{id}/permissions/{roleId}
 
@@ -2532,10 +2560,10 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param | Type | Description |
-| ----- | ---- | ----------- |
-| `target` | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`) |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                          |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                      |
 
 #### Response 200 OK (update available)
 

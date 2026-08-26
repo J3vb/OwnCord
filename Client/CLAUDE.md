@@ -23,7 +23,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   subscription registered there. Other modules do register their own
   `ws.on(...)` handlers for page-local UI (`main.ts`, `MainPage.ts`,
   `ChannelController.ts` — ringing, overlays, slow-mode timers); that is fine
-  as long as they only *read* store state. Writing a store from one of those
+  as long as they only _read_ store state. Writing a store from one of those
   handlers is the violation, and `local/no-store-write-in-ws-on` now fails the
   build on it.
 - Voice sessions are superseded, not cancelled. `LiveKitSession` re-entry

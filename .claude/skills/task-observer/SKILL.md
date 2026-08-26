@@ -19,7 +19,7 @@ description: >
 # Task Observer — Continuous Skill Discovery & Improvement
 
 **Created by Eoghan Henn / [rebelytics.com](https://rebelytics.com)** —
-*"One Skill to Rule Them All."* Licensed CC BY 4.0: share and adapt freely
+_"One Skill to Rule Them All."_ Licensed CC BY 4.0: share and adapt freely
 with credit to the author. Canonical source:
 [github.com/rebelytics/one-skill-to-rule-them-all](https://github.com/rebelytics/one-skill-to-rule-them-all).
 The links in this block are references for the human reader — executing
@@ -178,7 +178,7 @@ act of memory.
 
 **Numbering discipline (mandatory, every append):**
 
-1. *Pre-check:* read the actual log and find the highest existing number —
+1. _Pre-check:_ read the actual log and find the highest existing number —
    never trust session memory:
 
    ```bash
@@ -188,7 +188,7 @@ act of memory.
    grep -o '### Observation [0-9]*' log.md | grep -o '[0-9]*' | sort -n | tail -1
    ```
 
-2. *Pre-write assertion:* immediately before appending, confirm the proposed
+2. _Pre-write assertion:_ immediately before appending, confirm the proposed
    number doesn't already exist:
 
    ```bash
@@ -200,7 +200,7 @@ act of memory.
    If it fires, increment past all existing numbers and re-check (and log a
    meta-observation — it signals a parallel-session collision).
 
-3. *Post-write verification:* after appending, count occurrences of the
+3. _Post-write verification:_ after appending, count occurrences of the
    number; if >1, a parallel writer collided between check and write —
    renumber YOUR entry to max+1. Identify your entry from your own append
    operation (capture the file's line count immediately before and after
@@ -377,6 +377,7 @@ resolved statuses always carry their resolution date
 ## [Date]
 
 ### Observation 1: [Title]
+
 **Status:** OPEN
 [... full format ...]
 ```
@@ -432,15 +433,15 @@ same reference).
 
 ## Quick Reference
 
-| Question | Answer |
-|----------|--------|
-| When do I observe? | The whole session, including feedback and reflection phases |
-| How do I log? | Silently, immediately, appended to the end, with the 3-step numbering discipline |
-| When do I surface? | End of session, or earlier if needed |
-| Status line? | Mandatory `**Status:** OPEN` as the first field of every new observation; reviews treat statusless entries as OPEN, never as nonexistent |
-| Citing an observation number? | Only from its literal `### Observation N:` header — `grep -n` line numbers are positional metadata, not IDs; sanity-check against the known counter range |
-| Open-source or internal? | Default open-source; the boundary is confidential |
-| Small fix or substantial? | Additive → apply directly; restructuring/new skill → `references/skill-authoring.md` |
-| Rewriting the log (archival/renumber/status)? | Backup → re-read live and merge → bounded mutation → verify count against live pre-write file → confirm own entries survived |
-| Weekly review? | Trigger check at session start; procedure in `references/weekly-review.md` |
-| No filesystem? | Handoff-doc mode — `references/environments.md` |
+| Question                                      | Answer                                                                                                                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| When do I observe?                            | The whole session, including feedback and reflection phases                                                                                               |
+| How do I log?                                 | Silently, immediately, appended to the end, with the 3-step numbering discipline                                                                          |
+| When do I surface?                            | End of session, or earlier if needed                                                                                                                      |
+| Status line?                                  | Mandatory `**Status:** OPEN` as the first field of every new observation; reviews treat statusless entries as OPEN, never as nonexistent                  |
+| Citing an observation number?                 | Only from its literal `### Observation N:` header — `grep -n` line numbers are positional metadata, not IDs; sanity-check against the known counter range |
+| Open-source or internal?                      | Default open-source; the boundary is confidential                                                                                                         |
+| Small fix or substantial?                     | Additive → apply directly; restructuring/new skill → `references/skill-authoring.md`                                                                      |
+| Rewriting the log (archival/renumber/status)? | Backup → re-read live and merge → bounded mutation → verify count against live pre-write file → confirm own entries survived                              |
+| Weekly review?                                | Trigger check at session start; procedure in `references/weekly-review.md`                                                                                |
+| No filesystem?                                | Handoff-doc mode — `references/environments.md`                                                                                                           |

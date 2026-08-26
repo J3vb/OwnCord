@@ -29,10 +29,10 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, error, info, warn};
+use rustls::pki_types::ServerName;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
-use rustls::pki_types::ServerName;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -65,7 +65,10 @@ impl HttpProxyState {
     /// was mid-shutdown).
     async fn remove_if_port_matches(&self, remote_host: &str, port: u16) {
         let mut inner = self.inner.lock().await;
-        if inner.get(remote_host).is_some_and(|entry| entry.port == port) {
+        if inner
+            .get(remote_host)
+            .is_some_and(|entry| entry.port == port)
+        {
             inner.remove(remote_host);
         }
     }
@@ -372,7 +375,9 @@ async fn handle_connection<R: Runtime>(
         .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
     let mut tls = timeout(Duration::from_secs(10), connector.connect(server_name, tcp))
         .await
-        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out"))??;
+        .map_err(|_| {
+            Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out")
+        })??;
 
     let fingerprint = captured_fp
         .lock()
@@ -400,7 +405,10 @@ async fn handle_connection<R: Runtime>(
         // it (accept_cert_fingerprint) before any credential-bearing request is
         // sent. The connect page's health check triggers this before login.
         TofuOutcome::FirstUse => {
-            info!("[http_proxy] first-use cert for {} — awaiting user confirmation", store_key);
+            info!(
+                "[http_proxy] first-use cert for {} — awaiting user confirmation",
+                store_key
+            );
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({
@@ -523,19 +531,20 @@ mod tests {
 
         // A stale loop reporting a port that no longer matches the live
         // entry must leave the current entry alone.
-        state
-            .remove_if_port_matches("example.com:8443", 9999)
-            .await;
+        state.remove_if_port_matches("example.com:8443", 9999).await;
         assert_eq!(
-            state.inner.lock().await.get("example.com:8443").map(|e| e.port),
+            state
+                .inner
+                .lock()
+                .await
+                .get("example.com:8443")
+                .map(|e| e.port),
             Some(4242),
             "mismatched port must not remove a newer tunnel's entry"
         );
 
         // A loop reporting its own still-current port must remove it.
-        state
-            .remove_if_port_matches("example.com:8443", 4242)
-            .await;
+        state.remove_if_port_matches("example.com:8443", 4242).await;
         assert!(
             state.inner.lock().await.get("example.com:8443").is_none(),
             "matching port must deregister the dead tunnel"
@@ -609,13 +618,15 @@ mod tests {
 
     #[test]
     fn rewrite_overrides_existing_keepalive() {
-        let raw =
-            b"POST /x HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nConnection: keep-alive\r\n\r\n";
+        let raw = b"POST /x HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nConnection: keep-alive\r\n\r\n";
         let out = rewrite_request_headers(raw, "example.com:8443");
         assert!(out.contains("Connection: close\r\n"));
         assert!(!out.to_ascii_lowercase().contains("keep-alive"));
         // Exactly one Connection header.
-        assert_eq!(out.to_ascii_lowercase().matches("\r\nconnection:").count(), 1);
+        assert_eq!(
+            out.to_ascii_lowercase().matches("\r\nconnection:").count(),
+            1
+        );
     }
 
     #[test]

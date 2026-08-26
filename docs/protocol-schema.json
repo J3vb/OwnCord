@@ -29,7 +29,11 @@
       "ts": "VOICE_TOKEN_REFRESH",
       "go_trailing_comment": "//nolint:gosec // G101: false positive — message type constant, not a credential"
     },
-    { "wire": "voice_e2ee_announce", "go": "MsgTypeVoiceE2EEAnnounce", "ts": "VOICE_E2EE_ANNOUNCE" },
+    {
+      "wire": "voice_e2ee_announce",
+      "go": "MsgTypeVoiceE2EEAnnounce",
+      "ts": "VOICE_E2EE_ANNOUNCE"
+    },
     { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
     { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
     { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" },

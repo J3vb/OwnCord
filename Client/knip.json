@@ -2,13 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/main.ts"],
   "project": ["src/**/*.ts"],
-  "ignore": [
-    "public/**",
-    "src-tauri/**",
-    "src/lib/protocolTypes.ts"
-  ],
-  "ignoreDependencies": [
-    "@tauri-apps/cli"
-  ],
+  "ignore": ["public/**", "src-tauri/**", "src/lib/protocolTypes.ts"],
+  "ignoreDependencies": ["@tauri-apps/cli"],
   "ignoreExportsUsedInFile": true
 }

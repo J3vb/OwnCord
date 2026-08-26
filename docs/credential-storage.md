@@ -3,10 +3,10 @@
 The desktop client persists two secrets per server, both in the OS credential
 store under the service name `com.owncord.client`:
 
-| Secret | Account name | Contents |
-| --- | --- | --- |
-| Login credential | `{host}` | JSON `{"username","token","password"}` |
-| Voice-E2EE identity private key | `identity:{host}` | base64 JWK (P-256 private key) |
+| Secret                          | Account name      | Contents                               |
+| ------------------------------- | ----------------- | -------------------------------------- |
+| Login credential                | `{host}`          | JSON `{"username","token","password"}` |
+| Voice-E2EE identity private key | `identity:{host}` | base64 JWK (P-256 private key)         |
 
 The identity key is the long-term key peers pin under trust-on-first-use. Its
 public half is published to the server (`users.identity_public_key`) and its
@@ -102,7 +102,7 @@ writes, reads back and deletes a throwaway entry and reports which backend
 served it, touching no real credential:
 
 ```js
-await invoke("probe_credential_store")
+await invoke("probe_credential_store");
 // { ok: true, backend: "Keyring", error: null }
 // (Backend enum variants serialize verbatim: "Keyring" | "DpapiFile" | "EncryptedFile")
 ```
@@ -148,12 +148,12 @@ These were not the cause of the 2026-07 regression, but they can genuinely stop
 Windows persisting credentials, and the client now detects and reports them
 instead of silently regenerating keys.
 
-| Cause | Check | Fix |
-| --- | --- | --- |
-| Credential Manager service stopped | `sc query VaultSvc` | `sc config VaultSvc start= auto && sc start VaultSvc` |
-| "Network access: Do not allow storage of passwords and credentials for network authentication" | `reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v DisableDomainCreds` | Set the policy to *Disabled* (`secpol.msc` → Local Policies → Security Options), i.e. `DisableDomainCreds = 0`. Note this blocks *domain* credentials and makes writes fail with `ERROR_NO_SUCH_LOGON_SESSION`, which the client surfaces as an error rather than silently. |
-| No roaming profile, with `CRED_PERSIST_ENTERPRISE` | — | Documented Windows behaviour: the credential simply persists locally instead of roaming. Harmless. |
-| App running as a different user than the vault being inspected | `whoami` in the app's context vs. the one running `cmdkey` | Credentials are per-user; compare like for like. |
+| Cause                                                                                          | Check                                                                       | Fix                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential Manager service stopped                                                             | `sc query VaultSvc`                                                         | `sc config VaultSvc start= auto && sc start VaultSvc`                                                                                                                                                                                                                       |
+| "Network access: Do not allow storage of passwords and credentials for network authentication" | `reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v DisableDomainCreds` | Set the policy to _Disabled_ (`secpol.msc` → Local Policies → Security Options), i.e. `DisableDomainCreds = 0`. Note this blocks _domain_ credentials and makes writes fail with `ERROR_NO_SUCH_LOGON_SESSION`, which the client surfaces as an error rather than silently. |
+| No roaming profile, with `CRED_PERSIST_ENTERPRISE`                                             | —                                                                           | Documented Windows behaviour: the credential simply persists locally instead of roaming. Harmless.                                                                                                                                                                          |
+| App running as a different user than the vault being inspected                                 | `whoami` in the app's context vs. the one running `cmdkey`                  | Credentials are per-user; compare like for like.                                                                                                                                                                                                                            |
 
 Blob size is not a plausible cause: `CRED_MAX_CREDENTIAL_BLOB_SIZE` is 2560
 bytes and `keyring` stores the secret as UTF-16, so the ceiling is ~1280
@@ -196,4 +196,4 @@ fallback:
 
 None of this weakens the fail-closed E2EE posture: a peer whose announce
 signature does not verify is still rejected. The fallback only affects whether
-*our own* key survives a restart.
+_our own_ key survives a restart.

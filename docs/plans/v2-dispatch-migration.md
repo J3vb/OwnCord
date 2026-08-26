@@ -98,7 +98,7 @@ V1-shadowing guard inside `RegisterV2`. `registerVoiceHandlersV1` /
   identically.
 - Not decomposing the Hub or reworking replay/seq (backlog 12).
 - `handleVoiceLeave` remains a hub-internal routine for the disconnect/switch
-  callers; only its message *dispatch* moves to V2.
+  callers; only its message _dispatch_ moves to V2.
 
 ## As implemented (2026-07-20)
 

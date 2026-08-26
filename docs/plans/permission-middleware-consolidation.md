@@ -26,13 +26,13 @@ silently divergent for any future multi-bit mask.
 
 **2. A channel-level `deny` is genuinely not honoured — one layer down.**
 `PermissionService.getOrPopulate` (`permission.go:145-149`) and
-`ChannelService.ListVisibleChannels` (`channel.go:58-61`) substitute an *empty
-override map* when `GetAllChannelPermissionsForRole` errors. Every `deny` bit for
+`ChannelService.ListVisibleChannels` (`channel.go:58-61`) substitute an _empty
+override map_ when `GetAllChannelPermissionsForRole` errors. Every `deny` bit for
 that role evaporates, and `PermissionService` then **caches** the degraded
 snapshot for `permCacheTTL` (30s), across `HasChannelPerm`'s ~25 callers: message
 reads, pins, attachment serving, WS. Meanwhile `permissions.Checker`
 (`checker.go:60-63`), `MessageService.GetAccessibleChannelIDs`
-(`message.go:643-646`) and `ws.buildReady` (`serve.go:622-624`) all fail *closed*
+(`message.go:643-646`) and `ws.buildReady` (`serve.go:622-624`) all fail _closed_
 on the identical error. Two of five sites dissent, and they are the cached ones.
 
 D9 also declared `VisibleChannelIDs` the single visibility predicate; it missed a
@@ -109,7 +109,7 @@ see Non-goals.
   cannot hand a `r.Use` middleware a `{id}` declared on its own mux (v5.2.5
   `mux.go:513`), `GET /api/v1/files/{id}` could never use it (its channel id
   comes from the DB row), and ws has no HTTP middleware — so it would be a
-  *second* enforcement point for a rule the `Checker` owns. `channelID=0` would
+  _second_ enforcement point for a rule the `Checker` owns. `channelID=0` would
   issue a query whose right-looking answer is an accident of `ErrNoRows`
   handling (`db/channel_queries.go:140`), not a design.
 - **The auth-route DB sweep (item 12 / A-2026-07-06).** `AuthMiddleware` has 20
@@ -123,7 +123,7 @@ see Non-goals.
   lint with a known ceiling, catching what the two new tests plus review already
   catch. Revisit as a `golangci-lint` rule if it recurs.
 - **`ws.channelCanSend`** (`serve.go:583-590`) — the last hand-rolled copy. It
-  holds an override *value*, not a map, so reducing it needs a one-entry map
+  holds an override _value_, not a map, so reducing it needs a one-entry map
   allocation on the ready hot path or a new value-taking predicate. Disclosed
   deliberately rather than fixed; separate PR.
 - No `(bool, error)` permission signatures (`ws/deps.go:86-90`'s

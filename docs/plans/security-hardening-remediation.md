@@ -59,11 +59,12 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 ## Wave 1 — Availability & backend-breaking (HIGH)
 
 ### W1-1. Plugin CPU budget must not permanently brick the module
+
 - **File:** `Server/plugin/sandbox_wazero.go` (~line 224, `invokeCommand`)
 - **Root cause:** the runtime is built `WithCloseOnContextDone(true)`
   (line 72). The new per-call `context.WithTimeout` wraps `allocate`,
-  `command_dispatch`, and `deallocate`, so an expired deadline *closes the
-  module*. `inst.module` is only cleared by `platformDeactivate`, so nothing
+  `command_dispatch`, and `deallocate`, so an expired deadline _closes the
+  module_. `inst.module` is only cleared by `platformDeactivate`, so nothing
   re-instantiates it — one over-budget command bricks the plugin for all
   users until admin disable/enable or restart. The budget is wall-clock,
   floored at 100 ms, so any host HTTP call (`httpTimeout` = 10 s) trips it.
@@ -75,11 +76,12 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   should pause during host calls). Reconsider the floor so legitimate work
   isn't killed.
 - **Verify:** new test (build tag `wazero`) that (a) a command exceeding the
-  budget returns the budget error *and* a subsequent command on the same
+  budget returns the budget error _and_ a subsequent command on the same
   plugin still succeeds; (b) a command performing a host HTTP call within
   `httpTimeout` is not killed by the CPU budget.
 
 ### W1-2. E2EE key rotation drops peers in 7+ participant calls
+
 - **Files:** `Server/ws/voice_e2ee.go` (~line 151);
   `Client/src/lib/livekitSession.ts` (~lines 1317-1349)
 - **Root cause:** the `voice_e2ee_offer` limit is 5/sec, but the key holder
@@ -90,7 +92,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   rotation.
 - **Fix (choose one, prefer server-side):**
   - Server: exempt the fan-out relay from the tight per-message cap — rate
-    limit the *rotation event* (one budget per rotation) rather than each
+    limit the _rotation event_ (one budget per rotation) rather than each
     per-peer offer; or scale the limit to channel size.
   - Client: add bounded pacing + retry/backoff on `RATE_LIMITED` so all peers
     eventually receive the offer.
@@ -100,6 +102,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   receives the rotated key after a join/leave and after a periodic rotation.
 
 ### W1-3. Attachment-ownership check breaks Postgres and isn't atomic
+
 - **Files:** `Server/service/message.go` (~line 183);
   `Server/db/queries/*attachment*.sql` + regenerate `dbgen`/`pgdbgen`;
   `Server/store/postgres.go`, `Server/store/sqlite.go`
@@ -117,12 +120,13 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   `pgdbgen`); update the SQLite + Postgres migrations as a pair. This makes
   the check atomic, one query, and backend-agnostic, and removes the need for
   the `MemStore.GetAttachmentByID` `(nil,nil)` contortion.
-- **Verify:** service tests (SQLite *and* a Postgres path or a store fake that
+- **Verify:** service tests (SQLite _and_ a Postgres path or a store fake that
   implements the link semantics) covering: own unlinked attachment links;
   another user's attachment is refused; nonexistent id is skipped; already
   linked id is refused; `RowsAffected` mismatch → no message persisted.
 
 ### W1-4. Ban authorization guards dead code
+
 - **Files:** `Server/admin/handlers_users.go` (`handlePatchUser`, ~line 112);
   `Server/service/moderation.go`
 - **Root cause:** `requireBanAuthority` (BAN_MEMBERS + role hierarchy) is
@@ -135,7 +139,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   `ModerationService.BanUser`/`UnbanUser` (so the new authorization actually
   runs), or lift `requireBanAuthority` into the handler. Keep the
   admin-IP/admin-auth perimeter; add the permission + hierarchy check on top.
-  Move the target-existence check *after* authorization so a caller without
+  Move the target-existence check _after_ authorization so a caller without
   BAN_MEMBERS can't enumerate user ids via NotFound-vs-Forbidden.
 - **Verify:** handler test — actor without BAN_MEMBERS is refused; actor of
   equal/lower rank than target is refused; owner-rank target can't be banned
@@ -144,6 +148,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 ## Wave 2 — Behavioral regressions (MED-HIGH → MED)
 
 ### W2-1. Client-update rate limiter shares the auth bucket
+
 - **File:** `Server/api/router.go` (~line 257)
 - **Root cause:** it uses the empty-prefix `RateLimitMiddleware` on the shared
   `limiter`, colliding per-IP with `verifyTOTP`, the sensitive endpoints, and
@@ -156,6 +161,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   subsequent `verify-totp`/password request from the same IP.
 
 ### W2-2. ChangePassword reports failure after the password is committed
+
 - **Files:** `Server/service/user.go` (~line 60); caller
   `Server/api/profile_handler.go` (~line 231)
 - **Root cause:** `UpdateUserPassword` commits first; if `DeleteOtherSessions`
@@ -173,11 +179,12 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   password is unchanged.
 
 ### W2-3. Plugin activation via RegisterCommand breaks in-place upgrades
+
 - **Files:** `Server/plugin/sandbox_wazero.go` (~line 140);
   `Server/plugin/host_commands.go` (~line 36);
   `Server/plugin/registry.go` (`installFromDisk`, `InstallFromZip`)
 - **Root cause:** `RegisterCommand` refuses when `existing != inst` by
-  *pointer*, but `installFromDisk` replaces `r.plugins[id]`/`r.byName` with a
+  _pointer_, but `installFromDisk` replaces `r.plugins[id]`/`r.byName` with a
   fresh `*Instance` without clearing the old command bindings. Re-installing an
   enabled plugin leaves stale bindings that block re-registration; dispatch
   keeps routing to the orphaned old module until restart. The old
@@ -185,13 +192,14 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 - **Fix:** compare ownership by plugin identity (name/id), not instance
   pointer — allow the same plugin to re-bind its own command — and/or clear a
   plugin's stale command bindings during reinstall/deactivation before
-  re-activation. Preserve the cross-plugin hijack protection (a *different*
+  re-activation. Preserve the cross-plugin hijack protection (a _different_
   plugin still can't claim an owned command).
 - **Verify:** test that upgrading an enabled plugin in place rebinds its
   commands and dispatch routes to the new module; a different plugin claiming
   an owned command is still refused.
 
 ### W2-4. Attachment check rejects legit retries and legacy uploads
+
 - **File:** `Server/service/message.go` (~line 191)
 - **Root cause:** `att.MessageID != nil → ErrForbidden` means a client retry of
   a send whose first attempt already linked the attachment can never succeed;
@@ -202,6 +210,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 - **Verify:** covered by W1-3 tests (already-linked id → skipped, not fatal).
 
 ### W2-5. XFF right-to-left walk collapses/spoofs on broad trusted CIDRs
+
 - **File:** `Server/api/middleware.go` (~line 227, `clientIPWithProxies`)
 - **Root cause:** the walk skips every entry inside `trustedCIDRs`. With a
   broad config (e.g. `trusted_proxies: 10.0.0.0/8` covering LAN clients), the
@@ -210,7 +219,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   (one user's failed logins lock out everyone), or letting a client at a
   trusted IP forge the key.
 - **Fix:** when the walk exhausts without a non-trusted candidate, return the
-  left-most *valid* XFF entry (the furthest-upstream client) rather than
+  left-most _valid_ XFF entry (the furthest-upstream client) rather than
   `RemoteAddr`, so distinct clients keep distinct keys. Document that
   `trusted_proxies` should list only proxy hops, and validate config on
   startup. Pre-parse `trustedCIDRs` into `[]*net.IPNet` once (see W3-3).
@@ -219,6 +228,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   leftmost entry from an untrusted RemoteAddr is ignored.
 
 ### W2-6. SSRF-hardened dialer loses multi-address fallback
+
 - **File:** `Server/plugin/host_http.go` (~line 115)
 - **Root cause:** after validating every resolved IP, it dials only `ips[0]`,
   dropping Happy-Eyeballs/next-record fallback. An allowlisted dual-stack or
@@ -233,6 +243,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   is still refused.
 
 ### W2-7. Plugin-broadcast gate omits the block check
+
 - **Files:** `Server/ws/handlers_command.go` (~line 107);
   `Server/permissions/checker.go` (~line 79)
 - **Root cause:** `requireChannelBroadcastAccess` routes through
@@ -250,6 +261,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 ## Wave 3 — Cleanup, efficiency, hardening depth (LOW-MED)
 
 ### W3-1. Updater text-asset cache: add coalescing + negative caching
+
 - **File:** `Server/updater/updater.go` (~line 729, `FetchTextAssetCached`)
 - **Fix:** guard refresh with `golang.org/x/sync/singleflight` so a TTL-expiry
   burst issues one outbound fetch; briefly cache errors so an upstream outage
@@ -257,6 +269,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 - **Verify:** concurrent cold-cache test issues exactly one upstream fetch.
 
 ### W3-2. De-duplicate the update binary hashing
+
 - **File:** `Server/admin/update_handlers.go` (~line 166, `fileSHA256`)
 - **Fix:** `fileSHA256` duplicates `updater.VerifyChecksum`'s hashing body and
   re-reads the just-verified binary. Export one hashing helper from the updater
@@ -264,6 +277,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   and reuse it for the TOCTOU snapshot.
 
 ### W3-3. Update TOCTOU guard depth + XFF CIDR pre-parsing
+
 - **Files:** `Server/admin/update_handlers.go` (~line 117);
   `Server/api/middleware.go` (`isTrustedProxy`)
 - **Fix:** the re-verify narrows but does not close the swap window (verify by
@@ -273,6 +287,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   `[]*net.IPNet` once at middleware construction.
 
 ### W3-4. Cache-Control header contradiction
+
 - **File:** `Server/api/upload_handler.go` (~line 309) + test at
   `upload_handler_test.go` (~line 733)
 - **Fix:** `private, max-age=31536000, no-cache` is self-contradictory —
@@ -280,6 +295,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
   Use `private, no-cache` and update the test assertion.
 
 ### W3-5. Restore test coverage lost to the MemStore change
+
 - **File:** `Server/store/memstore.go` (~line 693)
 - **Fix:** subsumed by W1-3 (atomic link removes the need for the `(nil,nil)`
   stub). If MemStore keeps attachment stubs, ensure the ownership behavior is
@@ -296,7 +312,7 @@ no coverage (repo rule: "Target 80%+ coverage; TDD is the expected workflow").
 ## Cross-cutting requirements
 
 - **Tests:** every fix ships with tests (repo rule: 80%+ coverage, TDD). Add
-  the missing coverage for the *existing* new security code too:
+  the missing coverage for the _existing_ new security code too:
   `requireBanAuthority`, `FetchTextAssetCached`, `requireChannelBroadcastAccess`,
   fail-closed `DecryptTOTPSecret`.
 - **Build-tag matrix:** W1-1/W2-3 touch `//go:build wazero` code — verify the

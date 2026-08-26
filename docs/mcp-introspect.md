@@ -59,7 +59,7 @@ the token nor the cert.)
 
 ### The three tools
 
-**`api_request`** — a single generic passthrough that covers the *entire* REST API. It issues one
+**`api_request`** — a single generic passthrough that covers the _entire_ REST API. It issues one
 `https.request` to `https://127.0.0.1:<port><path>` with the bearer token and returns
 `{ status, headers, body }` (body is JSON-parsed when possible, else raw text). Any HTTP method is
 allowed, including destructive admin routes.
@@ -144,13 +144,13 @@ expect `{status:200, body:{...}}`.
 
 ### `api_request`
 
-| Param | Type | Notes |
-|-------|------|-------|
-| `method` | string | `GET`, `POST`, `PATCH`, `PUT`, `DELETE` |
-| `path` | string | Path beginning with `/` (e.g. `/admin/api/stats`) or a full URL |
-| `query` | object? | Query-string params |
-| `body` | any? | JSON body (object or string) |
-| `headers` | object? | Extra request headers |
+| Param     | Type    | Notes                                                           |
+| --------- | ------- | --------------------------------------------------------------- |
+| `method`  | string  | `GET`, `POST`, `PATCH`, `PUT`, `DELETE`                         |
+| `path`    | string  | Path beginning with `/` (e.g. `/admin/api/stats`) or a full URL |
+| `query`   | object? | Query-string params                                             |
+| `body`    | any?    | JSON body (object or string)                                    |
+| `headers` | object? | Extra request headers                                           |
 
 Returns `{ status, headers, body }`.
 
@@ -167,12 +167,12 @@ Useful read-only endpoints: `/health`, `/api/v1/metrics` (runtime/process stats)
 
 ### `server_logs`
 
-| Param | Type | Default | Notes |
-|-------|------|---------|-------|
-| `level` | string? | — | `DEBUG` \| `INFO` \| `WARN` \| `ERROR` |
-| `source` | string? | — | `websocket`, `http`, `admin`, `auth`, `database`, `storage`, `updater`, `config`, `server` |
-| `limit` | number? | 500 | Max records returned |
-| `follow_ms` | number? | 0 | `0` = backfill only; `>0` = also stream live for that many ms |
+| Param       | Type    | Default | Notes                                                                                      |
+| ----------- | ------- | ------- | ------------------------------------------------------------------------------------------ |
+| `level`     | string? | —       | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`                                                     |
+| `source`    | string? | —       | `websocket`, `http`, `admin`, `auth`, `database`, `storage`, `updater`, `config`, `server` |
+| `limit`     | number? | 500     | Max records returned                                                                       |
+| `follow_ms` | number? | 0       | `0` = backfill only; `>0` = also stream live for that many ms                              |
 
 Returns an array of `{ ts, level, msg, source, attrs }` (`attrs` is parsed from its JSON string when present; `req_id`/`trace_id` appear inside `attrs`).
 
@@ -183,11 +183,11 @@ Returns an array of `{ ts, level, msg, source, attrs }` (`attrs` is parsed from 
 
 ### `client_logs`
 
-| Param | Type | Default | Notes |
-|-------|------|---------|-------|
-| `lines` | number? | 200 | Trailing lines to return |
-| `level` | string? | — | Keep only lines tagged `[LEVEL]` |
-| `grep` | string? | — | Keep only lines containing this substring |
+| Param   | Type    | Default | Notes                                     |
+| ------- | ------- | ------- | ----------------------------------------- |
+| `lines` | number? | 200     | Trailing lines to return                  |
+| `level` | string? | —       | Keep only lines tagged `[LEVEL]`          |
+| `grep`  | string? | —       | Keep only lines containing this substring |
 
 Returns `{ path, found: true, lines: [...] }`, or `{ path, found: false, note }` if the client has
 not run yet.
@@ -198,25 +198,25 @@ not run yet.
 
 All optional except the token (which only the two server-backed tools need).
 
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `OWNCORD_API_TOKEN` | *(required for `api_request`/`server_logs`)* | Bearer token from `server token create`. |
-| `OWNCORD_BASE_URL` | `https://127.0.0.1:<server.port>` | Override the whole base URL (e.g. a non-TLS endpoint). Port is read from `Server/config.yaml`. |
-| `OWNCORD_CERT_PATH` | `Server/data/cert.pem` | Self-signed cert to pin. |
-| `OWNCORD_CLIENT_LOG` | `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log` | Desktop client log path. |
+| Env var              | Default                                                     | Purpose                                                                                        |
+| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `OWNCORD_API_TOKEN`  | _(required for `api_request`/`server_logs`)_                | Bearer token from `server token create`.                                                       |
+| `OWNCORD_BASE_URL`   | `https://127.0.0.1:<server.port>`                           | Override the whole base URL (e.g. a non-TLS endpoint). Port is read from `Server/config.yaml`. |
+| `OWNCORD_CERT_PATH`  | `Server/data/cert.pem`                                      | Self-signed cert to pin.                                                                       |
+| `OWNCORD_CLIENT_LOG` | `%LOCALAPPDATA%\com.owncord.client\logs\owncord-client.log` | Desktop client log path.                                                                       |
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause / fix |
-|---------|-------------|
-| `OWNCORD_API_TOKEN is not set` | Mint a token and set the env var; restart the shell/Claude Code so it's inherited. |
-| `OwnCord cert not found at …` | Start the server once to generate `Server/data/cert.pem`, or set `OWNCORD_CERT_PATH` / `OWNCORD_BASE_URL`. |
-| `api_request` returns `401` | Token missing/revoked/expired. Mint a fresh owner-bound token. |
+| Symptom                                   | Cause / fix                                                                                                                                                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OWNCORD_API_TOKEN is not set`            | Mint a token and set the env var; restart the shell/Claude Code so it's inherited.                                                                                                                                                          |
+| `OwnCord cert not found at …`             | Start the server once to generate `Server/data/cert.pem`, or set `OWNCORD_CERT_PATH` / `OWNCORD_BASE_URL`.                                                                                                                                  |
+| `api_request` returns `401`               | Token missing/revoked/expired. Mint a fresh owner-bound token.                                                                                                                                                                              |
 | `api_request` returns `403` on `/admin/*` | Either the request didn't come from an allowed IP (the tool must run on the same host as the server; localhost is allowed by default), or the token's user lacks the permission that route requires — see the route table in `docs/api.md`. |
-| `server_logs` fails at the ticket step | The log stream still needs ADMINISTRATOR (the widened `/admin/api/*` perimeter does not open it), or the server isn't the current build. |
-| `client_logs` → `found: false` | The desktop client hasn't run yet, or the path differs — set `OWNCORD_CLIENT_LOG`. |
+| `server_logs` fails at the ticket step    | The log stream still needs ADMINISTRATOR (the widened `/admin/api/*` perimeter does not open it), or the server isn't the current build.                                                                                                    |
+| `client_logs` → `found: false`            | The desktop client hasn't run yet, or the path differs — set `OWNCORD_CLIENT_LOG`.                                                                                                                                                          |
 
 ---
 

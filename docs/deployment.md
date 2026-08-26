@@ -14,12 +14,14 @@ Production deployment guide for OwnCord server on Windows and Linux.
 ## Building from Source
 
 **Windows:**
+
 ```bash
 cd Server
 go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.3" .
 ```
 
 **Linux:**
+
 ```bash
 cd Server
 CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.3" .
@@ -30,6 +32,7 @@ CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha
 - `CGO_ENABLED=0` produces a fully static binary on Linux
 
 Alternatively, download a pre-built binary from GitHub Releases:
+
 - **Windows**: `chatserver.exe`
 - **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
 
@@ -74,11 +77,11 @@ server:
   port: 8443
 
 voice:
-  livekit_url: "ws://livekit:7880"   # Docker service DNS — do not change
+  livekit_url: "ws://livekit:7880" # Docker service DNS — do not change
   quality: "medium"
 
 tls:
-  mode: "self_signed"   # or "acme" / "manual" for production
+  mode: "self_signed" # or "acme" / "manual" for production
 ```
 
 ### Data Persistence
@@ -310,12 +313,12 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 
 ### Admin Backup Endpoint
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/admin/api/backup` | POST | Create a new backup (owner-only) |
-| `/admin/api/backups` | GET | List all backups (newest first) |
-| `/admin/api/backups/{name}` | DELETE | Delete a backup (owner-only) |
-| `/admin/api/backups/{name}/restore` | POST | Restore from backup (owner-only; creates pre-restore safety backup first) |
+| Endpoint                            | Method | Description                                                               |
+| ----------------------------------- | ------ | ------------------------------------------------------------------------- |
+| `/admin/api/backup`                 | POST   | Create a new backup (owner-only)                                          |
+| `/admin/api/backups`                | GET    | List all backups (newest first)                                           |
+| `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                              |
+| `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first) |
 
 Backups are stored in the configured backup directory (default
 `data/backups/`) with timestamps. Point it somewhere safer than the data
@@ -450,6 +453,7 @@ descriptions):
 ### Server
 
 The server checks GitHub Releases for updates:
+
 - Compares semver versions
 - Results are cached for 1 hour
 - Downloads `chatserver.exe` with detached Ed25519/minisign signature verification
@@ -472,18 +476,19 @@ Set `github.token` in config for higher API rate limits (5000/hr vs 60/hr unauth
 ### Client
 
 The Tauri client uses NSIS installer updates:
+
 - Server exposes client update assets from GitHub Releases
 - Ed25519 signature verification before applying
 
 ## Firewall and Ports
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| `8443` | TCP | HTTPS server (configurable via `server.port`) |
-| `80` | TCP | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
-| `7880` | TCP | LiveKit server (WebSocket signaling) |
-| `7881` | TCP | LiveKit server (RTC/TURN over TCP) |
-| `50000-60000` | UDP | LiveKit WebRTC media (ICE candidates) |
+| Port          | Protocol | Purpose                                           |
+| ------------- | -------- | ------------------------------------------------- |
+| `8443`        | TCP      | HTTPS server (configurable via `server.port`)     |
+| `80`          | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
+| `7880`        | TCP      | LiveKit server (WebSocket signaling)              |
+| `7881`        | TCP      | LiveKit server (RTC/TURN over TCP)                |
+| `50000-60000` | UDP      | LiveKit WebRTC media (ICE candidates)             |
 
 For remote access, see the [Port Forwarding Guide](port-forwarding.md) or [Tailscale Guide](tailscale.md).
 
@@ -504,6 +509,7 @@ For remote access, see the [Port Forwarding Guide](port-forwarding.md) or [Tails
 ## Background Maintenance
 
 The server runs a maintenance loop every 15 minutes that:
+
 - Purges expired user sessions
 - Deletes orphaned file attachments (uploaded but never linked to a message, older than 1 hour)
 - Uses a circuit breaker (pauses after 5 consecutive failures)
@@ -511,6 +517,7 @@ The server runs a maintenance loop every 15 minutes that:
 ## Graceful Shutdown
 
 The server handles `Ctrl+C` (SIGINT) and `SIGTERM`:
+
 1. Stops accepting new connections
 2. Closes all WebSocket connections and voice rooms
 3. Drains HTTP connections with a 30-second timeout

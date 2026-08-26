@@ -21,7 +21,9 @@ cleanup() {
   # Playwright kills the process group on teardown; the trap covers manual
   # runs. The temp dir is left behind on failure for post-mortems and
   # reaped by the OS otherwise.
-  [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 

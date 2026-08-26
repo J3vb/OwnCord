@@ -4,18 +4,18 @@ Get OwnCord running with the fewest possible steps.
 
 ## Choose Your Setup Path
 
-| Goal | Best path |
-| ---- | --------- |
-| Fastest local/LAN setup | Prebuilt binaries |
-| Linux server with easiest operations | Docker |
-| Custom dev build | Build from source |
+| Goal                                 | Best path         |
+| ------------------------------------ | ----------------- |
+| Fastest local/LAN setup              | Prebuilt binaries |
+| Linux server with easiest operations | Docker            |
+| Custom dev build                     | Build from source |
 
 ## Platform Support (Current Releases)
 
-| Component | Windows x64 | Linux x64 | Linux ARM64 |
-| --------- | ----------- | --------- | ----------- |
-| Server binary | Yes | Yes | Not published yet |
-| Desktop client | Yes | Yes | Yes |
+| Component      | Windows x64 | Linux x64 | Linux ARM64       |
+| -------------- | ----------- | --------- | ----------------- |
+| Server binary  | Yes         | Yes       | Not published yet |
+| Desktop client | Yes         | Yes       | Yes               |
 
 ## Prerequisites
 
@@ -28,8 +28,8 @@ Get OwnCord running with the fewest possible steps.
 
 1. Download from [GitHub Releases](https://github.com/J3vb/OwnCord/releases).
 2. Start the server:
-	 - Windows: `chatserver.exe`
-	 - Linux: `./chatserver`
+   - Windows: `chatserver.exe`
+   - Linux: `./chatserver`
 3. Open `https://localhost:8443/admin`.
 4. Complete the setup wizard: it creates the Owner account and configures the
    basics (server name, port, security, uploads, voice). Your choices are
@@ -78,11 +78,11 @@ npm run tauri build
 
 - The default server address is `https://<server-ip>:8443`.
 - The desktop client uses TOFU certificate pinning:
-	- First connection prompts for trust.
-	- Future connections require the same cert fingerprint.
+  - First connection prompts for trust.
+  - Future connections require the same cert fingerprint.
 - Linux/Wayland: the client automatically sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`
-	on Wayland sessions to work around WebKitGTK rendering crashes. Export the
-	variable yourself (any value) before launching to override this.
+  on Wayland sessions to work around WebKitGTK rendering crashes. Export the
+  variable yourself (any value) before launching to override this.
 
 ## If Remote Users Cannot Connect
 

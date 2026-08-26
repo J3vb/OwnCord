@@ -28,9 +28,9 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, error, info, warn};
+use rustls::pki_types::ServerName;
 use std::net::IpAddr;
 use std::sync::Arc;
-use rustls::pki_types::ServerName;
 use tauri::{Manager, Runtime};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -205,16 +205,25 @@ pub async fn start_livekit_proxy<R: Runtime>(
     // the fingerprint should already be stored. If not, reject — we refuse
     // to connect without a pinned cert.
     let store_key = tofu::cert_store_key(&remote_host);
-    let fingerprint = tofu::load_stored_fingerprint(&app, &store_key)?
-        .ok_or_else(|| format!(
+    let fingerprint = tofu::load_stored_fingerprint(&app, &store_key)?.ok_or_else(|| {
+        format!(
             "no trusted certificate fingerprint for {remote_host}. \
              Connect via WebSocket first to establish TOFU trust."
-        ))?;
+        )
+    })?;
 
     // Reuse the existing proxy only when host AND pin are unchanged.
     if let Some(port) = inner.port {
-        if can_reuse_proxy(&inner.remote_host, &inner.pinned_fingerprint, &remote_host, &fingerprint) {
-            debug!("[livekit_proxy] reusing existing proxy on port {} for {}", port, remote_host);
+        if can_reuse_proxy(
+            &inner.remote_host,
+            &inner.pinned_fingerprint,
+            &remote_host,
+            &fingerprint,
+        ) {
+            debug!(
+                "[livekit_proxy] reusing existing proxy on port {} for {}",
+                port, remote_host
+            );
             return Ok(port);
         }
         // Different host or re-pinned cert — tear down the old proxy.
@@ -256,7 +265,10 @@ pub async fn start_livekit_proxy<R: Runtime>(
         }
     });
 
-    info!("[livekit_proxy] proxy started on 127.0.0.1:{} → {}", port, remote_host);
+    info!(
+        "[livekit_proxy] proxy started on 127.0.0.1:{} → {}",
+        port, remote_host
+    );
 
     inner.port = Some(port);
     inner.remote_host = remote_host;
@@ -268,9 +280,7 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
 /// Stop the LiveKit TLS proxy if running.
 #[tauri::command]
-pub async fn stop_livekit_proxy(
-    state: tauri::State<'_, LiveKitProxyState>,
-) -> Result<(), String> {
+pub async fn stop_livekit_proxy(state: tauri::State<'_, LiveKitProxyState>) -> Result<(), String> {
     let mut inner = state.inner.lock().await;
     if let Some(tx) = inner.shutdown_tx.take() {
         let _ = tx.send(());
@@ -370,10 +380,15 @@ async fn connect_tls(
     let tcp = timeout(limit, TcpStream::connect(remote_host))
         .await
         .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
-    debug!("[livekit_proxy] starting TLS handshake with {}", remote_host);
+    debug!(
+        "[livekit_proxy] starting TLS handshake with {}",
+        remote_host
+    );
     let tls = timeout(limit, connector.connect(server_name, tcp))
         .await
-        .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out"))??;
+        .map_err(|_| {
+            Box::<dyn std::error::Error + Send + Sync>::from("TLS handshake timed out")
+        })??;
     Ok(tls)
 }
 
@@ -413,9 +428,9 @@ async fn handle_connection(
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     })
     .await
-    .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from(
-        "upstream header read timed out",
-    ))??;
+    .map_err(|_| {
+        Box::<dyn std::error::Error + Send + Sync>::from("upstream header read timed out")
+    })??;
 
     // Reject CRLF in remote_host before header insertion (defense-in-depth;
     // primary validation is in start_livekit_proxy).
@@ -430,9 +445,9 @@ async fn handle_connection(
     // ── 3. Connect to remote over TLS ────────────────────────────────────
     let tls_config = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(
-            tofu::PinnedVerifier::new(pinned_fingerprint.to_string()),
-        ))
+        .with_custom_certificate_verifier(Arc::new(tofu::PinnedVerifier::new(
+            pinned_fingerprint.to_string(),
+        )))
         .with_no_client_auth();
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
@@ -447,7 +462,10 @@ async fn handle_connection(
     let result = io::copy_bidirectional(&mut local, &mut tls).await;
     match result {
         Ok((to_remote, from_remote)) => {
-            debug!("[livekit_proxy] connection closed: {}B sent, {}B received", to_remote, from_remote);
+            debug!(
+                "[livekit_proxy] connection closed: {}B sent, {}B received",
+                to_remote, from_remote
+            );
         }
         Err(e) => {
             debug!("[livekit_proxy] bidirectional copy ended: {}", e);
@@ -493,7 +511,10 @@ mod tests {
             "example.com\nX-Injected: 1",
             "example.com\r",
         ] {
-            assert!(validate_remote_host(host).is_err(), "should reject {host:?}");
+            assert!(
+                validate_remote_host(host).is_err(),
+                "should reject {host:?}"
+            );
         }
     }
 
@@ -512,7 +533,10 @@ mod tests {
             "exa mple.com:443",
             "example.com;evil",
         ] {
-            assert!(validate_remote_host(host).is_err(), "should reject {host:?}");
+            assert!(
+                validate_remote_host(host).is_err(),
+                "should reject {host:?}"
+            );
         }
     }
 
@@ -527,12 +551,22 @@ mod tests {
 
     #[test]
     fn reuses_proxy_only_when_host_and_pin_are_unchanged() {
-        assert!(can_reuse_proxy("example.com:443", "aa:bb", "example.com:443", "aa:bb"));
+        assert!(can_reuse_proxy(
+            "example.com:443",
+            "aa:bb",
+            "example.com:443",
+            "aa:bb"
+        ));
     }
 
     #[test]
     fn restarts_proxy_when_host_changes() {
-        assert!(!can_reuse_proxy("old.example:443", "aa:bb", "new.example:443", "aa:bb"));
+        assert!(!can_reuse_proxy(
+            "old.example:443",
+            "aa:bb",
+            "new.example:443",
+            "aa:bb"
+        ));
     }
 
     #[test]
@@ -541,7 +575,12 @@ mod tests {
         // store). The running listener still pins the old fingerprint, so every
         // connection through it would fail the TLS handshake — reuse must be
         // refused so the caller tears down and restarts with the new pin.
-        assert!(!can_reuse_proxy("example.com:443", "aa:bb", "example.com:443", "cc:dd"));
+        assert!(!can_reuse_proxy(
+            "example.com:443",
+            "aa:bb",
+            "example.com:443",
+            "cc:dd"
+        ));
     }
 
     // ── rewrite_proxy_headers ───────────────────────────────────────────────
@@ -749,7 +788,10 @@ mod tests {
         // next start_livekit_proxy rebinds instead of reusing the dead listener.
         state.clear_if_port_matches(4242).await;
         let inner = state.inner.lock().await;
-        assert_eq!(inner.port, None, "matching port must deregister the dead proxy");
+        assert_eq!(
+            inner.port, None,
+            "matching port must deregister the dead proxy"
+        );
         assert!(inner.remote_host.is_empty());
         assert!(inner.pinned_fingerprint.is_empty());
     }

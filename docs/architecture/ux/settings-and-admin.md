@@ -18,6 +18,7 @@ Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds
 Advanced, Logs.
 
 **Target rules:**
+
 - Every save is confirmed: a toast on success, an inline error on failure. No
   silent saves.
 - Preference writes are immediate and local (localStorage `owncord:settings:*`),
@@ -36,10 +37,10 @@ password for sensitive changes and are rate-limited server-side.
 
 ### 2.1 Profile edit
 
-| Step | Reaction |
-|------|----------|
+| Step                 | Reaction                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live |
-| Failure | Inline field error + rollback |
+| Failure              | Inline field error + rollback                                                                                             |
 
 ### 2.2 Change password (with session revocation)
 
@@ -75,9 +76,9 @@ success message with a soft note, never a red error. (Server contract:
 
 ### 2.3 Two-factor (TOTP)
 
-| Flow | Steps |
-|------|-------|
-| Enable | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true` |
+| Flow    | Steps                                                                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Enable  | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                         |
 | Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
@@ -85,11 +86,11 @@ now — you won't see them again" and a copy affordance.
 
 ### 2.4 Sessions & delete account
 
-| Action | Reaction |
-|--------|----------|
-| List sessions | `GET /users/me/sessions`; show device/IP/last-used; current session marked |
-| Revoke a session | `DELETE /users/me/sessions/{id}`; optimistic removal + toast |
-| Delete account | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page |
+| Action           | Reaction                                                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| List sessions    | `GET /users/me/sessions`; show device/IP/last-used; current session marked                                                        |
+| Revoke a session | `DELETE /users/me/sessions/{id}`; optimistic removal + toast                                                                      |
+| Delete account   | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page |
 
 ---
 
@@ -99,18 +100,19 @@ The desktop client exposes a **subset** of admin operations inline, gated by the
 actor's role. Everything here must (a) only appear for users who can perform it,
 and (b) confirm destructive actions.
 
-| Operation | Affordance | REST | Reaction |
-|-----------|-----------|------|----------|
-| Change role | Member context menu → submenu | `PATCH /admin/api/users/{id}` `{role_id}` | Toast; `member_update` reflects live |
-| Kick | Member menu, two-click confirm | `DELETE /admin/api/users/{id}/sessions` | Toast "Kicked {user}"; `member_leave` |
-| Ban | Member menu, two-click confirm | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them |
-| Create channel | Sidebar → modal | `POST /admin/api/channels` | Modal closes on success; `channel_create` |
-| Edit channel | Channel menu → modal | `PATCH /admin/api/channels/{id}` | `channel_update` |
-| Delete channel | Channel menu, two-click confirm | `DELETE /admin/api/channels/{id}` | `channel_delete`; redirect if active |
-| Reorder channels | Drag | `PATCH …/{id}` `{position}` per moved | Optimistic; roll back on failure |
-| Invites | Invite manager modal | `GET/POST/DELETE /invites` | List with masked codes, copy, revoke; empty state "No active invites" |
+| Operation        | Affordance                      | REST                                                 | Reaction                                                              |
+| ---------------- | ------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| Change role      | Member context menu → submenu   | `PATCH /admin/api/users/{id}` `{role_id}`            | Toast; `member_update` reflects live                                  |
+| Kick             | Member menu, two-click confirm  | `DELETE /admin/api/users/{id}/sessions`              | Toast "Kicked {user}"; `member_leave`                                 |
+| Ban              | Member menu, two-click confirm  | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them                                      |
+| Create channel   | Sidebar → modal                 | `POST /admin/api/channels`                           | Modal closes on success; `channel_create`                             |
+| Edit channel     | Channel menu → modal            | `PATCH /admin/api/channels/{id}`                     | `channel_update`                                                      |
+| Delete channel   | Channel menu, two-click confirm | `DELETE /admin/api/channels/{id}`                    | `channel_delete`; redirect if active                                  |
+| Reorder channels | Drag                            | `PATCH …/{id}` `{position}` per moved                | Optimistic; roll back on failure                                      |
+| Invites          | Invite manager modal            | `GET/POST/DELETE /invites`                           | List with masked codes, copy, revoke; empty state "No active invites" |
 
 **Target rules:**
+
 - **✓ Destructive admin actions show an in-flight state (2026-08).**
   `withConfirmation` (`AdminActions.ts`) keeps the item in a pending
   label/class while the promise settles and ignores further clicks, so a slow
@@ -122,9 +124,9 @@ and (b) confirm destructive actions.
   reason input plus a duration choice (`appendBanFlow()` in `components/AdminActions.ts`),
   and the menu passes both through
   (the `onBan` handler in `createSidebarMemberSection()`, `pages/main-page/SidebarMemberSection.ts` → `api.adminBanMember(userId, reason,
-  durationHours)`), so temporary bans and stored reasons work from the client.
+durationHours)`), so temporary bans and stored reasons work from the client.
 
-### 3.1 What is *not* in the client (by design)
+### 3.1 What is _not_ in the client (by design)
 
 The full admin panel — user list, audit log, server settings, channel
 permissions, plugin management, backups, updates, first-run setup — is the
@@ -177,13 +179,13 @@ sequenceDiagram
     end
 ```
 
-| State | Presentation |
-|-------|--------------|
-| checking | Silent (no UI until a result) |
-| available | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`) |
-| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known) |
-| applied | App relaunches automatically |
-| failed | "Update failed. Please try again later." + Dismiss |
+| State       | Presentation                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| checking    | Silent (no UI until a result)                                                                                                        |
+| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`) |
+| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                        |
+| applied     | App relaunches automatically                                                                                                         |
+| failed      | "Update failed. Please try again later." + Dismiss                                                                                   |
 
 > **✅ Wired — download progress.** The Rust download callback
 > (`download_and_install_update` in `update_commands.rs`) accumulates received

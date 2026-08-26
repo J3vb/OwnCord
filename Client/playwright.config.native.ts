@@ -36,7 +36,10 @@ export default defineConfig({
   workers: 1,
   retries: 2,
   reporter: process.env.CI
-    ? [["html", { open: "never" }], ["junit", { outputFile: "test-results/native-junit.xml" }]]
+    ? [
+        ["html", { open: "never" }],
+        ["junit", { outputFile: "test-results/native-junit.xml" }],
+      ]
     : "html",
 
   use: {
