@@ -114,8 +114,7 @@ enforces everything.
 **`core.hooksPath` is exclusive, not additive.** Once set, Git resolves every
 hook against `.githooks/` and stops consulting `.git/hooks/` entirely.
 `.githooks/` holds only `pre-commit` and `pre-push`, so running
-`hooks:install` **silently disables any locally installed `post-commit`** —
-including the one `graphify hook install` writes (`CLAUDE.md`). Nothing warns
-you. If you want both, either re-install graphify's hook as
-`.githooks/post-commit` (untracked, and it stays yours), or skip
+`hooks:install` **silently disables any locally installed hook** of any other
+name (`post-commit`, `post-checkout`, ...). Nothing warns you. If you need one,
+re-install it under `.githooks/` (untracked, and it stays yours), or skip
 `hooks:install` and run the checks through `npm run check` instead.

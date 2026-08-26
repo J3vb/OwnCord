@@ -134,10 +134,10 @@ Neither hook needs `make`, and neither needs Node for the Go checks.
 
 **`core.hooksPath` is exclusive.** Once set, Git resolves every hook against
 `.githooks/` and never looks in `.git/hooks/` again. `.githooks/` holds only
-`pre-commit` and `pre-push`, so `hooks:install` silently disables any
-`post-commit` you installed there — `graphify hook install` writes one. Nothing
-warns you. Put it at `.githooks/post-commit` instead (untracked, so it stays
-yours), or skip `hooks:install` and use `npm run check` before pushing.
+`pre-commit` and `pre-push`, so `hooks:install` silently disables any other
+hook you installed there (`post-commit`, `post-checkout`, ...). Nothing warns
+you. Put it under `.githooks/` instead (untracked, so it stays yours), or skip
+`hooks:install` and use `npm run check` before pushing.
 
 ## Plugin Development
 

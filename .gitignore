@@ -114,12 +114,5 @@ Client/.env
 # local server run logs
 server.log
 
-# Knowledge graph (graphify). The top-level built graph is tracked so a fresh
-# clone can query it without a rebuild. Every subdirectory stays local: cache/
-# is a per-machine AST build cache, and graphify parks the PREVIOUS graph in a
-# dated YYYY-MM-DD/ backup on each rebuild — 18 MB of stale duplicate that is a
-# local rollback aid, not shared state.
-graphify-out/*/
-
-# Transient graphify rebuild-state file.
-graphify-out/.pending_changes
+# Knowledge graph output (tool removed 2026-08-26; delete the dir when convenient).
+graphify-out/

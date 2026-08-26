@@ -28,8 +28,3 @@ indent_size = 4
 # Recipe lines are tab-significant to make(1).
 [Makefile]
 indent_style = tab
-
-# Generated, signature-covered, or deliberately frozen — see .prettierignore.
-[graphify-out/**]
-insert_final_newline = false
-trim_trailing_whitespace = false

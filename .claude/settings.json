@@ -1,14 +1,1 @@
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Grep",
-        "hooks": [{ "type": "command", "command": "graphify hook-guard search || exit 0" }]
-      },
-      {
-        "matcher": "Read|Glob",
-        "hooks": [{ "type": "command", "command": "graphify hook-guard read || exit 0" }]
-      }
-    ]
-  }
-}
+{}

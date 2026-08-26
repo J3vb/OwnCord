@@ -1,11 +1,7 @@
 # Prettier 3 reads .gitignore by default, so everything ignored there —
-# node_modules/, dist/, coverage/, Client/src/generated/, docs/security-findings/,
-# graphify-out/*/ — is already excluded. Only tracked files need entries here.
+# node_modules/, dist/, coverage/, Client/src/generated/, docs/security-findings/ —
+# is already excluded. Only tracked files need entries here.
 
-# Knowledge graph. These seven files ARE tracked, and .graphify_labels.json is
-# signed byte-for-byte by .graphify_labels.json.sig — reformatting it silently
-# invalidates the signature. .gitattributes already marks the tree -text.
-graphify-out/
 
 # Generated, verified by `git diff --exit-code` after regeneration.
 Server/db/dbgen/

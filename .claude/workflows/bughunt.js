@@ -116,15 +116,15 @@ Out of scope, do not report: naming, formatting, missing tests, "consider adding
 performance that is not a hang, anything you cannot point at specific lines for.
 
 Method:
-  1. Read the actual files. Never report from a filename, a grep hit, or a graph edge alone - a
-     graphify edge is structural evidence of coupling, not of a bug; open the cited file and confirm.
+  1. Read the actual files. Never report from a filename or a grep hit alone - a
+     structural reference is evidence of coupling, not of a bug; open the cited file and confirm.
   2. For every candidate, grep for ALL callers before judging - a guard may already live upstream.
   3. Check whether an existing test already locks the behavior you think is wrong. If a test asserts it,
      it is intended behavior, not a bug. Test files are *_test.go and tests/unit/*.test.ts.
   4. Report EVERY finding you can prove - there is no cap. The quality bar stays: zero findings is a
      valid, respectable answer, and each finding needs file, line, and a concrete repro.
 
-You may run read-only shell commands (grep, git log, go doc, graphify path, graphify explain).
+You may run read-only shell commands (grep, git log, go doc).
 Do not modify any file. Do not run the test suite.
 `;
 

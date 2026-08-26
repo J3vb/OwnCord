@@ -24,9 +24,7 @@ directive.
 
 Before launching, in order:
 
-1. **Rebuild the graph** (stale coordinates aim the explore lens at moved code):
-   `graphify update . --no-cluster` — local tree-sitter, zero LLM cost, ~10.7k nodes.
-2. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
+1. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
    `.superpowers/explore-ranking.json`: EVERY non-test source file (~419 rows), each with
    `examined` (already carries a ledger finding or a LIVE explored-clean record → the hunt
    pre-seeds its covered set), `risky` (top coupling ∪ past-bug clusters ∪ top churn,
@@ -39,7 +37,7 @@ Before launching, in order:
    must be `examined` in the inventory — a `known` file the inventory does not mark
    examined can never be drawn (the seen-filter blocks it) nor covered, which would
    strand `uncoveredCount()` above zero and block convergence.
-3. Read the ledger and pass every record in as `known`, so the hunt does not
+2. Read the ledger and pass every record in as `known`, so the hunt does not
    re-derive anything already found, fixed, declined, or refuted.
 
 ```
