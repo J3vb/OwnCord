@@ -20,6 +20,31 @@ How to set up the development environment and contribute to OwnCord.
 
 ### Available Commands
 
+#### Root facade — one entry point
+
+From the repository root. These orchestrate the per-stack commands below; they
+are a convenience, not a replacement. Nothing here needs `make`, and everything
+works the same on Windows, macOS and Linux.
+
+| Command | Description |
+|---------|-------------|
+| `npm run bootstrap` | `npm ci` in all three package roots |
+| `npm run check` | Everything CI gates on: server, client, Rust |
+| `npm run check:server` | Server only — build variants, vet, race, deadlock, lint, generated-output drift |
+| `npm run check:client` | Client only — typecheck, lint, format, unit + integration tests |
+| `npm run check:rust` | Tauri backend — `cargo test --lib` and clippy |
+| `npm run format` | Prettier over the client, `gofmt -w` over the server |
+| `npm run generate` | Regenerate protocol constants and the sqlc query layer |
+| `npm run release:preflight` | `check` plus a client production build |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where |
+
+Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
+with a printed reason rather than failing the run.
+
+**Working on the server only? You never need Node.** The facade prints each
+command it runs and the directory it runs it in; those are the commands in the
+next section, and using them directly is equally correct.
+
 #### Server (Go)
 
 | Command | Description |
@@ -103,6 +128,15 @@ npm run hooks:install    # = git config core.hooksPath .githooks
 | `pre-push` | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...` |
 
 Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` when needed — CI still enforces everything.
+
+Neither hook needs `make`, and neither needs Node for the Go checks.
+
+**`core.hooksPath` is exclusive.** Once set, Git resolves every hook against
+`.githooks/` and never looks in `.git/hooks/` again. `.githooks/` holds only
+`pre-commit` and `pre-push`, so `hooks:install` silently disables any
+`post-commit` you installed there — `graphify hook install` writes one. Nothing
+warns you. Put it at `.githooks/post-commit` instead (untracked, so it stays
+yours), or skip `hooks:install` and use `npm run check` before pushing.
 
 ## Plugin Development
 

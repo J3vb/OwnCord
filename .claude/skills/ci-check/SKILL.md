@@ -9,6 +9,13 @@ description: Run the local mirror of OwnCord's CI gates before pushing. Use when
 
 Run only the sections your change touches. Server and client are independent.
 
+From the repository root, `npm run check` runs all of it, and
+`check:server` / `check:client` / `check:rust` run one stack. `node
+scripts/run.mjs --list` prints the exact command each step runs and the
+directory it runs in — the per-stack commands below are those commands, and
+staying with them is fine. Nothing here needs `make`, and server work needs no
+Node.
+
 ## Server (from `Server/`)
 
 All four build-tag variants must compile — the tags gate whole files, so a
@@ -20,7 +27,11 @@ go vet ./...
 go test -race ./...
 go test -tags deadlock -count=1 ./ws/    # deadlock detector; ws is where lock order actually varies
 golangci-lint run                        # CI pins v2.11.3
-make sqlc-verify protocol-verify         # generated output must not be stale
+
+# Generated output must not be stale. These are what `make sqlc-verify` and
+# `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
+sqlc generate && git diff --exit-code db/dbgen
+go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
@@ -37,20 +48,23 @@ still in progress.
 ## Client (from `Client/`)
 
 ```bash
-NODE_OPTIONS=--no-experimental-webstorage npm test
+npm test
 npm run typecheck
 npm run lint
 npm run format:check
 ```
 
-The `NODE_OPTIONS` flag is mandatory on Node 22+ — see the client CLAUDE.md.
+`NODE_OPTIONS=--no-experimental-webstorage` used to be required here. It is not
+any more: `tests/setup.ts` installs an in-memory `localStorage` shim, CI runs
+Node 24 without the flag (`ci.yml`), and the full suite was measured passing
+without it — 192 files / 5257 tests, identical to the flagged run.
 
 `npm audit --audit-level=high` and `knip` also run in CI but are advisory.
 
 ## Rust (from `Client/src-tauri/`)
 
 ```bash
-cargo test
+cargo test --lib                         # CI runs --lib; plain `cargo test` also builds the bin target
 cargo clippy --all-targets -- -D warnings
 ```
 
@@ -67,3 +81,12 @@ CI on PRs to `main` and pulls heavy system dependencies.
 server build variants plus tsc and eslint. `OWNCORD_PREPUSH_TESTS=1` adds
 server tests. Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` — CI still
 enforces everything.
+
+**`core.hooksPath` is exclusive, not additive.** Once set, Git resolves every
+hook against `.githooks/` and stops consulting `.git/hooks/` entirely.
+`.githooks/` holds only `pre-commit` and `pre-push`, so running
+`hooks:install` **silently disables any locally installed `post-commit`** —
+including the one `graphify hook install` writes (`CLAUDE.md`). Nothing warns
+you. If you want both, either re-install graphify's hook as
+`.githooks/post-commit` (untracked, and it stays yours), or skip
+`hooks:install` and run the checks through `npm run check` instead.

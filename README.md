@@ -152,6 +152,17 @@ npm run tauri build
 
 ### Core verification commands
 
+Everything CI gates on, from the repository root:
+
+```bash
+npm run check                  # server + client + Rust
+npm run check:server           # or one stack at a time
+node scripts/run.mjs --list    # exactly what each task runs, and where
+```
+
+Or run the stacks directly — the facade is a convenience, not the only path,
+and **server work needs no Node at all**:
+
 ```bash
 # Server
 cd Server
