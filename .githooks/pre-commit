@@ -23,7 +23,8 @@ fail() {
 go_staged=$(printf '%s\n' "$staged" | grep '^Server/.*\.go$' | grep -v '^Server/db/dbgen/')
 if [ -n "$go_staged" ]; then
     if command -v go >/dev/null 2>&1 && command -v gofmt >/dev/null 2>&1; then
-        # shellcheck disable=SC2086 — repo paths contain no spaces
+        # Word splitting is intended: repo paths contain no spaces.
+        # shellcheck disable=SC2086
         unformatted=$(gofmt -l $go_staged)
         [ -n "$unformatted" ] && fail "gofmt needed (run gofmt -w on): $unformatted"
         (cd Server && go vet ./...) || fail "go vet"
@@ -64,7 +65,8 @@ fi
 # covers every material tracked source, not just client TypeScript.
 # --ignore-unknown drops the Go/Rust/binary paths it has no parser for.
 if [ -d node_modules ]; then
-    # shellcheck disable=SC2086 — repo paths contain no spaces
+    # Word splitting is intended: repo paths contain no spaces.
+    # shellcheck disable=SC2086
     npx prettier --check --ignore-unknown $staged || fail "prettier (run: npm run format)"
 else
     printf 'pre-commit: WARNING: node_modules missing at the repository root; skipping prettier.\n' >&2
