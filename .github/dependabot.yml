@@ -43,6 +43,29 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  # Server container base images (Server/Dockerfile). The builder's
+  # `golang:1.26-bookworm` tracks the toolchain in Server/go.mod and every
+  # `actions/setup-go` in CI, so a minor bump here is a signal to move all three
+  # together — not a standalone merge.
+  - package-ecosystem: docker
+    directory: /Server
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - docker
+    open-pull-requests-limit: 5
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
   # Tauri client npm dependencies
   - package-ecosystem: npm
     directory: /Client
