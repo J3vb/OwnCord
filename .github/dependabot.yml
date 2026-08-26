@@ -14,6 +14,13 @@ version: 2
 # Majors are ignored everywhere below, so each group only ever carries patch and
 # minor updates. If one member of a group is bad, add it to that ecosystem's
 # ignore list rather than ungrouping the rest.
+#
+# Each package root gets its own block rather than one block with `directories:`.
+# Grouping only works because a group rewrites exactly one lockfile; a block
+# spanning roots would put several lockfiles in one PR and reintroduce the very
+# conflict the grouping prevents. The three npm roots stay separate for the same
+# reason — see docs/contributing.md#dependency-policy for the measured decision
+# against adopting npm workspaces.
 
 updates:
   # Go server dependencies
@@ -50,6 +57,46 @@ updates:
     open-pull-requests-limit: 10
     groups:
       npm-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Root tooling npm dependencies (changelogen, prettier)
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 5
+    groups:
+      root-npm-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # tools/mcp-introspect npm dependencies (local dev MCP server)
+  - package-ecosystem: npm
+    directory: /tools/mcp-introspect
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 5
+    groups:
+      mcp-introspect-dependencies:
         patterns:
           - "*"
     ignore:
