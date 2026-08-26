@@ -10,6 +10,7 @@
     "check:server": "node scripts/run.mjs check:server",
     "check:client": "node scripts/run.mjs check:client",
     "check:rust": "node scripts/run.mjs check:rust",
+    "check:docs": "node scripts/run.mjs check:docs",
     "format": "node scripts/run.mjs format",
     "generate": "node scripts/run.mjs generate",
     "release:preflight": "node scripts/run.mjs release:preflight",

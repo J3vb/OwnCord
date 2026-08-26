@@ -78,6 +78,10 @@ const CHECK_RUST = [
   step('cargo', ['clippy', '--all-targets', '--', '-D', 'warnings'], 'Client/src-tauri'),
 ]
 
+// Fast and dependency-free, so it goes first: a contradicted count should not
+// wait behind ten minutes of -race.
+const CHECK_DOCS = [step('node', ['scripts/check-doc-counts.mjs'], '.')]
+
 const TASKS = {
   bootstrap: [
     step('npm', ['ci'], '.'),
@@ -87,7 +91,8 @@ const TASKS = {
   'check:server': CHECK_SERVER,
   'check:client': CHECK_CLIENT,
   'check:rust': CHECK_RUST,
-  check: [...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
+  'check:docs': CHECK_DOCS,
+  check: [...CHECK_DOCS, ...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
   generate: [
     step('go', ['run', './scripts/genprotocol'], 'Server'),
     optional('sqlc', 'sqlc', ['generate'], 'Server', 'sqlc not on PATH — install the version in Server/sqlc.version'),
@@ -97,6 +102,7 @@ const TASKS = {
     optional('gofmt', 'gofmt', ['-w', '.'], 'Server', 'gofmt not on PATH'),
   ],
   'release:preflight': [
+    ...CHECK_DOCS,
     ...CHECK_SERVER,
     ...CHECK_CLIENT,
     ...CHECK_RUST,
