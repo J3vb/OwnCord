@@ -10,8 +10,8 @@ description: Run the local mirror of OwnCord's CI gates before pushing. Use when
 Run only the sections your change touches. Server and client are independent.
 
 From the repository root, `npm run check` runs all of it, and
-`check:server` / `check:client` / `check:rust` run one stack. `node
-scripts/run.mjs --list` prints the exact command each step runs and the
+`check:server` / `check:client` / `check:rust` / `check:hygiene` run one stack.
+`node scripts/run.mjs --list` prints the exact command each step runs and the
 directory it runs in — the per-stack commands below are those commands, and
 staying with them is fine. Nothing here needs `make`, and server work needs no
 Node.
@@ -51,8 +51,10 @@ still in progress.
 npm test
 npm run typecheck
 npm run lint
-npm run format:check
 ```
+
+Formatting is no longer a client gate — Prettier is configured once at the
+repository root and checked by `check:hygiene` below.
 
 `NODE_OPTIONS=--no-experimental-webstorage` used to be required here. It is not
 any more: `tests/setup.ts` installs an in-memory `localStorage` shim, CI runs
@@ -60,6 +62,32 @@ Node 24 without the flag (`ci.yml`), and the full suite was measured passing
 without it — 192 files / 5257 tests, identical to the flagged run.
 
 `npm audit --audit-level=high` and `knip` also run in CI but are advisory.
+
+## Hygiene (from the repository root)
+
+```bash
+npm run check:hygiene
+```
+
+Which is:
+
+```bash
+npx prettier --check .          # every material tracked source, not just client TS
+shellcheck <tracked *.sh + .githooks/pre-commit + .githooks/pre-push>
+actionlint .github/workflows/*.yml
+```
+
+`shellcheck` and `actionlint` have no clean Windows install, so `run.mjs` marks
+them optional and prints `--- SKIP` instead of failing; CI runs them for real.
+Prettier is not optional and runs everywhere.
+
+The file lists come from `git ls-files`, never a filesystem glob:
+`.claude/worktrees/` holds gitignored copies of the tree that a glob would
+happily lint.
+
+Go formatting is not here. `gofmt -l` prints offenders and still exits 0, so it
+cannot fail a build; the `formatters` block in `Server/.golangci.yml` enforces
+it inside `golangci-lint run`, and `.githooks/pre-commit` catches staged files.
 
 ## Rust (from `Client/src-tauri/`)
 

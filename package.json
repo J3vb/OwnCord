@@ -11,6 +11,7 @@
     "check:client": "node scripts/run.mjs check:client",
     "check:rust": "node scripts/run.mjs check:rust",
     "check:docs": "node scripts/run.mjs check:docs",
+    "check:hygiene": "node scripts/run.mjs check:hygiene",
     "format": "node scripts/run.mjs format",
     "generate": "node scripts/run.mjs generate",
     "release:preflight": "node scripts/run.mjs release:preflight",
@@ -19,6 +20,7 @@
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "changelogen": "^0.6.2"
+    "changelogen": "^0.6.2",
+    "prettier": "^3.9.6"
   }
 }
