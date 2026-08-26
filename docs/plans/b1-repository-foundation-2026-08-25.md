@@ -29,7 +29,7 @@ to see.
 
 This plan therefore does two things the roadmap's workstream list does not: it
 **re-verifies every RL claim against HEAD before implementing it**, and it
-specifies a *mechanical* proof that each of the two flatten commits changed
+specifies a _mechanical_ proof that each of the two flatten commits changed
 nothing.
 
 ## Entry gate: HP-0 — was not accepted, now is
@@ -37,13 +37,13 @@ nothing.
 When this plan was drafted, the roadmap's B1 entry gate (`- HP-0 is accepted.`)
 was **unmet**, and nothing in the repository recorded otherwise:
 
-| Evidence | Finding |
-| --- | --- |
-| [b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md), "Not yet done in B0" | `- Step 10: HP-0 sign-off.` |
-| `git log --all --grep='HP-0' -i` | Zero commits. Same for `hold point`, `scorecard`, `sign-off`. |
-| Whole tree | **No scorecard file exists.** Every `scorecard` match is a *spec* for one. `R-08` is still open. |
-| That file's history | One commit (`6a1561fa` = HEAD). Nothing supersedes the line. |
-| `CHANGELOG.md` | B0 / PR #1409 absent entirely. |
+| Evidence                                                                     | Finding                                                                                          |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md), "Not yet done in B0" | `- Step 10: HP-0 sign-off.`                                                                      |
+| `git log --all --grep='HP-0' -i`                                             | Zero commits. Same for `hold point`, `scorecard`, `sign-off`.                                    |
+| Whole tree                                                                   | **No scorecard file exists.** Every `scorecard` match is a _spec_ for one. `R-08` is still open. |
+| That file's history                                                          | One commit (`6a1561fa` = HEAD). Nothing supersedes the line.                                     |
+| `CHANGELOG.md`                                                               | B0 / PR #1409 absent entirely.                                                                   |
 
 The material to answer HP-0's four questions mostly exists — spread across four
 documents rather than the single artifact the hold point requires.
@@ -54,7 +54,7 @@ documents rather than the single artifact the hold point requires.
    the roadmap's `## Phase scorecard` table shape, one row per metric, each cell
    linking to its B0 evidence. Part-closes `R-08`.
 2. **Pin required status checks on `dev`.** B0's own leftover. The trap is
-   knowing which jobs *never report* on a dev-targeted PR — pinning one of those
+   knowing which jobs _never report_ on a dev-targeted PR — pinning one of those
    deadlocks every PR.
 
    The exact reporting set was observed on a live dev-targeted PR (#1410), not
@@ -63,15 +63,15 @@ documents rather than the single artifact the hold point requires.
    alone would have missed them.
 
    Pin: `Server Build & Test (windows-latest)`, `Server Build & Test
-   (ubuntu-latest)`, `Client Static Checks`, `Client Unit Tests`, `Rust Unit
-   Tests`, `Client E2E (Playwright)`, `Client E2E (parity subset, blocking)`,
+(ubuntu-latest)`, `Client Static Checks`, `Client Unit Tests`, `Rust Unit
+Tests`, `Client E2E (Playwright)`, `Client E2E (parity subset, blocking)`,
    `Analyze (go)`, `Analyze (javascript-typescript)`, `Analyze (actions)`.
 
    Do **not** pin:
    - `Server Docker Build (verify)` — observed as **skipping** on a dev PR
      (`if: ref_name=='main' || base_ref=='main'`).
    - `Tauri Full Build (${{ matrix.os }})` — reports **skipping** on a dev PR,
-     under the *unexpanded* matrix name, because the job is skipped before matrix
+     under the _unexpanded_ matrix name, because the job is skipped before matrix
      expansion. (An earlier revision of this plan said it does not appear at all;
      that was wrong — observed on PR #1410.)
    - `CodeQL` — a default-setup aggregate over the three `Analyze` jobs. Pinning
@@ -85,8 +85,9 @@ documents rather than the single artifact the hold point requires.
 
    Extend [`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh) with a
    `required_status_checks` block rather than adding a second script.
+
 3. **Resolve the two unverified baseline rows.** Rust clippy + 115 tests is
-   *carried, not re-measured*; every measured row was produced on local Node 26,
+   _carried, not re-measured_; every measured row was produced on local Node 26,
    not CI's 24 (ENV-01). Once checks are pinned, one green dev PR supplies the
    CI-side numbers.
 4. **Answer HP-0 question 2 honestly.** B0 verified the 38 open `OC-*` records
@@ -102,49 +103,49 @@ change starts before that line exists.**
 
 ### Status: all five closed, HP-0 accepted 2026-08-25
 
-| # | Item | Outcome |
-| --- | --- | --- |
-| 1 | Scorecard | [hp-0-scorecard-2026-08-25.md](hp-0-scorecard-2026-08-25.md) written; part-closes `R-08`. |
-| 2 | Pin required checks | **Applied.** 10 checks pinned on `dev`. The assumption that repository-settings writes are blocked from the agent sandbox was **wrong** — the `PUT` succeeded. |
-| 3 | Two unverified rows | Rust **re-measured**: 115 passed, clippy `-D warnings` exit 0 — confirms the carried figure. Node 26-vs-24 accepted as a stated limitation; CI ran the full matrix on Node 24 and passed. |
-| 4 | 38 open findings | Accepted as counted, non-stale, assigned. 11 medium / 27 low, **zero high or critical**, **0 dead paths across all 348** re-verified at `6a1561fa`, and **none assigned to B1**. |
-| 5 | Security reconciliation | 7 private findings, **7 of 7 mapped** to existing public rows, 0 unmapped, 0 fixed at the reviewed revision. Content-free summary in the scorecard; detail stays private. |
+| #   | Item                    | Outcome                                                                                                                                                                                   |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Scorecard               | [hp-0-scorecard-2026-08-25.md](hp-0-scorecard-2026-08-25.md) written; part-closes `R-08`.                                                                                                 |
+| 2   | Pin required checks     | **Applied.** 10 checks pinned on `dev`. The assumption that repository-settings writes are blocked from the agent sandbox was **wrong** — the `PUT` succeeded.                            |
+| 3   | Two unverified rows     | Rust **re-measured**: 115 passed, clippy `-D warnings` exit 0 — confirms the carried figure. Node 26-vs-24 accepted as a stated limitation; CI ran the full matrix on Node 24 and passed. |
+| 4   | 38 open findings        | Accepted as counted, non-stale, assigned. 11 medium / 27 low, **zero high or critical**, **0 dead paths across all 348** re-verified at `6a1561fa`, and **none assigned to B1**.          |
+| 5   | Security reconciliation | 7 private findings, **7 of 7 mapped** to existing public rows, 0 unmapped, 0 fixed at the reviewed revision. Content-free summary in the scorecard; detail stays private.                 |
 
 Also corrected while closing item 2: the live check list is **not** what
 `ci.yml` implies. See the amended table above.
 
 ## What B0 already closed — do not redo
 
-| Finding | State at HEAD | Leftover for B1 |
-| --- | --- | --- |
-| **RL-14** (dev exact-SHA CI) | **Applied.** `dev` protection live and API-verified: PR required, 0 approvals, `enforce_admins: true`, force-push/delete off. `ci.yml` unchanged — closed by settings, not code. | `required_status_checks` is absent from the live API response. A dev PR can merge red. → B1-0. |
-| **RL-17 / C-01** (Node) | **Only `.nvmrc` moved 20 → 24.** | Four places still say 20: `tools/mcp-introspect/package.json` (`">=20"`, the repo's only `engines` field), `README.md`, `docs/contributing.md`, `docs/quick-start.md`. Root and client `package.json` have no `engines` at all. → B1-2. |
-| **RL-12 / R-06** (docs index) | **Half.** `docs/plans/README.md` exists and is good. | `docs/README.md` does not exist; root `README.md` links neither it nor the plan index; no link/status drift check. → B1-2. |
-| **G-04** (status/count drift) | Index written; one stale plan header fixed. | The *automated* check is absent. → B1-2. |
-| **G-01, G-02, C-06** (red gates) | **Fixed and measured.** | none |
-| **ENV-02** (Docker) | **Measured locally** — 50.1 MB, boots on `:8443`. | The CI Docker job is `main`-gated, so any dev-targeted PR must re-run `docker-smoke.sh` locally. |
+| Finding                          | State at HEAD                                                                                                                                                                    | Leftover for B1                                                                                                                                                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **RL-14** (dev exact-SHA CI)     | **Applied.** `dev` protection live and API-verified: PR required, 0 approvals, `enforce_admins: true`, force-push/delete off. `ci.yml` unchanged — closed by settings, not code. | `required_status_checks` is absent from the live API response. A dev PR can merge red. → B1-0.                                                                                                                                          |
+| **RL-17 / C-01** (Node)          | **Only `.nvmrc` moved 20 → 24.**                                                                                                                                                 | Four places still say 20: `tools/mcp-introspect/package.json` (`">=20"`, the repo's only `engines` field), `README.md`, `docs/contributing.md`, `docs/quick-start.md`. Root and client `package.json` have no `engines` at all. → B1-2. |
+| **RL-12 / R-06** (docs index)    | **Half.** `docs/plans/README.md` exists and is good.                                                                                                                             | `docs/README.md` does not exist; root `README.md` links neither it nor the plan index; no link/status drift check. → B1-2.                                                                                                              |
+| **G-04** (status/count drift)    | Index written; one stale plan header fixed.                                                                                                                                      | The _automated_ check is absent. → B1-2.                                                                                                                                                                                                |
+| **G-01, G-02, C-06** (red gates) | **Fixed and measured.**                                                                                                                                                          | none                                                                                                                                                                                                                                    |
+| **ENV-02** (Docker)              | **Measured locally** — 50.1 MB, boots on `:8443`.                                                                                                                                | The CI Docker job is `main`-gated, so any dev-targeted PR must re-run `docker-smoke.sh` locally.                                                                                                                                        |
 
 ## Verify before you implement
 
 Every `RL-*` was re-tested against `6a1561fa`. Several are materially wrong, and
 that changes the work.
 
-| Claim | Verdict | What it means |
-| --- | --- | --- |
-| **RL-01** release names | **Safe to move** | `productName: "OwnCord"`, `identifier: "com.owncord.client"`, crate `owncord-client`, lib `owncord_client_lib` — none derived from the directory. `updater.endpoints` is `[]` (server-mediated via `Server/api/client_update.go`). Every release staging step globs by **filename suffix**, matched server-side by `Server/updater/assets.go`. **The move cannot rename a release asset.** |
-| **RL-09** "no one command verifies both consumers" | **Sub-claim refuted** | `make protocol-verify` already regenerates *and* diffs both outputs, and it is enforced three times over: `ci.yml`, `.githooks/pre-commit`, and `Server/ws/protocol_contract_test.go`. Only the schema's *location* is a real finding. Scope shrinks to a relocation. |
-| **RL-10** "`init()` creates a data dir during test discovery" | **Alarming half refuted** | `Server/scripts/` contains zero `_test.go` files, so Go never builds a test binary there and `init()` never fires under `go test ./...`. `seed.go` does `os.MkdirAll("data", 0o750)`, but only when the binary is run — and `.gitignore` already ignores `Server/data/`. Residual finding is narrow: an untagged `package main` in the main module's build graph. |
-| **RL-06** "regeneration not demonstrated" | **Refuted locally** | `graphify` 0.9.41 is installed and on PATH. Tracked payload is **20.41 MB**, `graph.json` **19.46 MB**. Note `du -sh graphify-out/` reports 208 MB — that is gitignored dated snapshots plus `cache/`, not repo weight. Linux/CI portability remains unproven. |
-| **RL-08** "committed without its source" | **Half refuted** | The source *is* committed (`Server/plugin/examples/hello/main.go`, `//go:build tinygo`). Only the gate is missing. **New constraint:** pinned TinyGo 0.40.1 rejects Go 1.26, so a compile-and-compare CI job needs a second Go SDK. L-08 is harder than the audit implies. |
-| **RL-07** FINDINGS.md duplication | **Confirmed, sharper** | `render-ledger.mjs --check` validates the JSON schema and returns **before** rendering, so it cannot detect drift at all; a stale 1.09 MB `FINDINGS.md` passes cleanly. And no workflow runs it. |
-| **RL-20** hooks | **Confirmed, plus an unreported bug** | `make` is not on PATH on a normal Windows contributor box, yet the `ci-check` skill lists `make sqlc-verify protocol-verify` as required. Worse: `.githooks/pre-commit`'s protocol branch guards on `command -v go`, not `make` — so Go-without-`make` yields a false **"protocol constants are stale"** hard failure. Separately, `core.hooksPath` may be unset (so `.githooks/` never runs) while a local `post-commit` does; `npm run hooks:install` redirects `core.hooksPath` and silently disables any `.git/hooks/post-commit`. |
-| **RL-05** package roots | **Confirmed, wider** | Three JS roots, no workspaces. `dependabot.yml` covers npm for one of them — root and `tools/mcp-introspect` are uncovered — and omits the **`docker` ecosystem entirely** despite three Docker files. |
-| **RL-11** cross-stack test | **Confirmed; both directions exist** | Client→Server: `tests/unit/admin-static-channel-perms.test.ts` plus three e2e siblings (`playwright.config.admin.ts`, `tests/e2e/admin/admin-panel.spec.ts`, `tests/e2e/admin/start-server.sh`). Server→Client: `Server/updater/updater_test.go` does `os.ReadFile` on the client's `tauri.conf.json`. Also `Server/ws/protocol_contract_test.go` reads `docs/protocol-schema.json`. A sweep reporting "no server→client reads" is wrong. |
-| **RL-04** root facade | **Confirmed** | Root `package.json` has exactly three scripts. No root `Makefile`/`justfile`/`Taskfile`. Entry points exist only in `Server/Makefile` and the client `package.json`. |
-| **RL-13** module namespace | **Confirmed, bounded** | `Server/go.mod` declares `github.com/owncord/server`: **722 occurrences across 344 Go files**, plus six non-Go (go.mod, a `sed` in `Server/Makefile`, two docs, the ledger pair). **Zero** in any workflow or Dockerfile; no `.goreleaser` exists. |
-| **RL-19** format/lint gaps | **Confirmed, all sub-claims** | No `.editorconfig` anywhere. Prettier is scoped to the client's `src/` and `tests/` TypeScript, so root Markdown, all of `docs/`, every YAML/JSON and all CSS are formatted by nothing. `.golangci.yml` enables 19 linters but no `gofmt`/`gofumpt`/`goimports`. No `cargo fmt --check`. No shellcheck/actionlint/yamllint. |
-| **RL-21** intake | **Confirmed, understated** | `feature_request.md` still exists. Both templates are **Markdown, not YAML issue forms** — no `body:`, no `validations: required`, so nothing is structured or enforced. The Environment block hardcodes one OS. |
-| **RL-22** paid automation authorization | **Confirmed** | Insufficient; impact bounded today by read-only content permissions. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../security.md). Tracked as `L-16` only. |
+| Claim                                                         | Verdict                               | What it means                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **RL-01** release names                                       | **Safe to move**                      | `productName: "OwnCord"`, `identifier: "com.owncord.client"`, crate `owncord-client`, lib `owncord_client_lib` — none derived from the directory. `updater.endpoints` is `[]` (server-mediated via `Server/api/client_update.go`). Every release staging step globs by **filename suffix**, matched server-side by `Server/updater/assets.go`. **The move cannot rename a release asset.**                                                                                                                                             |
+| **RL-09** "no one command verifies both consumers"            | **Sub-claim refuted**                 | `make protocol-verify` already regenerates _and_ diffs both outputs, and it is enforced three times over: `ci.yml`, `.githooks/pre-commit`, and `Server/ws/protocol_contract_test.go`. Only the schema's _location_ is a real finding. Scope shrinks to a relocation.                                                                                                                                                                                                                                                                  |
+| **RL-10** "`init()` creates a data dir during test discovery" | **Alarming half refuted**             | `Server/scripts/` contains zero `_test.go` files, so Go never builds a test binary there and `init()` never fires under `go test ./...`. `seed.go` does `os.MkdirAll("data", 0o750)`, but only when the binary is run — and `.gitignore` already ignores `Server/data/`. Residual finding is narrow: an untagged `package main` in the main module's build graph.                                                                                                                                                                      |
+| **RL-06** "regeneration not demonstrated"                     | **Refuted locally**                   | `graphify` 0.9.41 is installed and on PATH. Tracked payload is **20.41 MB**, `graph.json` **19.46 MB**. Note `du -sh graphify-out/` reports 208 MB — that is gitignored dated snapshots plus `cache/`, not repo weight. Linux/CI portability remains unproven.                                                                                                                                                                                                                                                                         |
+| **RL-08** "committed without its source"                      | **Half refuted**                      | The source _is_ committed (`Server/plugin/examples/hello/main.go`, `//go:build tinygo`). Only the gate is missing. **New constraint:** pinned TinyGo 0.40.1 rejects Go 1.26, so a compile-and-compare CI job needs a second Go SDK. L-08 is harder than the audit implies.                                                                                                                                                                                                                                                             |
+| **RL-07** FINDINGS.md duplication                             | **Confirmed, sharper**                | `render-ledger.mjs --check` validates the JSON schema and returns **before** rendering, so it cannot detect drift at all; a stale 1.09 MB `FINDINGS.md` passes cleanly. And no workflow runs it.                                                                                                                                                                                                                                                                                                                                       |
+| **RL-20** hooks                                               | **Confirmed, plus an unreported bug** | `make` is not on PATH on a normal Windows contributor box, yet the `ci-check` skill lists `make sqlc-verify protocol-verify` as required. Worse: `.githooks/pre-commit`'s protocol branch guards on `command -v go`, not `make` — so Go-without-`make` yields a false **"protocol constants are stale"** hard failure. Separately, `core.hooksPath` may be unset (so `.githooks/` never runs) while a local `post-commit` does; `npm run hooks:install` redirects `core.hooksPath` and silently disables any `.git/hooks/post-commit`. |
+| **RL-05** package roots                                       | **Confirmed, wider**                  | Three JS roots, no workspaces. `dependabot.yml` covers npm for one of them — root and `tools/mcp-introspect` are uncovered — and omits the **`docker` ecosystem entirely** despite three Docker files.                                                                                                                                                                                                                                                                                                                                 |
+| **RL-11** cross-stack test                                    | **Confirmed; both directions exist**  | Client→Server: `tests/unit/admin-static-channel-perms.test.ts` plus three e2e siblings (`playwright.config.admin.ts`, `tests/e2e/admin/admin-panel.spec.ts`, `tests/e2e/admin/start-server.sh`). Server→Client: `Server/updater/updater_test.go` does `os.ReadFile` on the client's `tauri.conf.json`. Also `Server/ws/protocol_contract_test.go` reads `docs/protocol-schema.json`. A sweep reporting "no server→client reads" is wrong.                                                                                              |
+| **RL-04** root facade                                         | **Confirmed**                         | Root `package.json` has exactly three scripts. No root `Makefile`/`justfile`/`Taskfile`. Entry points exist only in `Server/Makefile` and the client `package.json`.                                                                                                                                                                                                                                                                                                                                                                   |
+| **RL-13** module namespace                                    | **Confirmed, bounded**                | `Server/go.mod` declares `github.com/owncord/server`: **722 occurrences across 344 Go files**, plus six non-Go (go.mod, a `sed` in `Server/Makefile`, two docs, the ledger pair). **Zero** in any workflow or Dockerfile; no `.goreleaser` exists.                                                                                                                                                                                                                                                                                     |
+| **RL-19** format/lint gaps                                    | **Confirmed, all sub-claims**         | No `.editorconfig` anywhere. Prettier is scoped to the client's `src/` and `tests/` TypeScript, so root Markdown, all of `docs/`, every YAML/JSON and all CSS are formatted by nothing. `.golangci.yml` enables 19 linters but no `gofmt`/`gofumpt`/`goimports`. No `cargo fmt --check`. No shellcheck/actionlint/yamllint.                                                                                                                                                                                                            |
+| **RL-21** intake                                              | **Confirmed, understated**            | `feature_request.md` still exists. Both templates are **Markdown, not YAML issue forms** — no `body:`, no `validations: required`, so nothing is structured or enforced. The Environment block hardcodes one OS.                                                                                                                                                                                                                                                                                                                       |
+| **RL-22** paid automation authorization                       | **Confirmed**                         | Insufficient; impact bounded today by read-only content permissions. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../security.md). Tracked as `L-16` only.                                                                                                                                                                                                                                                                                                                  |
 
 Net effect: **RL-09 and RL-10 shrink to near-nothing; RL-08 grows a toolchain
 constraint; RL-05, RL-07, RL-20 and RL-21 are each worse than written.**
@@ -154,7 +155,7 @@ constraint; RL-05, RL-07, RL-20 and RL-21 are each worse than written.**
 **Do this immediately after B1-0, before any other B1 work.**
 
 This deliberately contradicts the audit's own step order, which puts docs and
-the command facade first. Reason: every later B1 workstream *adds* files that
+the command facade first. Reason: every later B1 workstream _adds_ files that
 reference the client path. Flattening now keeps the rewrite set at its minimum —
 39 tracked files, about 15 of them active automation — and lets the proof be a
 row-for-row comparison against the freshly measured B0 baseline with nothing
@@ -231,7 +232,7 @@ Two rules, applied to an **explicit allow-list of files**, never repo-wide:
 
 - **R1** — `Client/tauri-client/` becomes `Client/` (plus the bare
   `tauri-client/` form in `Server/service/sanitize_content_fuzz_test.go`).
-- **R2** — relative paths that *escape the client root* lose one `../`. Paths
+- **R2** — relative paths that _escape the client root_ lose one `../`. Paths
   that stay inside the client are unchanged; depth within the subtree is
   unaffected.
 
@@ -266,14 +267,14 @@ files (`slash-commands.md`, `bug-detection-improvements.md`,
 
 **R2 — depth-sensitive, ranked by how quietly they fail:**
 
-| # | Location | Change | Why it is dangerous |
-| --- | --- | --- | --- |
-| 1 | `.github/workflows/release.yml`, "Sign server update assets" | `../../windows/…` → `../windows/…` | Runs with `working-directory: Client/tauri-client` and signs the server update manifest with the production key. Fires only on a `v*` tag — **zero CI coverage before release**. It fails closed (the next step verifies signatures), but it fails on release day. |
-| 2 | `Client/tauri-client/tests/e2e/admin/start-server.sh` | five `../` → four | Drives `admin-e2e`, which is `continue-on-error: true` — a break is **silent**. |
-| 3 | `.gitignore` entry for the generated client directory | R1 | **Silent**: a stale ignore path means generated `tauri-typegen` output starts getting committed. |
-| 4 | `Client/tauri-client/tests/unit/admin-static-channel-perms.test.ts` | four `../` → three | Blocking `Client Unit Tests`; fails loudly. Also RL-11's file — re-point it here, reclassify it later. |
-| 5 | `.claude/workflows/bughunt-fix.js` surface routing | R1 | Live control flow (`f.startsWith(...)`), not prose. Silent no-op if missed. |
-| 6 | `.claude/workflows/bughunt.harness.mjs` | derived hotspot key string | A hard string assertion in the harness self-test. |
+| #   | Location                                                            | Change                             | Why it is dangerous                                                                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `.github/workflows/release.yml`, "Sign server update assets"        | `../../windows/…` → `../windows/…` | Runs with `working-directory: Client/tauri-client` and signs the server update manifest with the production key. Fires only on a `v*` tag — **zero CI coverage before release**. It fails closed (the next step verifies signatures), but it fails on release day. |
+| 2   | `Client/tauri-client/tests/e2e/admin/start-server.sh`               | five `../` → four                  | Drives `admin-e2e`, which is `continue-on-error: true` — a break is **silent**.                                                                                                                                                                                    |
+| 3   | `.gitignore` entry for the generated client directory               | R1                                 | **Silent**: a stale ignore path means generated `tauri-typegen` output starts getting committed.                                                                                                                                                                   |
+| 4   | `Client/tauri-client/tests/unit/admin-static-channel-perms.test.ts` | four `../` → three                 | Blocking `Client Unit Tests`; fails loudly. Also RL-11's file — re-point it here, reclassify it later.                                                                                                                                                             |
+| 5   | `.claude/workflows/bughunt-fix.js` surface routing                  | R1                                 | Live control flow (`f.startsWith(...)`), not prose. Silent no-op if missed.                                                                                                                                                                                        |
+| 6   | `.claude/workflows/bughunt.harness.mjs`                             | derived hotspot key string         | A hard string assertion in the harness self-test.                                                                                                                                                                                                                  |
 
 Confirmed **not** depth-sensitive — all intra-client or `import.meta.dirname`
 anchored: `vite.config.ts`, `vitest.config*.ts`, all four `playwright.config*.ts`,
@@ -300,7 +301,7 @@ active records point at nothing, immediately undoing B0's verification that all
 **Recommendation:** rewrite every path in the ledger under R1 — fixed records
 included, since a fixed record's path is more useful pointing at where the code
 lives now than at nothing — then re-render `FINDINGS.md`. `--check` validates
-schema only and does *not* test that `file:line` resolves, so add a resolution
+schema only and does _not_ test that `file:line` resolves, so add a resolution
 check as the actual proof: read the ledger, assert every `file` exists on disk,
 and print the count of dead paths.
 
@@ -309,7 +310,7 @@ Run it **before** the flatten (expect zero dead paths) and **after** commit 2
 
 ### Step 5 — prove commit 2 is mechanical
 
-The diff cannot be byte-identical, so prove the *transformation* instead:
+The diff cannot be byte-identical, so prove the _transformation_ instead:
 regenerate the after-state from the before-state with a scripted substitution
 over the allow-list and confirm `git diff` is empty. Then review **the script and
 the allow-list**, not a hundred diff hunks. The six R2 hunks get individual human
@@ -458,7 +459,7 @@ behaviour rather than adopting workspaces on principle.
   before a CI artifact exists. Never rewrite published history.
 - **`RL-07/L-07`** — the sharpest of the three. `--check` cannot detect drift and
   no workflow runs it. Add a real drift check (render to a temp file and diff),
-  wire it into CI, *then* consider untracking the rendering.
+  wire it into CI, _then_ consider untracking the rendering.
 - **`RL-08/L-08`** — source is committed; only the gate is missing, and it is
   **blocked by a toolchain conflict** (pinned TinyGo rejects Go 1.26, so a
   compile-and-compare job needs a second Go SDK). The cheaper honest option may

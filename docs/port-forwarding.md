@@ -10,17 +10,17 @@ If you want a simpler remote-access path, use [Tailscale](tailscale.md) and skip
 
 ### Always required
 
-| Port | Protocol | Purpose |
-| ---- | -------- | ------- |
-| `8443` | TCP | OwnCord HTTPS + WebSocket |
+| Port   | Protocol | Purpose                   |
+| ------ | -------- | ------------------------- |
+| `8443` | TCP      | OwnCord HTTPS + WebSocket |
 
 ### Required only for voice/video
 
-| Port | Protocol | Purpose |
-| ---- | -------- | ------- |
-| `7880` | TCP | LiveKit signaling |
-| `7881` | TCP | LiveKit TCP fallback |
-| `50000-60000` | UDP | LiveKit media |
+| Port          | Protocol | Purpose              |
+| ------------- | -------- | -------------------- |
+| `7880`        | TCP      | LiveKit signaling    |
+| `7881`        | TCP      | LiveKit TCP fallback |
+| `50000-60000` | UDP      | LiveKit media        |
 
 ## Router Steps
 

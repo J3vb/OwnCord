@@ -10,56 +10,56 @@ authority**.
 
 ## Active — these drive current work
 
-| Plan | State |
-| --- | --- |
-| [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md) | Approved beta scope, frozen. 57 `BPR-*` requirements. |
-| [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md) | Phase order and gates, B0–B10. No phase complete. |
-| [repo-health-issue-register-2026-08-23](repo-health-issue-register-2026-08-23.md) | 88 planning rows. Public-safe; not a replacement for the ledger. |
-| [beta-requirements-traceability-2026-08-23](beta-requirements-traceability-2026-08-23.md) | Requirement → phase → evidence map. No row is release-qualified. |
-| [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md) | **Supersedes the roadmap's "current evidence snapshot."** B0 measurements and dispositions. |
-| [b1-repository-foundation-2026-08-25](b1-repository-foundation-2026-08-25.md) | **B1-0 done, B1-1 next.** B1 execution plan. Re-verifies every RL-* claim against HEAD; several are refuted. |
-| [hp-0-scorecard-2026-08-25](hp-0-scorecard-2026-08-25.md) | **HP-0 accepted 2026-08-25.** The single baseline-acceptance artifact. Part-closes `R-08`. |
-| [audit-2026-08-19-remediation](audit-2026-08-19-remediation.md) | Phases 1–6 done 2026-08-20; **phase 7 pending**. Its header still reads "in progress 2026-08-19" — stale; the phase table is correct. |
+| Plan                                                                                      | State                                                                                                                                 |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md)           | Approved beta scope, frozen. 57 `BPR-*` requirements.                                                                                 |
+| [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)                       | Phase order and gates, B0–B10. No phase complete.                                                                                     |
+| [repo-health-issue-register-2026-08-23](repo-health-issue-register-2026-08-23.md)         | 88 planning rows. Public-safe; not a replacement for the ledger.                                                                      |
+| [beta-requirements-traceability-2026-08-23](beta-requirements-traceability-2026-08-23.md) | Requirement → phase → evidence map. No row is release-qualified.                                                                      |
+| [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                                       | **Supersedes the roadmap's "current evidence snapshot."** B0 measurements and dispositions.                                           |
+| [b1-repository-foundation-2026-08-25](b1-repository-foundation-2026-08-25.md)             | **B1-0 done, B1-1 next.** B1 execution plan. Re-verifies every RL-* claim against HEAD; several are refuted.                          |
+| [hp-0-scorecard-2026-08-25](hp-0-scorecard-2026-08-25.md)                                 | **HP-0 accepted 2026-08-25.** The single baseline-acceptance artifact. Part-closes `R-08`.                                            |
+| [audit-2026-08-19-remediation](audit-2026-08-19-remediation.md)                           | Phases 1–6 done 2026-08-20; **phase 7 pending**. Its header still reads "in progress 2026-08-19" — stale; the phase table is correct. |
 
 ## Partially implemented
 
-| Plan | State |
-| --- | --- |
+| Plan                                                        | State                                                                                          |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | [bug-detection-improvements](bug-detection-improvements.md) | Tier 1a (`make fuzz`) and Tier 2 (five ESLint rules) shipped 2026-08-08. Remaining tiers open. |
 
 ## Design only — not implemented
 
-| Plan | State |
-| --- | --- |
+| Plan                                | State                                              |
+| ----------------------------------- | -------------------------------------------------- |
 | [slash-commands](slash-commands.md) | Design only. No implementation; not in beta scope. |
 
 ## Shipped — kept for history, do not use as current status
 
-| Plan | Shipped |
-| --- | --- |
-| [audit-2026-07-19-decisions](audit-2026-07-19-decisions.md) | Decisions recorded; greenlit items implemented through 2026-07-23. |
-| [channel-visibility-unification](channel-visibility-unification.md) | 2026-07-20 (D9), re-verified 2026-08-04. |
-| [v2-dispatch-migration](v2-dispatch-migration.md) | 2026-07-20 (D10), re-verified 2026-08-04. |
-| [tauri-capability-narrowing](tauri-capability-narrowing.md) | 2026-07-20, re-verified 2026-08-04. |
-| [http-tofu-proxy](http-tofu-proxy.md) | 2026-07-19, re-verified 2026-08-04. |
-| [permission-middleware-consolidation](permission-middleware-consolidation.md) | 2026-07-23 (D13), re-verified 2026-08-04. |
-| [security-hardening-remediation](security-hardening-remediation.md) | 2026-07-23, re-confirmed 2026-08-04. |
-| [security-scan-2026-07-22-remediation](security-scan-2026-07-22-remediation.md) | All 8 findings F1–F8 closed, verified 2026-08-04. |
-| [sqlc-adoption](sqlc-adoption.md) | Shipped, verified 2026-08-04. |
-| [discord-parity](discord-parity.md) | Phases 1–6 complete, verified 2026-08-04. Phase 1's table reads as a gap list but every row shipped. |
-| [infrastructure-roadmap](infrastructure-roadmap.md) | 2026-08-15, with two recorded leftovers (TOTP persister seam; published capacity numbers). |
+| Plan                                                                            | Shipped                                                                                              |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [audit-2026-07-19-decisions](audit-2026-07-19-decisions.md)                     | Decisions recorded; greenlit items implemented through 2026-07-23.                                   |
+| [channel-visibility-unification](channel-visibility-unification.md)             | 2026-07-20 (D9), re-verified 2026-08-04.                                                             |
+| [v2-dispatch-migration](v2-dispatch-migration.md)                               | 2026-07-20 (D10), re-verified 2026-08-04.                                                            |
+| [tauri-capability-narrowing](tauri-capability-narrowing.md)                     | 2026-07-20, re-verified 2026-08-04.                                                                  |
+| [http-tofu-proxy](http-tofu-proxy.md)                                           | 2026-07-19, re-verified 2026-08-04.                                                                  |
+| [permission-middleware-consolidation](permission-middleware-consolidation.md)   | 2026-07-23 (D13), re-verified 2026-08-04.                                                            |
+| [security-hardening-remediation](security-hardening-remediation.md)             | 2026-07-23, re-confirmed 2026-08-04.                                                                 |
+| [security-scan-2026-07-22-remediation](security-scan-2026-07-22-remediation.md) | All 8 findings F1–F8 closed, verified 2026-08-04.                                                    |
+| [sqlc-adoption](sqlc-adoption.md)                                               | Shipped, verified 2026-08-04.                                                                        |
+| [discord-parity](discord-parity.md)                                             | Phases 1–6 complete, verified 2026-08-04. Phase 1's table reads as a gap list but every row shipped. |
+| [infrastructure-roadmap](infrastructure-roadmap.md)                             | 2026-08-15, with two recorded leftovers (TOTP persister seam; published capacity numbers).           |
 
 ## Where status actually lives
 
 Planning documents are not trackers. Do not read a defect count out of one.
 
-| Concern | Source of truth |
-| --- | --- |
-| Defect status | `.superpowers/findings-ledger.json` (`FINDINGS.md` is rendered from it) |
-| Security-sensitive defects | Private GitHub Security Advisories |
-| Product scope | [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md) |
-| Phase order and gates | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md) |
-| Current measured baseline | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md) |
+| Concern                    | Source of truth                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| Defect status              | `.superpowers/findings-ledger.json` (`FINDINGS.md` is rendered from it)         |
+| Security-sensitive defects | Private GitHub Security Advisories                                              |
+| Product scope              | [beta-product-requirements-2026-08-23](beta-product-requirements-2026-08-23.md) |
+| Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
+| Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
 Ledger at 2026-08-25: **306 fixed / 38 open / 3 declined / 1 duplicate = 348**.
 All 38 open records still resolve to a live `file:line` at

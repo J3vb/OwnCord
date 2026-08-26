@@ -84,18 +84,23 @@ work.
 **Context:** [what was worked on; what the next session needs to know]
 
 ## Decisions Made
+
 [numbered]
 
 ## Observations Logged
+
 [full entries in standard format]
 
 ## Cross-Cutting Principles (current)
+
 [active or newly added]
 
 ## Action Items
+
 [next steps with enough context to resume]
 
 ## Working Artifacts
+
 [drafts/analyses in full]
 ```
 
@@ -103,7 +108,7 @@ work.
 
 1. Log all explicitly stated observations first, unfiltered.
 2. Then systematically read every section asking what skill gaps or
-   candidates are *implied* but unstated — handoff docs carry signal beyond
+   candidates are _implied_ but unstated — handoff docs carry signal beyond
    what was captured live.
 3. Pay special attention to action items (each may imply a missing skill),
    open questions (ambiguity signals a decision-framework gap), the

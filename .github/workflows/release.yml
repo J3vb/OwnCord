@@ -454,7 +454,14 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [release-client-windows, release-client-linux, release-client-linux-arm64, release-server, release-server-docker]
+    needs:
+      [
+        release-client-windows,
+        release-client-linux,
+        release-client-linux-arm64,
+        release-server,
+        release-server-docker,
+      ]
     runs-on: ubuntu-latest
     permissions:
       contents: write

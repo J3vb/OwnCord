@@ -14,13 +14,13 @@ slow-mode, and announcement read-only gating.
 
 The list renders from `messages.store` (`messagesByChannel`, capped 500/channel).
 
-| State | Trigger | Target reaction |
-|-------|---------|-----------------|
-| `loading` | Channel opened, history fetch in flight, nothing cached | **In-region loading placeholder** in the message area |
-| `ready` | Messages present | Virtualized list |
-| `empty` | Loaded, zero messages | "This is the beginning of #channel." welcome state (already `renderEmptyState()`, `components/MessageList.ts`) |
-| `loading older` | Scroll-to-top with `hasMore` | Top spinner while `prependMessages` resolves (already the scroll-top `hasMore` branch of `handleScroll()`, `components/MessageList.ts`) |
-| `error` | History fetch failed | **Inline section error + Retry** in the message area |
+| State           | Trigger                                                 | Target reaction                                                                                                                         |
+| --------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `loading`       | Channel opened, history fetch in flight, nothing cached | **In-region loading placeholder** in the message area                                                                                   |
+| `ready`         | Messages present                                        | Virtualized list                                                                                                                        |
+| `empty`         | Loaded, zero messages                                   | "This is the beginning of #channel." welcome state (already `renderEmptyState()`, `components/MessageList.ts`)                          |
+| `loading older` | Scroll-to-top with `hasMore`                            | Top spinner while `prependMessages` resolves (already the scroll-top `hasMore` branch of `handleScroll()`, `components/MessageList.ts`) |
+| `error`         | History fetch failed                                    | **Inline section error + Retry** in the message area                                                                                    |
 
 > **✓ Implemented (2026-07).** `messages.store` tracks a per-channel
 > `historyLoadState` (`loading` / `error`, absent = idle); `loadMessages` sets it
@@ -35,7 +35,7 @@ The list renders from `messages.store` (`messagesByChannel`, capped 500/channel)
 ## 2. Composer — permission & connection gating
 
 This is the spec's canonical example of **permission-as-affordance**. The
-composer must reflect, *before the user types or sends*, whether posting is
+composer must reflect, _before the user types or sends_, whether posting is
 possible.
 
 ```mermaid
@@ -54,14 +54,14 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state | Presentation | Reason shown |
-|----------------|--------------|--------------|
-| `enabled` | Editable textarea, attach + pickers active | — |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar | "Only moderators can post in announcement channels." |
-| `no-permission` | Disabled bar | "You don't have permission to send messages here." |
-| `offline` | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected | connection status (README §3) |
-| `slow-mode` | Disabled with a live countdown | "Slow mode: wait Ns." |
-| `uploading` | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner |
+| Composer state                                 | Presentation                                                                                                                | Reason shown                                         |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                  | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                         | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                | "You don't have permission to send messages here."   |
+| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                              | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -105,11 +105,11 @@ sequenceDiagram
     end
 ```
 
-| Optimistic state | Presentation | Transition |
-|------------------|--------------|------------|
-| `pending` | Row shown dimmed with a subtle "sending" affordance | `chat_send_ok` → `sent`; error → `failed` |
-| `sent` | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates | — |
-| `failed` | Row marked failed with **Retry** and **Delete draft**; content preserved | Retry re-sends with a new correlation id |
+| Optimistic state | Presentation                                                                                 | Transition                                |
+| ---------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `pending`        | Row shown dimmed with a subtle "sending" affordance                                          | `chat_send_ok` → `sent`; error → `failed` |
+| `sent`           | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates | —                                         |
+| `failed`         | Row marked failed with **Retry** and **Delete draft**; content preserved                     | Retry re-sends with a new correlation id  |
 
 **Reconciliation contract:** the correlation id (`ws.ts` per-send UUID, echoed as
 `chat_send_ok.id`) is the join key. `addMessage` from the broadcast must detect an
@@ -134,11 +134,11 @@ existing pending/sent row for that id and replace-in-place rather than append.
 
 ## 4. Edit / delete
 
-| Action | Target UX |
-|--------|-----------|
-| Edit (own message) | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast |
+| Action                   | Target UX                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast                         |
 | Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
-| Delete (no permission) | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES |
+| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                               |
 
 Deleted messages are soft-deleted (kept as a tombstone in the array, `deleted:true`)
 so surrounding context and reply references stay intact.
@@ -147,10 +147,10 @@ so surrounding context and reply references stay intact.
 
 ## 5. Reactions
 
-| Action | Target UX |
-|--------|-----------|
+| Action              | Target UX                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Add/remove reaction | Optimistic pill toggle + count adjustment, reflecting `me`; `reaction_update` echo reconciles; failure rolls the pill back |
-| Emoji picker | `EmojiPicker` with recent-emoji memory (`owncord:recent-emoji`) |
+| Emoji picker        | `EmojiPicker` with recent-emoji memory (`owncord:recent-emoji`)                                                            |
 
 > **✓ Implemented (2026-08).** The pill toggles on the click:
 > `ReactionController.sendReaction` applies the toggle locally
@@ -165,7 +165,7 @@ so surrounding context and reply references stay intact.
 
 **Who reacted (✓ implemented 2026-08):** hovering (or focusing) a reaction pill
 for 300 ms fetches the reactor list and shows a tooltip reading
-*"alice, bob, carol and 4 others reacted with 👍"*. The debounce mirrors
+_"alice, bob, carol and 4 others reacted with 👍"_. The debounce mirrors
 `lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
 The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
 (oldest first, capped at 100 server-side) and is cached per message+emoji in
@@ -180,13 +180,13 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
-| State | Presentation |
-|-------|--------------|
-| selected | Thumbnail/chip per file |
-| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`) |
-| uploading | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
-| uploaded | Chip ready; ids attached to the `chat_send` payload |
-| failed | Inline error on the chip with remove/retry |
+| State      | Presentation                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| selected   | Thumbnail/chip per file                                                                                                                                                      |
+| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)           |
+| uploading  | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
+| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                          |
+| failed     | Inline error on the chip with remove/retry                                                                                                                                   |
 
 Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
 `uploadFile` now honors the global 401 handler like every other call — a 401
@@ -196,12 +196,12 @@ sign in again.") and throws `ApiClientError(401)`.
 **Inline players (✓ implemented 2026-08):** a received attachment renders by MIME
 family, not as a download chip for everything but images:
 
-| MIME | Rendering |
-|------|-----------|
-| `image/*` except `image/svg+xml` | Inline `<img>` (existing) |
-| `video/mp4`, `video/webm`, `video/ogg` | Inline `<video controls preload="metadata">` in the same max box as an image, with the download button on hover |
-| `audio/mpeg`/`mp3`, `audio/ogg`, `audio/opus`, `audio/wav`, `audio/webm` | Inline `<audio controls preload="metadata">` row with filename, size and download |
-| anything else, including `image/svg+xml` | Download chip |
+| MIME                                                                     | Rendering                                                                                                       |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `image/*` except `image/svg+xml`                                         | Inline `<img>` (existing)                                                                                       |
+| `video/mp4`, `video/webm`, `video/ogg`                                   | Inline `<video controls preload="metadata">` in the same max box as an image, with the download button on hover |
+| `audio/mpeg`/`mp3`, `audio/ogg`, `audio/opus`, `audio/wav`, `audio/webm` | Inline `<audio controls preload="metadata">` row with filename, size and download                               |
+| anything else, including `image/svg+xml`                                 | Download chip                                                                                                   |
 
 Both player families are allowlists, not `video/`/`audio/` prefix tests: an
 unknown container gets a chip rather than a player that fails to decode. SVG is
@@ -217,11 +217,11 @@ string and park it in the LRU + IndexedDB caches.
 
 ## 7. Replies, pins, search, read/unread
 
-| Feature | Target UX |
-|---------|-----------|
-| Reply | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview |
-| Pin/unpin | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`) |
-| Search | Overlay with a status line cycling *type-N-chars → searching → results → no results → failed* (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query |
+| Feature     | Target UX                                                                                                                                                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                           |
+| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)            |
+| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                               |
 | Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented only for non-active, non-own, non-replay messages (the `chat_message` handler in `wireDispatcher()`, `lib/dispatcher.ts`); focus emits `channel_focus` for server read-state |
 
 **Read-state target rule:** unread counts must be suppressed during reconnect
@@ -233,7 +233,7 @@ unread messages renders a red **NEW** line above the first one. Opening the
 channel clears the badge, which destroys the only record of where the reader had
 got to, so `setActiveChannel` snapshots the count first
 (`channels.store.getUnreadOnOpen`); MessageList reads it once at mount and places
-the line above the last *N* loaded messages. Consequences of that derivation: the
+the line above the last _N_ loaded messages. Consequences of that derivation: the
 line is suppressed while the message window is detached (a slice around some old
 message is not the tail), and it clears on the next visit, when the snapshot is 0.
 The message under the line never renders as a grouped continuation of the one
@@ -262,24 +262,24 @@ reply bar above a reply, an `owncord://message/…` permalink pasted into chat o
 opened from the OS — goes through one path (`lib/message-navigation.ts`
 registry → `main-page/MessageJump.ts`), so they behave identically.
 
-| Step | Target UX |
-|------|-----------|
-| Target loaded | Scroll to the row and flash it (`.highlight-flash`, 1.5s) |
-| Target not loaded | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash |
-| Target in another channel | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
-| Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link |
+| Step                                  | Target UX                                                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Target loaded                         | Scroll to the row and flash it (`.highlight-flash`, 1.5s)                                                              |
+| Target not loaded                     | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash      |
+| Target in another channel             | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
+| Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link                                                  |
 
 **Detached windows.** An around-window whose `has_more_after` is true is
-*detached*: the bottom of the list is history, not "now". While detached the
+_detached_: the bottom of the list is history, not "now". While detached the
 store refuses to append live broadcasts (they belong below a gap, and splicing
 them on would be a lie about ordering) and the message list shows a **Jump to
 Present** pill. Clicking it reattaches and refetches the live tail. Scrolling
 further up (`prependMessages`) keeps the window detached; only a fresh tail
 fetch reattaches.
 
-**Permalinks.** The hover action bar's *Copy Message Link* yields
+**Permalinks.** The hover action bar's _Copy Message Link_ yields
 `owncord://message/{channelId}/{messageId}`. Pasted back into chat, that link
-renders as a compact chip (channel name + *Jump*) rather than a bare URL; a
+renders as a compact chip (channel name + _Jump_) rather than a bare URL; a
 link to a channel the reader cannot see stays plain text.
 
 ---
@@ -292,15 +292,15 @@ per-channel `mention_count` in `ready`. The client treats those fields as
 authoritative and only falls back to parsing `@tokens` locally when an older
 server omits them.
 
-| Surface | Target UX |
-|---------|-----------|
-| `@username` | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text |
-| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client |
-| Mention of *you* | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background) |
-| `#channel-name` | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use |
-| Channel badge | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row |
-| Notification | "*X* mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime |
-| Composer | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username; `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends |
+| Surface               | Target UX                                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@username`           | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text                          |
+| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client                                                                                                       |
+| Mention of _you_      | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background)                                                                                                                                                          |
+| `#channel-name`       | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use                                                         |
+| Channel badge         | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row                               |
+| Notification          | "_X_ mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime |
+| Composer              | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username; `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends        |
 
 **Editing rule:** an edit re-resolves mentions (the row's highlight follows the
 new text) but never re-notifies and never re-increments a badge — that is
@@ -315,17 +315,17 @@ client-side — the server stores and ships the raw text — and the renderer
 builds DOM nodes only: `innerHTML` is never used with message content, and
 every `href` passes `isSafeUrl` first.
 
-| Construct | Syntax | Notes |
-|-----------|--------|-------|
-| Bold / italic / underline / strike | `**b**`, `*i*` or `_i_`, `__u__`, `~~s~~` | Nest freely (`**bold *and italic***`). `_` only opens on a word boundary, so `snake_case_names` stay literal |
-| Spoiler | `\|\|hidden\|\|` | Obscured `role="button"` span with `aria-pressed`; revealing is per-span and one-way, and the revealing click is swallowed so a link underneath cannot open with it |
-| Escape | `\*literal\*` | A backslash neutralises any markdown punctuation; escapes are inert inside code |
-| Block quote | `> line` at line start | Contiguous `>` lines merge into one quote; `>>>` quotes the rest of the message. Quotes may contain other blocks, one level deep |
-| Heading | `# `, `## `, `### ` at line start | h1–h3; the space is required, so `#nospace` and `#channel` are untouched |
-| Lists | `- ` / `* ` bullets, `1. ` ordered | Contiguous items form one list; two leading spaces nest a single level; an ordered list keeps its starting number |
-| Masked link | `[text](url)` | `http(s)` absolute URLs only — `javascript:`, `data:` and relative URLs render as literal source text. Shows `title=url`, and produces **no** link embed (an author who hid the address does not get it previewed back) |
-| Inline code | `` `code` ``, ``` ``code`` ``` | Markdown, mentions and autolinking are all dead inside |
-| Code fence | ` ```lang ` … ` ``` ` | The tag renders as a label and selects a lightweight highlighter (js/ts, go, python, rust, json, bash, css, html — anything else falls back to plain). Copy button unchanged |
+| Construct                          | Syntax                                    | Notes                                                                                                                                                                                                                   |
+| ---------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bold / italic / underline / strike | `**b**`, `*i*` or `_i_`, `__u__`, `~~s~~` | Nest freely (`**bold *and italic***`). `_` only opens on a word boundary, so `snake_case_names` stay literal                                                                                                            |
+| Spoiler                            | `\|\|hidden\|\|`                          | Obscured `role="button"` span with `aria-pressed`; revealing is per-span and one-way, and the revealing click is swallowed so a link underneath cannot open with it                                                     |
+| Escape                             | `\*literal\*`                             | A backslash neutralises any markdown punctuation; escapes are inert inside code                                                                                                                                         |
+| Block quote                        | `> line` at line start                    | Contiguous `>` lines merge into one quote; `>>>` quotes the rest of the message. Quotes may contain other blocks, one level deep                                                                                        |
+| Heading                            | `# `, `## `, `### ` at line start         | h1–h3; the space is required, so `#nospace` and `#channel` are untouched                                                                                                                                                |
+| Lists                              | `- ` / `* ` bullets, `1. ` ordered        | Contiguous items form one list; two leading spaces nest a single level; an ordered list keeps its starting number                                                                                                       |
+| Masked link                        | `[text](url)`                             | `http(s)` absolute URLs only — `javascript:`, `data:` and relative URLs render as literal source text. Shows `title=url`, and produces **no** link embed (an author who hid the address does not get it previewed back) |
+| Inline code                        | `` `code` ``, ` ``code`` `                | Markdown, mentions and autolinking are all dead inside                                                                                                                                                                  |
+| Code fence                         | ` ```lang ` … ` ``` `                     | The tag renders as a label and selects a lightweight highlighter (js/ts, go, python, rust, json, bash, css, html — anything else falls back to plain). Copy button unchanged                                            |
 
 Bare URLs are still autolinked, and mention/`#channel` chips render inside
 styled spans — a URL's own `_` and `*` are treated as address, not markup.

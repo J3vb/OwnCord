@@ -26,7 +26,7 @@ These are silent — the code generates fine and fails at runtime.
 
 **Query files must be ASCII-only.** sqlc v1.30.0 measures rune positions
 against byte offsets, so one multi-byte character (an em-dash in a comment is
-the usual culprit) truncates the *next* query's emitted SQL by that many
+the usual culprit) truncates the _next_ query's emitted SQL by that many
 trailing bytes. Symptom: the `.sql` file looks right but the generated const
 in `dbgen/*.sql.go` is cut short — `ORDER BY id ASC` becomes `ORDER BY id A`,
 and SQLite reports "incomplete input".

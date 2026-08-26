@@ -21,10 +21,10 @@ The pre-built `hello.wasm` (925 KiB) is checked in, but you can rebuild it:
 
 ### Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| TinyGo | 0.40.1 | Supports Go 1.19–1.25 only |
-| Go | 1.25.x | TinyGo 0.40.1 rejects Go 1.26+ |
+| Tool     | Version      | Notes                                    |
+| -------- | ------------ | ---------------------------------------- |
+| TinyGo   | 0.40.1       | Supports Go 1.19–1.25 only               |
+| Go       | 1.25.x       | TinyGo 0.40.1 rejects Go 1.26+           |
 | wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target |
 
 On Windows, extract TinyGo to e.g. `D:\Local-Lab\Coding\Software\tinygo` and

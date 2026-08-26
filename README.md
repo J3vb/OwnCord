@@ -34,20 +34,20 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 
 ## What works right now
 
-| Area | Status |
-| ---- | ------ |
-| Core chat flow | Working in alpha |
-| Voice/video | Working in alpha |
-| Admin panel | Working in alpha |
+| Area               | Status                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Core chat flow     | Working in alpha                                                                                                                |
+| Voice/video        | Working in alpha                                                                                                                |
+| Admin panel        | Working in alpha                                                                                                                |
 | Security hardening | Ongoing review passes; findings and their statuses are tracked in the dated audits in [docs/](docs/) (see the Docs Index below) |
 
 ## Platform Support (Current Releases)
 
-| Component | Windows x64 | Linux x64 | Linux ARM64 |
-| --------- | ----------- | --------- | ----------- |
-| Server binary | Yes | Yes | Not yet |
-| Desktop client | Yes (NSIS installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
-| Docker server | N/A | Build from source (compose) | Not yet |
+| Component      | Windows x64          | Linux x64                   | Linux ARM64          |
+| -------------- | -------------------- | --------------------------- | -------------------- |
+| Server binary  | Yes                  | Yes                         | Not yet              |
+| Desktop client | Yes (NSIS installer) | Yes (AppImage, .deb)        | Yes (AppImage, .deb) |
+| Docker server  | N/A                  | Build from source (compose) | Not yet              |
 
 ## Start Here
 

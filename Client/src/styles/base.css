@@ -94,9 +94,13 @@ a {
 
 /* Thin scrollbar for sidebars */
 .channel-list::-webkit-scrollbar,
-.member-list::-webkit-scrollbar { width: 6px; }
+.member-list::-webkit-scrollbar {
+  width: 6px;
+}
 .channel-list::-webkit-scrollbar-thumb,
-.member-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thin-thumb); }
+.member-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thin-thumb);
+}
 
 /* Utility classes */
 .sr-only {

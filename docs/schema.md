@@ -16,15 +16,15 @@ OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-
 
 ## Database Configuration
 
-| PRAGMA | Value | Purpose |
-|--------|-------|---------|
-| `journal_mode` | `WAL` | Write-Ahead Logging for concurrent readers |
-| `foreign_keys` | `ON` | Enforces all `REFERENCES` constraints |
-| `busy_timeout` | `5000` | Waits up to 5 seconds for the write lock |
-| `synchronous` | `NORMAL` | Safe with WAL mode, reduces fsync calls |
-| `temp_store` | `MEMORY` | Temporary tables stored in RAM |
-| `mmap_size` | `268435456` | 256 MB memory-mapped I/O |
-| `cache_size` | `-64000` | 64 MB page cache |
+| PRAGMA         | Value       | Purpose                                    |
+| -------------- | ----------- | ------------------------------------------ |
+| `journal_mode` | `WAL`       | Write-Ahead Logging for concurrent readers |
+| `foreign_keys` | `ON`        | Enforces all `REFERENCES` constraints      |
+| `busy_timeout` | `5000`      | Waits up to 5 seconds for the write lock   |
+| `synchronous`  | `NORMAL`    | Safe with WAL mode, reduces fsync calls    |
+| `temp_store`   | `MEMORY`    | Temporary tables stored in RAM             |
+| `mmap_size`    | `268435456` | 256 MB memory-mapped I/O                   |
+| `cache_size`   | `-64000`    | 64 MB page cache                           |
 
 SQLite only allows one writer at a time. File-backed databases (the production
 mode) therefore run a split pool: a single-connection writer pool
@@ -48,39 +48,39 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 
 ### Migration History
 
-| File | Description |
-|------|-------------|
-| `001_initial_schema.sql` | All core tables, default roles and settings |
-| `002_voice_states.sql` | Adds `voice_states` table |
-| `003_audit_log.sql` | Recreates `audit_log` with canonical column names (via a transient `audit_log_v6` rename) |
-| `004_voice_optimization.sql` | Adds `camera`, `screenshare` to voice_states; voice settings to channels |
-| `005_fix_member_permissions.sql` | Fixes Member role permissions |
-| `006_channel_overrides_index.sql` | Adds composite index on channel_overrides |
-| `007_member_video_permissions.sql` | Adds USE_VIDEO and SHARE_SCREEN to Member role |
-| `008_attachment_dimensions.sql` | Adds `width` and `height` to attachments |
-| `009_dm_tables.sql` | Adds `dm_participants` and `dm_open_state` tables |
-| `010_attachment_uploader.sql` | Adds `attachments.uploader_id` + index for upload-ownership checks |
-| `011_rate_lockouts.sql` | Adds `rate_lockouts` so rate-limit lockouts survive restarts |
-| `012_user_blocks.sql` | Adds `user_blocks` (blocks DM creation/messaging between users) |
-| `013_channel_type_constraint.sql` | INSERT/UPDATE triggers restricting `channels.type` to `text`/`voice`/`dm` |
-| `014_events_table.sql` | Adds `events` — persistent broadcast log for reconnect cold-tier replay |
-| `015_plugins.sql` | Adds `plugins` and `plugin_kv` for the WASM plugin runtime |
-| `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
-| `017_user_identity_key.sql` | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU) |
-| `018_api_tokens.sql` | Adds `api_tokens` — long-lived, revocable bearer tokens for headless clients (bot/service auth) |
-| `019_perf_indexes.sql` | Adds hot-path indexes |
-| `020_drop_redundant_indexes.sql` | Drops indexes duplicating UNIQUE auto-indexes |
-| `021_voice_server_moderation.sql` | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed) |
-| `022_message_mentions.sql` | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles |
-| `023_role_management.sql` | Adds `idx_roles_name_nocase` — role names become unique case-insensitively, matching how they are looked up |
-| `024_channel_user_overrides.sql` | Adds `channel_user_overrides` — per-member channel permission overrides, the last layer of the resolution order |
-| `025_channel_nsfw.sql` | Adds `channels.nsfw` — the age-gate flag the server stores and broadcasts but imposes no behaviour of its own on |
-| `026_emoji_mime.sql` | Adds `emoji.mime_type` — the sniffed image type, so the emoji image route can send a Content-Type without re-reading the file |
-| `027_user_profile_fields.sql` | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe |
-| `028_group_dms.sql` | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving |
-| `029_drop_sounds_table.sql` | Drops `sounds` — dead since 001; the soundboard it was created for was never built (A-2026-07-13) |
+| File                                           | Description                                                                                                                                                                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `001_initial_schema.sql`                       | All core tables, default roles and settings                                                                                                                                                                             |
+| `002_voice_states.sql`                         | Adds `voice_states` table                                                                                                                                                                                               |
+| `003_audit_log.sql`                            | Recreates `audit_log` with canonical column names (via a transient `audit_log_v6` rename)                                                                                                                               |
+| `004_voice_optimization.sql`                   | Adds `camera`, `screenshare` to voice_states; voice settings to channels                                                                                                                                                |
+| `005_fix_member_permissions.sql`               | Fixes Member role permissions                                                                                                                                                                                           |
+| `006_channel_overrides_index.sql`              | Adds composite index on channel_overrides                                                                                                                                                                               |
+| `007_member_video_permissions.sql`             | Adds USE_VIDEO and SHARE_SCREEN to Member role                                                                                                                                                                          |
+| `008_attachment_dimensions.sql`                | Adds `width` and `height` to attachments                                                                                                                                                                                |
+| `009_dm_tables.sql`                            | Adds `dm_participants` and `dm_open_state` tables                                                                                                                                                                       |
+| `010_attachment_uploader.sql`                  | Adds `attachments.uploader_id` + index for upload-ownership checks                                                                                                                                                      |
+| `011_rate_lockouts.sql`                        | Adds `rate_lockouts` so rate-limit lockouts survive restarts                                                                                                                                                            |
+| `012_user_blocks.sql`                          | Adds `user_blocks` (blocks DM creation/messaging between users)                                                                                                                                                         |
+| `013_channel_type_constraint.sql`              | INSERT/UPDATE triggers restricting `channels.type` to `text`/`voice`/`dm`                                                                                                                                               |
+| `014_events_table.sql`                         | Adds `events` — persistent broadcast log for reconnect cold-tier replay                                                                                                                                                 |
+| `015_plugins.sql`                              | Adds `plugins` and `plugin_kv` for the WASM plugin runtime                                                                                                                                                              |
+| `016_announcement_channel_type.sql`            | Recreates the channel-type triggers to allow `announcement`                                                                                                                                                             |
+| `017_user_identity_key.sql`                    | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU)                                                                                                                                           |
+| `018_api_tokens.sql`                           | Adds `api_tokens` — long-lived, revocable bearer tokens for headless clients (bot/service auth)                                                                                                                         |
+| `019_perf_indexes.sql`                         | Adds hot-path indexes                                                                                                                                                                                                   |
+| `020_drop_redundant_indexes.sql`               | Drops indexes duplicating UNIQUE auto-indexes                                                                                                                                                                           |
+| `021_voice_server_moderation.sql`              | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed)                                                                                                                                              |
+| `022_message_mentions.sql`                     | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles                                                                                |
+| `023_role_management.sql`                      | Adds `idx_roles_name_nocase` — role names become unique case-insensitively, matching how they are looked up                                                                                                             |
+| `024_channel_user_overrides.sql`               | Adds `channel_user_overrides` — per-member channel permission overrides, the last layer of the resolution order                                                                                                         |
+| `025_channel_nsfw.sql`                         | Adds `channels.nsfw` — the age-gate flag the server stores and broadcasts but imposes no behaviour of its own on                                                                                                        |
+| `026_emoji_mime.sql`                           | Adds `emoji.mime_type` — the sniffed image type, so the emoji image route can send a Content-Type without re-reading the file                                                                                           |
+| `027_user_profile_fields.sql`                  | Adds `users.display_name`, `users.about`, `users.custom_status`, and a partial index on `users(avatar)` for the file route's avatar-authorization probe                                                                 |
+| `028_group_dms.sql`                            | Adds `channels.is_group` + a partial index — marks a DM channel as a group so group-ness survives people leaving                                                                                                        |
+| `029_drop_sounds_table.sql`                    | Drops `sounds` — dead since 001; the soundboard it was created for was never built (A-2026-07-13)                                                                                                                       |
 | `030_attachments_unlink_on_message_delete.sql` | Rebuilds `attachments` with `message_id ON DELETE SET NULL` (was CASCADE) — cascaded message deletes now unlink rows instead of removing them, so the periodic orphan sweep can still find and reclaim the stored files |
-| `031_sessions_expiry_index.sql` | Normalizes legacy `sessions.expires_at` values to RFC3339 UTC and adds `idx_sessions_expires_at` so the 15-minute expiry sweep is sargable |
+| `031_sessions_expiry_index.sql`                | Normalizes legacy `sessions.expires_at` values to RFC3339 UTC and adds `idx_sessions_expires_at` so the 15-minute expiry sweep is sargable                                                                              |
 
 ---
 
@@ -103,14 +103,14 @@ CREATE TABLE roles (
 
 **Default roles** — current values after the full migration set (001 seeds
 different masks: 005/007 raise Member's, 022 grants `MENTION_EVERYONE` to
-Owner/Admin/Moderator). Not fixed at runtime — see *Role semantics* below:
+Owner/Admin/Moderator). Not fixed at runtime — see _Role semantics_ below:
 
-| id | name | color | permissions | position | Notes |
-|----|------|-------|-------------|----------|-------|
-| 1 | Owner | `#E74C3C` | `0x7FFFFFFF` | 100 | All 31 permission bits set |
-| 2 | Admin | `#F39C12` | `0x3FFFFFFF` | 80 | Everything except ADMINISTRATOR |
-| 3 | Moderator | `#3498DB` | `0x002FFFFF` | 60 | All message + voice + moderation + mention-everyone |
-| 4 | Member | NULL | `0x1E63` | 40 | Send, read, attach, react, voice, video, screen share |
+| id  | name      | color     | permissions  | position | Notes                                                 |
+| --- | --------- | --------- | ------------ | -------- | ----------------------------------------------------- |
+| 1   | Owner     | `#E74C3C` | `0x7FFFFFFF` | 100      | All 31 permission bits set                            |
+| 2   | Admin     | `#F39C12` | `0x3FFFFFFF` | 80       | Everything except ADMINISTRATOR                       |
+| 3   | Moderator | `#3498DB` | `0x002FFFFF` | 60       | All message + voice + moderation + mention-everyone   |
+| 4   | Member    | NULL      | `0x1E63`     | 40       | Send, read, attach, react, voice, video, screen share |
 
 **Role semantics:**
 
@@ -282,7 +282,7 @@ shows a one-time-per-session warning before rendering the channel and marks it
 in the sidebar.
 
 `voice_max_users` and `voice_max_video` (0 = unlimited) are the only channel
-columns that *are* enforced by the server, on voice join and on video publish
+columns that _are_ enforced by the server, on voice join and on video publish
 respectively (`CHANNEL_FULL` / `VIDEO_LIMIT`). They exist on every row but are
 meaningless on a non-voice channel.
 
@@ -498,7 +498,7 @@ CREATE TABLE read_states (
 `mention_count` is incremented on message insert for every mentioned user who
 can read the channel, except the author and except users who have blocked the
 author. `@everyone` counts every reader; `@here` counts only readers whose
-*broadcast* status is not `offline` — the column stores the status the user
+_broadcast_ status is not `offline` — the column stores the status the user
 chose, so a reader who picked `invisible` is collapsed to `offline` here and is
 skipped, exactly as they appear to everyone else. Edits never increment it — a badge is only
 raised by the original send, so an edit cannot double-count a mention. The
@@ -728,30 +728,30 @@ CREATE TABLE plugin_kv (
 
 ## Indexes
 
-| Index Name | Table | Columns | Purpose |
-|------------|-------|---------|---------|
-| `idx_sessions_user` | sessions | `(user_id)` | Fast deletion of all sessions for a user |
-| `idx_sessions_expires_at` | sessions | `(expires_at)` | Sargable 15-minute session-expiry sweep (031) |
-| `idx_messages_channel` | messages | `(channel_id, id DESC)` | Latest messages in channel query |
-| `idx_messages_user` | messages | `(user_id)` | Filter by author |
-| `idx_messages_pinned` | messages | `(channel_id, id DESC)` partial: `WHERE pinned = 1 AND deleted = 0` | Pinned-message listing without scanning channel history (019) |
-| `idx_audit_timestamp` | audit_log | `(created_at DESC)` | Pagination of audit log |
-| `idx_audit_log_actor` | audit_log | `(actor_id)` | Filter by actor |
-| `idx_login_ip` | login_attempts | `(ip_address, timestamp)` | Rate limiting queries |
-| `idx_voice_states_channel` | voice_states | `(channel_id)` | All users in a voice channel |
-| `idx_channel_overrides_role` | channel_overrides | `(role_id, channel_id, allow, deny)` | Covering per-role override fetch (019; replaced `idx_channel_overrides_channel_role`, which duplicated the UNIQUE auto-index) |
-| `idx_dm_participants_user` | dm_participants | `(user_id)` | DM channel lookup |
-| `idx_attachments_uploader` | attachments | `(uploader_id)` | Upload-ownership checks |
-| `idx_attachments_message` | attachments | `(message_id)` | Message → attachments fetch (019, recreated by 030's rebuild) |
-| `idx_user_blocks_blocked` | user_blocks | `(blocked_id, blocker_id)` | Reverse block lookup |
-| `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
-| `idx_events_created_at` | events | `(created_at)` | Retention pruning |
-| `idx_api_tokens_user` | api_tokens | `(user_id)` | Per-user token listing/revocation (018) |
-| `idx_message_mentions_user` | message_mentions | `(mentioned_user_id)` | Per-user mention lookup |
-| `idx_channel_user_overrides_user` | channel_user_overrides | `(user_id)` | "every override this member carries" — the direction the permission cache populates from (the PK covers the per-channel direction) |
-| `idx_roles_name_nocase` | roles | `(name COLLATE NOCASE)` UNIQUE | Case-insensitive role-name uniqueness |
-| `idx_users_avatar` | users | `(avatar)` partial: `WHERE avatar IS NOT NULL` | File route's avatar-authorization probe (027) |
-| `idx_channels_dm_group` | channels | `(is_group)` partial: `WHERE type = 'dm'` | Group-DM filtering (028) |
+| Index Name                        | Table                  | Columns                                                             | Purpose                                                                                                                            |
+| --------------------------------- | ---------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `idx_sessions_user`               | sessions               | `(user_id)`                                                         | Fast deletion of all sessions for a user                                                                                           |
+| `idx_sessions_expires_at`         | sessions               | `(expires_at)`                                                      | Sargable 15-minute session-expiry sweep (031)                                                                                      |
+| `idx_messages_channel`            | messages               | `(channel_id, id DESC)`                                             | Latest messages in channel query                                                                                                   |
+| `idx_messages_user`               | messages               | `(user_id)`                                                         | Filter by author                                                                                                                   |
+| `idx_messages_pinned`             | messages               | `(channel_id, id DESC)` partial: `WHERE pinned = 1 AND deleted = 0` | Pinned-message listing without scanning channel history (019)                                                                      |
+| `idx_audit_timestamp`             | audit_log              | `(created_at DESC)`                                                 | Pagination of audit log                                                                                                            |
+| `idx_audit_log_actor`             | audit_log              | `(actor_id)`                                                        | Filter by actor                                                                                                                    |
+| `idx_login_ip`                    | login_attempts         | `(ip_address, timestamp)`                                           | Rate limiting queries                                                                                                              |
+| `idx_voice_states_channel`        | voice_states           | `(channel_id)`                                                      | All users in a voice channel                                                                                                       |
+| `idx_channel_overrides_role`      | channel_overrides      | `(role_id, channel_id, allow, deny)`                                | Covering per-role override fetch (019; replaced `idx_channel_overrides_channel_role`, which duplicated the UNIQUE auto-index)      |
+| `idx_dm_participants_user`        | dm_participants        | `(user_id)`                                                         | DM channel lookup                                                                                                                  |
+| `idx_attachments_uploader`        | attachments            | `(uploader_id)`                                                     | Upload-ownership checks                                                                                                            |
+| `idx_attachments_message`         | attachments            | `(message_id)`                                                      | Message → attachments fetch (019, recreated by 030's rebuild)                                                                      |
+| `idx_user_blocks_blocked`         | user_blocks            | `(blocked_id, blocker_id)`                                          | Reverse block lookup                                                                                                               |
+| `idx_events_channel_seq`          | events                 | `(channel_id, seq)`                                                 | Cold-tier replay per channel                                                                                                       |
+| `idx_events_created_at`           | events                 | `(created_at)`                                                      | Retention pruning                                                                                                                  |
+| `idx_api_tokens_user`             | api_tokens             | `(user_id)`                                                         | Per-user token listing/revocation (018)                                                                                            |
+| `idx_message_mentions_user`       | message_mentions       | `(mentioned_user_id)`                                               | Per-user mention lookup                                                                                                            |
+| `idx_channel_user_overrides_user` | channel_user_overrides | `(user_id)`                                                         | "every override this member carries" — the direction the permission cache populates from (the PK covers the per-channel direction) |
+| `idx_roles_name_nocase`           | roles                  | `(name COLLATE NOCASE)` UNIQUE                                      | Case-insensitive role-name uniqueness                                                                                              |
+| `idx_users_avatar`                | users                  | `(avatar)` partial: `WHERE avatar IS NOT NULL`                      | File route's avatar-authorization probe (027)                                                                                      |
+| `idx_channels_dm_group`           | channels               | `(is_group)` partial: `WHERE type = 'dm'`                           | Group-DM filtering (028)                                                                                                           |
 
 Sessions are looked up by token and invites by code through their `UNIQUE`
 auto-indexes; the duplicating `idx_sessions_token` / `idx_invites_code` were
@@ -767,45 +767,45 @@ Permissions are stored as an integer bitfield (31 bits used) in
 
 ### Bit Map
 
-| Bit | Hex | Name | Description |
-|-----|-----|------|-------------|
-| 0 | `0x1` | `SEND_MESSAGES` | Post messages in text channels |
-| 1 | `0x2` | `READ_MESSAGES` | View messages in text channels |
-| 5 | `0x20` | `ATTACH_FILES` | Upload file attachments |
-| 6 | `0x40` | `ADD_REACTIONS` | Add emoji reactions |
-| 9 | `0x200` | `CONNECT_VOICE` | Join voice channels |
-| 10 | `0x400` | `SPEAK_VOICE` | Transmit audio in voice channels |
-| 11 | `0x800` | `USE_VIDEO` | Enable camera in voice channels |
-| 12 | `0x1000` | `SHARE_SCREEN` | Share screen in voice channels |
-| 16 | `0x10000` | `MANAGE_MESSAGES` | Delete others' messages, pin/unpin |
-| 17 | `0x20000` | `MANAGE_CHANNELS` | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`) |
-| 18 | `0x40000` | `KICK_MEMBERS` | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`) |
-| 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`) |
-| 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet |
-| 21 | `0x200000` | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text |
-| 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`), and create/edit/delete/reorder roles below the actor's own (`/admin/api/roles…`) |
-| 25 | `0x2000000` | `MANAGE_SERVER` | Read and modify server settings (`/admin/api/settings`) |
-| 26 | `0x4000000` | `MANAGE_INVITES` | Create and revoke invite codes |
-| 27 | `0x8000000` | `VIEW_AUDIT_LOG` | Read the audit log (`GET /admin/api/audit-log`) |
-| 30 | `0x40000000` | `ADMINISTRATOR` | Bypasses ALL permission checks |
+| Bit | Hex          | Name               | Description                                                                                                                                                                       |
+| --- | ------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | `0x1`        | `SEND_MESSAGES`    | Post messages in text channels                                                                                                                                                    |
+| 1   | `0x2`        | `READ_MESSAGES`    | View messages in text channels                                                                                                                                                    |
+| 5   | `0x20`       | `ATTACH_FILES`     | Upload file attachments                                                                                                                                                           |
+| 6   | `0x40`       | `ADD_REACTIONS`    | Add emoji reactions                                                                                                                                                               |
+| 9   | `0x200`      | `CONNECT_VOICE`    | Join voice channels                                                                                                                                                               |
+| 10  | `0x400`      | `SPEAK_VOICE`      | Transmit audio in voice channels                                                                                                                                                  |
+| 11  | `0x800`      | `USE_VIDEO`        | Enable camera in voice channels                                                                                                                                                   |
+| 12  | `0x1000`     | `SHARE_SCREEN`     | Share screen in voice channels                                                                                                                                                    |
+| 16  | `0x10000`    | `MANAGE_MESSAGES`  | Delete others' messages, pin/unpin                                                                                                                                                |
+| 17  | `0x20000`    | `MANAGE_CHANNELS`  | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`)                                                                                         |
+| 18  | `0x40000`    | `KICK_MEMBERS`     | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`)                                                                                                        |
+| 19  | `0x80000`    | `BAN_MEMBERS`      | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`)                                                                                                                     |
+| 20  | `0x100000`   | `MUTE_MEMBERS`     | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet                                                                                        |
+| 21  | `0x200000`   | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text                                                                |
+| 24  | `0x1000000`  | `MANAGE_ROLES`     | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`), and create/edit/delete/reorder roles below the actor's own (`/admin/api/roles…`) |
+| 25  | `0x2000000`  | `MANAGE_SERVER`    | Read and modify server settings (`/admin/api/settings`)                                                                                                                           |
+| 26  | `0x4000000`  | `MANAGE_INVITES`   | Create and revoke invite codes                                                                                                                                                    |
+| 27  | `0x8000000`  | `VIEW_AUDIT_LOG`   | Read the audit log (`GET /admin/api/audit-log`)                                                                                                                                   |
+| 30  | `0x40000000` | `ADMINISTRATOR`    | Bypasses ALL permission checks                                                                                                                                                    |
 
 Bits 2-4, 7, 13-15, 22-23, 28-29, 31 are reserved.
 
 ### Permission groups
 
-The bit map above is the authority on what each bit *does*; this grouping is
-how the bits are *presented* — it is the layout of the admin panel's role
+The bit map above is the authority on what each bit _does_; this grouping is
+how the bits are _presented_ — it is the layout of the admin panel's role
 permission grid (`PERM_GROUPS` in `Server/admin/static/index.html`). It carries
 no semantics, but the two must stay in step: every defined bit belongs to
 exactly one group, and a bit missing from the grouping is a bit no operator can
 grant through the panel.
 
-| Group | Bits |
-|-------|------|
-| General | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `ADMINISTRATOR` |
-| Text | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES` |
-| Voice | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN` |
-| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS` |
+| Group      | Bits                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------- |
+| General    | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `ADMINISTRATOR`  |
+| Text       | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES` |
+| Voice      | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN`                                              |
+| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`                                                            |
 
 ### Admin perimeter
 
@@ -815,7 +815,7 @@ MANAGE_SERVER | VIEW_AUDIT_LOG | KICK_MEMBERS | BAN_MEMBERS | MUTE_MEMBERS`.
 Holding one bit only gets a principal through the door — each route group
 re-checks the specific bit it needs, so the seeded Moderator role can manage
 channels and ban members without reading settings or the audit log. Owner-only
-routes (backups, updates, API tokens) still gate on role *position*, not on a
+routes (backups, updates, API tokens) still gate on role _position_, not on a
 bit. See `docs/api.md` for the per-route mapping.
 
 ### Permission Checking Logic
@@ -835,12 +835,12 @@ override**. Within a layer deny is applied first (strips bits) then allow (adds
 bits), so allow wins when both target the same bit. Across layers the later,
 narrower layer wins:
 
-| Situation | Outcome |
-|-----------|---------|
-| role override allows, user override denies | denied |
-| role override denies, user override allows | allowed |
-| user override allows and denies the same bit | allowed |
-| holder has `ADMINISTRATOR` | allowed regardless of either layer |
+| Situation                                    | Outcome                            |
+| -------------------------------------------- | ---------------------------------- |
+| role override allows, user override denies   | denied                             |
+| role override denies, user override allows   | allowed                            |
+| user override allows and denies the same bit | allowed                            |
+| holder has `ADMINISTRATOR`                   | allowed regardless of either layer |
 
 `permissions.EffectiveChannelPerms` is the single implementation of steps 5-6,
 and `permissions.EffectivePerms` the one-layer primitive it is built from. The
@@ -858,9 +858,9 @@ DM channels bypass role permissions entirely and use participant-based authoriza
 
 ### Default Role Permission Values
 
-| Role | Hex | Permissions |
-|------|-----|-------------|
-| Owner | `0x7FFFFFFF` | Everything including ADMINISTRATOR |
-| Admin | `0x3FFFFFFF` | Everything except ADMINISTRATOR |
+| Role      | Hex          | Permissions                                                                          |
+| --------- | ------------ | ------------------------------------------------------------------------------------ |
+| Owner     | `0x7FFFFFFF` | Everything including ADMINISTRATOR                                                   |
+| Admin     | `0x3FFFFFFF` | Everything except ADMINISTRATOR                                                      |
 | Moderator | `0x002FFFFF` | All message + voice + moderation, plus `MENTION_EVERYONE` (granted by migration 022) |
-| Member | `0x1E63` | Send, read, attach, react, voice, video, screen share |
+| Member    | `0x1E63`     | Send, read, attach, react, voice, video, screen share                                |

@@ -19,7 +19,6 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-
   owncord:
     image: ghcr.io/j3vb/owncord-server:latest
     restart: unless-stopped
@@ -61,9 +60,9 @@ services:
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml
     ports:
-      - "7880:7880"            # WebSocket API (OwnCord server + browser signalling)
-      - "7881:7881"            # TCP fallback for WebRTC (clients behind strict NAT)
-      - "50000-60000:50000-60000/udp"  # WebRTC UDP media streams
+      - "7880:7880" # WebSocket API (OwnCord server + browser signalling)
+      - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
+      - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
     logging: *default-logging

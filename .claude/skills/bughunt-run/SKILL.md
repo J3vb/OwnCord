@@ -229,7 +229,7 @@ lines) locates the mechanism in minutes.
 
 ## 4. Verify the fixes independently — REQUIRED
 
-The workflow's prove agent *self-reports* that each test went RED with the fix
+The workflow's prove agent _self-reports_ that each test went RED with the fix
 reverted. Nothing inside the workflow can verify that: workflow scripts have no
 filesystem access. You do. Run the independent proof over every commit the
 workflow made:

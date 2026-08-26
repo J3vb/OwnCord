@@ -6,10 +6,10 @@
 
 ## Current status: 291 web tests, 291 passed (100%)
 
-| Run | Result | Wall time |
-| --- | ------ | --------- |
-| Full web suite (`playwright.config.ts`) | **291 / 291 passed**, 0 flaky retries observed | 9.2 min |
-| `@parity` subset (`--grep "@parity"` — mirrors the **blocking** `client-e2e-parity` CI job) | **15 / 15 passed** | 33 s |
+| Run                                                                                         | Result                                         | Wall time |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------- |
+| Full web suite (`playwright.config.ts`)                                                     | **291 / 291 passed**, 0 flaky retries observed | 9.2 min   |
+| `@parity` subset (`--grep "@parity"` — mirrors the **blocking** `client-e2e-parity` CI job) | **15 / 15 passed**                             | 33 s      |
 
 Changes since the `914cdac` run (+15 tests, 3 new spec files — DC-04's last
 client journeys plus the DC-13 smoke):
@@ -35,8 +35,8 @@ renamed `sidebar-header.spec.ts`, and the mock exposes its event-listener
 registry (`window.__tauriEventListeners`) so specs can wait for async listener
 registration instead of racing it.
 
-Flake accounting rule used here: a spec is *flaky* only if it failed and then
-passed on retry within a run; a spec failing every attempt is *failing*, named
+Flake accounting rule used here: a spec is _flaky_ only if it failed and then
+passed on retry within a run; a spec failing every attempt is _failing_, named
 by file. This run had neither.
 
 ## Suite inventory
@@ -59,12 +59,12 @@ by file. This run had neither.
 
 ## CI wiring (`.github/workflows/ci.yml`)
 
-| Job | Blocking? | What it runs |
-| --- | --------- | ------------ |
-| `client-e2e` | **Yes** (blocking since 2026-08-05, DC-07) | Full web suite, every PR |
-| `client-e2e-parity` | **Yes** | The `@parity` subset |
-| `admin-e2e` | No (`continue-on-error`, earning its soak) | The admin-panel journey vs a real server |
-| native config | not in CI | Windows-only; run manually |
+| Job                 | Blocking?                                  | What it runs                             |
+| ------------------- | ------------------------------------------ | ---------------------------------------- |
+| `client-e2e`        | **Yes** (blocking since 2026-08-05, DC-07) | Full web suite, every PR                 |
+| `client-e2e-parity` | **Yes**                                    | The `@parity` subset                     |
+| `admin-e2e`         | No (`continue-on-error`, earning its soak) | The admin-panel journey vs a real server |
+| native config       | not in CI                                  | Windows-only; run manually               |
 
 ## Known issues (open)
 

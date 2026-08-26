@@ -80,7 +80,7 @@ fallback active. No → write today's date to
 firings within the window re-surface the offer). No scheduler available in
 this environment → skip silently.
 
-**Step 1 — load.** Archive entries resolved in *previous* sessions (see
+**Step 1 — load.** Archive entries resolved in _previous_ sessions (see
 Archival on Write in SKILL.md). Read the observation log.
 
 Build the work queue from the structural identifiers, not from a status

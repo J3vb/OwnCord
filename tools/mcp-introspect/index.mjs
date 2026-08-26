@@ -64,7 +64,8 @@ function httpsAgent() {
 }
 
 function requireToken() {
-  if (!TOKEN) throw new Error("OWNCORD_API_TOKEN is not set — mint one with `server token create`.");
+  if (!TOKEN)
+    throw new Error("OWNCORD_API_TOKEN is not set — mint one with `server token create`.");
 }
 
 // One request helper backs api_request and is reused by the log flow. Never
@@ -74,7 +75,8 @@ function request(method, path, { query, body, headers } = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(/^https?:/.test(path) ? path : BASE_URL + path);
     if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-    const payload = body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body);
+    const payload =
+      body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body);
     const h = {
       Authorization: `Bearer ${TOKEN}`,
       ...(payload !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -106,7 +108,9 @@ function request(method, path, { query, body, headers } = {}) {
 async function collectLogs({ level, source, limit = 500, follow_ms = 0 } = {}) {
   const ticketRes = await request("POST", "/admin/api/logs/ticket");
   if (ticketRes.status !== 200 || !ticketRes.body?.ticket) {
-    throw new Error(`log ticket request failed: HTTP ${ticketRes.status} ${JSON.stringify(ticketRes.body)}`);
+    throw new Error(
+      `log ticket request failed: HTTP ${ticketRes.status} ${JSON.stringify(ticketRes.body)}`,
+    );
   }
   const url = new URL(`${BASE_URL}/admin/api/logs/stream`);
   url.searchParams.set("ticket", ticketRes.body.ticket);
@@ -114,7 +118,11 @@ async function collectLogs({ level, source, limit = 500, follow_ms = 0 } = {}) {
   const records = await new Promise((resolve, reject) => {
     const req = https.request(
       url,
-      { method: "GET", agent: httpsAgent(), headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" } },
+      {
+        method: "GET",
+        agent: httpsAgent(),
+        headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
+      },
       (res) => {
         if (res.statusCode !== 200) {
           res.resume();
@@ -183,7 +191,11 @@ function clientLogs({ lines = 200, level, grep } = {}) {
   try {
     text = readFileSync(CLIENT_LOG, "utf8");
   } catch (e) {
-    return { path: CLIENT_LOG, found: false, note: `client log not found (client may not have run yet): ${e.code}` };
+    return {
+      path: CLIENT_LOG,
+      found: false,
+      note: `client log not found (client may not have run yet): ${e.code}`,
+    };
   }
   let rows = text.split(/\r?\n/).filter(Boolean);
   if (level) rows = rows.filter((l) => l.toUpperCase().includes(`[${level.toUpperCase()}]`));
@@ -228,9 +240,17 @@ server.registerTool(
       "Each record is {ts, level, msg, source, attrs}. Filters by level/source and applies a limit.",
     inputSchema: {
       level: z.string().optional().describe("DEBUG | INFO | WARN | ERROR"),
-      source: z.string().optional().describe("websocket|http|admin|auth|database|storage|updater|config|server"),
+      source: z
+        .string()
+        .optional()
+        .describe("websocket|http|admin|auth|database|storage|updater|config|server"),
       limit: z.number().int().positive().optional().describe("Max records to return (default 500)"),
-      follow_ms: z.number().int().nonnegative().optional().describe("0 = backfill only (default); >0 keeps streaming that long"),
+      follow_ms: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("0 = backfill only (default); >0 keeps streaming that long"),
     },
   },
   async (a) => {
@@ -249,7 +269,12 @@ server.registerTool(
     description:
       "Tail the desktop client's log file directly (no server needed). Optional level filter / substring grep.",
     inputSchema: {
-      lines: z.number().int().positive().optional().describe("How many trailing lines (default 200)"),
+      lines: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("How many trailing lines (default 200)"),
       level: z.string().optional().describe("Filter to lines tagged with this level, e.g. ERROR"),
       grep: z.string().optional().describe("Keep only lines containing this substring"),
     },

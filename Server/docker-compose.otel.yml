@@ -13,16 +13,15 @@
 # OwnCord metrics (when server is running): http://localhost:8443/metrics
 
 services:
-
   jaeger:
     image: jaegertracing/all-in-one:latest
     restart: unless-stopped
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"   # Jaeger UI
-      - "4317:4317"     # OTLP gRPC (used by the server's tracer exporter)
-      - "4318:4318"     # OTLP HTTP (alternative endpoint)
+      - "16686:16686" # Jaeger UI
+      - "4317:4317" # OTLP gRPC (used by the server's tracer exporter)
+      - "4318:4318" # OTLP HTTP (alternative endpoint)
     networks:
       - otel-net
 
@@ -31,7 +30,7 @@ services:
     restart: unless-stopped
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=1h"   # dev-only short retention
+      - "--storage.tsdb.retention.time=1h" # dev-only short retention
     volumes:
       - ./prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
     ports:

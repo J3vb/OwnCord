@@ -26,7 +26,7 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
 > server:
 >   admin_allowed_cidrs:
 >     - "127.0.0.0/8"
->     - "100.64.0.0/10"   # Tailscale tailnet
+>     - "100.64.0.0/10" # Tailscale tailnet
 > ```
 
 ## TLS Recommendation
