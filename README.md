@@ -130,7 +130,7 @@ Two main components:
 ### Prerequisites
 
 - Go 1.26+
-- Node.js 20+
+- Node.js 24+ (see `Client/.nvmrc`)
 - Rust stable (client builds)
 
 ### Build from source
@@ -151,6 +151,17 @@ npm run tauri build
 ```
 
 ### Core verification commands
+
+Everything CI gates on, from the repository root:
+
+```bash
+npm run check                  # server + client + Rust
+npm run check:server           # or one stack at a time
+node scripts/run.mjs --list    # exactly what each task runs, and where
+```
+
+Or run the stacks directly — the facade is a convenience, not the only path,
+and **server work needs no Node at all**:
 
 ```bash
 # Server
@@ -202,28 +213,22 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 
 ## Docs Index
 
-- [docs/quick-start.md](docs/quick-start.md)
-- [docs/deployment.md](docs/deployment.md)
-- [docs/livekit-setup.md](docs/livekit-setup.md)
-- [docs/port-forwarding.md](docs/port-forwarding.md)
-- [docs/tailscale.md](docs/tailscale.md)
+**[docs/README.md](docs/README.md) is the complete index** — every document in
+`docs/`, grouped by whether it is guidance, a reference contract, a dated audit,
+or a plan. The most-used entries:
+
+- [docs/quick-start.md](docs/quick-start.md) — get a server running
+- [docs/deployment.md](docs/deployment.md) — production deployment
+- [docs/contributing.md](docs/contributing.md) — setup, branch model, how to run the checks CI runs
+- [docs/security.md](docs/security.md) — reporting a vulnerability
 - [docs/architecture/](docs/architecture/README.md) — system blueprints (diagrams + flows)
-- [docs/audit-2026-08-04-docs-and-coverage.md](docs/audit-2026-08-04-docs-and-coverage.md) — latest full audit (docs accuracy, UX flow coverage, test runs)
-- [docs/audit-2026-08-04.md](docs/audit-2026-08-04.md) — latest security review
-- [docs/audit-2026-07-19.md](docs/audit-2026-07-19.md) — architecture & spec-conformance audit
-- [docs/api.md](docs/api.md)
-- [docs/protocol.md](docs/protocol.md)
-- [docs/schema.md](docs/schema.md)
-- [docs/architecture/client.md](docs/architecture/client.md) — client architecture (replaces client-architecture.md)
 - [docs/architecture/ux/](docs/architecture/ux/README.md) — client UX specification (target-state flows, per-view states, event→reaction maps)
-- [docs/server-configuration.md](docs/server-configuration.md)
-- [docs/credential-storage.md](docs/credential-storage.md)
-- [docs/mcp-introspect.md](docs/mcp-introspect.md) — dev-only MCP server for introspecting a running instance
-- [docs/audit-test-coverage-2026-07-25.md](docs/audit-test-coverage-2026-07-25.md) — test-coverage audit
-- [docs/audit-2026-04-07.md](docs/audit-2026-04-07.md) — first comprehensive audit
-- [docs/plans/](docs/plans/) — design plans and decision records (each carries a verified status header)
-- [docs/contributing.md](docs/contributing.md)
-- [docs/security.md](docs/security.md)
+- [docs/api.md](docs/api.md), [docs/protocol.md](docs/protocol.md), [docs/schema.md](docs/schema.md), [docs/server-configuration.md](docs/server-configuration.md) — reference contracts
+- [docs/plans/README.md](docs/plans/README.md) — plan index; records each plan's state and is the authority over a plan's own header
+
+Audits are dated snapshots and are not maintained after the fact — read them as
+history. [docs/README.md](docs/README.md#audits--dated-not-maintained) lists all
+nine, newest first.
 
 ## Contributing
 

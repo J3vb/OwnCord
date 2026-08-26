@@ -314,10 +314,12 @@ finding must be excised from history (amend + rebase onto the amended
 commit), not merely removed by a follow-up commit.
 
 Then review the branch against the merge-base — `git diff
-origin/main...HEAD` (three-dot), never two-dot: a concurrent merge plus a
-background fetch can move origin/main mid-run and turn the two-dot diff into
-phantom deletions. If origin moved, confirm zero file overlap and a clean
-`git merge-tree --write-tree origin/main HEAD` before opening the PR by
+origin/dev...HEAD` (three-dot), never two-dot: a concurrent merge plus a
+background fetch can move the base mid-run and turn the two-dot diff into
+phantom deletions. `dev` is the integration branch every PR targets
+(docs/contributing.md#branch-and-pr-model); use `origin/main` only for a
+release PR cut from `dev`. If origin moved, confirm zero file overlap and a
+clean `git merge-tree --write-tree origin/dev HEAD` before opening the PR by
 hand. The workflow never
 pushes and never opens a PR.
 

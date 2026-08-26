@@ -172,6 +172,30 @@ jobs:
   # and must stay green — never "fix" a failing test by editing its assertions.
   # ubuntu-latest for the same reason as client-check above: jsdom-only vitest
   # with no platform-conditional code under test.
+  # The automated half of G-04: a planning document that states a finding count
+  # the ledger contradicts fails here instead of quietly misleading a reader.
+  # Deliberately tiny — no npm ci, because the script imports nothing outside
+  # node:. It also runs its own selftest, since the whole check rests on
+  # patterns narrow enough not to cry wolf.
+  docs-consistency:
+    name: Docs & Ledger Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Self-test the count matcher
+        run: node scripts/check-doc-counts.mjs --selftest
+
+      - name: Documents must agree with the findings ledger
+        run: node scripts/check-doc-counts.mjs
+
+      - name: Ledger schema is valid
+        run: node .superpowers/render-ledger.mjs --check
+
   client-tests:
     name: Client Unit Tests
     runs-on: ubuntu-latest

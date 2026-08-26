@@ -22,31 +22,40 @@ fail() {
 # ---------- Server (Go) ----------
 go_staged=$(printf '%s\n' "$staged" | grep '^Server/.*\.go$' | grep -v '^Server/db/dbgen/')
 if [ -n "$go_staged" ]; then
-    if command -v go >/dev/null 2>&1; then
+    if command -v go >/dev/null 2>&1 && command -v gofmt >/dev/null 2>&1; then
         # shellcheck disable=SC2086 — repo paths contain no spaces
         unformatted=$(gofmt -l $go_staged)
         [ -n "$unformatted" ] && fail "gofmt needed (run gofmt -w on): $unformatted"
         (cd Server && go vet ./...) || fail "go vet"
     else
-        printf 'pre-commit: WARNING: go not installed; skipping Go checks.\n' >&2
+        printf 'pre-commit: WARNING: go/gofmt not installed; skipping Go checks.\n' >&2
     fi
 fi
+
+# These two blocks inline what `make sqlc-verify` / `make protocol-verify` reduce
+# to (Server/Makefile), rather than shelling out to make. `make` is not on PATH on
+# a stock Windows box, and a guard on `go`/`sqlc` does not imply it: the old code
+# probed one command and invoked another, so a contributor with Go but no make was
+# told "protocol constants are stale" when nothing had been generated or compared.
 
 # sqlc inputs changed -> regenerated db/dbgen must be part of the same commit.
 if printf '%s\n' "$staged" | grep -qE '^Server/(db/queries/|migrations/|sqlc\.yaml|sqlc\.version)'; then
     if command -v sqlc >/dev/null 2>&1; then
-        (cd Server && make sqlc-verify) \
-            || fail "db/dbgen is stale — run 'make sqlc-generate' in Server/ and stage the result"
+        (cd Server && sqlc generate && git diff --exit-code db/dbgen) \
+            || fail "db/dbgen is stale — run 'sqlc generate' in Server/ and stage the result"
     else
-        printf 'pre-commit: WARNING: sqlc not installed (make sqlc-install); CI will run sqlc-verify.\n' >&2
+        printf 'pre-commit: WARNING: sqlc not installed; skipping the db/dbgen check. Install the version pinned in Server/sqlc.version. CI will run it.\n' >&2
     fi
 fi
 
 # Protocol schema changed -> regenerated Go + TS constants must be in the same commit.
 if printf '%s\n' "$staged" | grep -qE '^(docs/protocol-schema\.json|Server/scripts/genprotocol/)'; then
     if command -v go >/dev/null 2>&1; then
-        (cd Server && make protocol-verify) \
-            || fail "protocol constants are stale — run 'make protocol-generate' in Server/ and stage the result"
+        (cd Server && go run ./scripts/genprotocol \
+            && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts) \
+            || fail "protocol constants are stale — run 'go run ./scripts/genprotocol' in Server/ and stage the result"
+    else
+        printf 'pre-commit: WARNING: go not installed; skipping the protocol-constants check. CI will run it.\n' >&2
     fi
 fi
 

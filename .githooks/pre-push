@@ -15,9 +15,34 @@ fail() {
     exit 1
 }
 
-# What changed relative to origin/main decides which side's gates run.
+# What changed relative to this branch's base decides which side's gates run.
+#
+# The base is whichever of origin/dev, origin/main is NEAREST — the one with the
+# fewest commits between its merge-base and HEAD. A feature branch cut from dev
+# picks dev; dev itself scores 0 against dev (nothing to compare) and so picks
+# main, which is right for a dev -> main release PR. Hardcoding origin/main got
+# the first case wrong once dev became the integration branch: everything on dev
+# and not yet on main counted as "changed", so both sides' gates ran every time.
+#
 # Markdown/docs changes never trigger builds.
-changed=$(git diff --name-only origin/main...HEAD 2>/dev/null) || changed="__all__"
+base=""
+best=""
+for cand in origin/dev origin/main; do
+    git rev-parse --verify -q "$cand" >/dev/null 2>&1 || continue
+    mb=$(git merge-base "$cand" HEAD 2>/dev/null) || continue
+    n=$(git rev-list --count "$mb..HEAD" 2>/dev/null) || continue
+    [ "$n" -eq 0 ] && continue
+    if [ -z "$best" ] || [ "$n" -lt "$best" ]; then
+        base=$cand
+        best=$n
+    fi
+done
+
+if [ -n "$base" ]; then
+    changed=$(git diff --name-only "$base...HEAD" 2>/dev/null) || changed="__all__"
+else
+    changed="__all__"
+fi
 [ "$changed" = "__all__" ] || changed=$(printf '%s\n' "$changed" | grep -v '\.md$')
 [ -z "$changed" ] && exit 0
 

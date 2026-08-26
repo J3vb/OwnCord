@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Local MCP server to introspect a running OwnCord instance (dev tool for Claude Code).",
   "engines": {
-    "node": ">=20"
+    "node": ">=24",
+    "npm": ">=10"
   },
   "scripts": {
     "start": "node index.mjs"
