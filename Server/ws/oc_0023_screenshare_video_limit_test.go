@@ -10,8 +10,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // oc0023VideoLimitRoleID is a dedicated, non-seeded role carrying every

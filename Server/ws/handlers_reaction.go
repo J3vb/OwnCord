@@ -3,7 +3,7 @@ package ws
 import (
 	"context"
 
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // registerReactionHandlers registers reaction_add and reaction_remove V2 handlers.

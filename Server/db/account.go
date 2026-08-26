@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // DeleteAccount anonymises and disables a user account within a single

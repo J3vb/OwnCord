@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 func TestServiceErrorToResult_InternalErrorDoesNotLeakAndIsLogged(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // BlockService had no coverage at all. Its job is the validation layer above

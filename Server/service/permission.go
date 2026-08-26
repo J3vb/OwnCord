@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/syncutil"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // cachedPerms holds a snapshot of a user's role and channel overrides.

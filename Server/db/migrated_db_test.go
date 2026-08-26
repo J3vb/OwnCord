@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // newMigratedTestDB opens an in-memory database with the *real* embedded

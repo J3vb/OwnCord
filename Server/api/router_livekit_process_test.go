@@ -26,10 +26,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // voiceJoinWSMsg builds a raw voice_join WebSocket frame for the given channel.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // handlePingV2 is the V2 handler for ping (heartbeat) messages.

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // ModerationService handles user ban/unban operations.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestChatSend_BroadcastCarriesMentions locks that the chat_message fan-out

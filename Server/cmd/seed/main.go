@@ -17,8 +17,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── Seed data definitions ──────────────────────────────────────────────────

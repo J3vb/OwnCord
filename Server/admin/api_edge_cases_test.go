@@ -11,8 +11,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // ─── handlePatchUser — self-modification guard ─────────────────────────────

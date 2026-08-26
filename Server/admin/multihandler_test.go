@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // The multiHandler tees every server log record into the admin panel's live

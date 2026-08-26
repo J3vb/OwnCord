@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // UpsertLockout inserts or replaces a rate-limit lockout entry.

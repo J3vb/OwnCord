@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── voice_token_refresh (now V2 — dispatched via handleMessage) ────────────

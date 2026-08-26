@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── handleChatSend additional branches (handlers.go:127 — 76.2%) ────────────

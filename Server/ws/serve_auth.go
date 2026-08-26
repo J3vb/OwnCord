@@ -7,8 +7,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // authenticateConn reads the first WebSocket message and validates the session

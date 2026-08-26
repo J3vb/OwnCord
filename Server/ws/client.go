@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 const (

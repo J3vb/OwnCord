@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // TestStartSweep_NeverRunsConcurrentlyWithItself locks the in-flight guard

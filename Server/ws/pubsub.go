@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // Topic is a named pub/sub channel that clients can subscribe to.

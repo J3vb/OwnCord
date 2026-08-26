@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/owncord/server/admin"
+	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 func TestSetupStatus_NeedsSetup(t *testing.T) {

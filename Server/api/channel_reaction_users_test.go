@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // ─── GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users ──

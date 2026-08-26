@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // openMigratedMemory opens an in-memory DB and runs the full migration.

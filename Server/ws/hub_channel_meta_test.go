@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // countChannelMetaFor counts channel_create / channel_update events for a

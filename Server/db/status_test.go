@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // The invisible model lives in three tiny pure functions, and every payload

@@ -12,7 +12,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow pins OC-0017.

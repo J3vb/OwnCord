@@ -16,7 +16,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // dmChannelStatusFor pulls the recipient status for other.ID out of a ready

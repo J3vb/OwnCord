@@ -6,9 +6,9 @@ import (
 	"html"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
 )
 
 // sanitizer is the shared HTML sanitization policy (strips all tags).

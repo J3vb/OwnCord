@@ -20,8 +20,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestReconnect_PrunedPrefix_ForcesFullReady locks the guard added in

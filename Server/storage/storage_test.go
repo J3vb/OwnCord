@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/storage"
+	"github.com/J3vb/OwnCord/Server/storage"
 )
 
 // newTestStorage creates a Storage instance backed by a temporary directory

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // absenceWindow is how long an "it must NOT arrive" assertion waits. The

@@ -3,7 +3,7 @@ package permissions_test
 import (
 	"testing"
 
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // ─── Constant value tests ─────────────────────────────────────────────────────

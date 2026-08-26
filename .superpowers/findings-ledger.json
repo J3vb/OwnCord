@@ -3755,7 +3755,7 @@
         "test": "Server/admin/setup_handler_test.go",
         "revertProof": "pass"
       },
-      "suggestedFix": "In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/owncord/server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.",
+      "suggestedFix": "In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/J3vb/OwnCord/Server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.",
       "fixedDate": "2026-08-19"
     },
     {

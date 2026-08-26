@@ -19,7 +19,7 @@ import (
 
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // TLSResult holds the output of LoadOrGenerate.

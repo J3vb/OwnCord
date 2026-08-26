@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // pendingEvent is a single event waiting to be flushed to the EventStore.

@@ -16,9 +16,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── ServeWS / authenticateConn happy path ────────────────────────────────────

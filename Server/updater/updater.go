@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"

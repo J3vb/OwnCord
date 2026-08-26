@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
 )
 
 // DMBroadcaster is the interface needed to send WebSocket events from REST

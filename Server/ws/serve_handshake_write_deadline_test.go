@@ -31,8 +31,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // tinySendBufListener wraps a net.Listener and shrinks SO_SNDBUF on every

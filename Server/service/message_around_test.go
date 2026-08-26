@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // seedAroundHistory fills channelID with n messages authored by user 1 and

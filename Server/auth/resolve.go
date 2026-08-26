@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // tokenStore is the DB surface bearer-token resolution needs. *db.DB satisfies

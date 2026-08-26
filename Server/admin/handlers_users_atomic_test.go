@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/admin"
+	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 // A PATCH combining banned + role_id must be all-or-nothing: if the role

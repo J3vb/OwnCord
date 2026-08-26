@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // Voice membership is gated on CONNECT_VOICE alone (voice_join), but the

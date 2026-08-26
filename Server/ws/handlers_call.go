@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // Ringing is rate limited per user rather than per (user, channel): the abuse

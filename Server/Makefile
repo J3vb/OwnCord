@@ -64,7 +64,7 @@ cover-all:
 	go test -count=1 -coverpkg=./... -coverprofile=coverage-all.out ./...
 	@echo
 	@echo "── functions with no coverage ──────────────────────────────────────"
-	@go tool cover -func=coverage-all.out | awk '$$NF=="0.0%"' | sed 's|github.com/owncord/server/||'
+	@go tool cover -func=coverage-all.out | awk '$$NF=="0.0%"' | sed 's|github.com/J3vb/OwnCord/Server/||'
 	@echo
 	@go tool cover -func=coverage-all.out | tail -1
 

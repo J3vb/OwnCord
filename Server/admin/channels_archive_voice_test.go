@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // Archiving a voice channel hides it from every client the same way deleting

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // loadNoEnv loads cfgPath ensuring no OWNCORD_ env overrides leak in from the

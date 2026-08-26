@@ -11,10 +11,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // stubDispatcher stands in for *plugin.Registry. A real registry is useless

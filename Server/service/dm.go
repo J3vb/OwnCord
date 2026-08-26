@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // DMService handles direct message channel operations.

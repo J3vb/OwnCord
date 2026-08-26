@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/ws"
 )
 
 // ---------------------------------------------------------------------------

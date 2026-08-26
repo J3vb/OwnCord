@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // This file provides real in-memory SQLite test helpers for the service

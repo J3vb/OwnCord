@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // The admin test schema seeds Owner (id 1, pos 100, ADMINISTRATOR), Admin

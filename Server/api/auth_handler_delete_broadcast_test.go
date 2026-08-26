@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
 )
 
 // recordingAuthBroadcaster records BroadcastMemberBan calls so tests can

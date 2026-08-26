@@ -4722,7 +4722,7 @@ Server/api/auth_handler.go:470 user, err := database.GetUserByUsername(r.Context
 
 bluemonday v1.0.27 sanitize.go:417-443 — case html.TextToken: default: buff.WriteString(token.String())  // x/net/html TextToken.String() == EscapeString(Data)
 
-**Suggested fix:** In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/owncord/server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.
+**Suggested fix:** In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/J3vb/OwnCord/Server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.
 
 **Fixed:** `29619536` · test `Server/admin/setup_handler_test.go` · revert-proof pass
 

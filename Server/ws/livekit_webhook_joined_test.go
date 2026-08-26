@@ -10,7 +10,7 @@ import (
 
 	"github.com/livekit/protocol/livekit"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // handleWebhookParticipantJoined had no coverage. It is the server's guard

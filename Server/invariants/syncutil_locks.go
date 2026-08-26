@@ -70,7 +70,7 @@ func checkSyncutilLocks(f *ast.File, fset *token.FileSet, rel string) []Violatio
 			File: rel,
 			Line: fset.Position(sel.Pos()).Line,
 			Msg: "raw sync." + name + " is invisible to the -tags deadlock CI pass; " +
-				"declare it as syncutil." + name + " (github.com/owncord/server/syncutil), " +
+				"declare it as syncutil." + name + " (github.com/J3vb/OwnCord/Server/syncutil), " +
 				"or add //invariant:allow syncutil-locks — <reason>",
 		})
 		return true

@@ -3,7 +3,7 @@ package plugin
 import (
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // openPluginTestDB opens an in-memory database with the full migration set

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // ─── Setup ───────────────────────────────────────────────────────────────────

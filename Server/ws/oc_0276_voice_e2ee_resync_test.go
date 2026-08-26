@@ -23,7 +23,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {

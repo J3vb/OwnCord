@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // TestSetup_HonoursTrustedProxies pins OC-0274: first-run setup must resolve

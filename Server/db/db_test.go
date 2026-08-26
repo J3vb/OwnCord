@@ -13,7 +13,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // openMemory opens an in-memory database for testing.

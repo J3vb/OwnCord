@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // ErrChannelFull is returned when a voice channel is at capacity.

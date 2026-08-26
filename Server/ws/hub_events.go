@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	"github.com/owncord/server/plugin"
+	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
 // nextSeq returns the next monotonic sequence number for broadcast messages.

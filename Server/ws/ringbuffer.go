@@ -1,6 +1,6 @@
 package ws
 
-import "github.com/owncord/server/syncutil"
+import "github.com/J3vb/OwnCord/Server/syncutil"
 
 // eventEntry stores a broadcast event for potential replay.
 type eventEntry struct {

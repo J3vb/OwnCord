@@ -3,7 +3,7 @@ package admin
 import (
 	"context"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── Context keys ─────────────────────────────────────────────────────────────

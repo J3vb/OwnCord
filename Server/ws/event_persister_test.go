@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // captureLogs redirects the default slog logger to a buffer for the duration

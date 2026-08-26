@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // groupDMFixture returns a migrated database with three users (ids 1..3).

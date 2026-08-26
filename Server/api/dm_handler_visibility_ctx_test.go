@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // OC-0140: broadcastDMOpen is called with r.Context() by CreateGroupDM (and

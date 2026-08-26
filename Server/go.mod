@@ -1,4 +1,4 @@
-module github.com/owncord/server
+module github.com/J3vb/OwnCord/Server
 
 go 1.26
 

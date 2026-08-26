@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // Voice E2EE rate limits. Both the announce and offer relays fan out to every

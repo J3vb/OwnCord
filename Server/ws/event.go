@@ -1,6 +1,6 @@
 package ws
 
-import "github.com/owncord/server/db"
+import "github.com/J3vb/OwnCord/Server/db"
 
 // ClientError represents an error to send back to the requesting client.
 // It implements the error interface so it can be used as Result.Error.

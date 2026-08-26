@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/plugin"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
 // openPluginTestDB opens an in-memory database with the full migration set so

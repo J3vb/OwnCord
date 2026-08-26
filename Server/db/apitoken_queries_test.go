@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // newTokenTestDB opens an in-memory DB and applies the real embedded migrations

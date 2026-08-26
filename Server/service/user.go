@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/syncutil"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // UserService handles user profile and session operations.
