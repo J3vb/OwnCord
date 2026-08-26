@@ -3,7 +3,7 @@
 //
 // The wire protocol is the envelope format from docs/protocol.md: every
 // client->server frame is {type, id?, payload:{...}} and the first frame MUST
-// be an `auth` envelope. If you change docs/protocol-schema.json, grep this
+// be an `auth` envelope. If you change protocol/schema.json, grep this
 // script — it is not generated and CI does not run it, so it rots silently
 // (it once drifted to pre-envelope framing and reported green while every
 // auth failed).

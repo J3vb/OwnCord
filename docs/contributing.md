@@ -60,19 +60,19 @@ next section, and using them directly is equally correct.
 
 **Make targets** (run from `Server/`):
 
-| Command                  | Description                                                                         |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| `make test`              | Run the test suite the way CI does (`-race`, 20 min timeout)                        |
-| `make test-deadlock`     | Run the deadlock-detection pass CI also runs (`-tags deadlock`)                     |
-| `make cover`             | Per-package coverage (what CI uploads) + a function summary                         |
-| `make cover-all`         | Cross-package coverage — the honest number (also lists 0.0% functions)              |
-| `make sqlc-install`      | Install the pinned sqlc version into `$GOBIN`                                       |
-| `make sqlc-generate`     | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine)                |
-| `make sqlc-verify`       | Fail if the committed `dbgen` output is stale (used by CI)                          |
-| `make protocol-generate` | Regenerate the WS message-type constants (Go + TS) from `docs/protocol-schema.json` |
-| `make protocol-verify`   | Fail if the committed protocol constants are stale (used by CI)                     |
-| `make otel-up`           | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development  |
-| `make otel-down`         | Stop and remove the OTel dev containers                                             |
+| Command                  | Description                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `make test`              | Run the test suite the way CI does (`-race`, 20 min timeout)                       |
+| `make test-deadlock`     | Run the deadlock-detection pass CI also runs (`-tags deadlock`)                    |
+| `make cover`             | Per-package coverage (what CI uploads) + a function summary                        |
+| `make cover-all`         | Cross-package coverage — the honest number (also lists 0.0% functions)             |
+| `make sqlc-install`      | Install the pinned sqlc version into `$GOBIN`                                      |
+| `make sqlc-generate`     | Regenerate the type-safe Go query layer (`db/dbgen/`, SQLite engine)               |
+| `make sqlc-verify`       | Fail if the committed `dbgen` output is stale (used by CI)                         |
+| `make protocol-generate` | Regenerate the WS message-type constants (Go + TS) from `protocol/schema.json`     |
+| `make protocol-verify`   | Fail if the committed protocol constants are stale (used by CI)                    |
+| `make otel-up`           | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
+| `make otel-down`         | Stop and remove the OTel dev containers                                            |
 
 #### Client (Tauri v2)
 

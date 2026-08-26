@@ -9,7 +9,7 @@
 # sqlc-generate      Regenerate type-safe Go from sqlc.yaml (db/dbgen).
 # sqlc-verify        Fail if the committed dbgen output is stale (used by CI).
 # sqlc-install       Install the pinned sqlc version into $GOBIN.
-# protocol-generate  Regenerate WS message-type constants (Go + TS) from docs/protocol-schema.json.
+# protocol-generate  Regenerate WS message-type constants (Go + TS) from ../protocol/schema.json.
 # protocol-verify    Fail if the committed protocol constants are stale (used by CI).
 # otel-up            Start Jaeger + Prometheus for local tracing development.
 # otel-down          Stop and remove the OTel dev containers.
@@ -82,10 +82,10 @@ sqlc-verify:
 	)
 
 protocol-generate:
-	go run ./scripts/genprotocol
+	go run ./cmd/genprotocol
 
 protocol-verify:
-	go run ./scripts/genprotocol
+	go run ./cmd/genprotocol
 	@git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts || ( \
 		echo "ERROR: generated protocol constants are stale. Run 'make protocol-generate' and commit the result." ; \
 		exit 1 ; \

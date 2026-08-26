@@ -54,7 +54,7 @@ if [ "$changed" = "__all__" ]; then
 else
     if printf '%s\n' "$changed" | grep -q '^Server/'; then server_changed=1; fi
     if printf '%s\n' "$changed" | grep -q '^Client/'; then client_changed=1; fi
-    if printf '%s\n' "$changed" | grep -q '^docs/protocol-schema\.json'; then
+    if printf '%s\n' "$changed" | grep -q '^protocol/schema\.json'; then
         server_changed=1
         client_changed=1
     fi

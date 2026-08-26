@@ -50,11 +50,11 @@ if printf '%s\n' "$staged" | grep -qE '^Server/(db/queries/|migrations/|sqlc\.ya
 fi
 
 # Protocol schema changed -> regenerated Go + TS constants must be in the same commit.
-if printf '%s\n' "$staged" | grep -qE '^(docs/protocol-schema\.json|Server/scripts/genprotocol/)'; then
+if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genprotocol/)'; then
     if command -v go >/dev/null 2>&1; then
-        (cd Server && go run ./scripts/genprotocol \
+        (cd Server && go run ./cmd/genprotocol \
             && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts) \
-            || fail "protocol constants are stale — run 'go run ./scripts/genprotocol' in Server/ and stage the result"
+            || fail "protocol constants are stale — run 'go run ./cmd/genprotocol' in Server/ and stage the result"
     else
         printf 'pre-commit: WARNING: go not installed; skipping the protocol-constants check. CI will run it.\n' >&2
     fi

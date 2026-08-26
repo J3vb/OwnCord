@@ -37,7 +37,7 @@ golangci-lint run                        # CI pins v2.11.3
 # Generated output must not be stale. These are what `make sqlc-verify` and
 # `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
 sqlc generate && git diff --exit-code db/dbgen
-go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts
+go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.

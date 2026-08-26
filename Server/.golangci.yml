@@ -72,7 +72,7 @@ linters:
       excludes:
         - G104 # unhandled errors — errcheck covers this better
         - G304 # file path from variable — expected in file storage code
-        - G306 # WriteFile perms ≤0600 — our only hits are generated source files (genprotocol), which must stay world-readable or multi-stage container builds break
+        - G306 # WriteFile perms ≤0600 — our only hits are generated source files (cmd/genprotocol), which must stay world-readable or multi-stage container builds break
         - G706 # log injection — false positive with slog structured logging (values are typed key-value pairs, not interpolated)
 
   exclusions:
