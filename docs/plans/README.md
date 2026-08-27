@@ -17,7 +17,7 @@ authority**.
 | [repo-health-issue-register-2026-08-23](repo-health-issue-register-2026-08-23.md)         | 88 planning rows. Public-safe; not a replacement for the ledger.                                                                      |
 | [beta-requirements-traceability-2026-08-23](beta-requirements-traceability-2026-08-23.md) | Requirement → phase → evidence map. No row is release-qualified.                                                                      |
 | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                                       | **Supersedes the roadmap's "current evidence snapshot."** B0 measurements and dispositions.                                           |
-| [b1-repository-foundation-2026-08-25](b1-repository-foundation-2026-08-25.md)             | **B1-0 done, B1-1 next.** B1 execution plan. Re-verifies every RL-* claim against HEAD; several are refuted.                          |
+| [b1-repository-foundation-2026-08-25](b1-repository-foundation-2026-08-25.md)             | **B1-0 through B1-6 done, B1-7 next.** B1 execution plan. Re-verifies every RL-* claim against HEAD; several are refuted.             |
 | [hp-0-scorecard-2026-08-25](hp-0-scorecard-2026-08-25.md)                                 | **HP-0 accepted 2026-08-25.** The single baseline-acceptance artifact. Part-closes `R-08`.                                            |
 | [audit-2026-08-19-remediation](audit-2026-08-19-remediation.md)                           | Phases 1–6 done 2026-08-20; **phase 7 pending**. Its header still reads "in progress 2026-08-19" — stale; the phase table is correct. |
 

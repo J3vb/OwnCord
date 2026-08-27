@@ -11,13 +11,15 @@ dated snapshots that were true when written and were never updated, and
 
 ## Start here
 
-| I want to…             | Read                                    |
-| ---------------------- | --------------------------------------- |
-| Run a server           | [quick-start.md](quick-start.md)        |
-| Deploy for real        | [deployment.md](deployment.md)          |
-| Contribute a change    | [contributing.md](contributing.md)      |
-| Understand the system  | [architecture/](architecture/README.md) |
-| Report a vulnerability | [security.md](security.md)              |
+| I want to…              | Read                                                        |
+| ----------------------- | ----------------------------------------------------------- |
+| Run a server            | [quick-start.md](quick-start.md)                            |
+| Deploy for real         | [deployment.md](deployment.md)                              |
+| Contribute a change     | [contributing.md](contributing.md)                          |
+| Understand the system   | [architecture/](architecture/README.md)                     |
+| Report a bug            | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) |
+| Ask, or suggest an idea | [Discussions](https://github.com/J3vb/OwnCord/discussions)  |
+| Report a vulnerability  | [security.md](security.md)                                  |
 
 ## Guidance
 

@@ -11,7 +11,7 @@
 A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own.
 
 > **Alpha, and a hobby project.**
-> This is something I build for fun and run for a small group of friends. It isn't a product, there's no support, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
+> This is something I build for fun and run for a small group of friends. It isn't a product, it comes with no support commitment, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
 >
 > Don't use it for anything sensitive.
 
@@ -237,6 +237,18 @@ nine, newest first.
 3. Open a PR targeting `dev` — `dev` is merged to `main` for releases.
 
 See [docs/contributing.md](docs/contributing.md) for the full process.
+
+## Getting Help and Reporting Problems
+
+Nothing here is a support promise — see the note at the top — but there is a
+right place for each kind of message:
+
+| Kind                            | Where                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| A reproducible bug              | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)                                  |
+| A question about setup or usage | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)              |
+| An idea or feature suggestion   | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas)          |
+| A security vulnerability        | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new) — never an issue |
 
 ## License
 

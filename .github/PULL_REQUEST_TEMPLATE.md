@@ -19,13 +19,30 @@
 
 ## Test Plan
 
-- [ ] Unit tests pass (`npm test` / `go test ./...`)
-- [ ] TypeScript check passes (`npx tsc --noEmit`)
+- [ ] `npm run check` passes from the repository root — the one entry point that
+      runs what CI gates on. `check:server` / `check:client` / `check:rust` /
+      `check:hygiene` / `check:docs` run a single stack if that is all you touched
 - [ ] Manual testing done (describe below)
+- [ ] Generated files were regenerated, not hand-edited — `Server/db/dbgen/`,
+      `Server/ws/message_types.go`, `Client/src/lib/protocolTypes.ts`,
+      `Client/src/generated/`, `.superpowers/FINDINGS.md`. CI fails on drift
 - [ ] Docs updated — anything under `docs/architecture/` (incl. `ux/`) whose
       "Source of truth" files this PR touches is updated in the same PR
       (their maintenance rule), and reference docs (`api.md`, `protocol.md`,
       `schema.md`, `server-configuration.md`) reflect any surface changes
+
+## Scope
+
+<!-- What adjacent work did you deliberately leave out, and why? A written
+     deferral is a deliverable — see docs/contributing.md#commit-format. -->
+
+Not included:
+
+> **No security detail in this PR.** This repository is public, so the
+> description, the commits and the branch name are all disclosure channels. If
+> this change repairs a vulnerability, report it through
+> [private security reporting](https://github.com/J3vb/OwnCord/security/advisories/new)
+> first and describe only the control this PR adds.
 
 ## Screenshots
 
