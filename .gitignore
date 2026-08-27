@@ -129,5 +129,8 @@ Client/.env
 # local server run logs
 server.log
 
-# Knowledge graph output (tool removed 2026-08-26; delete the dir when convenient).
+# Knowledge-graph output. The tool and its 20.41 MB tracked payload were removed
+# in a5f7d95 (#1413, RL-06). The rule stays so a machine that still has the local
+# directory — it reached ~208 MB with cache and dated snapshots — does not see it
+# as untracked noise.
 graphify-out/
