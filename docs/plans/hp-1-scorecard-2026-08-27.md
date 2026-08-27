@@ -8,10 +8,12 @@
 **Evidence base:** [b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md),
 [b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md)
 
-**Decision: PENDING — the repository owner records acceptance, not this
-document.** All eight exit conditions are evidenced below. Condition 6 is
-**partially met** and is stated as such. Nothing found in the structural review
-blocks acceptance.
+**Decision: ACCEPTED — 2026-08-27 by J3vb (repository owner).**
+
+All eight exit conditions are evidenced below. Condition 6 is accepted **as a
+stated limitation, not as met**: `dev` carries `strict: false`, so a PR can
+still merge without re-testing against a moved base. Nothing found in the
+structural review blocks acceptance. **B1 is complete and B2 may begin.**
 
 HP-1 asks one question: were B1's structural changes **mechanical**? This
 scorecard answers it with reproducible commands rather than assertion, then
