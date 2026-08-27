@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // RoleService owns create/edit/delete/reorder of roles. It is the only writer

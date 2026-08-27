@@ -13,7 +13,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // TestAdminAuthMiddleware_DBErrorIsNotUnauthorized verifies that when

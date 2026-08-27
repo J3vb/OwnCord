@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // Store is the data-access surface the service layer depends on. It is the

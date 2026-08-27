@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // Phase 6 profile fields. The rules that matter here are the ones a handler

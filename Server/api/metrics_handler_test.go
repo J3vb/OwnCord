@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
 )
 
 // buildMetricsRouter creates a chi router with the metrics endpoint behind AdminIPRestrict.

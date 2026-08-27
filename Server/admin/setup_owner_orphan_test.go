@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/admin"
+	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 // These two tests pin OC-0253: once CreateOwnerIfEmpty has committed the

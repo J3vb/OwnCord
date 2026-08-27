@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // GetUserByID has no banned filter (unlike ListMembers and the other lookups

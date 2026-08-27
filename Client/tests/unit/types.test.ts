@@ -10,7 +10,7 @@ import type {
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
 
-// Sample PROTOCOL.md JSON payloads for parsing validation
+// Sample docs/protocol.md JSON payloads for parsing validation
 const sampleAuthOk = {
   type: "auth_ok" as const,
   payload: {

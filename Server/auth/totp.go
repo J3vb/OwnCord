@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 const (

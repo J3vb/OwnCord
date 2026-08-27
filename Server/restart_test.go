@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/owncord/server/admin"
+	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 func TestRestartCoordinator_RequestIdempotent(t *testing.T) {

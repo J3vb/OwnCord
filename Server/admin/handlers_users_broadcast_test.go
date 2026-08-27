@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // unbanMockHub wraps mockHub (admin/api_test.go) and additionally implements

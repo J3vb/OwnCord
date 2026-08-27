@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // seedReactedMessage posts a message in channel 10 and has each of userIDs

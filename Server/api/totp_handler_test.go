@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // ─── POST /api/v1/auth/verify-totp ──────────────────────────────────────────

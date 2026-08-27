@@ -17,13 +17,13 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/storage"
 )
 
 // testPermSvc wires a PermissionService around the test DB so

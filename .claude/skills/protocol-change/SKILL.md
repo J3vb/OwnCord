@@ -1,12 +1,12 @@
 ---
 name: protocol-change
-description: Add or change a WebSocket message type in OwnCord. Use before editing docs/protocol-schema.json, Server/ws/message_types.go, or Client/src/lib/protocolTypes.ts.
+description: Add or change a WebSocket message type in OwnCord. Use before editing protocol/schema.json, Server/ws/message_types.go, or Client/src/lib/protocolTypes.ts.
 ---
 
 # protocol-change
 
-`docs/protocol-schema.json` is the source of truth. Both constant files are
-generated from it by `Server/scripts/genprotocol/`.
+`protocol/schema.json` is the source of truth. Both constant files are
+generated from it by `Server/cmd/genprotocol/`.
 
 **The schema holds message-type NAMES only.** Route by what you are changing —
 most payload work never touches it, and sending a field change through the
@@ -23,7 +23,7 @@ forwards the message raw, there is nothing to add. If it **re-serialises**, an
 older server drops unknown JSON fields — so a field the server must forward is
 NOT backward compatible with older servers.
 
-1. Edit `docs/protocol-schema.json`.
+1. Edit `protocol/schema.json`.
 2. Run `make protocol-generate` from `Server/`.
 3. Commit **both** outputs — `Server/ws/message_types.go` and
    `Client/src/lib/protocolTypes.ts`. One run regenerates the

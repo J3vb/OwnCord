@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestHashPassword_DiffersFromPlaintext(t *testing.T) {

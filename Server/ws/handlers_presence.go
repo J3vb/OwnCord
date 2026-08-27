@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // channel_focus and mark_read each get their own 5/s budget under this same

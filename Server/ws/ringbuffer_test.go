@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── Push ────────────────────────────────────────────────────────────────────

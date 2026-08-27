@@ -26,7 +26,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

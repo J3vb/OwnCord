@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // Scheduled-backup intervals for the backup_schedule setting values the admin

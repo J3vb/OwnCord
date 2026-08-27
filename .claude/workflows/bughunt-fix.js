@@ -506,7 +506,7 @@ const GATE_COMMANDS = {
     `  make sqlc-verify protocol-verify   # generated output must not be stale. If make is not on PATH, ` +
     `run the equivalent commands directly instead: ` +
     `"sqlc generate && git diff --exit-code db/dbgen" and ` +
-    `"go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts" ` +
+    `"go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts" ` +
     `- a non-empty diff in either means generated code is stale and the gate fails`,
   rust:
     `From Client/src-tauri:\n` + `  cargo test\n` + `  cargo clippy --all-targets -- -D warnings`,

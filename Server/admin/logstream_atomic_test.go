@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // handleLogStream's backfill loop does a DB round-trip per entry between

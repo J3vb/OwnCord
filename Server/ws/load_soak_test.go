@@ -11,10 +11,10 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestTheLoadTest is a load/soak test for the hub's concurrency machinery: it

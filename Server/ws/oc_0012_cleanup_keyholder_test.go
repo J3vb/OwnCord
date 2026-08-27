@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // OC-0012: every other voice-removal path re-elects the key holder

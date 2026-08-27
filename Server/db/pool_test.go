@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // openFileDB opens a temp-file-backed database with the full embedded

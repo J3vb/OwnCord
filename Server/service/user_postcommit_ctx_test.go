@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // OC-0250: UpdateProfile (and UpdateIdentityKey) commit their write, then

@@ -1494,7 +1494,7 @@ recipient from being flooded.
 
 ## Message Type Reference Table
 
-The authoritative type inventory is [protocol-schema.json](protocol-schema.json),
+The authoritative type inventory is [protocol/schema.json](../protocol/schema.json),
 from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
@@ -1578,7 +1578,7 @@ tables below add per-type behavioral notes.
 ### Plugin command types
 
 Three wire types exist for the WASM plugin system. Since 2026-08-04 they are
-listed in `protocol-schema.json` like every other type (closing DC-01), so
+listed in `protocol/schema.json` like every other type (closing DC-01), so
 the generated constants cover them and `make protocol-verify` plus the
 `ws` package's protocol-contract test gate them against drift.
 

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // contextKey is an unexported type for context keys in this package.

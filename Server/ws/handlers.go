@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // HandleMessageForTest dispatches a raw WebSocket message from client c.

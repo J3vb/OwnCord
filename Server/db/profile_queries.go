@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // UpdateUserProfile updates the username, avatar, display name and about text

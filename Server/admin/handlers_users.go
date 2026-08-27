@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── User Handlers ───────────────────────────────────────────────────────────

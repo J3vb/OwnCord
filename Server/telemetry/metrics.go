@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	scopeWS      = "github.com/owncord/server/ws"
-	scopeService = "github.com/owncord/server/service"
-	scopeVoice   = "github.com/owncord/server/voice"
+	scopeWS      = "github.com/J3vb/OwnCord/Server/ws"
+	scopeService = "github.com/J3vb/OwnCord/Server/service"
+	scopeVoice   = "github.com/J3vb/OwnCord/Server/voice"
 )
 
 // AppMetrics is the canonical bundle of meters used across the server. Build

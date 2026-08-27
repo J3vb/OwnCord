@@ -24,7 +24,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // missingRoleID names no row in the roles table.

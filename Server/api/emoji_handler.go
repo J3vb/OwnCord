@@ -16,11 +16,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
 )
 
 // EmojiBroadcaster is the slice of the hub the emoji routes need: after every

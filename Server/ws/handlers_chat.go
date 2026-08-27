@@ -5,8 +5,8 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // registerChatHandlers registers all chat-related V2 message handlers.

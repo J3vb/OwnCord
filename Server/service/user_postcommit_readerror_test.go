@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // OC-0297: UpdateProfile's post-commit re-read (the GetUserByID call after

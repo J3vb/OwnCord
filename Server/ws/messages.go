@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // envelope is the common wrapper for all WebSocket messages.

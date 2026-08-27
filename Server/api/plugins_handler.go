@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/plugin"
 )
 
 // maxPluginUploadBytes caps the multipart upload at 16 MiB to match the

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── emoji_update ────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // fakeAuditStore records the batches handed to PersistAudits so tests can

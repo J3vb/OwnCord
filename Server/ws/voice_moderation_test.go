@@ -8,11 +8,11 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // voiceModSchema is voiceSchema plus audit_log, so the moderation handlers'

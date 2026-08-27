@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/updater"
 	"golang.org/x/mod/semver"
 )
 

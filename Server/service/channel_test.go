@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // TestListVisibleChannels_OverrideFetchErrorFailsClosed is the uncached half of

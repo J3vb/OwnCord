@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/storage"
-	"github.com/owncord/server/ws"
 )
 
 // Avatar upload. The interesting properties are the ones a URL-only avatar

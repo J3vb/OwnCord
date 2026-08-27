@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:contract": "vitest run tests/contract",
     "test:e2e": "playwright test",
     "test:e2e:prod": "npm run build && playwright test --config playwright.config.prod.ts",
     "test:e2e:native": "playwright test --config playwright.config.native.ts",

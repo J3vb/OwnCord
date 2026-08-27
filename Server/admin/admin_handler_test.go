@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/updater"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 // ─── NewHandler ───────────────────────────────────────────────────────────────

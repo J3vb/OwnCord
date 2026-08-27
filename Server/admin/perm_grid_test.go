@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // The admin panel's role editor renders one checkbox per permission bit from a

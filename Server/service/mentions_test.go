@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // newMentionFixture builds a channel 10 with three members (alice=1 author,

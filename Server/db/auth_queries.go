@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // ─── User Operations ──────────────────────────────────────────────────────────

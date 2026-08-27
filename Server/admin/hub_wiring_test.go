@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/owncord/server/ws"
+import "github.com/J3vb/OwnCord/Server/ws"
 
 // OC-0058: handlePatchUser reaches BroadcastMemberUnban through a type
 // assertion, which fails silently if *ws.Hub ever loses (or never had) the

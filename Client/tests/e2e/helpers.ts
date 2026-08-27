@@ -345,10 +345,10 @@ export function chatEchoHandlers(): Array<{ type: string; handler: string }> {
 /**
  * Voice WS flow handlers for E2E testing.
  * Simulates the server-side voice protocol defined in:
- *   docs/brain/06-Specs/PROTOCOL.md (voice_join, voice_leave, voice_token, voice_token_refresh)
- *   docs/protocol-schema.json (message type schemas)
+ *   docs/protocol.md (voice_join, voice_leave, voice_token, voice_token_refresh)
+ *   protocol/schema.json (message type schemas)
  *
- * When PROTOCOL.md voice message types change, update these handlers to match.
+ * When docs/protocol.md voice message types change, update these handlers to match.
  */
 export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
   return [

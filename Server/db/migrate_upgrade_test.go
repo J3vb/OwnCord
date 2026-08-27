@@ -25,8 +25,8 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/migrations"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 )
 
 // migrationCutoffFS presents a filtered view of an underlying migrations FS

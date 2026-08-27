@@ -14,7 +14,7 @@ CI fails on drift, and the next generator run silently discards your edit.
 | Generated                                                              | Source of truth                                 | Workflow                                                       |
 | ---------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
 | `Server/db/dbgen/`                                                     | `Server/db/queries/*.sql`, `Server/migrations/` | `db-change` skill                                              |
-| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts` | `docs/protocol-schema.json`                     | `protocol-change` skill                                        |
+| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                          | `protocol-change` skill                                        |
 | `Client/src/generated/`                                                | `tauri-typegen`                                 | CI patches known typegen bugs — see `.github/workflows/ci.yml` |
 
 ## Bug-hunt ledger

@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // diagnosticsResponse is returned by GET /api/v1/diagnostics/connectivity.

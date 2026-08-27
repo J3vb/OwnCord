@@ -37,14 +37,14 @@ dated snapshots that were true when written and were never updated, and
 These describe contracts the code implements. If one disagrees with the code,
 the code is right and the document is a bug.
 
-| Document                                           | Covers                                                                                                                                                 |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [api.md](api.md)                                   | REST API under `/api/v1`.                                                                                                                              |
-| [protocol.md](protocol.md)                         | WebSocket protocol — frames, sequencing, reconnect.                                                                                                    |
-| [schema.md](schema.md)                             | SQLite schema and migrations.                                                                                                                          |
-| [server-configuration.md](server-configuration.md) | Every server configuration option.                                                                                                                     |
-| [credential-storage.md](credential-storage.md)     | What the desktop client persists, and where.                                                                                                           |
-| [protocol-schema.json](protocol-schema.json)       | **Generated-code source of truth.** `Server/ws/message_types.go` and `Client/src/lib/protocolTypes.ts` are generated from it — never hand-edit either. |
+| Document                                           | Covers                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [api.md](api.md)                                   | REST API under `/api/v1`.                                                                                                                                                                                                                                              |
+| [protocol.md](protocol.md)                         | WebSocket protocol — frames, sequencing, reconnect.                                                                                                                                                                                                                    |
+| [schema.md](schema.md)                             | SQLite schema and migrations.                                                                                                                                                                                                                                          |
+| [server-configuration.md](server-configuration.md) | Every server configuration option.                                                                                                                                                                                                                                     |
+| [credential-storage.md](credential-storage.md)     | What the desktop client persists, and where.                                                                                                                                                                                                                           |
+| [../protocol/schema.json](../protocol/schema.json) | **Generated-code source of truth**, at the repository root because it is owned by neither side. `Server/ws/message_types.go` and `Client/src/lib/protocolTypes.ts` are generated from it — never hand-edit either. See [../protocol/README.md](../protocol/README.md). |
 
 ## Architecture
 

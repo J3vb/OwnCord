@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/owncord/server/db/dbgen"
-	"github.com/owncord/server/migrations"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/migrations"
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 

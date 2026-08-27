@@ -14,10 +14,10 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

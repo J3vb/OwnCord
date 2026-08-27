@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/owncord/server/syncutil"
-	"github.com/owncord/server/updater"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 const (

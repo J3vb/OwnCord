@@ -3,7 +3,7 @@ package ws
 import (
 	"context"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // registerVoiceControlsV2 registers all voice V2 handlers: the control toggles,

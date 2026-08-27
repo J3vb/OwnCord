@@ -53,7 +53,7 @@ func f() { var mu sync.Mutex; _ = mu }
 			name: "syncutil alias is clean",
 			path: "ws/x.go",
 			src: `package ws
-import "github.com/owncord/server/syncutil"
+import "github.com/J3vb/OwnCord/Server/syncutil"
 type Hub struct{ mu syncutil.RWMutex }
 `,
 			want: 0,

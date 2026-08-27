@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

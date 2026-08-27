@@ -1,11 +1,13 @@
-// seed.go is a standalone tool that populates an OwnCord database with
-// development data (users, channels, messages, DMs). It is idempotent:
-// running it multiple times against the same database is safe.
+// Command seed populates an OwnCord database with development data (users,
+// channels, messages, DMs). It is idempotent: running it multiple times
+// against the same database is safe.
 //
-// Usage:
+// Usage (from the Server/ directory):
 //
-//	go run scripts/seed.go                         # uses ./data/chatserver.db
-//	go run scripts/seed.go -db path/to/owncord.db  # custom path
+//	go run ./cmd/seed -confirm-dev                        # uses ./data/chatserver.db
+//	go run ./cmd/seed -confirm-dev -db path/to/owncord.db # custom path
+//
+// -confirm-dev is mandatory: the seeded accounts use weak passwords.
 package main
 
 import (
@@ -15,8 +17,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── Seed data definitions ──────────────────────────────────────────────────
@@ -136,6 +138,15 @@ func main() {
 	}
 
 	log.SetFlags(0) // no timestamp prefix — keep output clean
+
+	// The default DB path is data/chatserver.db, and db.Open does not create
+	// intermediate directories. Ensure ./data exists so a fresh checkout works.
+	// This sits here rather than in an init() so that importing or building the
+	// package touches no filesystem — the tool creates the directory only when
+	// it is actually about to open the default database.
+	if err := os.MkdirAll("data", 0o750); err != nil {
+		log.Printf("warning: could not create data directory: %v", err)
+	}
 
 	database, err := db.Open(*dbPath)
 	if err != nil {
@@ -358,14 +369,4 @@ func createDMConversation(database *db.DB, userIDs []int64) (int, error) {
 	}
 
 	return created, nil
-}
-
-// ─── Ensure data directory exists ───────────────────────────────────────────
-
-func init() {
-	// The default DB path is data/chatserver.db. Ensure the data directory
-	// exists so db.Open doesn't fail on a fresh checkout.
-	if err := os.MkdirAll("data", 0o750); err != nil {
-		log.Printf("warning: could not create data directory: %v", err)
-	}
 }

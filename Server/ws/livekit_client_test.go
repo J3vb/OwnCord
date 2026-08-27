@@ -9,8 +9,8 @@ import (
 	"github.com/livekit/protocol/livekit"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // LiveKitClient.ListParticipants, CountVideoTracks and HealthCheck had no

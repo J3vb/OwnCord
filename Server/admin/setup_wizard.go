@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── SetupOptions ────────────────────────────────────────────────────────────

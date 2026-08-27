@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // pwStore wraps a real *db.DB with controllable DeleteOtherSessions behavior

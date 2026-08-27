@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // newTestModerationService seeds a real in-memory DB with a role hierarchy:

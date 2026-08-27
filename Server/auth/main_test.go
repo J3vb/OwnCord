@@ -6,7 +6,7 @@ import (
 	"go.uber.org/goleak"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestMain(m *testing.M) {

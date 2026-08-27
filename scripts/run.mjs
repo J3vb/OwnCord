@@ -59,7 +59,7 @@ const tracked = (...patterns) => {
 // `git diff --exit-code` after regenerating is what `make protocol-verify` and
 // `make sqlc-verify` reduce to. Inlined so neither needs make.
 const PROTOCOL_VERIFY = [
-  step("go", ["run", "./scripts/genprotocol"], "Server"),
+  step("go", ["run", "./cmd/genprotocol"], "Server"),
   step(
     "git",
     ["diff", "--exit-code", "ws/message_types.go", "../Client/src/lib/protocolTypes.ts"],
@@ -151,7 +151,7 @@ const TASKS = {
   "check:hygiene": CHECK_HYGIENE,
   check: [...CHECK_DOCS, ...CHECK_HYGIENE, ...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
   generate: [
-    step("go", ["run", "./scripts/genprotocol"], "Server"),
+    step("go", ["run", "./cmd/genprotocol"], "Server"),
     optional(
       "sqlc",
       "sqlc",

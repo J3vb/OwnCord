@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // BlockService handles user block/unblock operations.

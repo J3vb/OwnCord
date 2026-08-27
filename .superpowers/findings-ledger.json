@@ -3755,7 +3755,7 @@
         "test": "Server/admin/setup_handler_test.go",
         "revertProof": "pass"
       },
-      "suggestedFix": "In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/owncord/server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.",
+      "suggestedFix": "In Server/admin/setup_handler.go:175 use the same fixpoint sanitizer as registration: `req.Username = strings.TrimSpace(service.SanitizeText(req.Username))` (Server/service/message.go:214). Server/admin already imports github.com/J3vb/OwnCord/Server/service (admin.go:12) and service does not import admin, so there is no cycle. One line, in the one place setup canonicalizes the username.",
       "fixedDate": "2026-08-19"
     },
     {
@@ -3775,7 +3775,7 @@
       "confidence": "high",
       "fix": {
         "commit": "69258a51",
-        "test": "Client/tests/unit/admin-static-channel-perms.test.ts",
+        "test": "Client/tests/contract/server-admin-static-channel-perms.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "In saveChannelPerms, record the role IDs the quick-toggle loop actually wrote and skip the matrix step when the selected target is one of them — one guard in the one function: collect `const touched=new Set()` in the loop (add role.role_id on each PUT/DELETE), then wrap the matrix block in `if(path && !(permTargetPath().indexOf('/permissions/')>-1 && touched.has(tid)))`. Cleanest variant: give the quick checkbox an onchange that patches the in-memory role.allow/role.deny in state.permChannel and calls renderPermMatrix(), so the matrix always reflects the pending toggle instead of the stale snapshot.",
@@ -5134,7 +5134,7 @@
         "test": "Client/tests/unit/livekit-e2ee.test.ts",
         "revertProof": "pass"
       },
-      "suggestedFix": "Carry the leaver's join instance in the broadcast and make the client's leave handling instance-conditional. finishVoiceLeave already holds `oldJoinToken` (voice_leave.go:56), so add it to voiceLeavePayload/buildVoiceLeave (via the protocol-change skill, since docs/protocol-schema.json is the source of truth) and record each peer's join token from voice_state in the client. Then guard the top of handleParticipantLeft: if the payload's join token is not the one currently recorded for that peer, ignore the event entirely — one guard in the shared function covers the delete, the retirement and the election at once. A client-only stopgap that removes the permanent half of the damage is to skip the `retirePeerKey` call at :1213-1215 whenever the peer is still present in `voiceStore.voiceUsers.get(channelId)`, which leaves the peer re-announceable instead of permanently blocked.",
+      "suggestedFix": "Carry the leaver's join instance in the broadcast and make the client's leave handling instance-conditional. finishVoiceLeave already holds `oldJoinToken` (voice_leave.go:56), so add it to voiceLeavePayload/buildVoiceLeave (via the protocol-change skill, since protocol/schema.json is the source of truth) and record each peer's join token from voice_state in the client. Then guard the top of handleParticipantLeft: if the payload's join token is not the one currently recorded for that peer, ignore the event entirely — one guard in the shared function covers the delete, the retirement and the election at once. A client-only stopgap that removes the permanent half of the damage is to skip the `retirePeerKey` call at :1213-1215 whenever the peer is still present in `voiceStore.voiceUsers.get(channelId)`, which leaves the peer re-announceable instead of permanently blocked.",
       "fixedDate": "2026-08-20"
     },
     {
@@ -6426,7 +6426,7 @@
       "lens": "flow-message",
       "finder": "opus",
       "confidence": "medium",
-      "suggestedFix": "Stop collapsing the two tokens on the wire, then apply the server's rule once on the client's replay path. (1) Add a `mentions_here` bool to chatMessagePayload/chatEditedPayload (Server/ws/messages.go:83 and :149) sourced from mentionSet.HereOnly (plumb it alongside MentionsEveryone through service/message.go's SendResult/EditResult and ws/handlers_chat.go), regenerating docs/protocol-schema.json -> message_types.go/protocolTypes.ts via the protocol-change skill. (2) In Client/src/lib/dispatcher.ts, hoist the existing `isReplayFrame` computation (currently dispatcher.ts:686-690) above the unread/mention block at 634-649 and gate the badge in that one place: treat a frame as a mention only when `payload.mentions.includes(me)` or (`payload.mentions_everyone && !(payload.mentions_here && isReplayFrame)`). That mirrors applyMentionCounts exactly — a here-only mention delivered in the reconnect burst is by definition one the reader was disconnected for — and leaves live delivery, @everyone, and direct mentions untouched. No change to mentions.ts's highlightsCurrentUser is needed for highlight rendering; only the badge increment must distinguish the two.",
+      "suggestedFix": "Stop collapsing the two tokens on the wire, then apply the server's rule once on the client's replay path. (1) Add a `mentions_here` bool to chatMessagePayload/chatEditedPayload (Server/ws/messages.go:83 and :149) sourced from mentionSet.HereOnly (plumb it alongside MentionsEveryone through service/message.go's SendResult/EditResult and ws/handlers_chat.go), regenerating protocol/schema.json -> message_types.go/protocolTypes.ts via the protocol-change skill. (2) In Client/src/lib/dispatcher.ts, hoist the existing `isReplayFrame` computation (currently dispatcher.ts:686-690) above the unread/mention block at 634-649 and gate the badge in that one place: treat a frame as a mention only when `payload.mentions.includes(me)` or (`payload.mentions_everyone && !(payload.mentions_here && isReplayFrame)`). That mirrors applyMentionCounts exactly — a here-only mention delivered in the reconnect burst is by definition one the reader was disconnected for — and leaves live delivery, @everyone, and direct mentions untouched. No change to mentions.ts's highlightsCurrentUser is needed for highlight rendering; only the badge increment must distinguish the two.",
       "fix": {
         "commit": "6f6d0ae",
         "test": "Client/tests/unit/dispatcher.test.ts",

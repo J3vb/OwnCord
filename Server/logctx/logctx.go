@@ -12,8 +12,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/owncord/server/telemetry"
 )
 
 type handler struct {

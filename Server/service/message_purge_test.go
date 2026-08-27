@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // newPurgeService builds a MessageService with a moderator (user 2, role 20,

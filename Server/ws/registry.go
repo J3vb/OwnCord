@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/owncord/server/stackutil"
+	"github.com/J3vb/OwnCord/Server/stackutil"
 )
 
 // handlerV2Entry pairs a V2 handler with its domain-specific dependency struct.

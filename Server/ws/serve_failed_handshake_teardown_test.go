@@ -19,8 +19,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // newTeardownTestDB opens an in-memory database with the full migration set.

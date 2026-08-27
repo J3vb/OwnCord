@@ -1,6 +1,6 @@
 package db
 
-import "github.com/owncord/server/db/dbgen"
+import "github.com/J3vb/OwnCord/Server/db/dbgen"
 
 // This file holds the conversions from sqlc-generated row/model types
 // (db/dbgen) to the domain model types this package exposes. sqlc emits int64

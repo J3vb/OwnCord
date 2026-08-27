@@ -11,11 +11,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // newTestModService builds a real ModerationService over the test database so

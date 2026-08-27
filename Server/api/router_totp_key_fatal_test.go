@@ -3,9 +3,9 @@ package api_test
 import (
 	"testing"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // TestNewRouterRefusesToStartWithMalformedTOTPKey pins OC-0228: a malformed

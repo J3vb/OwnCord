@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // ─── Authorization tests for channel read access (REST) ─────────────────────

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // The no-op provider is what runs in every build without -tags otel — i.e. the

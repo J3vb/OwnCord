@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/service"
 )
 
 // ─── handleCreateInvite: malformed JSON body ────────────────────────────────

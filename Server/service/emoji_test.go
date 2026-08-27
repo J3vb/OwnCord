@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // newEmojiService builds an EmojiService over a hierarchy where exactly one

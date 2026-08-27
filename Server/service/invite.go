@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // InviteService handles invite management.

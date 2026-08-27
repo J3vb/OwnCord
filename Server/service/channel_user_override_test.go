@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // seedChannelUserOverride sets a per-user permission override on a channel.

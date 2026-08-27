@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // EventStore persists broadcast events for cold-tier replay during reconnection

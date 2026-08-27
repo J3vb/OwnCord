@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 func TestLoadDefaults(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // compile-time check that SetPluginRegistry is exported.

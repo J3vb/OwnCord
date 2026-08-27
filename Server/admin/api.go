@@ -4,12 +4,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/updater"
 )
 
 // setupLimiterReapInterval and setupLimiterReapMaxWindow control how often

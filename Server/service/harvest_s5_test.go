@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // rendezvousListStore pairs up two concurrent ListRoles calls so both read the

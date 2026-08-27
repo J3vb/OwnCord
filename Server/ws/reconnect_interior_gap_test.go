@@ -22,8 +22,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestReconnect_InteriorGap_ForcesFullReady locks the guard that must be added

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // `archived` used to be consulted only by the visibility predicate

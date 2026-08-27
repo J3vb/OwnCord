@@ -9,7 +9,7 @@ package telemetry
 import (
 	"context"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 // Init configures and installs the OpenTelemetry SDK based on cfg. In the
