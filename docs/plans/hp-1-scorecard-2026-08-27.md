@@ -9,9 +9,9 @@
 [b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md)
 
 **Decision: PENDING — the repository owner records acceptance, not this
-document.** Seven of the eight exit conditions are evidenced below. Condition 7
-closes when B1-7 merges; condition 6 is **partially met** and is stated as such.
-Nothing found in the structural review blocks acceptance.
+document.** All eight exit conditions are evidenced below. Condition 6 is
+**partially met** and is stated as such. Nothing found in the structural review
+blocks acceptance.
 
 HP-1 asks one question: were B1's structural changes **mechanical**? This
 scorecard answers it with reproducible commands rather than assertion, then
@@ -167,8 +167,8 @@ scripts, hooks, or the Dockerfile:
 | 3   | Move and rewrite independently reviewable; active path refs complete | **met**           | Questions 1–5                                                                                                                                                                      |
 | 4   | Generated sources have explicit reproducible owners                  | **met**           | `check:server` regenerates and diffs both generators — below                                                                                                                       |
 | 5   | Protocol schema generates and verifies both consumers from the root  | **met**           | `protocol/schema.json` → `Server/ws/message_types.go` + `Client/src/lib/protocolTypes.ts`; enforced in `ci.yml`, `.githooks/pre-commit`, and `Server/ws/protocol_contract_test.go` |
-| 6   | Every `dev` integration commit has exact-SHA CI                      | **partially met** | See below — 11 checks pinned, but `strict: false`                                                                                                                                  |
-| 7   | Issues, Discussions, PRs, private security reporting match the model | **pending**       | B1-7, in flight when this was written — see below                                                                                                                                  |
+| 6   | Every `dev` integration commit has exact-SHA CI                      | **partially met** | See below — 12 checks pinned, but `strict: false`                                                                                                                                  |
+| 7   | Issues, Discussions, PRs, private security reporting match the model | **met**           | B1-7 (#1419), merged 2026-08-27 — see below                                                                                                                                        |
 | 8   | Full B0 evidence remains green after the migration                   | **met**           | Gate run below; every B0 number reproduced                                                                                                                                         |
 
 ### Condition 2 — nothing that names a release asset derives from a directory
@@ -257,13 +257,18 @@ Three traps this run hit, recorded so the next person does not:
 
 Live protection on `dev`, read from the API rather than inferred:
 
-| Setting                  | Value                                                           |
-| ------------------------ | --------------------------------------------------------------- |
-| Pull request required    | yes, **0** approvals                                            |
-| `enforce_admins`         | **true**                                                        |
-| Force pushes / deletions | disabled                                                        |
-| Required checks          | **11** — the 10 pinned in B1-0 plus `Repository Hygiene` (B1-3) |
-| `strict`                 | **false**                                                       |
+| Setting                  | Value                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| Pull request required    | yes, **0** approvals                                                                        |
+| `enforce_admins`         | **true**                                                                                    |
+| Force pushes / deletions | disabled                                                                                    |
+| Required checks          | **12** — B1-0's 10, plus `Repository Hygiene` (B1-3) and `Docs & Ledger Consistency` (B1-6) |
+| `strict`                 | **false**                                                                                   |
+
+The twelfth was pinned on 2026-08-27 by running
+[`b0-dev-branch-protection.sh`](b0-dev-branch-protection.sh), which B1-6 landed
+but deliberately did not run — repository-settings writes need a person. Until
+that run, the FINDINGS.md drift gate reported but could not block a merge.
 
 `strict: false` means "require branches to be up to date before merging" is
 **off**. When `dev` advances after a PR's checks go green, that PR can still
@@ -282,32 +287,59 @@ but forces a rebase on every open PR each time another lands, and
 the owner's to make, and it is a repository-settings change rather than a code
 one. Carried as an open item.
 
-### Condition 7 — not this document's to close
+### Condition 7 — closed by B1-7, plus the settings it could not apply
 
-B1-7 (`RL-21` issue forms and Discussions routing, `RL-22` automation
-authorization, `RL-16` tag-publication evidence) was still in flight when this
-scorecard was measured. Its own PR carries that evidence. `RL-22` is coordinated
-privately per [security.md](../security.md) and does not appear in public
-commits, issues, or PR descriptions — so this row is closed by B1-7's merge plus
-the private record, not by anything visible here.
+B1-7 (#1419) landed the community model on 2026-08-27, and its two
+repository-settings scripts were applied the same day:
 
-Everything else in this scorecard was measured against `db3f28b7`, which does
-not contain B1-7. Re-running the gate after B1-7 merges is cheap
-(`npm run check`) and is the honest way to close condition 8 over the final
-tree; the numbers above are not expected to move, because B1-7 touches
-`.github/` templates rather than code.
+| Control                | State                                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `Release tags` ruleset | **active**, target `tag`, `refs/tags/v*`, blocks update + deletion, **0 bypass actors**       |
+| `release` environment  | created, **1 required reviewer** (`J3vb`), no wait timer                                      |
+| Discussions slugs      | `q-a` and `ideas` both exist and match `.github/ISSUE_TEMPLATE/config.yml` — routing resolves |
+
+Two things that read-back surfaced, neither blocking:
+
+- **The `release` environment has `can_admins_bypass: true`** (GitHub's
+  default). The ruleset was created with `bypass_actors: []` so nobody can
+  bypass _it_, but the reviewer gate on the environment is admin-bypassable.
+  On a repository where the sole admin is also the sole reviewer this changes
+  little, and it is the setting to revisit if that ever stops being true.
+- **`.github/workflows/claude.yml` cannot authenticate.** It passes
+  `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`, and that
+  secret does not exist on the repository — `gh secret list` shows six secrets,
+  none of them it. Five `issue_comment` runs exist and every one is `skipped`,
+  so the B1-7 guard is stopping them before the missing secret would matter.
+  The paid-automation surface `RL-22` hardens is therefore inert today.
+
+`RL-22` is coordinated privately per [security.md](../security.md) and does not
+appear in public commits, issues, or PR descriptions — so that part of this row
+is closed by B1-7's merge plus the private record, not by anything visible here.
+
+The structural proofs in Questions 1–5 were measured before B1-7 merged, which
+does not matter: they compare fixed historical SHAs. The **gate run** did
+matter, so it was re-run after this branch was rebased onto `c0c87366` (B1-7),
+over the final tree — including B1-7's `check-workflow-guards.mjs`, which
+`check:hygiene` now runs twice (`--selftest`, then live). Its sibling
+`verify-gate-evidence.mjs` is **not** in the local facade: `ci.yml` runs its
+`--selftest` and the assert form needs a `$GITHUB_TOKEN` and a real SHA, so CI
+is the only place it is exercised.
 
 ## Open items carried past B1
 
 Recorded, not fixed. Nothing here blocks B2's entry gate.
 
-| Item                           | State                                                                                                                                                                                                                   |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RL-08` — WASM artifact gate   | **blocked.** The pinned TinyGo rejects Go 1.26, so a compile-and-compare job needs a second Go SDK. B1-6 judged the cheaper honest option to be untracking the prebuilt artifact and documenting the build. Unresolved. |
-| `dev` `strict: false`          | **open.** Condition 6 above.                                                                                                                                                                                            |
-| 38 open `OC-*` findings        | **counted, non-stale, assigned.** 11 medium / 27 low, zero high or critical, none assigned to B1. Accepted at HP-0; re-stated here, not re-adjudicated.                                                                 |
-| Two unreferenced Rust commands | `probe_credential_store` and `ptt_get_key` are registered in `lib.rs` and invoked from nowhere. Dead-surface candidates for B7, recorded in [platform-contracts.md](../architecture/platform-contracts.md).             |
-| Human owners for `platform/`   | **none exist.** Ownership is recorded by phase (B7/B8/B2) because there is nothing else to record.                                                                                                                      |
+| Item                                   | State                                                                                                                                                                                                                                      |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RL-08` — WASM artifact gate           | **blocked.** The pinned TinyGo rejects Go 1.26, so a compile-and-compare job needs a second Go SDK. B1-6 judged the cheaper honest option to be untracking the prebuilt artifact and documenting the build. Unresolved.                    |
+| `dev` `strict: false`                  | **open.** Condition 6 above.                                                                                                                                                                                                               |
+| 38 open `OC-*` findings                | **counted, non-stale, assigned.** 11 medium / 27 low, zero high or critical, none assigned to B1. Accepted at HP-0; re-stated here, not re-adjudicated.                                                                                    |
+| Two unreferenced Rust commands         | `probe_credential_store` and `ptt_get_key` are registered in `lib.rs` and invoked from nowhere. Dead-surface candidates for B7, recorded in [platform-contracts.md](../architecture/platform-contracts.md).                                |
+| Human owners for `platform/`           | **none exist.** Ownership is recorded by phase (B7/B8/B2) because there is nothing else to record.                                                                                                                                         |
+| `environment: release` in the workflow | **open, deliberately.** `.github/workflows/release.yml` does not name the environment. The key stalls a release if the environment does not exist, so B1-7 left it out; the environment now exists, so this is a separate two-line change. |
+| `release` env admin bypass             | **open.** `can_admins_bypass: true` (GitHub default). The ruleset has zero bypass actors, but the reviewer gate does not. Matters only once the sole admin stops being the sole reviewer.                                                  |
+| `CLAUDE_CODE_OAUTH_TOKEN`              | **absent.** `claude.yml` passes it and the repository has no such secret, so the workflow cannot authenticate. Every run to date is `skipped` at the B1-7 guard, so nothing is failing — but the automation is inert.                      |
+| `ENV-03` — `MSYS_NO_PATHCONV`          | **open, P2.** `Server/scripts/docker-smoke.sh` still does not set it, so Git Bash on Windows reports a boot failure that did not happen.                                                                                                   |
 
 ## Hand-off to B2
 

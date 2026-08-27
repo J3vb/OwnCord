@@ -19,7 +19,7 @@ authority**.
 | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                                       | **Supersedes the roadmap's "current evidence snapshot."** B0 measurements and dispositions.                                           |
 | [b1-repository-foundation-2026-08-25](b1-repository-foundation-2026-08-25.md)             | **B1-0 through B1-8 all done.** B1 execution plan. Re-verifies every RL-\* claim against HEAD; several are refuted.                   |
 | [hp-0-scorecard-2026-08-25](hp-0-scorecard-2026-08-25.md)                                 | **HP-0 accepted 2026-08-25.** The single baseline-acceptance artifact. Part-closes `R-08`.                                            |
-| [hp-1-scorecard-2026-08-27](hp-1-scorecard-2026-08-27.md)                                 | **HP-1 review done; acceptance pending B1-7.** Structural-diff proofs for the flatten and module rename, plus the B1 exit gate.       |
+| [hp-1-scorecard-2026-08-27](hp-1-scorecard-2026-08-27.md)                                 | **HP-1 review done; owner acceptance pending.** Structural-diff proofs for the flatten and module rename, plus the B1 exit gate.      |
 | [audit-2026-08-19-remediation](audit-2026-08-19-remediation.md)                           | Phases 1–6 done 2026-08-20; **phase 7 pending**. Its header still reads "in progress 2026-08-19" — stale; the phase table is correct. |
 
 ## Partially implemented
