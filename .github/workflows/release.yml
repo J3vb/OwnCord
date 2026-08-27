@@ -15,12 +15,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # R-09 / RL-16. ci.yml has no `tags:` trigger, so a tag push starts this
+  # workflow and nothing else — and this workflow re-runs none of the required
+  # checks. It builds, smokes and signs, which is a different question from
+  # "did the gate pass on this commit".
+  #
+  # It did not, at least once: v1.2.0-alpha.3 published from a commit whose
+  # `Server Build & Test (windows-latest)` had concluded failure. Nothing
+  # noticed, because nothing looked.
+  #
+  # The required set is read out of b0-dev-branch-protection.sh rather than
+  # restated here, so pinning a new check cannot leave this gate behind. The
+  # logic lives in a script with a --selftest that ci.yml runs on every PR:
+  # a step that exists only in this file first executes at tag time, which is
+  # the wrong place to discover its bugs.
+  gate-evidence:
+    name: Verify exact-SHA gate evidence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Required checks must be green on the tagged commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/verify-gate-evidence.mjs "${{ github.sha }}"
+
   # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
   # because the client manifests weren't bumped before tagging — deployed
   # clients then never saw the update. Fail fast on that mismatch, before any
   # expensive build starts.
   verify-versions:
     name: Verify client version matches tag
+    # Every build job needs verify-versions, and both publishers need those, so
+    # one edge here gates the whole graph — nothing builds, pushes to GHCR, or
+    # creates a Release on a commit that did not pass.
+    needs: gate-evidence
     runs-on: ubuntu-latest
     permissions:
       contents: read

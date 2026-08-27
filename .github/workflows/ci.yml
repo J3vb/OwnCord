@@ -193,6 +193,16 @@ jobs:
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
 
+      # R-09 / RL-16. The release gate itself is only invoked for real at tag
+      # time, which is the wrong place to find a bug in it — so its decision
+      # logic is exercised here, on every pull request, against fixtures. Same
+      # reason Server/scripts/docker-smoke.sh is called from both workflows.
+      # This also parses the required-check list out of
+      # b0-dev-branch-protection.sh, so a change to that list's shape fails here
+      # rather than silently weakening the gate.
+      - name: Self-test the release gate
+        run: node scripts/verify-gate-evidence.mjs --selftest
+
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
       # failure. Rendering twice and comparing tests both: the render must
