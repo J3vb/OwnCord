@@ -121,9 +121,16 @@ candidate counts make an anomalously empty lens visible after the fact.
 
 ## 2. Gate (human)
 
-Read `.superpowers/FINDINGS.md`. Mark anything you do not want fixed as
-`declined` with a rationale — declined findings are fed back into the next hunt's
-prompts and never re-reported.
+Generate the readable rendering, then read it — it is gitignored, so a fresh
+clone has no copy until you make one:
+
+```bash
+node .superpowers/render-ledger.mjs   # writes .superpowers/FINDINGS.md
+```
+
+Mark anything you do not want fixed as `declined` with a rationale — declined
+findings are fed back into the next hunt's prompts and never re-reported. Edit
+`findings-ledger.json` to do that, not the rendering.
 
 ## 3. Fix
 

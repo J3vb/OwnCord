@@ -76,12 +76,16 @@ node_modules/
 .claude-flow/
 .rust-review-results/
 
-# Bug-hunt ledger: shared so contributors can add findings. Only the ledger,
-# its render and its validator are tracked; hunt transcripts, .bak snapshots
-# and debris patches are per-session scratch and stay local.
+# Bug-hunt ledger: shared so contributors can add findings. Only the ledger and
+# its renderer are tracked; hunt transcripts, .bak snapshots and debris patches
+# are per-session scratch and stay local.
+#
+# FINDINGS.md is deliberately NOT tracked (RL-07): it is 100% derived from
+# findings-ledger.json, and every hunt would otherwise write a fresh ~1.06 MB
+# blob into permanent history for a file a reader can regenerate in under a
+# second with `node .superpowers/render-ledger.mjs`.
 .superpowers/*
 !.superpowers/findings-ledger.json
-!.superpowers/FINDINGS.md
 !.superpowers/render-ledger.mjs
 
 .claude/worktrees/

@@ -458,9 +458,12 @@ behaviour rather than adopting workspaces on principle.
 - **`RL-06/L-06`** — 20.41 MB tracked, `graph.json` 19.46 MB. Local regeneration
   is demonstrated; Linux/CI portability is the remaining unknown. Do not untrack
   before a CI artifact exists. Never rewrite published history.
-- **`RL-07/L-07`** — the sharpest of the three. `--check` cannot detect drift and
-  no workflow runs it. Add a real drift check (render to a temp file and diff),
-  wire it into CI, _then_ consider untracking the rendering.
+- **`RL-07/L-07`** — **done.** `--check` returned before `render()` and never
+  opened `FINDINGS.md`, so a stale 1.09 MB rendering passed the
+  `Docs & Ledger Consistency` job cleanly. B1-6 landed the drift check first,
+  then untracked the rendering — which removes the drift class entirely rather
+  than watching it. `findings-ledger.json` stays the only tracked copy; CI
+  renders twice, compares, and uploads the result as an artifact.
 - **`RL-08/L-08`** — source is committed; only the gate is missing, and it is
   **blocked by a toolchain conflict** (pinned TinyGo rejects Go 1.26, so a
   compile-and-compare job needs a second Go SDK). The cheaper honest option may

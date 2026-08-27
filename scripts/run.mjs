@@ -110,17 +110,15 @@ const CHECK_RUST = [
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
 ];
 
-// RL-07. `render-ledger.mjs --check` validates the ledger's schema and returns
-// before rendering, so it cannot see a stale FINDINGS.md. Regenerate, then let
-// git be the differ — the same shape as PROTOCOL_VERIFY and SQLC_VERIFY above.
-// --stat, not a full diff: a fully drifted 1.09 MB rendering is a ~40,000-line
-// log, and the exit code is what gates. Rendering also validates, because
-// main() exits 1 on a schema problem before it writes, so this subsumes --check.
+// RL-07. FINDINGS.md is not tracked, so there is no committed rendering to
+// drift — the gate is that generation must succeed. Rendering subsumes
+// `--check`: main() validates and exits 1 on a schema problem before it writes.
+// It also leaves the contributor a readable copy, which is the point of running
+// it locally. CI additionally renders twice and compares, to prove the output
+// is a pure function of the ledger; that needs a temp path, so it lives in
+// ci.yml rather than here.
 // `step`, not `optional`: this file is itself Node, so probing for it is theatre.
-const LEDGER_VERIFY = [
-  step("node", [".superpowers/render-ledger.mjs"], "."),
-  step("git", ["diff", "--exit-code", "--stat", ".superpowers/FINDINGS.md"], "."),
-];
+const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
 
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.

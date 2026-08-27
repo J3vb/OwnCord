@@ -60,19 +60,17 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
     fi
 fi
 
-# Findings ledger changed -> the rendered FINDINGS.md must be in the same commit.
-# Same regenerate-then-diff shape as the two blocks above. render-ledger.mjs is
-# Node-stdlib-only, so `node` alone is the probe — no node_modules guard, unlike
-# the prettier block below. FINDINGS.md is in the pattern on purpose: CLAUDE.md
-# forbids hand-editing it, and this is the only gate that sees a hand-edit
-# before it becomes a commit.
-if printf '%s\n' "$staged" | grep -qE '^\.superpowers/(findings-ledger\.json|FINDINGS\.md|render-ledger\.mjs)$'; then
+# Findings ledger changed -> it must still be valid. Unlike the two blocks
+# above there is nothing to diff: FINDINGS.md is not tracked (RL-07), so a
+# stale rendering cannot be committed. --check is the whole gate here, and it
+# writes nothing. render-ledger.mjs is Node-stdlib-only, so `node` alone is the
+# probe — no node_modules guard, unlike the prettier block below.
+if printf '%s\n' "$staged" | grep -qE '^\.superpowers/(findings-ledger\.json|render-ledger\.mjs)$'; then
     if command -v node >/dev/null 2>&1; then
-        (node .superpowers/render-ledger.mjs \
-            && git diff --exit-code --stat .superpowers/FINDINGS.md) \
-            || fail "FINDINGS.md is stale — run 'node .superpowers/render-ledger.mjs' and stage the result"
+        node .superpowers/render-ledger.mjs --check \
+            || fail "findings-ledger.json is invalid — see the INVALID lines above"
     else
-        printf 'pre-commit: WARNING: node not installed; skipping the FINDINGS.md check. CI will run it.\n' >&2
+        printf 'pre-commit: WARNING: node not installed; skipping the ledger check. CI will run it.\n' >&2
     fi
 fi
 
