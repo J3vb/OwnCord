@@ -3,8 +3,9 @@
 **Drafted:** 2026-08-25
 **Base commit:** `6a1561fa` (`dev`, post-PR #1409)
 **Status:** in progress; **entry gate met — HP-0 accepted 2026-08-25**. B1-0
-(#1410), B1-1 (#1411), B1-2 (#1412) and B1-3 are complete; B1-4 is the next
-step.
+(#1410), B1-1 (#1411), B1-2 (#1412), B1-3 (#1414), B1-4 (#1415), B1-5 (#1417)
+and B1-6 (this branch) are complete; B1-7, community intake and automation
+authorization, is the next step.
 
 Primary inputs:
 
