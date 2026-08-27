@@ -29,6 +29,12 @@
 #       This is the half of S-05 that makes the gate a gate -- a check that is
 #       present but unpinned lets a formatting regression merge.
 #
+#       Docs & Ledger Consistency added 2026-08-27 (B1-6). Name read off PR #1418
+#       after the job reported `success`. Unpinned it was harmless while the job
+#       only validated the ledger's JSON schema. B1-6 made it also reject a
+#       ledger that fails to render, and L-07's closure evidence is "CI rejects
+#       generation failure or drift" -- rejecting requires pinning.
+#
 #       Deliberately NOT pinned, and why:
 #         Server Docker Build (verify)  reports "skipping" on a dev PR
 #                                       (if: ref_name=='main' || base_ref=='main')
@@ -40,10 +46,6 @@
 #                                       theatre (that is R-01, B10 work)
 #         CodeQL                        default-setup aggregate over the three
 #                                       Analyze jobs; pinning those is enough
-#         Docs & Ledger Consistency     reports and passes on a dev PR, and is NOT
-#                                       pinned. That looks like an oversight from
-#                                       the 2026-08-25 pass rather than a decision;
-#                                       it belongs to G-04, not to B1-3.
 #
 #       A required check that never reports blocks every PR forever. Re-read the
 #       list before changing it:
@@ -66,6 +68,7 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
       "Client Unit Tests",
       "Rust Unit Tests",
       "Repository Hygiene",
+      "Docs & Ledger Consistency",
       "Client E2E (Playwright)",
       "Client E2E (parity subset, blocking)",
       "Analyze (go)",

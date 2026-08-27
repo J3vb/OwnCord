@@ -8,5 +8,3 @@
 *.wasm binary
 *.exe binary
 
-# Rendered from findings-ledger.json by render-ledger.mjs — never hand-edit.
-.superpowers/FINDINGS.md linguist-generated=true

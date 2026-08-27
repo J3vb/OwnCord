@@ -60,6 +60,20 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
     fi
 fi
 
+# Findings ledger changed -> it must still be valid. Unlike the two blocks
+# above there is nothing to diff: FINDINGS.md is not tracked (RL-07), so a
+# stale rendering cannot be committed. --check is the whole gate here, and it
+# writes nothing. render-ledger.mjs is Node-stdlib-only, so `node` alone is the
+# probe — no node_modules guard, unlike the prettier block below.
+if printf '%s\n' "$staged" | grep -qE '^\.superpowers/(findings-ledger\.json|render-ledger\.mjs)$'; then
+    if command -v node >/dev/null 2>&1; then
+        node .superpowers/render-ledger.mjs --check \
+            || fail "findings-ledger.json is invalid — see the INVALID lines above"
+    else
+        printf 'pre-commit: WARNING: node not installed; skipping the ledger check. CI will run it.\n' >&2
+    fi
+fi
+
 # ---------- Formatting (repository-wide) ----------
 # Prettier is configured once at the repository root (.prettierrc.json) and
 # covers every material tracked source, not just client TypeScript.

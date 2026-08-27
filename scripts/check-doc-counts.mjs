@@ -7,8 +7,11 @@
 //
 // Scope, deliberately small: this counts ledger statuses and compares them to
 // the numbers active documents assert. It is not a document-status framework,
-// and it does not check that FINDINGS.md is in sync with the ledger — that is a
-// different check (RL-07) with a different owner.
+// and it does not check that FINDINGS.md is in sync with the ledger — that was
+// RL-07, and B1-6 answered it by not tracking FINDINGS.md at all, so there is
+// no committed rendering left to drift. `npm run check:docs` runs this script
+// and then regenerates the rendering, which is where a generation failure
+// surfaces.
 //
 // It reads findings-ledger.json directly and does NOT import render-ledger.mjs.
 // That module has no `import.meta.main` guard, so importing it to reuse
@@ -51,7 +54,6 @@ const WATCHED = [
   "docs/plans/repo-health-issue-register-2026-08-23.md",
   "docs/plans/b0-baseline-2026-08-25.md",
   "docs/plans/b1-repository-foundation-2026-08-25.md",
-  ".superpowers/FINDINGS.md",
   "CLAUDE.md",
   "README.md",
 ];

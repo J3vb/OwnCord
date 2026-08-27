@@ -19,17 +19,21 @@ CI fails on drift, and the next generator run silently discards your edit.
 
 ## Bug-hunt ledger
 
-`.superpowers/findings-ledger.json` is the shared ledger of hunt findings —
-open a PR against it to add one. `FINDINGS.md` is rendered from it:
+`.superpowers/findings-ledger.json` is the shared ledger of hunt findings and
+the only tracked copy — open a PR against it to add one. The readable
+`FINDINGS.md` is **not tracked**: generate it whenever you want to read one
+(gitignored, under a second, and CI uploads it as a build artifact):
 
 ```
-node .superpowers/render-ledger.mjs           # rewrite FINDINGS.md
+node .superpowers/render-ledger.mjs           # write a local FINDINGS.md
 node .superpowers/render-ledger.mjs --check   # validate the ledger only
 ```
 
-Statuses: `open`, `fixed`, `declined`, `refuted`, `duplicate`, `blocked`.
-Never edit `FINDINGS.md` by hand — edit the ledger and re-render. Everything
-else under `.superpowers/` is per-session scratch and stays local.
+Statuses: `open`, `fixed`, `declined`, `refuted`, `duplicate`, `blocked`;
+`severity` must be `critical`, `high`, `medium` or `low`. Edit the ledger, never
+the rendering — a hand-edited `FINDINGS.md` is overwritten by the next render
+and committed by nothing. Everything else under `.superpowers/` is per-session
+scratch and stays local.
 
 ## Gotchas
 

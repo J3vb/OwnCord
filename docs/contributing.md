@@ -26,18 +26,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command                       | Description                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `npm run bootstrap`           | `npm ci` in all three package roots                                             |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                    |
-| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift |
-| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                 |
-| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                   |
-| `npm run check:docs`          | Fail if a watched document states a finding count the ledger contradicts        |
-| `npm run format`              | Prettier over the client, `gofmt -w` over the server                            |
-| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                          |
-| `npm run release:preflight`   | `check` plus a client production build                                          |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                              |
+| Command                       | Description                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                                               |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                                      |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                   |
+| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                                   |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                     |
+| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or the ledger fails to render |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                              |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                            |
+| `npm run release:preflight`   | `check` plus a client production build                                                            |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                                |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.
@@ -144,18 +144,23 @@ you. Put it under `.githooks/` instead (untracked, so it stays yours), or skip
 ## Plugin Development
 
 Plugins are WASM modules loaded at runtime when the server is built with `-tags wazero`.
-See `Server/plugin/examples/hello/README.md` for the full plugin ABI and build instructions.
 
-**Toolchain requirements for building `.wasm` plugins with TinyGo:**
+> **The plugin ABI is experimental and carries no compatibility promise.** The
+> subsystem is disabled twice over — it compiles only under `-tags wazero`
+> (`Server/plugin/sandbox_default.go`), and `plugins.enabled` defaults to
+> `false` (`Server/config/config.go`) — and the five exported functions may
+> change or be removed in any release without a deprecation period.
 
-| Tool     | Version      | Notes                                                                                               |
-| -------- | ------------ | --------------------------------------------------------------------------------------------------- |
-| TinyGo   | 0.40.1       | Supports Go 1.19–1.25 only                                                                          |
-| Go SDK   | 1.25.x       | Install alongside the system Go via `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
-| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases                    |
+See [`Server/plugin/examples/hello/README.md`](../Server/plugin/examples/hello/README.md)
+for the ABI, the build command, and the pinned TinyGo/Go/Binaryen versions. That
+file is the single source of truth for the plugin toolchain — this page used to
+carry a second copy of the version table, and the two had already drifted apart
+in wording.
 
-Any WASM toolchain (Rust/`wasm32-wasi`, AssemblyScript, etc.) that exports the five ABI
-functions is equally valid — TinyGo is just the example toolchain used by `examples/hello/`.
+The example's `.wasm` is not checked in: TinyGo embeds absolute host paths from
+the building machine and offers no `-trimpath`, so its output is not
+byte-reproducible and no CI job can verify it. Build it locally from the source
+beside it.
 
 ---
 
@@ -220,7 +225,7 @@ and target.
 
 1. Branch from `dev`
 2. Open the PR against `dev`
-3. All ten required checks must pass -- `dev` is protected, so a red PR cannot
+3. All twelve required checks must pass -- `dev` is protected, so a red PR cannot
    merge
 4. Request code review
 5. Squash merge, conventional commit subject
@@ -314,7 +319,11 @@ closing audit findings 2026-04-07 #8 / DC-11):
   `package.json` files say Node 24 — with `engine-strict=true` in each
   package's `.npmrc`, so a wrong major fails the install instead of warning.
   `Server/sqlc.version` pins sqlc, Go pins via `go.mod` (`GOTOOLCHAIN=auto`),
-  and GitHub Actions are SHA-pinned with Dependabot bumping the pins.
+  and GitHub Actions are SHA-pinned with Dependabot bumping the pins. The one
+  deliberate exception is the plugin toolchain: TinyGo and Binaryen are
+  _documented_ rather than file-pinned, because no gate installs them and
+  nothing would read the pin — the example plugin's README is their single
+  source of truth.
 - **Three package roots, not an npm workspace** — measured 2026-08-26 (npm
   11.17, Node 26), not decided on principle. Making `/`, `/Client` and
   `/tools/mcp-introspect` npm workspaces buys one 298 KB lockfile instead of

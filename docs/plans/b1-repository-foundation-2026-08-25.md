@@ -3,8 +3,9 @@
 **Drafted:** 2026-08-25
 **Base commit:** `6a1561fa` (`dev`, post-PR #1409)
 **Status:** in progress; **entry gate met — HP-0 accepted 2026-08-25**. B1-0
-(#1410), B1-1 (#1411), B1-2 (#1412) and B1-3 are complete; B1-4 is the next
-step.
+(#1410), B1-1 (#1411), B1-2 (#1412), B1-3 (#1414), B1-4 (#1415), B1-5 (#1417)
+and B1-6 (this branch) are complete; B1-7, community intake and automation
+authorization, is the next step.
 
 Primary inputs:
 
@@ -136,9 +137,9 @@ that changes the work.
 | **RL-01** release names                                       | **Safe to move**                      | `productName: "OwnCord"`, `identifier: "com.owncord.client"`, crate `owncord-client`, lib `owncord_client_lib` — none derived from the directory. `updater.endpoints` is `[]` (server-mediated via `Server/api/client_update.go`). Every release staging step globs by **filename suffix**, matched server-side by `Server/updater/assets.go`. **The move cannot rename a release asset.**                                                                                                                                             |
 | **RL-09** "no one command verifies both consumers"            | **Sub-claim refuted**                 | `make protocol-verify` already regenerates _and_ diffs both outputs, and it is enforced three times over: `ci.yml`, `.githooks/pre-commit`, and `Server/ws/protocol_contract_test.go`. Only the schema's _location_ is a real finding. Scope shrinks to a relocation.                                                                                                                                                                                                                                                                  |
 | **RL-10** "`init()` creates a data dir during test discovery" | **Alarming half refuted**             | `Server/scripts/` contains zero `_test.go` files, so Go never builds a test binary there and `init()` never fires under `go test ./...`. `seed.go` does `os.MkdirAll("data", 0o750)`, but only when the binary is run — and `.gitignore` already ignores `Server/data/`. Residual finding is narrow: an untagged `package main` in the main module's build graph.                                                                                                                                                                      |
-| **RL-06** "regeneration not demonstrated"                     | **Refuted locally**                   | `graphify` 0.9.41 is installed and on PATH. Tracked payload is **20.41 MB**, `graph.json` **19.46 MB**. Note `du -sh graphify-out/` reports 208 MB — that is gitignored dated snapshots plus `cache/`, not repo weight. Linux/CI portability remains unproven.                                                                                                                                                                                                                                                                         |
+| **RL-06** "regeneration not demonstrated"                     | **Closed by deletion**                | Superseded before B1-6 opened: `a5f7d95` (#1413) removed the tool and all 7 tracked files — **20,408,656 bytes**, `graph.json` **19,463,420**. `git ls-files` now matches nothing. The outcome RL-06 wanted (no large tracked payload, history intact) holds; the method it prescribed (regenerate-then-untrack) was bypassed. Portability is moot — there is nothing to regenerate.                                                                                                                                                   |
 | **RL-08** "committed without its source"                      | **Half refuted**                      | The source _is_ committed (`Server/plugin/examples/hello/main.go`, `//go:build tinygo`). Only the gate is missing. **New constraint:** pinned TinyGo 0.40.1 rejects Go 1.26, so a compile-and-compare CI job needs a second Go SDK. L-08 is harder than the audit implies.                                                                                                                                                                                                                                                             |
-| **RL-07** FINDINGS.md duplication                             | **Confirmed, sharper**                | `render-ledger.mjs --check` validates the JSON schema and returns **before** rendering, so it cannot detect drift at all; a stale 1.09 MB `FINDINGS.md` passes cleanly. And no workflow runs it.                                                                                                                                                                                                                                                                                                                                       |
+| **RL-07** FINDINGS.md duplication                             | **Confirmed, sharper**                | `render-ledger.mjs --check` validates the JSON schema and returns **before** rendering, so it cannot detect drift at all; a stale 1.09 MB `FINDINGS.md` passes cleanly. B1-2 (#1412) wired that schema-only check into the `Docs & Ledger Consistency` job, which is why the original "no workflow runs it" no longer holds — the job runs, it just cannot see drift. B1-6 adds the check that can.                                                                                                                                    |
 | **RL-20** hooks                                               | **Confirmed, plus an unreported bug** | `make` is not on PATH on a normal Windows contributor box, yet the `ci-check` skill lists `make sqlc-verify protocol-verify` as required. Worse: `.githooks/pre-commit`'s protocol branch guards on `command -v go`, not `make` — so Go-without-`make` yields a false **"protocol constants are stale"** hard failure. Separately, `core.hooksPath` may be unset (so `.githooks/` never runs) while a local `post-commit` does; `npm run hooks:install` redirects `core.hooksPath` and silently disables any `.git/hooks/post-commit`. |
 | **RL-05** package roots                                       | **Confirmed, wider**                  | Three JS roots, no workspaces. `dependabot.yml` covers npm for one of them — root and `tools/mcp-introspect` are uncovered — and omits the **`docker` ecosystem entirely** despite three Docker files.                                                                                                                                                                                                                                                                                                                                 |
 | **RL-11** cross-stack test                                    | **Confirmed; both directions exist**  | Client→Server: `tests/unit/admin-static-channel-perms.test.ts` plus three e2e siblings (`playwright.config.admin.ts`, `tests/e2e/admin/admin-panel.spec.ts`, `tests/e2e/admin/start-server.sh`). Server→Client: `Server/updater/updater_test.go` does `os.ReadFile` on the client's `tauri.conf.json`. Also `Server/ws/protocol_contract_test.go` reads `docs/protocol-schema.json`. A sweep reporting "no server→client reads" is wrong.                                                                                              |
@@ -172,15 +173,9 @@ else in the diff.
 
 ### Step 1 — freeze the environment
 
-```bash
-export GRAPHIFY_SKIP_HOOK=1     # keep set for the whole sequence
-```
-
-The graphify `post-commit` hook launches a detached graph rebuild after any
-commit touching a non-`graphify-out/` path. Left on, it rewrites `graphify-out/`
-between commit 1 and commit 2 — the two commits stop being adjacent, and the
-background write can race staging. `GRAPHIFY_SKIP_HOOK=1` is the documented off
-switch; no uninstall needed.
+A detached `post-commit` graph rebuild used to dirty the tree between commits
+here, which is why this step once began by exporting `GRAPHIFY_SKIP_HOOK=1`.
+That tool and its hook were removed in `a5f7d95` (#1413); nothing to disable.
 
 Close any editor, `cargo`, `vite`, or file watcher holding
 `Client/tauri-client/src-tauri/target/`: a Windows directory rename fails while a
@@ -286,9 +281,7 @@ the client's own `.gitignore`. `Server/Makefile` and `genprotocol` use
 `../Client/…` from `Server/`, so their depth is unchanged — only the path
 element drops.
 
-**Leave alone:** every dated `docs/audit-*.md`, `graphify-out/**` (regenerated —
-and `.graphify_labels.json` is covered byte-for-byte by its `.sig`, so
-hand-editing invalidates it), and `CHANGELOG.md`.
+**Leave alone:** every dated `docs/audit-*.md`, and `CHANGELOG.md`.
 
 ### The ledger is the one real judgement call
 
@@ -363,15 +356,10 @@ Targeted proofs the generic suite will not give you:
 
 ### Step 7 — refresh the graph, separately
 
-```bash
-unset GRAPHIFY_SKIP_HOOK
-graphify update .
-git commit -am "chore(graphify): refresh knowledge graph after the Client flatten"
-```
-
-Its own commit, per `CLAUDE.md`. The 13,233 stale path strings in `graph.json`
-regenerate; never hand-edit them, and never fold an 18 MB blob into the
-structural diff.
+**Retired.** This step ran `graphify update .` to regenerate the 13,233 stale
+path strings in `graph.json` after the flatten. The tool was removed wholesale
+in `a5f7d95` (#1413), so the command no longer exists and `git commit -am` here
+would commit nothing while appearing to succeed.
 
 ### PR shape
 
@@ -411,7 +399,7 @@ Covers `RL-17/C-01`, `RL-12/R-06`, the `G-04` remnant, `RL-04/L-04`,
      facade — `go run ./scripts/genprotocol` plus `git diff --exit-code` already
      works — and update the `ci-check` skill to match.
    - `npm run hooks:install` repoints `core.hooksPath` at `.githooks/`, which has
-     no `post-commit`, silently disabling any locally installed one (graphify).
+     no `post-commit`, silently disabling any locally installed one.
      Either ship a chaining `.githooks/post-commit` or document the exclusivity.
 6. **Branch policy (`R-02`).** One statement of the branch/PR model. Active
    documents currently disagree.
@@ -420,7 +408,7 @@ Covers `RL-17/C-01`, `RL-12/R-06`, the `G-04` remnant, `RL-04/L-04`,
 
 `RL-19/L-13` and `S-05`. Add a root `.editorconfig`, widen Prettier beyond the
 client's TypeScript, add `cargo fmt --check`, repository-wide `gofmt`,
-`shellcheck`, and `actionlint`. Exclude `graphify-out/`, `Server/db/dbgen/`, the
+`shellcheck`, and `actionlint`. Exclude `Server/db/dbgen/`, the
 generated client directory, and the untracked `docs/security-findings/`. **Land
 the gate and the reformat as two commits** so the world-reformat diff is
 reviewable separately from the rule that caused it.
@@ -455,12 +443,19 @@ behaviour rather than adopting workspaces on principle.
 
 ## B1-6 — Generated artifacts
 
-- **`RL-06/L-06`** — 20.41 MB tracked, `graph.json` 19.46 MB. Local regeneration
-  is demonstrated; Linux/CI portability is the remaining unknown. Do not untrack
-  before a CI artifact exists. Never rewrite published history.
-- **`RL-07/L-07`** — the sharpest of the three. `--check` cannot detect drift and
-  no workflow runs it. Add a real drift check (render to a temp file and diff),
-  wire it into CI, _then_ consider untracking the rendering.
+- **`RL-06/L-06`** — **closed by deletion, before this phase opened.** `a5f7d95`
+  (#1413) removed the tool and all 7 tracked files (20,408,656 bytes;
+  `graph.json` 19,463,420). Nothing graphify-related is tracked, so the
+  "prove portable regeneration, then untrack" sequence has no subject: there is
+  nothing left to regenerate and no committed report to drift-check. History was
+  not rewritten and is not going to be. B1-6 only retires the dead operational
+  steps this plan still carried.
+- **`RL-07/L-07`** — **done.** `--check` returned before `render()` and never
+  opened `FINDINGS.md`, so a stale 1.09 MB rendering passed the
+  `Docs & Ledger Consistency` job cleanly. B1-6 landed the drift check first,
+  then untracked the rendering — which removes the drift class entirely rather
+  than watching it. `findings-ledger.json` stays the only tracked copy; CI
+  renders twice, compares, and uploads the result as an artifact.
 - **`RL-08/L-08`** — source is committed; only the gate is missing, and it is
   **blocked by a toolchain conflict** (pinned TinyGo rejects Go 1.26, so a
   compile-and-compare job needs a second Go SDK). The cheaper honest option may
@@ -495,15 +490,15 @@ behaviour moves in B1.** Adapter extraction is B7 and must not be smuggled in.
 - Server architecture, database seams, hub lifecycle (B3).
 - Renaming `Server/`, lowercasing `Client`/`Server`, or monorepo consolidation —
   the layout audit explicitly rejects all three.
-- Rewriting Git history to shrink `graphify-out/`.
+- Rewriting Git history to shrink the removed `graphify-out/` blobs. The files
+  are gone from the tree (#1413), but four `graph.json` revisions remain in the
+  pack — ~71 MiB logical, ~3.2 MiB packed of 13.28 MiB. They stay.
 - Editing dated audit files to match new paths.
 
 ## Traps carried forward from B0
 
 - `dev` is PR-only, 0 approvals, enforced on admins. **Required checks are not
   pinned**, so a PR can still merge red until B1-0 lands.
-- Set `GRAPHIFY_SKIP_HOOK=1` for any multi-commit sequence, or the detached
-  post-commit rebuild dirties the tree between commits.
 - The CI Docker job is `main`-gated and therefore **skipped on dev PRs**. Produce
   Docker evidence locally; on Git Bash for Windows, `MSYS_NO_PATHCONV=1` is
   required or MSYS path conversion reports a false boot failure.

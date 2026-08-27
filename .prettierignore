@@ -7,8 +7,6 @@
 Server/db/dbgen/
 Client/src/lib/protocolTypes.ts
 
-# Rendered from findings-ledger.json by render-ledger.mjs.
-.superpowers/FINDINGS.md
 
 # Dated point-in-time snapshots. scripts/check-doc-counts.mjs already treats
 # these as deliberately unmaintained and out of scope to edit; reformatting

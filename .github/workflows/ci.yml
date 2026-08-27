@@ -193,6 +193,35 @@ jobs:
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
 
+      # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
+      # asks that the rendering be reproducible and that CI reject a generation
+      # failure. Rendering twice and comparing tests both: the render must
+      # succeed (it validates and exits 1 before writing), and it must be a pure
+      # function of the ledger. The severity rule in validate() is what makes
+      # the second half true -- an unranked severity would make render()'s sort
+      # implementation-defined.
+      - name: FINDINGS.md renders, and renders identically twice
+        run: |
+          node .superpowers/render-ledger.mjs
+          cp .superpowers/FINDINGS.md "$RUNNER_TEMP/FINDINGS.first.md"
+          node .superpowers/render-ledger.mjs
+          cmp "$RUNNER_TEMP/FINDINGS.first.md" .superpowers/FINDINGS.md || {
+            echo "ERROR: rendering the ledger twice produced different output."
+            echo "render() must be a pure function of findings-ledger.json."
+            exit 1
+          }
+
+      # The rendering is the human-readable view and is deliberately untracked,
+      # so this artifact is how a reviewer reads it without a Node run.
+      # if: always() -- you want it downloadable precisely when the job failed.
+      - name: Upload the rendered findings ledger
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: findings-ledger-rendering
+          path: .superpowers/FINDINGS.md
+          retention-days: 7
+
   # Repository-wide formatting, script lint and workflow lint (RL-19 / L-13, S-05).
   #
   # Root-scoped and ubuntu-only for the same reason as docs-consistency above:

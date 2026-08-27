@@ -110,9 +110,19 @@ const CHECK_RUST = [
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
 ];
 
+// RL-07. FINDINGS.md is not tracked, so there is no committed rendering to
+// drift — the gate is that generation must succeed. Rendering subsumes
+// `--check`: main() validates and exits 1 on a schema problem before it writes.
+// It also leaves the contributor a readable copy, which is the point of running
+// it locally. CI additionally renders twice and compares, to prove the output
+// is a pure function of the ledger; that needs a temp path, so it lives in
+// ci.yml rather than here.
+// `step`, not `optional`: this file is itself Node, so probing for it is theatre.
+const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
+
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.
-const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], ".")];
+const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], "."), ...LEDGER_VERIFY];
 
 // Repository-wide formatting and script/workflow lint (RL-19 / L-13, S-05).
 //
