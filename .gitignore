@@ -47,6 +47,17 @@ Server/server.exe
 Server/config.yaml
 Server/data/
 
+# Prebuilt plugin example (RL-08). Built from the main.go beside it with the
+# TinyGo toolchain that directory's README pins. Read by nothing in the build
+# or test graph, and not byte-reproducible on another machine: TinyGo embeds
+# absolute host paths from the building machine's Go SDK and module cache, and
+# has no -trimpath equivalent.
+#
+# Deliberately NOT a blanket *.wasm rule. Client/public/rnnoise.wasm is a
+# vendored npm artifact this repository does not build and the client fetches
+# at runtime; ignoring it would break voice noise suppression.
+Server/plugin/examples/hello/hello.wasm
+
 # Test coverage artifacts
 *.out
 Server/cov.out

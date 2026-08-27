@@ -17,6 +17,10 @@ config.yaml
 scripts/
 cmd/
 
+# Plugin examples: source for a disabled subsystem, plus a prebuilt .wasm a
+# developer may still have on disk untracked. Nothing in the image reads either.
+plugin/examples/
+
 # Git metadata
 .git
 .gitignore
