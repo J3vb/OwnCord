@@ -2032,7 +2032,7 @@ Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
 
 ```json
 {
-  "current": "v1.2.0-alpha.3",
+  "current": "v1.2.0-alpha.4",
   "latest": "v1.2.0",
   "update_available": true,
   "required_assets_present": true,

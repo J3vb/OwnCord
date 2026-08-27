@@ -63,7 +63,7 @@ body:
         deliberately not exposed on the unauthenticated /health endpoint, so
         "unknown" is a fine answer if you are not the operator. A server built
         from source reports "dev".
-      placeholder: "1.2.0-alpha.3 / dev / unknown"
+      placeholder: "1.2.0-alpha.4 / dev / unknown"
     validations:
       required: false
 
@@ -72,7 +72,7 @@ body:
     attributes:
       label: Client version
       description: Settings → Logs shows it. Leave blank for a server-only bug.
-      placeholder: "1.2.0-alpha.3"
+      placeholder: "1.2.0-alpha.4"
     validations:
       required: false
 

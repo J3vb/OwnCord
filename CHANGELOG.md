@@ -39,7 +39,7 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
-## Unreleased
+## v1.2.0-alpha.4
 
 **62 bug fixes**, all user-visible, plus repository work that changes nothing an
 operator can see. Fixes first; the repository half is the short block at the end.

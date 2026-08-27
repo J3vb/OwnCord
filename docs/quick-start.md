@@ -55,11 +55,11 @@ Full Docker details: [Deployment Guide](deployment.md#docker-linux).
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.3" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.3" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
 
 # Client
 cd Client
