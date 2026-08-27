@@ -4,8 +4,12 @@
 **Base commit:** `6a1561fa` (`dev`, post-PR #1409)
 **Status:** in progress; **entry gate met — HP-0 accepted 2026-08-25**. B1-0
 (#1410), B1-1 (#1411), B1-2 (#1412), B1-3 (#1414), B1-4 (#1415), B1-5 (#1417),
-B1-6 (#1418) and B1-7 (this branch) are complete; B1-8, the platform contract
-map, is the next step — and it is documentation only.
+B1-6 (#1418), B1-7 (#1419) and B1-8 (this branch) are complete — **every B1 step
+has landed.** HP-1's structural review has been performed and the exit gate
+measured: [hp-1-scorecard-2026-08-27.md](hp-1-scorecard-2026-08-27.md). All
+eight exit conditions are evidenced; condition 6 is recorded as **partially
+met**, because `dev` carries `strict: false`, so a PR can still merge without
+re-testing against a moved base.
 
 Primary inputs:
 
@@ -335,9 +339,21 @@ npm run build                                         # compare the five recorde
 # Rust (from Client/src-tauri/)
 cargo test && cargo clippy --all-targets -- -D warnings
 
-# Docker — CI skips this job on dev PRs, so produce it locally
-MSYS_NO_PATHCONV=1 bash Server/docker-smoke.sh        # expect exit 0, ~50.1 MB
+# Docker — CI skips this job on dev PRs, so produce it locally.
+# The script moved to Server/scripts/ and now takes the image as an argument,
+# so it no longer builds anything itself — build first, exactly as ci.yml does.
+MSYS_NO_PATHCONV=1 docker build --build-arg VERSION=ci -t owncord-smoke:candidate Server/
+MSYS_NO_PATHCONV=1 bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
 ```
+
+Two traps here. **The build context is `Server/`, not the repository root** —
+`ci.yml` sets `context: Server/`, the `Dockerfile` opens with
+`COPY go.mod go.sum ./`, and only `Server/.dockerignore` exists. Building from
+the root instead streams the whole working tree (400 MB+ of `node_modules`,
+`target/`, `dist/`) and then fails on the missing `go.mod`. And
+`MSYS_NO_PATHCONV=1` is still required, because the script still does not set it
+itself (`ENV-03`, P2, open): without it MSYS rewrites the container-internal
+`/chatserver` path and the script reports a boot failure that did not happen.
 
 Targeted proofs the generic suite will not give you:
 
@@ -483,6 +499,27 @@ behaviour rather than adopting workspaces on principle.
 `RL-02/L-02`. Record the browser-neutral contract folders
 (`Client/src/platform/{contracts,browser,desktop}`) and their owners. **No native
 behaviour moves in B1.** Adapter extraction is B7 and must not be smuggled in.
+
+**Done** — [docs/architecture/platform-contracts.md](../architecture/platform-contracts.md).
+Two corrections to what this item assumed:
+
+- **`Client/src/platform/` does not exist**, and never has: no commits, no
+  files, zero importers. The item reads as though the folders are there and
+  need documenting. They are a target, so the document records a design
+  decision, not a structure.
+- **No human owners exist for these folders anywhere in the repository.**
+  Ownership is recorded by phase (B7 for the adapters and the static check, B8
+  for the browser build, B2 for the protocol both adapters speak), and the
+  document says the human-owner gap is real rather than letting the absence
+  read as an oversight.
+
+Measured rather than estimated: 20 files under `Client/src/` import
+`@tauri-apps/*`, using 26 distinct `invoke` command names against 30
+`#[tauri::command]` handlers, with zero dangling calls and zero uses of the
+`window.__TAURI__` global. The count is 26 and not 22 because `lib/ws.ts` binds
+`core.invoke` to a local `tauriInvoke` first — a regex matching only
+`invoke("…")` misses four commands, which any future lint rule enforcing the
+seam has to account for.
 
 ## Explicitly out of scope for B1
 
