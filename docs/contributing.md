@@ -164,6 +164,33 @@ beside it.
 
 ---
 
+## Reporting problems, and where things go
+
+Bugs, questions and vulnerabilities have three different destinations, and the
+difference matters most for the third.
+
+| Kind                            | Where                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| A reproducible bug              | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) — the form asks for the environment detail needed to reproduce it |
+| A question about setup or usage | [Discussions → Q&A](https://github.com/J3vb/OwnCord/discussions/categories/q-a)                                               |
+| An idea or feature suggestion   | [Discussions → Ideas](https://github.com/J3vb/OwnCord/discussions/categories/ideas) — not an issue                            |
+| A security vulnerability        | [Private advisory](https://github.com/J3vb/OwnCord/security/advisories/new)                                                   |
+
+### Security reporting
+
+**Never open a public issue, pull request, or discussion for a security bug.**
+Use [private security reporting](https://github.com/J3vb/OwnCord/security/advisories/new);
+[SECURITY.md](../SECURITY.md) is the canonical policy and states the response
+timeline, and [docs/security.md](security.md) says what stays private and for
+how long.
+
+This repository is public, so a commit message, a PR description and a branch
+name are all disclosure channels. If you are fixing something you believe is a
+security problem, say so in the private advisory first and let the fix be
+coordinated — do not describe the weakness in the public change that repairs it.
+The same applies to weaknesses in the repository's own automation and settings,
+not only to bugs in the server or client.
+
 ## Branch and PR model
 
 This section is the single source of truth for the branch model. Everywhere
@@ -174,7 +201,7 @@ links here rather than restating it.
 - `main` -- releases only. `dev` is merged to `main` for a release, and release
   tags are cut from `main`.
 
-`dev` is protected and PR-only: direct pushes are rejected, ten status checks
+`dev` is protected and PR-only: direct pushes are rejected, twelve status checks
 are required, `required_approving_review_count` is 0, and the rule is enforced
 on admins. So a PR is self-mergeable once CI is green, but no commit reaches
 `dev` without CI having run on it. Settings and rationale live in

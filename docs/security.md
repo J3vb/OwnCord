@@ -13,6 +13,26 @@ The repository-root [SECURITY.md](../SECURITY.md) is the canonical reporting
 policy — what to include and the response timeline (initial response within
 7 days) live there, so the two files cannot disagree.
 
+## What stays private, and for how long
+
+This applies to weaknesses in the repository's own automation and settings —
+workflow authorization, credential scope, release gating — as much as to bugs in
+the server or client. Planning documents cite this section as the rule; it is
+written here so the citation points at something.
+
+- Public artifacts — commits, issues, pull request descriptions, changelogs —
+  carry an **opaque identifier, the affected property, safe acceptance criteria,
+  and a status**. Nothing more.
+- Reproduction steps, source-to-sink traces, exploit conditions, and the state a
+  fix replaced stay in the private advisory. A commit that fixes a weakness
+  describes the control it adds, not the gap it closes.
+- Every private finding has exactly one public owner, so nothing is tracked only
+  in private and nothing is silently dropped.
+- Release notes may describe repaired impact after coordinated remediation,
+  without the detail needed to reproduce it.
+
+This repository is public. A commit message is a disclosure channel.
+
 ## Two-Factor Authentication
 
 OwnCord supports TOTP-based 2FA:
