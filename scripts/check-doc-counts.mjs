@@ -51,6 +51,7 @@ const WATCHED = [
   "docs/README.md",
   "docs/plans/README.md",
   "docs/plans/hp-0-scorecard-2026-08-25.md",
+  "docs/plans/hp-1-scorecard-2026-08-27.md",
   "docs/plans/repo-health-issue-register-2026-08-23.md",
   "docs/plans/b0-baseline-2026-08-25.md",
   "docs/plans/b1-repository-foundation-2026-08-25.md",

@@ -5,6 +5,29 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## Unreleased
+
+Phases B0 and B1 of the [repository-health
+roadmap](docs/plans/repo-health-roadmap-2026-08-23.md) — repository structure,
+gates, and contributor path. **No operator-visible behaviour changed**, and
+desktop behaviour, release asset names, and the update contract are unchanged
+by design. Three items nonetheless affect anyone with a working copy or a fork:
+
+- **`Client/tauri-client/` is now `Client/`** (#1411). A pure file move plus a
+  mechanical path rewrite, verified as 473 R100 renames with no content change.
+  Rebase an in-flight branch rather than merging across the move.
+- **The Go module is now `github.com/J3vb/OwnCord/Server`**, was
+  `github.com/owncord/server` (#1417). 350 files, purely mechanical.
+- **The protocol schema moved to `protocol/schema.json`**, was
+  `docs/protocol-schema.json` (#1417). It is owned by neither side, so it lives
+  at the repository root; see [`protocol/README.md`](protocol/README.md).
+
+One command now runs the checks CI runs, on Windows and Linux, with no `make`
+prerequisite: `npm run bootstrap`, then `npm run check` (or `check:server`,
+`check:client`, `check:rust`, `check:docs`, `check:hygiene`). Go-only
+contributors still do not need Node — the facade orchestrates, it does not
+replace the direct commands.
+
 ## v1.2.0-alpha.3
 
 - **fix:** eight bug-hunt batches closed **199 verified defects** since
