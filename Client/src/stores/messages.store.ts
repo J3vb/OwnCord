@@ -207,7 +207,20 @@ function sanitizePassApprox(s: string): string {
       .replace(/&apos;/g, "'")
       .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&");
-  const stripTags = (input: string): string => input.replace(/<[^>]*>/g, "");
+  // Repeated rather than a single pass: a lone `replace` can in principle
+  // splice a fresh `<...>` out of the text either side of what it removed.
+  // echoNormalize's own fixpoint loop already absorbed that, so this is
+  // output-identical -- it just puts the repetition where a reader (and
+  // CodeQL's js/incomplete-multi-character-sanitization) can see it.
+  const stripTags = (input: string): string => {
+    let out = input;
+    while (out.includes("<")) {
+      const next = out.replace(/<[^>]*>/g, "");
+      if (next === out) break;
+      out = next;
+    }
+    return out;
+  };
   return unescapeOnce(stripTags(unescapeOnce(s)));
 }
 
