@@ -225,7 +225,7 @@ and target.
 
 1. Branch from `dev`
 2. Open the PR against `dev`
-3. All ten required checks must pass -- `dev` is protected, so a red PR cannot
+3. All twelve required checks must pass -- `dev` is protected, so a red PR cannot
    merge
 4. Request code review
 5. Squash merge, conventional commit subject

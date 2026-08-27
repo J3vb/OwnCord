@@ -106,7 +106,7 @@ the live API.
 | Approvals required       | 0 (solo maintainer) |
 | Applies to admins        | yes                 |
 | Force pushes / deletions | disabled            |
-| Required status checks   | **10**              |
+| Required status checks   | **12**              |
 
 Pinned:
 
@@ -116,7 +116,12 @@ Server Build & Test (windows-latest)    Client E2E (parity subset, blocking)
 Client Static Checks                    Analyze (go)
 Client Unit Tests                       Analyze (javascript-typescript)
 Rust Unit Tests                         Analyze (actions)
+Repository Hygiene                      Docs & Ledger Consistency
 ```
+
+`Repository Hygiene` was added 2026-08-26 (B1-3, S-05) and
+`Docs & Ledger Consistency` 2026-08-27 (B1-6, L-07); both names were read off a
+live PR after the job reported, per the rule below.
 
 Deliberately **not** pinned, with the observed reason:
 
@@ -129,7 +134,7 @@ Deliberately **not** pinned, with the observed reason:
 
 A required check that never reports blocks every PR forever, so the list was
 read off a live dev-targeted PR with `gh pr checks`, not inferred from
-`ci.yml`. That mattered: **three of the ten exist in no workflow file**, because
+`ci.yml`. That mattered: **three of the twelve exist in no workflow file**, because
 CodeQL runs from GitHub default setup configured in repository settings.
 
 Two consequences to carry into B1:
