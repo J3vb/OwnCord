@@ -257,6 +257,12 @@ and target.
 4. Request code review
 5. Squash merge, conventional commit subject
 
+If your change is one an operator would notice, add a `CHANGELOG.md` entry under
+`## Unreleased`. That file's **"How to write an entry"** section is the rule, and
+it is not optional styling: scannable lists grouped by user-facing area, one line
+per fix, what was broken then what it does now. No walls of text, no `OC-*` ids,
+no file paths.
+
 ## Testing
 
 The client suite enforces **70% coverage thresholds** in `vitest.config.ts`;

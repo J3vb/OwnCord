@@ -5,28 +5,113 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## How to write an entry
+
+**Scannable lists, never walls of text.** A reader should be able to find what
+affects them in about ten seconds, without reading a paragraph they do not care
+about. Entries below `v1.2.0-alpha.3` do not follow this and are left as
+shipped history; everything from the next release forward does.
+
+The rules:
+
+1. **Open with what is user-visible and what is not.** Most releases carry a
+   mixture. Say which is which up front, so nobody reads twenty lines of
+   repository plumbing looking for a fix.
+2. **Group by the area a user recognises** — Login & connection, Voice,
+   Mentions, Messages & files, Accounts & admin, Desktop UI. Not by subsystem,
+   package, or which PR it came from.
+3. **One line per fix.** If it needs two lines, it needs two entries or it does
+   not belong here.
+4. **Say what was broken, then what it does now.** "Banned users could still
+   connect — ban is re-checked on connect." A reader must be able to tell
+   whether it bit them, without opening the PR.
+5. **Plain language.** Name the thing a user sees, not the function that owned
+   the bug. `voiceJoinLeaveCurrent` means nothing to an operator; "moderator
+   mute survives a channel move" does.
+6. **No `OC-*` ids, no file paths, no PR-body prose.** The ledger and the pull
+   request already carry those, and this file is the one place that does not
+   need them. A PR number is fine where it genuinely helps someone dig.
+7. **Counts belong in a summary line, not per item.** "62 fixes" once at the
+   top beats a number attached to every bullet.
+
+Anything a user cannot observe — repository layout, CI gates, generated-code
+ownership, dependency automation — gets **at most a short block at the end**,
+and only when it changes something a contributor or fork holder must do
+(a moved directory, a renamed module, a new required command).
+
 ## Unreleased
 
-Phases B0 and B1 of the [repository-health
-roadmap](docs/plans/repo-health-roadmap-2026-08-23.md) — repository structure,
-gates, and contributor path. **No operator-visible behaviour changed**, and
-desktop behaviour, release asset names, and the update contract are unchanged
-by design. Three items nonetheless affect anyone with a working copy or a fork:
+**62 bug fixes**, all user-visible, plus repository work that changes nothing an
+operator can see. Fixes first; the repository half is the short block at the end.
 
-- **`Client/tauri-client/` is now `Client/`** (#1411). A pure file move plus a
-  mechanical path rewrite, verified as 473 R100 renames with no content change.
-  Rebase an in-flight branch rather than merging across the move.
-- **The Go module is now `github.com/J3vb/OwnCord/Server`**, was
-  `github.com/owncord/server` (#1417). 350 files, purely mechanical.
-- **The protocol schema moved to `protocol/schema.json`**, was
-  `docs/protocol-schema.json` (#1417). It is owned by neither side, so it lives
-  at the repository root; see [`protocol/README.md`](protocol/README.md).
+### Login & connection
 
-One command now runs the checks CI runs, on Windows and Linux, with no `make`
-prerequisite: `npm run bootstrap`, then `npm run check` (or `check:server`,
-`check:client`, `check:rust`, `check:docs`, `check:hygiene`). Go-only
-contributors still do not need Node — the facade orchestrates, it does not
-replace the direct commands.
+- Connecting with a failed role lookup silently made you a plain **member** — it
+  now fails closed instead of guessing.
+- **Banned users could still connect.** Ban status is re-checked on connect.
+- Reconnecting left a **phantom voice E2EE key holder** and a stale voice-channel
+  marker behind.
+- Typing indicators in DMs could **disconnect you** under load.
+
+### Voice
+
+- Moderator mute and deafen are **preserved across a channel move** — they were
+  silently dropped.
+- Voice E2EE keys **re-sync on reconnect**, and a departed peer's key is always
+  retired so a replayed announce cannot overwrite a fresh one.
+- A kicked client no longer receives frames.
+- A rolled-back join now reaches everyone present, including people without
+  permission to read the channel.
+- A **failed microphone unmute now shows as failed** instead of quietly
+  reporting you as unmuted.
+- Noise suppression rebuilds correctly after a microphone restart.
+
+### Mentions
+
+- **`@here` no longer behaves like `@everyone`** — the two are distinguished.
+- Mention badges are reversed on delete, purge and account deletion, and can no
+  longer be reversed twice.
+
+### Messages & files
+
+- Deleting a message now **actually deletes its attachment files**.
+- A failed avatar upload no longer deletes a committed file's reference.
+
+### Accounts & admin
+
+- The `require_2fa` enrollment gate misfired after a temporary ban lapsed, and
+  applied its precondition to unrelated settings.
+- A DM partner with no live connection now shows **offline everywhere** — it was
+  inconsistent between views.
+- Plugin installation rolls back properly when it fails.
+- The diagnostics endpoint honours trusted proxies.
+
+### Desktop app
+
+- Fixed event-listener leaks in the message list, member list, emoji picker,
+  quick switcher, sidebar popovers and drag-reorder.
+- Recent emoji, channel mutes and custom status are now **per-server** instead of
+  bleeding between servers.
+- The DM sidebar filter survives updates, the call button cannot redial, the
+  incoming-call banner uses nicknames, and Ctrl+I unwraps correctly on bold text.
+
+### Repository — no runtime effect
+
+Phases B0 and B1 of the
+[repository-health roadmap](docs/plans/repo-health-roadmap-2026-08-23.md).
+Desktop behaviour, release asset names and the update contract are unchanged by
+design. Three items affect anyone holding a working copy or a fork:
+
+- **`Client/tauri-client/` is now `Client/`** (#1411). Rebase an in-flight
+  branch rather than merging across the move.
+- **The Go module is now `github.com/J3vb/OwnCord/Server`** (#1417), was
+  `github.com/owncord/server`.
+- **The protocol schema is now `protocol/schema.json`** (#1417), was
+  `docs/protocol-schema.json`.
+
+One command runs what CI gates on, Windows and Linux, no `make` needed:
+`npm run bootstrap`, then `npm run check`. Go-only contributors still do not
+need Node.
 
 ## v1.2.0-alpha.3
 
