@@ -147,7 +147,7 @@ that changes the work.
 | **RL-13** module namespace                                    | **Confirmed, bounded**                | `Server/go.mod` declares `github.com/owncord/server`: **722 occurrences across 344 Go files**, plus six non-Go (go.mod, a `sed` in `Server/Makefile`, two docs, the ledger pair). **Zero** in any workflow or Dockerfile; no `.goreleaser` exists.                                                                                                                                                                                                                                                                                     |
 | **RL-19** format/lint gaps                                    | **Confirmed, all sub-claims**         | No `.editorconfig` anywhere. Prettier is scoped to the client's `src/` and `tests/` TypeScript, so root Markdown, all of `docs/`, every YAML/JSON and all CSS are formatted by nothing. `.golangci.yml` enables 19 linters but no `gofmt`/`gofumpt`/`goimports`. No `cargo fmt --check`. No shellcheck/actionlint/yamllint.                                                                                                                                                                                                            |
 | **RL-21** intake                                              | **Confirmed, understated**            | `feature_request.md` still exists. Both templates are **Markdown, not YAML issue forms** — no `body:`, no `validations: required`, so nothing is structured or enforced. The Environment block hardcodes one OS.                                                                                                                                                                                                                                                                                                                       |
-| **RL-22** paid automation authorization                       | **Confirmed**                         | Insufficient; impact bounded today by read-only content permissions. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../security.md). Tracked as `L-16` only.                                                                                                                                                                                                                                                                                                                  |
+| **RL-22** paid automation authorization                       | **Confirmed; done in B1-7**           | Insufficient. The earlier note that impact was bounded by read-only content permissions understated it: the workflow's own token block is least-privilege, but that is not the only identity a run can hold. Mechanism, guard text, and fix stay out of public commits, issues, and PR bodies per [docs/security.md](../security.md). Tracked as `L-16` only.                                                                                                                                                                          |
 
 Net effect: **RL-09 and RL-10 shrink to near-nothing; RL-08 grows a toolchain
 constraint; RL-05, RL-07, RL-20 and RL-21 are each worse than written.**
@@ -469,10 +469,13 @@ behaviour rather than adopting workspaces on principle.
   Environment block hardcodes one OS. Convert to YAML forms; add browser/PWA,
   CPU architecture, and deployment-mode fields; route ideas and feedback to
   Discussions.
-- **`RL-22/L-16`** — harden authorization for externally triggered paid
-  automation. Impact is bounded today by read-only content permissions. Mechanism
-  and fix are coordinated privately per [docs/security.md](../security.md); they
-  do not appear in public commits, issues, or PR descriptions.
+- **`RL-22/L-16`** — **done.** The workflow now states its own trust boundary,
+  bounds each run's duration, collapses repeated triggers, and carries a
+  regression test inside the pinned hygiene gate. The earlier claim that impact
+  was bounded by read-only content permissions understated it — a run's effective
+  identity is not only the workflow's token block. Mechanism and fix are
+  coordinated privately per [docs/security.md](../security.md); they do not
+  appear in public commits, issues, or PR descriptions.
 - **`RL-16/R-09`** — tag publication consumes exact-SHA gate evidence.
 
 ## B1-8 — Platform contract map (documentation only)

@@ -10,14 +10,41 @@ on:
   pull_request_review:
     types: [submitted]
 
+# Repeated triggers on one issue or pull request collapse into a single run
+# rather than fanning out. `github.event.issue.number` is present on the issues
+# and issue_comment events; `github.event.pull_request.number` on the two review
+# events. Exactly one of the two is non-empty per event, so the group is stable.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   claude:
+    # Two independent conditions, both required.
+    #
+    # 1. The actor is on the maintainer allowlist. This workflow consumes a
+    #    metered API credential, so the repository states its own trust boundary
+    #    here rather than relying on any downstream check. Add a login to this
+    #    list to grant access; there is no other way in.
+    # 2. The trigger text mentions @claude.
+    #
+    # scripts/check-workflow-guards.mjs asserts that both this actor term and the
+    # cost bounds below survive; actionlint checks expression syntax and cannot
+    # see authorization intent.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      contains(fromJSON('["J3vb"]'), github.actor) &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
     runs-on: ubuntu-latest
+    # Every other long-running job in this repository declares a cap
+    # (ci.yml rust-tests, client-e2e, admin-e2e, client-e2e-parity;
+    # load-baseline). Without one the job inherits GitHub's 360-minute default,
+    # which is the wrong ceiling for metered work.
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: read

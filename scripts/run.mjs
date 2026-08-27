@@ -146,6 +146,13 @@ const CHECK_HYGIENE = [
     ".",
     "actionlint not on PATH — no clean Windows install; CI runs it",
   ),
+  // L-16. actionlint validates expression syntax and action inputs; it has no
+  // concept of who a condition admits or how long a job may run. This asserts
+  // the guards on workflows that spend. `step`, not `optional`: it is Node, and
+  // this file is Node. It lives in check:hygiene so it runs inside the pinned
+  // Repository Hygiene job rather than needing a new required check.
+  step("node", ["scripts/check-workflow-guards.mjs", "--selftest"], "."),
+  step("node", ["scripts/check-workflow-guards.mjs"], "."),
 ];
 
 const TASKS = {
