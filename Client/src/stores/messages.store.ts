@@ -214,7 +214,9 @@ function sanitizePassApprox(s: string): string {
   // CodeQL's js/incomplete-multi-character-sanitization) can see it.
   const stripTags = (input: string): string => {
     let out = input;
-    for (let next = out.replace(/<[^>]*>/g, ""); next !== out; next = out.replace(/<[^>]*>/g, "")) {
+    while (out.includes("<")) {
+      const next = out.replace(/<[^>]*>/g, "");
+      if (next === out) break;
       out = next;
     }
     return out;
