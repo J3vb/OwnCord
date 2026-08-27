@@ -6,6 +6,13 @@ import assert from "node:assert/strict";
 
 const VALID_STATUS = ["open", "fixed", "declined", "refuted", "duplicate", "blocked"];
 
+// Must stay in lockstep with SEV_RANK below. render() sorts the open section by
+// SEV_RANK, and an unranked severity makes the comparator return NaN — which
+// leaves the sort order implementation-defined, so the rendering would stop
+// being a pure function of the ledger. The drift gate compares the rendering
+// against the ledger, so its whole premise rests on this being enforced.
+const VALID_SEVERITY = ["critical", "high", "medium", "low"];
+
 export function validate(ledger) {
   const problems = [];
   const ids = new Set();
@@ -14,6 +21,7 @@ export function validate(ledger) {
     ids.add(r.id);
     if (!/^OC-\d{4}$/.test(r.id)) problems.push(`${r.id}: malformed id`);
     if (!VALID_STATUS.includes(r.status)) problems.push(`${r.id}: bad status ${r.status}`);
+    if (!VALID_SEVERITY.includes(r.severity)) problems.push(`${r.id}: bad severity ${r.severity}`);
     if (r.status === "fixed" && (!r.fix || !r.fix.commit))
       problems.push(`${r.id}: fixed without a commit`);
     if (r.status === "declined" && !r.rationale)
@@ -25,23 +33,44 @@ export function validate(ledger) {
 }
 
 function selftest() {
+  // Every fixture carries a severity: validate() now requires one, so omitting
+  // it would make each case report two problems and assert against the wrong one.
   assert.deepEqual(validate({ findings: [] }), []);
-  assert.deepEqual(validate({ findings: [{ id: "OC-0001", status: "fixed", fix: null }] }), [
-    "OC-0001: fixed without a commit",
+  assert.deepEqual(
+    validate({ findings: [{ id: "OC-0001", severity: "low", status: "fixed", fix: null }] }),
+    ["OC-0001: fixed without a commit"],
+  );
+  assert.deepEqual(validate({ findings: [{ id: "bad", severity: "low", status: "open" }] }), [
+    "bad: malformed id",
   ]);
-  assert.deepEqual(validate({ findings: [{ id: "bad", status: "open" }] }), ["bad: malformed id"]);
   assert.deepEqual(
     validate({
       findings: [
-        { id: "OC-0001", status: "open" },
-        { id: "OC-0001", status: "open" },
+        { id: "OC-0001", severity: "low", status: "open" },
+        { id: "OC-0001", severity: "low", status: "open" },
       ],
     }),
     ["duplicate id OC-0001"],
   );
-  assert.deepEqual(validate({ findings: [{ id: "OC-0002", status: "declined" }] }), [
-    "OC-0002: declined without a rationale",
+  assert.deepEqual(
+    validate({ findings: [{ id: "OC-0002", severity: "low", status: "declined" }] }),
+    ["OC-0002: declined without a rationale"],
+  );
+
+  // An unranked severity is what makes render()'s sort implementation-defined.
+  assert.deepEqual(
+    validate({ findings: [{ id: "OC-0003", severity: "moderate", status: "open" }] }),
+    ["OC-0003: bad severity moderate"],
+  );
+  assert.deepEqual(validate({ findings: [{ id: "OC-0004", status: "open" }] }), [
+    "OC-0004: bad severity undefined",
   ]);
+  for (const sev of VALID_SEVERITY) {
+    assert.deepEqual(
+      validate({ findings: [{ id: "OC-0005", severity: sev, status: "open" }] }),
+      [],
+    );
+  }
   console.log("selftest: all assertions pass");
 }
 

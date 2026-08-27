@@ -26,18 +26,18 @@ From the repository root. These orchestrate the per-stack commands below; they
 are a convenience, not a replacement. Nothing here needs `make`, and everything
 works the same on Windows, macOS and Linux.
 
-| Command                       | Description                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `npm run bootstrap`           | `npm ci` in all three package roots                                             |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                    |
-| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift |
-| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                 |
-| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                   |
-| `npm run check:docs`          | Fail if a watched document states a finding count the ledger contradicts        |
-| `npm run format`              | Prettier over the client, `gofmt -w` over the server                            |
-| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                          |
-| `npm run release:preflight`   | `check` plus a client production build                                          |
-| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                              |
+| Command                       | Description                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `npm run bootstrap`           | `npm ci` in all three package roots                                                              |
+| `npm run check`               | Everything CI gates on: server, client, Rust                                                     |
+| `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                  |
+| `npm run check:client`        | Client only — typecheck, lint, format, unit + integration tests                                  |
+| `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                    |
+| `npm run check:docs`          | Fail if a watched document contradicts the ledger's finding counts, or if `FINDINGS.md` is stale |
+| `npm run format`              | Prettier over the client, `gofmt -w` over the server                                             |
+| `npm run generate`            | Regenerate protocol constants and the sqlc query layer                                           |
+| `npm run release:preflight`   | `check` plus a client production build                                                           |
+| `node scripts/run.mjs --list` | Print the exact command every task runs, and where                                               |
 
 Tools CI installs but you may not have — `golangci-lint`, `sqlc` — are skipped
 with a printed reason rather than failing the run.

@@ -62,11 +62,14 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
 Ledger at 2026-08-25: **306 fixed / 38 open / 3 declined / 1 duplicate = 348**.
-All 38 open records still resolve to a live `file:line` at
-`5cc0888964e26276d1aca145e83270a2c1b9febd` — none is stale. Verify with:
+All 38 open records still resolved to a live `file:line` at
+`5cc0888964e26276d1aca145e83270a2c1b9febd` when that sweep was run — it was a
+manual pass, not something a command reproduces. What the tooling does check:
 
 ```
-node .superpowers/render-ledger.mjs --check
+node .superpowers/render-ledger.mjs --check   # the ledger's schema is valid
+node scripts/check-doc-counts.mjs             # documents agree with it, and
+                                              # FINDINGS.md is not stale
 ```
 
 ## Adding a plan

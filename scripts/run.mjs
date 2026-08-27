@@ -110,9 +110,21 @@ const CHECK_RUST = [
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
 ];
 
+// RL-07. `render-ledger.mjs --check` validates the ledger's schema and returns
+// before rendering, so it cannot see a stale FINDINGS.md. Regenerate, then let
+// git be the differ — the same shape as PROTOCOL_VERIFY and SQLC_VERIFY above.
+// --stat, not a full diff: a fully drifted 1.09 MB rendering is a ~40,000-line
+// log, and the exit code is what gates. Rendering also validates, because
+// main() exits 1 on a schema problem before it writes, so this subsumes --check.
+// `step`, not `optional`: this file is itself Node, so probing for it is theatre.
+const LEDGER_VERIFY = [
+  step("node", [".superpowers/render-ledger.mjs"], "."),
+  step("git", ["diff", "--exit-code", "--stat", ".superpowers/FINDINGS.md"], "."),
+];
+
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.
-const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], ".")];
+const CHECK_DOCS = [step("node", ["scripts/check-doc-counts.mjs"], "."), ...LEDGER_VERIFY];
 
 // Repository-wide formatting and script/workflow lint (RL-19 / L-13, S-05).
 //

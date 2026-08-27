@@ -69,6 +69,27 @@ without it — 192 files / 5257 tests, identical to the flagged run.
 
 `npm audit --audit-level=high` and `knip` also run in CI but are advisory.
 
+## Docs and ledger (from the repository root)
+
+```bash
+npm run check:docs
+```
+
+Which is `scripts/check-doc-counts.mjs` plus, since B1-6, a regenerate-and-diff
+of the findings ledger's rendering:
+
+```bash
+node .superpowers/render-ledger.mjs
+git diff --exit-code --stat .superpowers/FINDINGS.md
+```
+
+`render-ledger.mjs --check` alone is **not** this gate — it validates the
+ledger's JSON schema and returns before rendering, so a stale `FINDINGS.md`
+passes it cleanly. CI runs both, in `Docs & Ledger Consistency`.
+
+Rendering subsumes `--check`: the renderer validates and exits 1 before it
+writes, so a schema break fails the first command.
+
 ## Hygiene (from the repository root)
 
 ```bash
