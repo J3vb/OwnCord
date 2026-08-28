@@ -81,13 +81,14 @@ Done in this order; the tag is already pushed.
    workflow's own `Verify signed assets against pinned server update key` step
    passed inside that run. Record the asset list in HP-2 as the pre-epoch
    updater contract.
-2. **Sync `dev`.** `main` is 5 ahead of `dev`. Open the sync PR the way #1425
-   was done: `git switch -c chore/sync-main-after-alpha4 origin/dev && git merge --no-ff origin/main && git push -u origin HEAD && gh pr create --base dev --title "chore: merge main into dev after v1.2.0-alpha.4"`.
-   **Known trap:** squash-merging that PR re-diverges `dev` from `main` by
-   content-identical commits; the next release PR then shows phantom conflicts
-   and is unblocked by creating `release/<tag>` with `git merge --no-ff main`
-   (how alpha.4 itself was unblocked). Accept the trap; it is cheaper than
-   changing the merge model mid-phase.
+2. **Sync `dev`.** **Done 2026-08-28 by the owner** — #1432 "merge main into
+   dev after the v1.2.0-alpha.4 release" (`dd7ed091`), the same shape as #1425.
+   `main` was 5 ahead of `dev` before it. **Known trap, still live:**
+   squash-merging a sync PR re-diverges `dev` from `main` by content-identical
+   commits; the next release PR then shows phantom conflicts and is unblocked
+   by creating `release/<tag>` with `git merge --no-ff main` (how alpha.4
+   itself was unblocked). Accept the trap; it is cheaper than changing the
+   merge model mid-phase.
 3. **`environment: release`.** In `.github/workflows/release.yml`, add
    `environment: release` at job level to the job that runs "Generate server
    update manifest" and signs it (around lines 568–599). The environment
@@ -106,8 +107,8 @@ Done in this order; the tag is already pushed.
    → `true`. Repository-settings writes need a person; the owner approved this
    one on 2026-08-28. Record the read-back in HP-2.
 
-Items 3–5 are one PR (`chore(b2-0): release hygiene`). Item 2 is its own PR.
-Item 1 is evidence, not a change.
+Items 3–5 are one PR (`chore(b2-0): release hygiene`). Item 2 landed as
+#1432. Item 1 is evidence, not a change.
 
 ## B2-1 — Capture the epoch-1 fixtures
 
