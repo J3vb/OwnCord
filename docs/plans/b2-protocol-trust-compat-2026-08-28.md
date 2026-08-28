@@ -5,8 +5,8 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0
-is the first step. Update this line, not only the step table, when a step
-lands.
+landed 2026-08-28 (evidence in its section); B2-1 is next. Update this line,
+not only the step table, when a step lands.
 
 Primary inputs:
 
@@ -34,19 +34,19 @@ one to one and a half weeks with agents working steps in parallel.
 
 ## Steps at a glance
 
-| Step     | What                                                                                               | Size     | Parallel with          |
-| -------- | -------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
-| **B2-0** | Alpha.4 verified; `dev` synced (done, #1432); `environment: release`; ENV-03; `dev` `strict: true` | hours    | —                      |
-| **B2-1** | Capture the epoch-1 fixtures; retire `voice_speakers` and `member_leave`                           | 1 day    | B2-6, B2-7             |
-| **B2-2** | Protocol epoch and negotiation                                                                     | 1 day    | serialized, after B2-8 |
-| **B2-3** | Server-first updates through the signed manifest                                                   | ½ day    | after B2-2             |
-| **B2-4** | Compatibility matrix                                                                               | ½ day    | after B2-2             |
-| **B2-5** | One permission predicate per security property                                                     | 1–2 days | serialized             |
-| **B2-6** | Safe audit coverage                                                                                | ½ day    | B2-1, B2-7             |
-| **B2-7** | Trust model, absence proofs, plugin boundary                                                       | 1 day    | B2-1, B2-6             |
-| **B2-8** | The nine B2-tagged findings                                                                        | 1 day    | before B2-2            |
-| **B2-9** | Security owners and acceptance tests                                                               | spread   | —                      |
-| **HP-2** | Protocol and threat-model sign-off                                                                 | —        | —                      |
+| Step     | What                                                                                                              | Size     | Parallel with          |
+| -------- | ----------------------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
+| **B2-0** | **Done 2026-08-28.** Alpha.4 verified; `dev` synced (#1432); `environment: release`; ENV-03; `dev` `strict: true` | hours    | —                      |
+| **B2-1** | Capture the epoch-1 fixtures; retire `voice_speakers` and `member_leave`                                          | 1 day    | B2-6, B2-7             |
+| **B2-2** | Protocol epoch and negotiation                                                                                    | 1 day    | serialized, after B2-8 |
+| **B2-3** | Server-first updates through the signed manifest                                                                  | ½ day    | after B2-2             |
+| **B2-4** | Compatibility matrix                                                                                              | ½ day    | after B2-2             |
+| **B2-5** | One permission predicate per security property                                                                    | 1–2 days | serialized             |
+| **B2-6** | Safe audit coverage                                                                                               | ½ day    | B2-1, B2-7             |
+| **B2-7** | Trust model, absence proofs, plugin boundary                                                                      | 1 day    | B2-1, B2-6             |
+| **B2-8** | The nine B2-tagged findings                                                                                       | 1 day    | before B2-2            |
+| **B2-9** | Security owners and acceptance tests                                                                              | spread   | —                      |
+| **HP-2** | Protocol and threat-model sign-off                                                                                | —        | —                      |
 
 Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
 own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
@@ -131,6 +131,29 @@ Done in this order; the tag is already pushed.
 
 Items 3–5 are one PR (`chore(b2-0): release hygiene`). Item 2 landed as
 #1432. Item 1 is evidence, not a change.
+
+**Evidence, 2026-08-28** — HP-2 questions 1 and 7 cite this block:
+
+- Release: `gh release view v1.2.0-alpha.4 --json assets --jq '.assets|length'`
+  → `20`, target `main`. The pre-epoch updater contract is that asset set:
+  `chatserver.exe` + `.sig`, `chatserver-linux-amd64.tar.gz`,
+  `checksums.sha256`, `owncord-src-v1.2.0-alpha.4.tar.gz`,
+  `server-update-manifest.json` + `.sig`, the client AppImages (amd64 and
+  aarch64, each with a `.tar.gz` and `.sig` pair), `.deb` (amd64, arm64), and
+  the NSIS installer (`-setup.exe`, `.nsis.zip` + `.sig`).
+- `dev` strict: script run 2026-08-28 07:58 UTC;
+  `gh api repos/J3vb/OwnCord/branches/dev/protection --jq '.required_status_checks.strict'`
+  → `true`, the 12 contexts unchanged.
+- `environment: release`: one required reviewer (`J3vb`, self-review allowed),
+  `deployment_branch_policy: null` (tag refs may deploy — the gate holds the
+  run, it does not reject it), and no environment-scoped secrets, so nothing
+  can shadow the repository secrets the build jobs sign with. actionlint
+  v1.7.12 on `release.yml`: clean.
+- ENV-03: from Git Bash with `MSYS_NO_PATHCONV` unset, the pre-change script
+  exits 1 (`::error::container never reported healthy within 30s` — Git Bash
+  had rewritten `/chatserver` into a Windows path); the changed script exits 0
+  against `owncord-smoke:candidate` built from `Server/` with
+  `--build-arg VERSION=ci`.
 
 ## B2-1 — Capture the epoch-1 fixtures
 
@@ -442,8 +465,9 @@ The roadmap's seven conditions, plus two:
 ## Traps carried forward
 
 - **Docker:** build context is `Server/`; compare `docker images --format '{{.Size}}'`
-  (50.1 MB), not `docker image inspect` (12.5 MB); until B2-0 lands, set
-  `MSYS_NO_PATHCONV=1` yourself.
+  (50.1 MB), not `docker image inspect` (12.5 MB). `docker-smoke.sh` exports
+  `MSYS_NO_PATHCONV=1` itself since B2-0; ad-hoc `docker exec … /path` calls
+  from Git Bash still need it set.
 - **Squash merges hide structure.** Record `refs/pull/<n>/head` SHAs at merge
   time for every B2 PR a hold point will review.
 - **`check:docs` counts.** `docs/plans/README.md` is watched; never write two

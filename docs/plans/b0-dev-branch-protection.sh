@@ -60,7 +60,7 @@ REPO="${REPO:-J3vb/OwnCord}"
 gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
 {
   "required_status_checks": {
-    "strict": false,
+    "strict": true,
     "contexts": [
       "Server Build & Test (ubuntu-latest)",
       "Server Build & Test (windows-latest)",
