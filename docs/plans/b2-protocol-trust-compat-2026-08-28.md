@@ -194,6 +194,39 @@ B2-2 merges there is no clean way to record what "epoch 0/1" looked like.
 Verification: `npm run check:server` (regenerates and diffs both generators;
 runs the new test under `go test ./...`), `npm run check:client`.
 
+**Evidence, 2026-08-28** — HP-2 question 1 cites this block:
+
+- Branch `feat/b2-1-epoch1-fixtures` from `dev` `fb6b51a0`; PR #1435 to `dev`.
+  Record the pre-squash head at merge time:
+  `gh api repos/J3vb/OwnCord/pulls/1435 --jq .head.sha` (before) or
+  `git ls-remote origin refs/pull/1435/head` (after).
+- Pre-squash commits: retirement `dd638f1c` (own commit, before capture);
+  fixtures `54cae614` (capture), `c0719519` (end-of-journey barriers,
+  present-form optionals), `d5fe06e5` (null forms of `auth_ok`/`member_join`
+  user fields, `id` on `auth`, unsigned announce); client auth frame
+  `0f15fafb`; updater shapes `8e065130`; docs `00a7b65c`, `f7c161a5`,
+  `5b5b5c19`.
+- Gates at `5b5b5c19`: `check:server`, `check:client`, `check:docs`,
+  `check:hygiene` all exit 0; `TestEpoch1Fixtures` passes `-count=3`,
+  `-race -count=3`, `-tags deadlock -count=10`; regeneration is
+  byte-identical; both trailing-frame guards proven by negative control.
+- Item 4 grep at HEAD hits only `docs/audit-2026-07-19.md` (dated record) and
+  this file's own command text.
+- Item 5 refined: the rule is **shape, not value** — a key-set, type,
+  presence, or order change needs an epoch bump; a seeded default value change
+  is regenerated in the same PR. Normalising seeded values was rejected (hides
+  enum drift).
+- Scope addition: six `docs/protocol.md` statements the captured wire proved
+  false were corrected in the same PR (relayed `voice_state` has no `seq`,
+  `chat_message.user.display_name`, the six real `auth_error` messages,
+  connect examples' `seq`, `voice_join` reply order, `voice_max_video` default
+  25), plus the auth-failure close code 1008.
+- Found, not fixed (behaviour change): the joiner's own `voice_state` is
+  broadcast through the hub queue while the rest of the join burst is written
+  directly (`Server/ws/voice_join.go:498` vs `:445`/`:523`/`:546`), so its
+  position on the joiner's socket is not guaranteed (~1/30 under
+  `-tags deadlock`). Documented; B2-8 / ledger candidate.
+
 ## B2-2 — Protocol epoch and negotiation
 
 Design fixed 2026-08-28; the numbers and names below are the contract.
