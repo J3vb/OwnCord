@@ -4,9 +4,9 @@
 **Base commit:** `64d2e108` (`dev`, post-PR #1425); `main` @ `b7d388a3` =
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
-**Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0
-landed 2026-08-28 (evidence in its section); B2-1 is next. Update this line,
-not only the step table, when a step lands.
+**Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
+B2-1 and B2-8 landed 2026-08-28 (evidence in their sections); B2-2 is next.
+Update this line, not only the step table, when a step lands.
 
 Primary inputs:
 
@@ -425,6 +425,42 @@ Run `bughunt-fix` on exactly these nine (test-first, per-file agents, one
 `ci-check` gate, one PR). A finding that turns out to need B7 (client
 platform seam) is re-tagged in the issue register with the reason, per the roadmap's
 phase execution pattern, not silently skipped.
+
+**Evidence, 2026-08-28** — branch `fix/b2-8-findings-2026-08-28` from `dev`
+`1fe3df79`; PR #1436 to `dev`.
+
+- Re-verified against HEAD first, one read-only agent per finding, before any
+  fix: all nine still open; none needs B7 — the `B2/B7` tags in the issue
+  register are scheduling hints, not a platform-seam dependency, so nothing
+  was re-tagged. Two coordinates had drifted after #1435
+  (`dispatcher.ts` 1077→1069 and 688→687); the rest were exact.
+- Two `bughunt-fix` waves so the same-run overlap guard never fired: wave 1
+  (OC-0311/0315, 0316, 0317, 0318, 0322, 0337, 0338 — seven file clusters),
+  wave 2 (OC-0328, whose fix also edits the `dispatcher.ts` call site that
+  wave 1's first cluster owned). 9/9 fixed test-first in 8 commits
+  (`a231108f`, `cd4cc850`, `7c159c11`, `bbbaeed4`, `e95c57a4`,
+  `7aeab0ed`, `073e8799`, `3e74c968`), each revert-proven by its prove
+  agent and then independently by `verify-fixes.mjs`: 8/8 PASS, red then green (4 client, 4 server), plus a hand RED/GREEN of the wazero-tagged OC-0318 parity test that the untagged run cannot exercise.
+- Test-design facts worth keeping: OC-0315's RED needs a pinned non-UTC zone
+  (Asia/Tokyo via the `renderers.test.ts` probe pattern) because
+  `Date.parse` and `parseTimestamp` agree under CI's UTC; OC-0338's pinning
+  test decodes with `BurntSushi/toml` directly from an untagged file because
+  `tryLoadPluginTOML` is `//go:build wazero`; OC-0318's default-build RED is
+  the both-manifests rejection, and its install/scan precedence parity is a
+  wazero-tagged test (CI runs `go test -tags wazero ./plugin/...`).
+- Also in this PR: the B2-1 evidence block above records pre-squash head
+  `069412db`, and ledger OC-0349 (open, low) records the `voice_join`
+  ordering hazard B2-1 found (`Server/ws/voice_join.go:498` vs
+  `:445/:523/:546`) — a behaviour change left for a later fix batch.
+- Gates at `3e74c968`: `check:server` plus `go vet -tags wazero ./...` and
+  `go test -tags wazero -count=1 ./plugin/...`, `check:client` plus
+  `npx knip` (blocking in CI since 2026-08-04 but not part of
+  `check:client`), `check:docs`, `check:hygiene` — all exit 0.
+- Found, not fixed (workflow tooling, not B2): the `bughunt-fix` gate list
+  still runs `npm run format:check` from `Client/` (removed in B1-3; the
+  formatting gate is root-scoped) and omits `knip`, so every run ends with a
+  phantom `gate: FAIL` — every real command passed. Recorded in the skill
+  observation log for the workflow script.
 
 ## B2-9 — Security owners and acceptance tests
 

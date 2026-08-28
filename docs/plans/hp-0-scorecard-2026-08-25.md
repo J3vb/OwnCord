@@ -37,7 +37,7 @@ baseline is **truthful, reproducible, and sufficient to begin B1**.
 | Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                     |
 | Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                            |
 | Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                  |
-| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 348 records**                 | re-verified at `6a1561fa`                                           |
+| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 349 records**                 | re-verified at `6a1561fa`                                           |
 | Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                               |
 | 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                          |
 | Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                  |
@@ -67,11 +67,11 @@ Open ledger, re-verified at `6a1561fa`:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 306     |
-| open      | **38**  |
+| fixed     | 315     |
+| open      | **30**  |
 | declined  | 3       |
 | duplicate | 1       |
-| **total** | **348** |
+| **total** | **349** |
 
 Of the 38 open records:
 

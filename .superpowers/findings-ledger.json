@@ -7335,13 +7335,19 @@
       "why": "The VOICE_LEAVE handler has payload.channel_id in hand (it uses it two lines above for shouldTeardownSession) but calls handleParticipantLeft(payload.user_id) with no channel. E2EEManager.handleParticipantLeft then unconditionally deletes that user from _peerPublicKeys/_peerOfferEpochs, clears their verification badge, retires their key, and re-runs the key-holder election against the client's OWN voice channel — even though the leave was for a different channel entirely. voice_leave is broadcast to channelReadAudience(thatChannel), i.e. every client with READ_MESSAGES on it, not just the room's participants.",
       "repro": "I am in voice channel A and hold the room key; I also have READ_MESSAGES on voice channel B. Peer P (in B) switches to A. Server order: voice_leave(B,P) and voice_state(A,P) are enqueued on the buffered h.broadcast queue by P's voice_join; P's voice_token is sent directly, so P connects and its voice_e2ee_announce is relayed to me via pubsub.Publish. With the broadcast goroutine backed up, my socket sees: (1) announce(P,K) -> I verify P, store K, offer P the current room key; (2) voice_leave(B,P) -> handleParticipantLeft(P) with no channel filter: hadPeerKey=true, P deleted from _peerPublicKeys, clearPeerVerification(P) wipes the verified badge, and because A's roster does not list P yet, retirePeerKey(P,K) retires P's LIVE key; then the `wasKeyHolder && hadPeerKey` branch rotates the room key excluding P; (3) voice_state(A,P) -> P appears in my voice widget. Result: P is visibly in my call but holds a superseded key — nothing I send decrypts for them and nothing they send decrypts for me. Nothing heals it: mid-call peers never re-announce, my 5-minute rotation iterates _peerPublicKeys (P is gone), and any later replay of P's stored key (e.g. sendVoicePeerKeys on my WS reconnect, hub.go:664-666) is rejected by the retirement guard at livekitE2EE.ts:782. Passing payload.channel_id and ignoring leaves for other channels fixes it; the ready-resync call site at dispatcher.ts:374-384 already scopes by channel.",
       "evidence": "dispatcher.ts:1071-1079:\n      const shouldTeardownSession =\n        isSelf && voiceStore.getState().currentChannelId === payload.channel_id;\n      void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {\n        void handleParticipantLeft(payload.user_id);   // <- payload.channel_id dropped\n\nlivekitE2EE.ts:1246-1253 (no channel parameter; acts on this._channelId):\n  async handleParticipantLeft(userId: number): Promise<void> {\n    const departingKey = this._peerPublicKeys.get(userId);\n    const hadPeerKey = departingKey !== undefined;\n    this._peerPublicKeys.delete(userId);\n    this._peerOfferEpochs.delete(userId);\n    clearPeerVerification(userId);\n    const channelId = this._channelId ?? this.deps.getCurrentChannelId();\n\nAudience proof, hub_broadcast.go:126-143: broadcastVoiceEventWithLeaver resolves h.channelReadAudience(ctx, channelID) — everyone with READ on the channel, regardless of voice membership.\n\nReordering proof (already documented in-tree): voice_leave goes through the async hub queue (hub_broadcast.go:160-168 `h.broadcast <- bm`), while voice_e2ee_announce is published straight into the recipient's send queue from the announcer's read pump (voice_e2ee.go:270-272 `h.pubsub.Publish(VoiceTopic(channelID), ...)`) — the same hazard livekitE2EE.ts:1268-1272 cites for OC-0213.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "voice-e2ee",
       "suggestedFix": "Scope the E2EE notification to this client's own voice channel, mirroring removeVoiceUser and the shouldTeardownSession comparison already computed in the same handler. In dispatcher.ts, reuse the pre-leaveVoiceChannel store read: `const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;` (the value shouldTeardownSession already derives at :1071-1072), then at :1077 call it only when it matches — `if (sameChannel) void handleParticipantLeft(payload.user_id);` — leaving `if (shouldTeardownSession) void leaveVoice(false);` untouched. This keeps the one-argument call shape that dispatcher.test.ts:2728 asserts, and needs no change in livekitE2EE.ts. (Threading payload.channel_id into handleParticipantLeft and early-returning on mismatch against `this._channelId ?? this.deps.getCurrentChannelId()` is the alternative single-guard form, but it breaks that arity assertion and would require updating it to toHaveBeenCalledWith(7, 3).) The other caller, the ready-resync at dispatcher.ts:374-384, is already channel-scoped and unaffected.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "a231108f",
+        "test": "Client/tests/unit/dispatcher.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0312",
@@ -7403,13 +7409,19 @@
       "why": "`payload.timestamp` is the raw SQLite `datetime('now')` string (\"2026-08-22 12:00:01\" — UTC, no zone designator; Server/migrations/001_initial_schema.sql:81, passed through verbatim by service/message_crud.go:79). `Date.parse` treats it as LOCAL time, so the parsed epoch is off by the viewer's UTC offset. The codebase already has `parseTimestamp()` (components/message-list/formatting.ts:25-33) that exists solely to append the missing \"Z\"; this comparison bypasses it. The bias cancels once `serverClockSkewMs` has been sampled (line 765 uses the same biased parse), but it is 0 until the first accepted live message — so the very first reconnect of a session is decided by the viewer's timezone instead of by the timestamp.",
       "repro": "Cold-skew case (serverClockSkewMs still 0 — no chat_message received since login, i.e. a quiet channel).\nEast of UTC, e.g. viewer at UTC+2: socket blips and reconnects at wall time H; 1 s later a peer posts a genuinely LIVE message. Date.parse(ts) = T - 2h, so `T - 2h < H - 0` is true → isReplayFrame = true → notifyIncomingMessage is skipped (no desktop notification, no sound, no taskbar flash). Worse, line 700-702 computes `isMention = ... && !(mentions_here && isReplayFrame)`, so a live `@here` that names the viewer raises no mention badge at all — and the reconnect tier sends no follow-up `ready` to correct it (OC-0271), so the badge is lost permanently.\nWest of UTC, e.g. viewer at UTC-5: Date.parse(ts) = T + 5h, so the test is false for every frame → the entire replayed burst is classified live and fires one desktop notification + sound per already-seen message, which is exactly what the gate was added to prevent.\nNot caught by tests: every timestamp in tests/unit/dispatcher.test.ts (lines 515, 541, 597, 622, 672, 779, 810…) is an ISO `Z` string, a form the server never emits.",
       "evidence": "685:      const isReplayFrame =\n686:        lastReconnectHandshakeAt !== null &&\n687:        Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&\n688:        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;\n...\n765:        serverClockSkewMs = Date.now() - Date.parse(payload.timestamp);\n\n(the helper that exists for exactly this, formatting.ts:31-34:)\n  const date = !raw.endsWith(\"Z\") && !raw.includes(\"+\") && !/T\\d{2}:\\d{2}:\\d{2}[+-]/.test(raw)\n      ? new Date(raw.replace(\" \", \"T\") + \"Z\") : new Date(raw);",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "ordering-boundary",
       "suggestedFix": "Route both parses through the existing UTC-normalizing helper instead of bare Date.parse — e.g. import { parseTimestamp } from \"@components/message-list/formatting\" (or lift it into @lib) and use `parseTimestamp(payload.timestamp).getTime()` at dispatcher.ts:688 and :765. One shared helper at both sites, no per-caller guards.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "a231108f",
+        "test": "Client/tests/unit/dispatcher.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0316",
@@ -7420,13 +7432,19 @@
       "why": "registerNow's resume-time E2EE resync (OC-0276) only pushes other participants' stored ECDH public keys *to* the resuming client. The room key itself travels the other way, as a targeted unsequenced voice_e2ee_offer, and one sent while the socket was down is dropped outright. Nothing on either side re-runs the exchange after the resume: the server never re-offers, and the client's only re-announce paths (setupKeyExchange, reannounceForReconnect) are both driven by the LiveKit room, not by the WebSocket, so a pure WS blip leaves a non-key-holder holding the pre-rotation key with no signal and no retry.",
       "repro": "Users A (lower user id, key holder) and B are in a voice call; both LiveKit sessions are healthy. B's WebSocket drops (WiFi blip / proxy restart) but its LiveKit room stays up — nothing tears voice down on a socket drop alone (dispatcher.ts READY comment, livekitSession.ts). The server has not yet observed B's TCP close, so B's old *Client is still in h.clients. While B is offline a third participant C leaves (or A's 5-minute KEY_ROTATION_INTERVAL_MS timer fires, livekitE2EE.ts:109): A rotates the room key and sends a voice_e2ee_offer for B. sendToUserIfInVoiceChannel queues it onto B's dead client and it is lost. B reconnects with last_seq > 0; handleReconnect replays the sequenced voice_state/voice_leave frames, registerNow transfers B's voice state and calls sendVoicePeerKeys — so B's roster and peer-key map are correct — but B's keyProvider still holds the pre-rotation key. From that moment A and B cannot decrypt each other's frames: both hear silence while VoiceWidget still shows \"Secured\", and the only recovery is A's next 5-minute periodic rotation.",
       "evidence": "Server/ws/hub.go:664-666 (registerNow tail):\n    if voiceChID := c.getVoiceChID(); voiceChID != 0 {\n        h.sendVoicePeerKeys(c, voiceChID)\n    }\nsendVoicePeerKeys (Server/ws/voice_e2ee.go:344-350) only sends buildVoiceE2EEAnnounce(uid, pubKey, sig) for every *other* participant — no room-key material.\n\nThe offer path drops silently while the socket is down (Server/ws/voice_e2ee.go:239-259):\n    target, ok := h.clients[targetUserID]\n    if !ok { slog.Debug(\"e2ee: key offer dropped, target not connected\", ...); return }\n    ...\n    target.sendMsg(msg)\n(and while the dead old *Client is still registered, sendMsg queues into a send buffer that registerNow's old.closeSend() then discards).\n\nClient side, the only two re-announce entry points are LiveKit-driven:\n  Client/src/lib/livekitE2EE.ts:159  setupKeyExchange  <- called only from livekitSession.ts:1103 (connectAndSetup)\n  Client/src/lib/livekitE2EE.ts:346  reannounceForReconnect <- called only from livekitSession.ts:564 (attemptAutoReconnect)\nNeither is reachable from a WS resume: dispatcher.ts's AUTH_OK handler (lines 270-290) does exactly setAuth() + one channel_focus send, and the READY handler's E2EE work (OC-0201, dispatcher.ts:360-384) runs only on the full-resync tier, which a successful replay resume never takes.\n\nreannounceForReconnect's own comment states the assumption that is unmet here: \"the key holder will send a fresh offer if the key was rotated during our absence\" (livekitE2EE.ts:343-344) — true only because that path re-announces; the WS-resume path does not.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "flow-reconnect",
       "suggestedFix": "One server-side addition at registerNow's resync call site (Server/ws/hub.go:664-666) — do not put it inside sendVoicePeerKeys, since voice_join.go:531 shares that function and the joiner's own announce already comes from its client there:\n\n    if voiceChID := c.getVoiceChID(); voiceChID != 0 {\n        h.sendVoicePeerKeys(c, voiceChID)\n        // Re-relay THIS client's own stored key back onto VoiceTopic so the\n        // key holder's duplicate-announce branch re-wraps the CURRENT room\n        // key for us — a rotation offer sent while this socket was down was\n        // dropped and no replay tier can recover it.\n        if key, sig := c.getE2EEPubKey(); key != \"\" {\n            h.sendToVoiceChannelExcept(voiceChID, c.userID,\n                buildVoiceE2EEAnnounce(c.userID, key, sig))\n        }\n    }\n\nThis needs no client change: handleAnnounceInner's dedup branch (livekitE2EE.ts:~812, \"duplicate announce — will re-send offer if key holder\") deliberately falls through to the wrap-and-offer branch on an identical key, so the holder re-offers the live room key. The announce is not blocked by _retiredPeerKeys (that set holds only keys a peer has been moved OFF of, never the live one) and re-runs verifyPeerAnnounce exactly as reannounceForReconnect's announce already does. Guard it on c.lastSeq > 0 if you want it strictly on the resume path.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "cd4cc850",
+        "test": "Server/ws/oc_0316_voice_e2ee_resume_rotation_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0317",
@@ -7437,13 +7455,19 @@
       "why": "The replay branch suppresses the unread/mention increment but still writes `lastMessageId: messageId` unconditionally. When the redelivered id is *lower* than the stored watermark, the watermark is rolled backwards, so the very next frame in the same replay burst no longer looks like a replay and is counted as new. Its sibling `updateDmLastMessagePreview` (lines 186-190) documents this exact hazard (OC-0301) and returns `prev` instead — `updateDmLastMessage` never got the same treatment.",
       "repro": "DM channel 5. Two messages (ids 101 then 102) are delivered by the server in the registerNow→buildReady window, so `ready` lands with unreadCount=2 / lastMessageId=102, and both frames are then drained from the queue as `chat_message` (dispatcher.ts:740 calls updateDmLastMessage for each, since the DM is neither own-message nor active).\n1. frame 101: isReplay = (101 <= 102) = true → unreadCount stays 2, but lastMessageId is overwritten with 101.\n2. frame 102: isReplay = (102 <= 101) = false → unreadCount = 3, and mentionCount = +1 if the message mentioned the reader.\nThe DM sidebar badge shows 3 unread (and a phantom mention) for 2 messages, and it survives until the next full `ready`. Nothing in tests/unit/dm-store.test.ts asserts lastMessageId after a stale call, so the behavior is not locked.",
       "evidence": "const isReplay = updated.lastMessageId !== null && messageId <= updated.lastMessageId;\nreturn { channels: [ { ...updated,\n  lastMessageId: messageId,          // <-- regresses the watermark on a replay\n  lastMessage: content,\n  lastMessageAt: timestamp,\n  unreadCount: isReplay ? updated.unreadCount : updated.unreadCount + 1,\n  mentionCount: isMention && !isReplay ? updated.mentionCount + 1 : updated.mentionCount,\n}, ...rest ] };",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-components",
       "suggestedFix": "Mirror the sibling: in updateDmLastMessage's setState, replace the isReplay ternaries with an early `if (isReplay) return prev;` right after the isReplay computation (dm.store.ts:149). One guard in the shared function; the equal-id case is the same message ready already previewed, so nothing visible is lost.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "7c159c11",
+        "test": "Client/tests/unit/dm-store.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0318",
@@ -7454,13 +7478,19 @@
       "why": "Two sources of truth for one plugin directory, read with opposite precedence by the two paths that consume it. `installZipStagedManifest` reads *only* `plugin.json` from the staged zip, and that is the manifest that is validated, shown to the admin, persisted to `plugins.manifest_json`, and used to activate the instance. `scanPluginDirectory` — the path that runs on every server start — prefers `plugin.toml` and only falls back to `plugin.json` when the TOML file is absent. A zip may contain both files (installZipExtract rejects only symlinks and path escapes, not extra regular files), so the manifest that governs the plugin after a restart is one that was never examined at install time. The manifest is the per-plugin ACL (manifest.go:64-67, errors.go:18-22: \"the manifest — not the guest module — is the authority ... so an admin can see the full command surface before enabling the plugin\"), so this defeats exactly the review it exists for.",
       "repro": "Server built with `-tags wazero` (the build where plugins actually execute and where TOML is parsed). Upload a zip through POST /api/v1/admin/plugins/install containing plugin.json with `\"permissions\": [\"commands\"]`, `\"commands\": [{\"name\":\"hello\"}]`, `\"entrypoint\":\"hello.wasm\"` — plus a plugin.toml at the same root declaring `permissions = [\"commands\",\"http\",\"storage\",\"ui\"]`, extra `[[commands]]` entries, and `entrypoint = \"other.wasm\"`. Install succeeds; installZipStagedManifest parses only the JSON, so the admin list, the stored manifest_json, and the immediately-activated instance all show the narrow JSON surface. Restart the server: LoadAll → scanPluginDirectory (loader.go:64) picks plugin.toml, installFromDisk upserts *that* manifest, and activateAll brings the plugin up with the broader capability set, the undeclared-at-review commands, and a different .wasm entrypoint — with no new admin action and no log line noting that the effective manifest changed. The same mechanism bites non-maliciously: an author who ships both files and later edits only plugin.json sees the stale TOML silently win after every restart while the freshly installed process used the JSON.",
       "evidence": "registry.go:421-427 (install path)\n\tmanifestPath := filepath.Join(stageAbs, \"plugin.json\")\n\traw, err := os.ReadFile(manifestPath)\n\tif err != nil { return nil, fmt.Errorf(\"plugin zip: missing plugin.json at root: %w\", err) }\n\tmanifest, err := ParseManifest(raw)\n\nloader.go:63-86 (load path)\n\t// Prefer plugin.toml (wazero build) over plugin.json.\n\tmanifest, ok, tomlErr := tryLoadPluginTOML(pluginDir)\n\t...\n\tif !ok { /* only now read plugin.json */ }\n\nregistry.go:286-296 — the staged tree (including any plugin.toml) is promoted verbatim into finalDir and registered with the JSON manifest.\n`grep -rn \"plugin.toml\" Server/ --include=*.go` matches only manifest_toml.go and the loader comment: nothing in the install path ever looks at it.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-2",
       "suggestedFix": "Make both paths resolve the manifest through one function instead of guarding each caller. Extract loader.go:62-86's precedence into a shared helper and call it from the install path too:\n\n\t// loader.go\n\tfunc loadManifestFromDir(dir string) (*Manifest, error) {\n\t\tif m, ok, err := tryLoadPluginTOML(dir); err != nil {\n\t\t\treturn nil, err\n\t\t} else if ok {\n\t\t\treturn m, nil\n\t\t}\n\t\traw, err := os.ReadFile(filepath.Join(dir, \"plugin.json\"))\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t\treturn ParseManifest(raw)\n\t}\n\nThen replace registry.go:422-427 with `manifest, err := loadManifestFromDir(stageAbs)` (keeping the existing \"missing plugin.json at root\" wrapping for os.IsNotExist) and have scanPluginDirectory call the same helper. The manifest the admin's install validates is then byte-for-byte the one the next restart loads, in both build tags. If keeping JSON-only at install is preferred, the equally small alternative is to reject the ambiguity at the single install site — after extraction, `if _, err := os.Stat(filepath.Join(stageAbs, \"plugin.toml\")); err == nil { return nil, fmt.Errorf(\"plugin zip: must not contain both plugin.json and plugin.toml\") }` — but the shared-helper version also fixes the plain on-disk case where an author edits only one of the two files.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "bbbaeed4",
+        "test": "Server/plugin/registry_test.go, Server/plugin/registry_zip_toml_wazero_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0319",
@@ -7522,13 +7552,19 @@
       "why": "The DNS-name branch uses `[\\w.-]+`, and JS `\\w` is `[A-Za-z0-9_]` — so a host containing `_` passes. Both `http_proxy::validate_remote_host` and `livekit_proxy::validate_remote_host` allow only `is_ascii_alphanumeric() || '.' | '-' | ':' | '[' | ']'` and reject `_`. Since every REST call routes through `ensureHttpProxy` (api.ts:88), an underscore host is accepted by the Add Server modal and by `api.setConfig`, then fails 100% of REST traffic. The file's own header comment and ServerPanel.ts:310-313 both state the invariant that this validator mirrors the Rust one (\"an address accepted here is also accepted by the actual connection path, and vice versa\").",
       "repro": "Connect page -> \"Add Server\" -> address `my_server.lan:8443`. ServerPanel.ts:314 `isValidHost(addr)` returns true (JS `\\w` matches `_`), so the profile is saved. The connect page then health-checks it: `api.getHealth(\"my_server.lan:8443\")` -> `ensureHttpProxy(host)` -> `invoke(\"start_http_proxy\", {remoteHost})` -> http_proxy.rs:101 `validate_remote_host` -> Err(\"remote_host contains unexpected characters\"). Every REST call fails identically, so login is impossible and the profile shows permanently unreachable; `start_livekit_proxy` rejects the same host, so voice is dead too. The WS proxy has no charset check, so `wss://my_server.lan/api/v1/ws` would have connected — the client accepts an address that only one of its three transports can use.",
       "evidence": "hostValidation.ts:33  return /^[\\w.-]+(:\\d+)?$/.test(host);          // \\w includes '_'\n\nhttp_proxy.rs:83-88\n    if !remote_host\n        .chars()\n        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))\n    {\n        return Err(\"remote_host contains unexpected characters\".into());\n    }\n\nlivekit_proxy.rs:110-116  (identical charset, same rejection)\n\napi.ts:87-89\n  async function baseUrl(): Promise<string> {\n    return `${await ensureHttpProxy(config.host)}/api/v1`;\n  }\n\ncommands.rs tests pin the Rust side as deliberate:\n    (\"underscore\", \"chat_example.com\".into()),   // expected to be rejected\n\ntests/unit/host-validation.test.ts has no underscore case, so nothing locks the TS behavior.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "tauri-rust",
       "suggestedFix": "One character-class change in the shared validator, hostValidation.ts:33: replace `\\w` with an explicit ASCII class so the DNS branch matches the Rust charset — `return /^[A-Za-z0-9.-]+(:\\d+)?$/.test(host);`. Add an underscore rejection case to tests/unit/host-validation.test.ts mirroring commands.rs:364 so the two validators stay pinned together.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "e95c57a4",
+        "test": "Client/tests/unit/host-validation.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0323",
@@ -7624,13 +7660,19 @@
       "why": "incrementUnread/incrementMention bump unconditionally. `Channel.lastMessageId` is declared (line 30) and filled from `ready`'s `last_message_id` (line 100), but no call site anywhere in the client reads it — the identical registerNow->buildReady double-delivery window that OC-0242 fixed for DMs (dm.store.ts) is unguarded for server channels.",
       "repro": "A message is broadcast into channel #general between registerNow (Server/ws/serve.go:853, which subscribes the socket) and buildReady (serve.go:884) on a fresh connect or a full resync. The server counts it in read_states.unread_count, so `ready` carries unread_count = 1 and last_message_id = <that id>; `ready` is written straight to the connection by handshakeWrite while the broadcast waits in the client's send queue. setChannels applies unreadCount = 1, then writePump drains the queued chat_message and dispatcher.ts:711 calls incrementUnread -> the sidebar shows 2 unread for 1 message, and an @mention in it shows a mention count of 2. dm.store.ts:148 guards this exact case for DMs with `messageId <= updated.lastMessageId`; the channel path has no equivalent.",
       "evidence": "channels.store.ts:346-363\n  export function incrementUnread(channelId: number, evenIfActive = false): void {\n    channelsStore.setState((prev) => {\n      if (prev.activeChannelId === channelId && !evenIfActive) return prev;\n      const existing = prev.channels.get(channelId);\n      if (existing === undefined) return prev;\n      const updated: Channel = { ...existing, unreadCount: existing.unreadCount + 1 };\n      ...\n\nchannels.store.ts:30 / :100 — the watermark is stored and never consulted\n  readonly lastMessageId: number | null;\n  lastMessageId: ch.last_message_id ?? null,\n\n`grep -rn lastMessageId` over src/ shows the only readers are dm.store.ts and SidebarDmHelpers.ts — nothing reads Channel.lastMessageId.\n\ncaller: dispatcher.ts:706-715\n  if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {\n    incrementUnread(payload.channel_id, isDetached);\n    if (isMention) incrementMention(payload.channel_id, isDetached);\n  }",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "hotspot-client-tauri-client-src-lib",
       "suggestedFix": "Mirror the DM shape in the one shared store function rather than at the call site: give channels.store a single guarded entry point, e.g. `noteChannelMessage(channelId, messageId, isMention, evenIfActive)`, whose setState computes `const isReplay = existing.lastMessageId !== null && messageId <= existing.lastMessageId;` and writes `unreadCount: isReplay ? existing.unreadCount : existing.unreadCount + 1`, `mentionCount: isMention && !isReplay ? existing.mentionCount + 1 : existing.mentionCount`, and `lastMessageId: Math.max(messageId, existing.lastMessageId ?? 0)` — both counters behind ONE watermark read, exactly as OC-0242 required for updateDmLastMessage (a guard split across the two functions cannot work: the first call would already have advanced the watermark). Then replace the pair at dispatcher.ts:710/713 with the single call; it is the only production caller of incrementUnread/incrementMention, so the existing exports can stay for the tests.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "3e74c968",
+        "test": "Client/tests/unit/channels.store.test.ts, Client/tests/unit/dispatcher.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0329",
@@ -7777,13 +7819,19 @@
       "why": "The cold-tier query is `ORDER BY seq ASC LIMIT n`, so when the range exceeds the cap it is the newest rows that are discarded. The main replay path 220 lines above (reconnectSelectReplay, serve.go:422 and serve.go:442) explicitly detects both of that query's failure modes — `len(persisted) >= coldCap` (cap hit, newest dropped) and a retention-pruned prefix (oldest-seq probe) — and forces a full ready. liveVoiceEventsSince calls the identical db.GetEventsSinceForChannels with the identical cap and has neither guard, so a truncated window is handed to the client as if it were the complete voice history for that room. Worse, the cap is spent on UNFILTERED rows: the query is `channel_id = 0 OR channel_id IN (chID)`, so global broadcasts and the DM's ordinary chat messages consume the budget, and the voice_state/voice_leave filter at serve.go:655 only runs on whatever survived. A peer's voice_leave that falls in the dropped tail is never delivered and never re-sent (the client tracks only max(seq)), so the resumed client renders a participant who has left; symmetrically, a dropped voice_state hides a peer who is really in the call, which also starves that peer of the E2EE announce/offer exchange keyed on the roster.",
       "repro": "Config: event_persistence.enabled = true, event_persistence.replay_cold_limit = 50 (a legal value; ConfigureReplay accepts any positive int, Server/ws/hub.go:751). Alice and Bob are both in a voice call inside a 1:1 DM that Alice has since closed, so the DM id is outside Alice's allowedChannelIDs (computeAllowedChannels sources DM ids from dm_open_state) and handleReconnect takes the liveVoiceChID supplement branch at serve.go:286. Alice's socket drops. While she is offline: (1) Bob posts 60 messages into that DM — each is a persisted event on that channel_id — and then (2) Bob leaves voice, emitting voice_leave. Alice's readable channels stay quiet, so the main cold-tier replay at serve.go:417 returns well under 50 rows and succeeds (tier \"db\"), and the ring buffer no longer covers her last_seq. liveVoiceEventsSince then runs GetEventsSinceForChannels(lastSeq, [dmID], 50), which returns the OLDEST 50 rows — the first 50 chat messages — and drops the remaining 10 rows including Bob's voice_leave. Alice's client resumes with Bob still listed in the voice roster and never receives a correction; the same window would equally have swallowed a voice_state for a peer who joined late, leaving that peer invisible to her for the rest of the call.",
       "evidence": "// Server/ws/serve.go:637-649 (liveVoiceEventsSince)\nif buf := h.ReplayBuffer().EventsSinceFiltered(afterSeq, only); buf != nil {\n\traw = buf\n} else if esp := h.eventStore.Load(); esp != nil {\n\tes := *esp\n\tpersisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, h.maxColdReplayLimit())\n\tif err != nil {\n\t\treturn nil\n\t}\n\traw = make([][]byte, 0, len(persisted))\n\tfor _, p := range persisted {\n\t\traw = append(raw, p.Payload)\n\t}\n}\n// no `len(persisted) >= coldCap` check, no oldest-seq retention probe — compare\n// Server/ws/serve.go:422-453, which has both for the same query:\n//   case len(persisted) >= coldCap:  \"...the NEWEST events were dropped...forcing full ready\"\n//   case len(oldest) == 0 || uint64(oldest[0].Seq) > lastSeq+1: \"retention pruning left a gap...forcing full ready\"\n//\n// Server/db/event_queries.go:136-144 — the cap is applied before any type filter:\n//   WHERE seq > ? AND (channel_id = 0 OR channel_id IN (...)) ORDER BY seq ASC LIMIT ?\n// Server/ws/serve.go:653-659 — voice filtering happens only on the truncated result.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-1",
       "suggestedFix": "Stop spending the cap on non-voice rows and stop replaying a truncated window. Smallest change: give this call its own store method that applies the type filter in SQL — `WHERE seq > ? AND channel_id = ? AND event_type IN ('voice_state','voice_leave') ORDER BY seq ASC LIMIT ?` — so chat and global broadcasts can no longer evict voice events from the budget, and in liveVoiceEventsSince add the sibling's cap check: `if len(persisted) >= cap { slog.Warn(\"live voice supplement hit the row cap, skipping truncated window\"); return nil }`. Returning nil is the correct degradation here (a full ready is no longer available — registerNow already ran at serve.go:268 before the supplement at serve.go:287), and it restores the documented best-effort miss instead of installing a join whose matching leave was discarded. Do not simply raise the limit: that leaves the same silent-truncation hole one order of magnitude further out.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "7aeab0ed",
+        "test": "Server/ws/reconnect_voice_supplement_coldtier_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0338",
@@ -7794,13 +7842,19 @@
       "why": "`toml.Decode` resolves a TOML key to a struct field via the `toml` struct tag, or, when absent, the Go field name matched with `strings.EqualFold`. `Manifest`/`Resources` declare only `json` tags, so `max_memory_mb` and `cpu_budget_ms` never match `MaxMemoryMB` / `CPUBudgetMs` (underscores break EqualFold) and are left undecoded with no error. Every other manifest key happens to be a single word (`name`, `version`, `entrypoint`, `permissions`, `commands`, `ui`, `asset`, …) and case-folds fine, which is why the breakage is invisible — only the two snake_case resource keys are silently discarded, and `Validate()` only checks `>= 0`, so zero passes.",
       "repro": "Build with `-tags wazero` (the only build where plugin.toml is parsed at all — manifest_nottoml.go:9 stubs it out). Ship `plugins/foo/plugin.toml`:\n\n  name = \"foo\"\n  version = \"1.0.0\"\n  entrypoint = \"foo.wasm\"\n  permissions = [\"commands\"]\n  [[commands]]\n  name = \"foo\"\n  [resources]\n  cpu_budget_ms = 2000\n  max_memory_mb = 128\n\nscanPluginDirectory (loader.go:64) loads it via tryLoadPluginTOML; `Manifest.Resources` is `{0, 0}`. Invoke `/foo`: sandbox_wazero.go:317 falls through to `r.cfg.CPUBudgetMs` (config default 100), so a command the author budgeted 2000 ms for is killed at 100 ms with \"command exceeded CPU budget of 100ms\". The byte-identical plugin.json (`\"resources\": {\"cpu_budget_ms\": 2000}`) behaves correctly, so the same plugin works as JSON and misbehaves as TOML. installFromDisk then serializes the zeroed Resources back into `plugins.manifest_json` (loader.go:132-138, registry.go:192-196), so the admin plugin list also reports a budget the author never wrote. No test covers TOML decoding (`grep -rn toml Server/plugin/*_test.go` is empty), so nothing locks this in as intended.",
       "evidence": "manifest_toml.go:31-38\n\tvar m Manifest\n\tif _, err := toml.Decode(string(raw), &m); err != nil { ... }\n\tif err := m.Validate(); err != nil { ... }\n\nmanifest.go:77-80\ntype Resources struct {\n\tMaxMemoryMB int `json:\"max_memory_mb\"`\n\tCPUBudgetMs int `json:\"cpu_budget_ms\"`\n}\n\ntoml@v1.6.0/decode.go:311-318 — `if ff.name == key { ... }` else `if f == nil && strings.EqualFold(ff.name, key) { f = ff }`\ntoml@v1.6.0/type_fields.go:108-113 — `name := opts.name; if name == \"\" { name = sf.Name }`, where `opts` comes from `tag.Get(\"toml\")` (encode.go:647-648).\n\nConsumer: sandbox_wazero.go:317-323\n\tbudgetMs := inst.Manifest.Resources.CPUBudgetMs\n\tif budgetMs <= 0 { budgetMs = r.cfg.CPUBudgetMs }\n\tif budgetMs <= 0 { budgetMs = 100 }",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-2",
       "suggestedFix": "Add toml tags to the two snake_case fields in Server/plugin/manifest.go:77-80:\n\ttype Resources struct {\n\t\tMaxMemoryMB int `json:\"max_memory_mb\" toml:\"max_memory_mb\"`\n\t\tCPUBudgetMs int `json:\"cpu_budget_ms\" toml:\"cpu_budget_ms\"`\n\t}\nThat is the minimal fix and is safe for the JSON path (encoding/json ignores the toml tag). Optionally harden the shared decode site instead of every future field: in tryLoadPluginTOML (manifest_toml.go:31) keep the MetaData and reject leftovers — `md, err := toml.Decode(...)`; `if u := md.Undecoded(); len(u) > 0 { return nil, false, fmt.Errorf(\"plugin.toml: unknown keys %v\", u) }` — which turns any future tag/name mismatch or manifest typo into a loud load error rather than a silent zero.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-28",
+      "fix": {
+        "commit": "073e8799",
+        "test": "Server/plugin/manifest_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0339",
