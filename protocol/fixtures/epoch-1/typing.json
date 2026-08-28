@@ -36,6 +36,19 @@
           },
           "type": "typing"
         }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
       }
     ]
   }

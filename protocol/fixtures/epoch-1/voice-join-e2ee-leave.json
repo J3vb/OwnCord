@@ -62,7 +62,8 @@
         "dir": "c2s",
         "frame": {
           "payload": {
-            "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU="
+            "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU=",
+            "signature": "YWxpY2Utc2lnbmF0dXJlLW92ZXItaGVyLWVjZGgta2V5"
           },
           "type": "voice_e2ee_announce"
         }
@@ -94,6 +95,19 @@
           },
           "seq": "<seq:number>",
           "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ],
@@ -177,6 +191,7 @@
         "frame": {
           "payload": {
             "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU=",
+            "signature": "YWxpY2Utc2lnbmF0dXJlLW92ZXItaGVyLWVjZGgta2V5",
             "user_id": "<id:number>"
           },
           "type": "voice_e2ee_announce"
@@ -202,6 +217,19 @@
           },
           "seq": "<seq:number>",
           "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ]

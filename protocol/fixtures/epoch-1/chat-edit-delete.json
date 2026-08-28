@@ -49,6 +49,19 @@
           "seq": "<seq:number>",
           "type": "chat_deleted"
         }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
       }
     ],
     "b": [
@@ -77,6 +90,19 @@
           },
           "seq": "<seq:number>",
           "type": "chat_deleted"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ]

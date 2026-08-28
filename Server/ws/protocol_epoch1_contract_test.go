@@ -22,18 +22,34 @@ package ws_test
 //     "<token:string>" — before both writing and comparison. The type stays
 //     visible so a field that changes from number to string still fails.
 //     channel_id and role_id are NOT normalised: they are deterministic in a
-//     freshly migrated database and are meaningful to the contract.
+//     freshly migrated database and are meaningful to the contract. The rule
+//     keys off the field NAME, not the meaning of the value, so a bare "id"
+//     (ready.channels[].id, a request's own id) and active_channel_id ARE
+//     normalised even where that value is in fact a channel id. That is by
+//     design, not an oversight: only the two exact names are exempt.
 //     Everything else — extra keys, missing keys, renames, enum values, null
 //     vs absent — is compared verbatim. That is the drift these exist to catch.
+//   - Optional fields are recorded in BOTH forms. alice carries a display
+//     name, an avatar, an about text, a custom status and an E2EE identity
+//     public key, and her voice_e2ee_announce carries a signature; bob carries
+//     none of them. A field frozen only as null/absent would let a rename or a
+//     retype through unseen, so every omitempty field a journey can reach is
+//     present in at least one fixture.
 //   - Only the journey's own frames are recorded. The connect handshake
 //     (auth_ok / ready / member_join / presence) and any channel_focus setup
 //     are drained without recording, EXCEPT in fresh-connect, resume-replay
 //     and auth-failure, where the handshake *is* the journey. Otherwise every
 //     fixture would carry its own copy of the ready payload and one ready
 //     change would rewrite eleven files.
-//   - Where a frame must produce nothing on a connection (mark_read, the
-//     sender's own typing_start), absence is proven with a ping/pong barrier
-//     rather than a sleep, and that pair is part of the transcript.
+//   - Every journey ends with a ping/pong barrier on each recorded
+//     connection, and where a frame must produce nothing at all (mark_read,
+//     the sender's own typing_start) that same pair doubles as the absence
+//     proof. pong is a direct reply, so anything the server queued ahead of it
+//     arrives first and fails as `expected "pong", got "X"`. Without the
+//     barrier a frame emitted after a journey's last read would never be
+//     recorded and the fixture would still pass — exactly the drift this file
+//     exists to catch. auth-failure is the exception: the server closes the
+//     socket after auth_error, and that close is the proof nothing follows.
 //   - One position genuinely is not ordered by the server: a voice joiner's own
 //     voice_state arrives on the hub's asynchronous broadcast queue while the
 //     rest of its join burst is written directly by the handler goroutine. That
@@ -191,9 +207,10 @@ func decodeFrame(t *testing.T, raw []byte) map[string]any {
 }
 
 // canonicalJSON renders v with sorted keys and stable two-space indentation,
-// so key order never enters the comparison. HTML escaping is off: it is
-// json.MarshalIndent's default and would render every placeholder as
-// "<id:number>" in a file whose whole job is to be read by a human
+// so key order never enters the comparison. HTML escaping is off: it is on by
+// default in encoding/json (json.MarshalIndent included), and with it every
+// placeholder would be written as "\u003cid:number\u003e" rather than
+// "<id:number>" — in a file whose whole job is to be read by a human
 // reviewing a protocol change.
 func canonicalJSON(t *testing.T, v any) string {
 	t.Helper()
@@ -366,14 +383,48 @@ func (r *epochRig) seedUser(t *testing.T, username string) (int64, string) {
 	return userID, token
 }
 
+// fillAliceProfile sets every optional profile field on alice, so the fixtures
+// record their present form and not just their null/absent one. bob is left
+// bare on purpose — that is how both forms end up frozen. The values are
+// obviously test data; the avatar is an https URL because that is the only
+// shape the REST profile path accepts (api/profile_handler.go:120).
+func (r *epochRig) fillAliceProfile(t *testing.T, userID int64) {
+	t.Helper()
+	ctx := context.Background()
+	avatar := "https://fixtures.invalid/alice-avatar.png"
+	displayName := "Alice Fixture"
+	about := "fixture profile text"
+	customStatus := "fixture custom status"
+	// A long-term E2EE identity key, base64 of an obvious test string. It is
+	// NOT normalised — the rule replaces keys containing "token", and
+	// identity_public_key is not one — so the fixture pins the value verbatim.
+	identityKey := "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl"
+	if err := r.db.UpdateUserProfile(ctx, userID, "alice", &avatar, &displayName, &about); err != nil {
+		t.Fatalf("UpdateUserProfile(alice): %v", err)
+	}
+	if err := r.db.UpdateUserCustomStatus(ctx, userID, &customStatus); err != nil {
+		t.Fatalf("UpdateUserCustomStatus(alice): %v", err)
+	}
+	if err := r.db.UpdateUserIdentityKey(ctx, userID, &identityKey); err != nil {
+		t.Fatalf("UpdateUserIdentityKey(alice): %v", err)
+	}
+}
+
 // seedBaseline gives every journey the same starting database: two members,
 // one text channel (id 1) and one voice channel (id 2). Channel ids are not
 // normalised, so keeping the seed identical keeps them readable across
 // fixtures.
+//
+// alice fills in every optional profile field and bob fills in none, so each
+// omitempty/nullable field is frozen in BOTH forms: present (where a rename or
+// a retype is visible) and absent. Freezing only the absent form would let
+// display_name or identity_public_key be renamed, retyped or dropped without a
+// single fixture moving.
 func (r *epochRig) seedBaseline(t *testing.T) (aliceID, bobID int64, aliceTok, bobTok string) {
 	t.Helper()
 	aliceID, aliceTok = r.seedUser(t, "alice")
 	bobID, bobTok = r.seedUser(t, "bob")
+	r.fillAliceProfile(t, aliceID)
 	ctx := context.Background()
 	textID, err := r.db.CreateChannel(ctx, "general", "text", "", "", 0)
 	if err != nil {
@@ -421,7 +472,11 @@ func (r *epochRig) dial(t *testing.T, name string) *wsConn {
 	if err != nil {
 		t.Fatalf("conn %q: websocket.Dial: %v", name, err)
 	}
-	conn.SetReadLimit(1 << 20) // the ready payload outgrows the 32 KiB default
+	// Headroom, not a requirement: the largest frame these journeys produce
+	// (ready) is ~1.5 KiB, well inside coder/websocket's 32 KiB default. A
+	// fixture run must fail on a frame that changed, not on a read limit, if a
+	// future seed or a fatter ready pushes past it.
+	conn.SetReadLimit(1 << 20)
 	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
 	return &wsConn{t: t, name: name, tr: r.tr, conn: conn}
 }
@@ -479,6 +534,42 @@ func (c *wsConn) expect(msgType string) map[string]any {
 		c.t.Fatalf("conn %q: expected %q, got %q: %s", c.name, msgType, got, canonicalJSON(c.t, frame))
 	}
 	return frame
+}
+
+// barrier closes a connection's recorded frame list: it sends ping and asserts
+// the next frame is pong. pong is a direct reply, so any frame the server
+// queued before it arrives first and fails as `expected "pong", got "X"` —
+// which is what makes a trailing frame a fixture failure instead of a frame
+// nobody ever reads. The pair is recorded; it is part of the transcript.
+//
+// Ping budget: handlePingV2 rate-limits ping to 2 per second per USER
+// (handlers_ping.go:14) and drops the excess SILENTLY, which would turn a
+// third ping into a 5 s read-deadline failure rather than an error frame. No
+// journey may spend more than two per user per second: focus(_, true) spends
+// one and this spends one, which is the ceiling four journeys already sit on.
+// Need another? Give that user a second connection, do not add a sleep.
+func (c *wsConn) barrier() {
+	c.t.Helper()
+	c.send(map[string]any{"type": "ping", "payload": map[string]any{}})
+	c.expect("pong")
+}
+
+// expectClosed asserts the server hung up rather than sending another frame.
+// It is auth-failure's barrier: there is no session left to ping, so the close
+// itself (serve.go:128, StatusPolicyViolation) is the proof that auth_error is
+// the last thing on that socket.
+func (c *wsConn) expectClosed() {
+	c.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), frameDeadline)
+	defer cancel()
+	_, raw, err := c.conn.Read(ctx)
+	if err == nil {
+		c.t.Fatalf("conn %q: expected the server to close, got frame %s", c.name, raw)
+	}
+	if got := websocket.CloseStatus(err); got != websocket.StatusPolicyViolation {
+		c.t.Fatalf("conn %q: expected close status %v, got %v (%v)",
+			c.name, websocket.StatusPolicyViolation, got, err)
+	}
 }
 
 // drain reads the named frames without recording them — journey setup, not
@@ -580,8 +671,7 @@ func (c *wsConn) focus(channelID int64, barrier bool) {
 		"payload": map[string]any{"channel_id": channelID},
 	})
 	if barrier {
-		c.send(map[string]any{"type": "ping", "payload": map[string]any{}})
-		c.expect("pong")
+		c.barrier()
 	}
 	c.record = was
 }
@@ -632,12 +722,19 @@ func journeyFreshConnect(t *testing.T, r *epochRig) {
 	a.expect("ready")
 	a.expect("member_join")
 	a.expect("presence")
+	a.barrier()
 }
 
 // journeyAuthFailure records the rejection an unknown session token earns.
 // The two sibling rejections share the frame shape and differ only in the
 // message string: "invalid message" (unparseable first frame) and "first
 // message must be auth" (a first frame of any other type).
+//
+// This is the one journey with no ping/pong barrier: there is no session to
+// ping. The server closes the socket right after the frame (serve.go:126-129),
+// so the close is the proof that auth_error is the last thing said — and an
+// extra frame slipped in ahead of it fails expectClosed rather than passing
+// unrecorded.
 func journeyAuthFailure(t *testing.T, r *epochRig) {
 	r.seedBaseline(t)
 
@@ -648,8 +745,12 @@ func journeyAuthFailure(t *testing.T, r *epochRig) {
 		"payload": map[string]any{"token": "not-a-real-session-token", "last_seq": 0},
 	})
 	a.expect("auth_error")
+	a.expectClosed()
 }
 
+// journeyPing records the heartbeat round trip twice: the second pair is the
+// barrier proving nothing follows the first pong. Two is the whole per-second
+// ping budget (see barrier), so this journey sits exactly on the ceiling.
 func journeyPing(t *testing.T, r *epochRig) {
 	_, _, aliceTok, _ := r.seedBaseline(t)
 
@@ -659,6 +760,7 @@ func journeyPing(t *testing.T, r *epochRig) {
 	a.record = true
 	a.send(map[string]any{"type": "ping", "payload": map[string]any{}})
 	a.expect("pong")
+	a.barrier()
 }
 
 // journeyChatSendFanout records a channel message: the sender's direct
@@ -683,6 +785,8 @@ func journeyChatSendFanout(t *testing.T, r *epochRig) {
 	a.expect("chat_send_ok")
 	a.expect("chat_message")
 	b.expect("chat_message")
+	a.barrier()
+	b.barrier()
 }
 
 // journeyChatEditDelete records the two mutations of an existing message.
@@ -718,6 +822,8 @@ func journeyChatEditDelete(t *testing.T, r *epochRig) {
 	})
 	a.expect("chat_deleted")
 	b.expect("chat_deleted")
+	a.barrier()
+	b.barrier()
 }
 
 // journeyReactionAddRemove records both halves of a reaction. Add and remove
@@ -752,11 +858,20 @@ func journeyReactionAddRemove(t *testing.T, r *epochRig) {
 	})
 	a.expect("reaction_update")
 	b.expect("reaction_update")
+	a.barrier()
+	b.barrier()
 }
 
 // journeyTyping records the typing indicator, which is delivered on the
 // low-priority queue and excludes its sender. The ping/pong pair on "a" is the
 // absence proof: the typist must not see its own typing frame.
+//
+// "a" focuses the channel first, exactly like the other fan-out journeys. That
+// is what makes the absence proof mean anything: registerNow only subscribes a
+// client to a channel topic when it has focus (hub.go:611-616), so an
+// unfocused "a" could not receive the frame no matter what excludeUserID did,
+// and the barrier would be proving the subscription was missing rather than
+// that the server excludes the sender.
 func journeyTyping(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
@@ -764,6 +879,7 @@ func journeyTyping(t *testing.T, r *epochRig) {
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
 	a.drain("member_join", "presence")
+	a.focus(textChannelID, false)
 	b.focus(textChannelID, true)
 
 	a.record, b.record = true, true
@@ -772,8 +888,8 @@ func journeyTyping(t *testing.T, r *epochRig) {
 		"payload": map[string]any{"channel_id": textChannelID},
 	})
 	b.expect("typing")
-	a.send(map[string]any{"type": "ping", "payload": map[string]any{}})
-	a.expect("pong")
+	a.barrier()
+	b.barrier()
 }
 
 // journeyMarkRead records the one client→server frame that answers with
@@ -792,8 +908,7 @@ func journeyMarkRead(t *testing.T, r *epochRig) {
 		"type":    "mark_read",
 		"payload": map[string]any{"channel_id": textChannelID},
 	})
-	a.send(map[string]any{"type": "ping", "payload": map[string]any{}})
-	a.expect("pong")
+	a.barrier()
 }
 
 // journeyDMSend records a direct message. DM traffic is addressed to the
@@ -820,6 +935,8 @@ func journeyDMSend(t *testing.T, r *epochRig) {
 	a.expect("chat_send_ok")
 	a.expect("chat_message")
 	b.expect("chat_message")
+	a.barrier()
+	b.barrier()
 }
 
 // journeyResumeReplay records the reconnect handshake: the actor drops, misses
@@ -856,6 +973,12 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 	})
 	b.expect("chat_send_ok")
 	b.expect("chat_message")
+	// b's barrier closes ITS recorded list here rather than at the end of the
+	// journey: everything b has to say about the away window is said, and the
+	// resume below broadcasts a presence that lands on b afterwards. That
+	// frame belongs to the resuming connection's transcript, where it is
+	// recorded, not to b's.
+	b.barrier()
 	b.record = false
 
 	a2 := r.dial(t, "a")
@@ -876,6 +999,7 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 	a2.expect("presence")     // replayed: the actor's own disconnect
 	a2.expect("chat_message") // replayed: what it missed
 	a2.expect("presence")     // live: back online
+	a2.barrier()
 }
 
 // journeyVoiceJoinE2EELeave records a two-party encrypted call: both join, the
@@ -915,11 +1039,17 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 	b.expectJoinBurst(bobID, "voice_token", "voice_state", "voice_config")
 	a.expect("voice_state") // bob's, broadcast to the room's audience
 
-	// alice publishes her ECDH public key; the server relays it verbatim to
-	// every other participant and never verifies it.
+	// alice publishes her ECDH public key, signed by her identity key; the
+	// server checks only the size and base64-ness of both and relays them
+	// verbatim (voice_e2ee.go:126-140) — it never verifies the signature.
+	// signature is omitempty, so sending one is what records its present form;
+	// a legacy announce without one is the absent form the schema also allows.
 	a.send(map[string]any{
-		"type":    "voice_e2ee_announce",
-		"payload": map[string]any{"public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU="},
+		"type": "voice_e2ee_announce",
+		"payload": map[string]any{
+			"public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU=",
+			"signature":  "YWxpY2Utc2lnbmF0dXJlLW92ZXItaGVyLWVjZGgta2V5",
+		},
 	})
 	b.expect("voice_e2ee_announce")
 
@@ -938,4 +1068,6 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 	a.send(map[string]any{"type": "voice_leave", "payload": map[string]any{}})
 	a.expect("voice_leave")
 	b.expect("voice_leave")
+	a.barrier()
+	b.barrier()
 }

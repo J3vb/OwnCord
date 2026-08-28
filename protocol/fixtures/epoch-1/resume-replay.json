@@ -21,10 +21,10 @@
             "replay_source": "buffer",
             "server_name": "OwnCord Server",
             "user": {
-              "about": null,
-              "avatar": null,
-              "custom_status": null,
-              "display_name": null,
+              "about": "fixture profile text",
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "custom_status": "fixture custom status",
+              "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
               "status": "online",
@@ -76,12 +76,25 @@
         "dir": "s2c",
         "frame": {
           "payload": {
-            "custom_status": null,
+            "custom_status": "fixture custom status",
             "status": "online",
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
           "type": "presence"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ],
@@ -144,6 +157,19 @@
           },
           "seq": "<seq:number>",
           "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ]

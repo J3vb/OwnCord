@@ -40,7 +40,8 @@
             "reply_to": null,
             "timestamp": "<ts:string>",
             "user": {
-              "avatar": null,
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
               "username": "alice"
@@ -48,6 +49,19 @@
           },
           "seq": "<seq:number>",
           "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ],
@@ -68,7 +82,8 @@
             "reply_to": null,
             "timestamp": "<ts:string>",
             "user": {
-              "avatar": null,
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
               "username": "alice"
@@ -76,6 +91,19 @@
           },
           "seq": "<seq:number>",
           "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ]

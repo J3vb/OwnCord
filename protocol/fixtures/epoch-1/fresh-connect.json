@@ -20,10 +20,10 @@
             "replay_source": "none",
             "server_name": "OwnCord Server",
             "user": {
-              "about": null,
-              "avatar": null,
-              "custom_status": null,
-              "display_name": null,
+              "about": "fixture profile text",
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "custom_status": "fixture custom status",
+              "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
               "status": "online",
@@ -71,10 +71,11 @@
             "dm_channels": [],
             "members": [
               {
-                "avatar": null,
-                "custom_status": null,
-                "display_name": null,
+                "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "custom_status": "fixture custom status",
+                "display_name": "Alice Fixture",
                 "id": "<id:number>",
+                "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
                 "role": "member",
                 "status": "online",
                 "username": "alice"
@@ -136,8 +137,10 @@
           "payload": {
             "status": "online",
             "user": {
-              "avatar": null,
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
               "id": "<id:number>",
+              "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
               "role": "member",
               "username": "alice"
             }
@@ -150,12 +153,25 @@
         "dir": "s2c",
         "frame": {
           "payload": {
-            "custom_status": null,
+            "custom_status": "fixture custom status",
             "status": "online",
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
           "type": "presence"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
         }
       }
     ]
