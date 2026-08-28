@@ -207,7 +207,8 @@ buffer), or `"db"` (persistent `events` table). See
 first frame was not type `auth`), `missing token`, `invalid token`, `session
 expired`, and `user not found`.
 
-After sending `auth_error`, the server closes the connection.
+After sending `auth_error`, the server closes the connection with close code
+**1008** (policy violation) and reason `authentication failed`.
 
 ### Step 4: ready Payload
 
@@ -300,11 +301,12 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 **channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `slow_mode`, `nsfw`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
 
 `nsfw`, `voice_max_users` and `voice_max_video` are always present, with their
-zero values (`false`, `0`, `0`) on an unconfigured channel — never omitted, so
-"absent" never has to mean two different things. `nsfw` is a label the server
-never acts on (see below); the two voice limits are the values the voice-join
-path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a client can show
-"3/5" and explain a refusal it could have predicted.
+column defaults on an unconfigured channel — `false`, `0`, and **`25`** for
+`voice_max_video`, which is `DEFAULT 25` rather than zero (migration 004) —
+never omitted, so "absent" never has to mean two different things. `nsfw` is a
+label the server never acts on (see below); the two voice limits are the values
+the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
+client can show "3/5" and explain a refusal it could have predicted.
 
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is

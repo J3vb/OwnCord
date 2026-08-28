@@ -57,12 +57,23 @@ go test ./ws -run TestEpoch1Fixtures -update
 
 from `Server/`, then read the diff frame by frame before committing it.
 
-**A fixture may only change with an epoch bump.** A diff under
-`fixtures/epoch-<n>/` in a change that does not bump the protocol epoch is a
-protocol break to revert, not a refactor to accept. New wire behaviour gets a
-new `fixtures/epoch-<n+1>/` directory; older directories stay as the record of
-what earlier clients speak. (Epoch negotiation itself is the next epoch's
-concern.)
+**A fixture's shape may only change with an epoch bump — shape, not value.**
+A diff under `fixtures/epoch-<n>/` that changes a key set, a JSON type, whether
+a key is present at all, or the order of frames on one connection is a protocol
+change: it needs a new `fixtures/epoch-<n+1>/` directory, with the old one kept
+as the record of what earlier clients speak. In a change that does not bump the
+epoch, that diff is a protocol break to revert, not a refactor to accept.
+(Epoch negotiation itself is the next epoch's concern.)
+
+A diff confined to a **seeded default value** is not a protocol change. The
+fixtures record real values wherever they are deterministic — role permission
+masks and colours, `motd`, `server_name`, a channel's `voice_max_video`, the
+`voice_config` preset — so a migration that changes a default mask, or a new
+default channel, moves a fixture without touching the wire. Regenerate in the
+same PR and read the diff frame by frame. Normalising those values away is not
+the answer: a placeholder over a mask or over an enum such as
+`voice_config.threshold_mode` would hide exactly the drift these files exist to
+catch.
 
 The narrative protocol reference is [`docs/protocol.md`](../docs/protocol.md);
 the blueprint is [`docs/architecture/websocket.md`](../docs/architecture/websocket.md).
