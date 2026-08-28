@@ -737,9 +737,13 @@ service.
 14. _(added 2026-08-28)_ The 250/100/25 run starts from
     `Server/scripts/k6/ws-load.js`. k6 cannot drive voice; a 25-participant
     LiveKit load harness is a real gap and needs a named owner before HP-6.
-15. _(added 2026-08-28)_ `release.yml` is tag-only with no CI gate (R-09).
-    Wire the existing `verify-gate-evidence.mjs` (B1-7) into it so a tag
-    cannot publish a SHA the blocking matrix never tested.
+15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
+    (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
+    lands in B2-0. B6 rehearses one tag against both before HP-6.
+16. _(added 2026-08-28)_ Add the browser-hosting flag to
+    `GET /api/v1/server-info` (defined in B2-2) alongside workstream 6's
+    default-off hosting switch, so one endpoint answers "what is this
+    server, and is the browser client on".
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -917,6 +921,9 @@ behavior.
     LAN/offline path uses publicly trusted or local-CA certificates only —
     never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
     hard case one).
+12. _(added 2026-08-28)_ The browser client reads `GET /api/v1/server-info`
+    (B2-2, flag from B6) for the hosting flag and epoch; no separate
+    discovery endpoint.
 
 Service workers, camera/microphone, Web Push, and screen capture require secure
 contexts in normal browser use. The plan follows the relevant
@@ -1203,7 +1210,7 @@ in this order:
 3. B2-8 — the B2-tagged findings, because they touch the same replay/resume
    files as B2-2;
 4. B2-2 → B2-3 → B2-4, serialized;
-5. B2-5, B2-6, B2-7 and B2-9 in parallel where the plan allows.
+5. B2-6, B2-7 and B2-9 in parallel where the plan allows; B2-5 is serialized.
 
 Do not begin B3 domain extraction, client platform extraction, or browser work
 before HP-2 closes.

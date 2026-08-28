@@ -2,7 +2,8 @@
 
 **Drafted:** 2026-08-28  
 **Base commit:** `64d2e108` (`dev`, post-PR #1425); `main` @ `b7d388a3` =
-`v1.2.0-alpha.4`  
+`v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
+onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0
 is the first step. Update this line, not only the step table, when a step
 lands.
@@ -31,6 +32,25 @@ roadmap to ship sooner. BPR-002 (no deadline) and BPR-003 (frozen scope)
 stand. Sizes below are personal estimates and never a gate; the honest total is
 one to one and a half weeks with agents working steps in parallel.
 
+## Steps at a glance
+
+| Step     | What                                                                                               | Size     | Parallel with          |
+| -------- | -------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
+| **B2-0** | Alpha.4 verified; `dev` synced (done, #1432); `environment: release`; ENV-03; `dev` `strict: true` | hours    | —                      |
+| **B2-1** | Capture the epoch-1 fixtures; retire `voice_speakers` and `member_leave`                           | 1 day    | B2-6, B2-7             |
+| **B2-2** | Protocol epoch and negotiation                                                                     | 1 day    | serialized, after B2-8 |
+| **B2-3** | Server-first updates through the signed manifest                                                   | ½ day    | after B2-2             |
+| **B2-4** | Compatibility matrix                                                                               | ½ day    | after B2-2             |
+| **B2-5** | One permission predicate per security property                                                     | 1–2 days | serialized             |
+| **B2-6** | Safe audit coverage                                                                                | ½ day    | B2-1, B2-7             |
+| **B2-7** | Trust model, absence proofs, plugin boundary                                                       | 1 day    | B2-1, B2-6             |
+| **B2-8** | The nine B2-tagged findings                                                                        | 1 day    | before B2-2            |
+| **B2-9** | Security owners and acceptance tests                                                               | spread   | —                      |
+| **HP-2** | Protocol and threat-model sign-off                                                                 | —        | —                      |
+
+Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
+own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
+
 ## Entry gate
 
 | Condition                                                            | State 2026-08-28                                                                                                                      |
@@ -51,19 +71,20 @@ one to one and a half weeks with agents working steps in parallel.
 
 Every claim the roadmap's B2 section rests on, re-tested against `64d2e108`.
 
-| Claim                                         | Verdict                     | What it means for the work                                                                                                                                                                                                                                |
-| --------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No protocol epoch exists                      | **Confirmed**               | `protocol/schema.json` has `"version": 1` — the schema _format_, read by `Server/cmd/genprotocol/main.go:35`. The `auth` payload (`Server/ws/serve_auth.go:46-52`) is `token`, `last_seq`, `active_channel_id`. Nothing carries a version.                |
-| The client has no "update required" path      | **Half refuted**            | `Client/src/lib/ws.ts:306-314` already treats `auth_error` as non-recoverable: sets `intentionalClose`, dispatches, disconnects. So a rejected client **does not** loop today. B2-2 rides that path and pins it with a test; it does not build a new one. |
-| The update endpoint ignores compatibility     | **Confirmed**               | `Server/api/client_update.go:34` advertises the newest GitHub release for the target. The signed manifest (`Server/updater/verify.go:29`) has `version`, `asset`, `sha256`, `assets` — no epoch.                                                          |
-| WASM is disabled by default                   | **Confirmed, already done** | `Server/config/config.go` (plugins `Enabled` defaults false; the example config says "Disabled by default"). B2-7 adds wording only.                                                                                                                      |
-| Reserved entries with no sender (S-15)        | **Confirmed**               | `protocol/schema.json:65` `voice_speakers`, `:75` `member_leave`. No production emit site in `Server/`.                                                                                                                                                   |
-| Audit events exist                            | **Confirmed**               | `Server/db/audit_writer.go` (async batched writer, drops are logged); 43 `Audit(` call sites. Invite create/revoke have none (S-02).                                                                                                                      |
-| Permission helpers exist but are mirrored     | **Confirmed**               | `Server/permissions/permissions.go`: `HasPerm`, `HasAnyPerm`, `HasAdmin`, `HasServerPerm`, `EffectivePerms`, `EffectiveChannelPerms`. Typing checks a weaker permission than posting (S-01); ready/refresh/ws mirror send policy by hand (S-12).          |
-| Trust model has one document                  | **Refuted**                 | Pieces live in `docs/protocol.md`, `docs/architecture/voice-e2ee.md`, `docs/credential-storage.md`, `docs/security.md`. No single statement of what the operator can read.                                                                                |
-| Federation / directory / central identity     | **Absent, unproven**        | Nothing exists. B2-7 turns "nothing" into a test that fails if something appears.                                                                                                                                                                         |
-| WS application close codes in use             | **Measured**                | `4000`, `4001`, `4096`. `4426` is free.                                                                                                                                                                                                                   |
-| CI needs a new job for the compatibility test | **Refuted**                 | A Go table test runs under `go test ./...`, which the required `Server Build & Test` check already executes. No new job, no pin-script change for B2-4.                                                                                                   |
+| Claim                                         | Verdict                     | What it means for the work                                                                                                                                                                                                                                   |
+| --------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No protocol epoch exists                      | **Confirmed**               | `protocol/schema.json` has `"version": 1` — the schema _format_, read by `Server/cmd/genprotocol/main.go:35`. The `auth` payload (`Server/ws/serve_auth.go:46-52`) is `token`, `last_seq`, `active_channel_id`. Nothing carries a version.                   |
+| The client has no "update required" path      | **Half refuted**            | `Client/src/lib/ws.ts:306-314` already treats `auth_error` as non-recoverable: sets `intentionalClose`, dispatches, disconnects. So a rejected client **does not** loop today. B2-2 rides that path and pins it with a test; it does not build a new one.    |
+| The update endpoint ignores compatibility     | **Confirmed**               | `Server/api/client_update.go:34` advertises the newest GitHub release for the target. The signed manifest (`Server/updater/verify.go:29`) has `version`, `asset`, `sha256`, `assets` — no epoch.                                                             |
+| WASM is disabled by default                   | **Confirmed, already done** | `Server/config/config.go` (plugins `Enabled` defaults false; the example config says "Disabled by default"). B2-7 adds wording only.                                                                                                                         |
+| Reserved entries with no sender (S-15)        | **Confirmed**               | `protocol/schema.json:65` `voice_speakers`, `:75` `member_leave`. No production emit site in `Server/`.                                                                                                                                                      |
+| L-08 prebuilt WASM still tracked              | **Refuted**                 | Deleted in #1418; `.gitignore` ignores it; the example's README documents the build. Only the deterministic-build gate remains, and it is blocked (B1 plan). B2-7 item 4 is that decision, not the untracking.                                               |
+| Audit events exist                            | **Confirmed**               | `Server/db/audit_writer.go` (async batched writer, drops are logged); the `WriteAudit(`, `LogAudit(` and `EnqueueAudit(` call sites (a grep for `Audit(` catches all three). Invite create/revoke have none (S-02).                                          |
+| Permission helpers exist but are mirrored     | **Confirmed**               | `Server/permissions/permissions.go`: `HasPerm`, `HasAnyPerm`, `HasAdmin`, `HasServerPerm`, `EffectivePerms`, `EffectiveChannelPerms`. Typing checks a weaker permission than posting (S-01); ready/refresh/ws mirror send policy by hand (S-12).             |
+| Trust model has one document                  | **Refuted**                 | Pieces live in `docs/protocol.md`, `docs/architecture/voice-e2ee.md`, `docs/credential-storage.md`, `docs/security.md`. No single statement of what the operator can read.                                                                                   |
+| Federation / directory / central identity     | **Absent, unproven**        | Nothing exists. B2-7 turns "nothing" into a test that fails if something appears.                                                                                                                                                                            |
+| WS application close codes in use             | **Refuted**                 | None. Non-test code closes only with the library's 1000/1011. The `4000`/`4096` grep hits are unrelated constants (`CONFIRM_TIMEOUT_MS`, `maxMessageLen`, `Vec::with_capacity`, `touchThrottleMaxEntries`). `4426` will be the first application close code. |
+| CI needs a new job for the compatibility test | **Refuted**                 | A Go table test runs under `go test ./...`, which the required `Server Build & Test` check already executes. No new job, no pin-script change for B2-4.                                                                                                      |
 
 Net effect: B2-2 is smaller than the roadmap implies (the rejection path
 exists), B2-4 needs no CI change, and the trust-model document is a genuine
@@ -74,7 +95,7 @@ gap.
 Done in this order; the tag is already pushed.
 
 1. **Verify the release.** Run `33144028968` completed `success` 2026-08-28
-   05:23. `gh release view v1.2.0-alpha.4 --json assets --jq '.assets|length'`
+   05:23 UTC. `gh release view v1.2.0-alpha.4 --json assets --jq '.assets|length'`
    → **20**, the same set alpha.3 shipped: server binary + archive + `.sig` +
    `checksums.sha256` + source snapshot + signed `server-update-manifest.json`,
    plus the AppImage/deb/NSIS client assets and their signatures. The
@@ -90,8 +111,9 @@ Done in this order; the tag is already pushed.
    itself was unblocked). Accept the trap; it is cheaper than changing the
    merge model mid-phase.
 3. **`environment: release`.** In `.github/workflows/release.yml`, add
-   `environment: release` at job level to the job that runs "Generate server
-   update manifest" and signs it (around lines 568–599). The environment
+   `environment: release` at job level on the `publish` job (its header is
+   near line 490 of `release.yml`; the "Generate server update manifest" and
+   signing steps live inside it). The environment
    exists with one reviewer, so the next tag waits for approval. Verify with
    `actionlint` (the hygiene job runs it in CI; locally it may be absent on
    Windows — CI is the gate).
@@ -197,6 +219,10 @@ PROTOCOL_EPOCH` and `client_version` (from the app metadata the settings
    next release") stays parseable until epoch 0 leaves the window, i.e. until
    N = 3. It is client↔client through a relay, so the server's epoch cannot
    police it; a written date does.
+6. **Scope of "negotiation".** Epoch only. No capability flags at beta; a
+   client either speaks the epoch or it does not. The roadmap's "protocol
+   changelog" is the obligations table above plus the `CHANGELOG.md` entry
+   that ships the epoch.
 
 Four commits (schema+generator; server; client; server-info+docs). Record the
 pre-squash SHAs in HP-2 — the fixture commit from B2-1 and the negotiation
@@ -220,9 +246,10 @@ commits must be reviewable apart.
    tampered manifest → candidate ignored.
 4. Docs: `docs/api.md` client-update section (the filter and the manifest
    fields); one paragraph "the server upgrades first" in `docs/deployment.md`;
-   and the next tag line, `v1.2.0-beta.1`, recorded where the release
-   procedure lives (`grep -n 'alpha' docs/contributing.md docs/deployment.md`
-   finds it).
+   and the next tag line, `v1.2.0-beta.1`, recorded as the heading
+   `CHANGELOG.md`'s next entry will use and in one sentence in
+   `docs/contributing.md` (no release-procedure document exists today; do
+   not create one for this).
 
 ## B2-4 — Compatibility matrix
 
@@ -282,7 +309,10 @@ Runs in parallel with B2-1 and B2-6.
    what is end-to-end encrypted (voice, video, screen share; the key-holder
    model and identity TOFU from `docs/architecture/voice-e2ee.md`; the server
    relays what it cannot read); transport (TLS modes; desktop certificate
-   pinning; browser: publicly trusted or local-CA, no pinning); at rest (SQLite
+   pinning; browser: publicly trusted or local-CA, no pinning); the desktop
+   preview destination policy (C-09) — what the native boundary must own:
+   resolution, redirects, destinations, time and body limits — stated as a
+   contract so B7 implements it rather than rediscovers it; at rest (SQLite
    is not encrypted; secrets are hashed; desktop secrets in the OS keychain);
    what the operator can and cannot do; multi-device sessions; what beta does
    not claim. Linked from `docs/security.md`, `docs/deployment.md`,
@@ -305,10 +335,14 @@ Runs in parallel with B2-1 and B2-6.
    exporters); the core list that never moves (authentication, authorization,
    TLS, safe fetch, quotas, E2EE, updates, deletion, recovery, moderation
    audit). Release-notes wording for beta goes in the same file.
-4. **L-08.** Untrack the prebuilt example WASM
-   (`git ls-files Server/plugin/examples | grep -i wasm` names it), ignore
-   it, and document the TinyGo build in that directory's README with the
-   pinned TinyGo version and the Go-1.26 constraint B1-6 found. No CI job.
+4. **L-08.** B1-6 (#1418) already untracked the prebuilt example WASM,
+   ignores it in `.gitignore`, and documented the TinyGo build in
+   `Server/plugin/examples/hello/README.md` (pinned TinyGo 0.40.1; rejects
+   Go 1.26). What remains is the register's "deterministic source build
+   passes" gate, which B1-6 found blocked on a second Go SDK. B2-7 decides
+   one of two: a compile-and-compare job using a second Go SDK, or
+   re-tagging the gate to B10 with the reason recorded in HP-2. Doing
+   neither is not an option.
 
 ## B2-8 — The B2-tagged findings
 
@@ -328,27 +362,28 @@ Lands **before** B2-2; they touch the same replay/resume files.
 
 Run `bughunt-fix` on exactly these nine (test-first, per-file agents, one
 `ci-check` gate, one PR). A finding that turns out to need B7 (client
-platform seam) is re-tagged in the ledger with the reason, per the roadmap's
+platform seam) is re-tagged in the issue register with the reason, per the roadmap's
 phase execution pattern, not silently skipped.
 
 ## B2-9 — Security owners and acceptance tests
 
 The seven local reports in `docs/security-findings/` (gitignored, never
-committed) and where each goes:
+committed; the directory-to-row mapping lives in its local README) and
+where each goes:
 
-| Report directory                     | Public row | Owner phase                     | Acceptance test lives                      | Lands with                        |
-| ------------------------------------ | ---------- | ------------------------------- | ------------------------------------------ | --------------------------------- |
-| `typing-permission-drift`            | S-01       | **B2**                          | beside the report until B2-5 merges        | B2-5                              |
-| `voice-moderation-channel-overrides` | SEC-02     | **B2** (server half)            | beside the report until B2-5 merges        | B2-5; UI half in B5               |
-| `desktop-link-preview-ssrf`          | C-09       | **B2** (contract) / B7 (client) | beside the report                          | contract in B2-7 docs; code in B7 |
-| `desktop-media-buffering`            | SEC-03     | B2 if small, else **B5**        | beside the report                          | B2-9 or B5 item 11                |
-| `password-confirmation-concurrency`  | SEC-01     | **B4**                          | private GitHub advisory (owner creates it) | B4                                |
-| `upload-disk-exhaustion`             | SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it) | B6                                |
-| `unicode-login-throttle-collision`   | OC-0324    | **B4**                          | private GitHub advisory (owner creates it) | B4                                |
+| Public row | Owner phase                     | Acceptance test lives                                                                                                    | Lands with                        |
+| ---------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
+| S-01       | **B2**                          | beside the report until B2-5 merges                                                                                      | B2-5                              |
+| SEC-02     | **B2** (server half)            | beside the report until B2-5 merges                                                                                      | B2-5; UI half in B5               |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                                                        | contract in B2-7 docs; code in B7 |
+| SEC-03     | B2 if small, else **B5**        | beside the report                                                                                                        | B2-9 or B5 item 11                |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                                                               | B4                                |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                                                               | B6                                |
+| OC-0324    | **B4**                          | beside the report — its `why` and `repro` are already public in the tracked ledger, so an advisory would protect nothing | B4                                |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
-local until its fix lands, then lands publicly in the same PR. The three
-advisories are created by the owner in the GitHub UI (Security → Advisories →
+local until its fix lands, then lands publicly in the same PR. The two
+advisories (SEC-01, SEC-04) are created by the owner in the GitHub UI (Security → Advisories →
 New draft), not by CLI with the report text; their IDs are recorded in
 `docs/security-findings/README.md`, which is local. Public commits, issues and
 PR bodies never name the mechanism (`docs/security.md`).
