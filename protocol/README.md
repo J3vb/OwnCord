@@ -68,12 +68,17 @@ epoch, that diff is a protocol break to revert, not a refactor to accept.
 A diff confined to a **seeded default value** is not a protocol change. The
 fixtures record real values wherever they are deterministic — role permission
 masks and colours, `motd`, `server_name`, a channel's `voice_max_video`, the
-`voice_config` preset — so a migration that changes a default mask, or a new
-default channel, moves a fixture without touching the wire. Regenerate in the
-same PR and read the diff frame by frame. Normalising those values away is not
+`voice_config` preset — so a migration that changes a default mask moves a
+fixture without touching the wire. Regenerate in the same PR and read the diff
+frame by frame. Normalising those values away is not
 the answer: a placeholder over a mask or over an enum such as
 `voice_config.threshold_mode` would hide exactly the drift these files exist to
 catch.
+
+A value drawn from a fixed vocabulary the client switches on — `threshold_mode`,
+`quality`, `status`, `replay_source`, a channel `type` — is shape, not a seeded
+value: renaming or dropping a member of it is a protocol change even though
+only a value moved.
 
 The narrative protocol reference is [`docs/protocol.md`](../docs/protocol.md);
 the blueprint is [`docs/architecture/websocket.md`](../docs/architecture/websocket.md).

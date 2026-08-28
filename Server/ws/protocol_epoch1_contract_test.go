@@ -56,8 +56,8 @@ package ws_test
 //     pong is a direct reply on the normal-priority queue, so anything queued
 //     ahead of it there — or on the high-priority queue — arrives first and
 //     fails as `expected "pong", got "X"`. A LOW-priority frame (typing,
-//     presence) pending at the same instant is the one thing pong may overtake
-//     (writePump, serve_pumps.go:83-101); no journey is affected, because
+//     presence_update) pending at the same instant is the one thing pong may
+//     overtake (writePump, serve_pumps.go:83-101); no journey is affected, because
 //     every barrier here is sent on a connection that is otherwise idle.
 //     Without the barrier a frame emitted after a journey's last read would
 //     never be recorded and the fixture would still pass — exactly the drift
