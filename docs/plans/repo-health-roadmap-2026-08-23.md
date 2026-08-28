@@ -469,6 +469,21 @@ for every later requirement.
 11. Establish performance baselines for permission invalidation, read-state
     writes, broadcast/replay, database waits, reconnect storms, and upload
     admission.
+12. _(added 2026-08-28)_ Build the alpha-shaped test dataset: a deterministic
+    alpha-shape profile in `Server/cmd/seed` plus one anonymised
+    `v1.2.0-alpha.4` database snapshot at a documented path. B4's HP-4 drills,
+    B6's upgrade rehearsal and B10's in-place upgrade all consume it; until B3
+    builds it, nobody owns it.
+13. _(added 2026-08-28)_ Workstreams 2 and 3 are the design already written in
+    [bug-detection-improvements.md](bug-detection-improvements.md), Tiers 3a,
+    3b and 3c. Execute that design; do not write another.
+14. _(added 2026-08-28)_ Workstream 1's coverage floor starts at B0's measured
+    74.6% CI aggregate and ratchets from there.
+15. _(added 2026-08-28)_ Adopt an `authz-chokepoint` rule in
+    `Server/invariants` only if B2-5's predicate inventory shows a mechanical
+    shape. The rule was dropped once for lack of evidence; B2-5 produces it.
+16. _(added 2026-08-28)_ Run the Docker smoke nightly on `dev`. The CI job is
+    `main`-gated, so `dev` never proves the image.
 
 ### Hold point HP-3 — First vertical-slice review
 
@@ -541,6 +556,13 @@ retained, and erasable without central services or misleading privacy claims.
     policies and attachment cleanup.
 12. Keep diagnostics local, make support-bundle export user initiated, and
     prevent automatic product or usage telemetry.
+13. _(added 2026-08-28)_ HP-4's destructive drills run against the B3
+    alpha-shaped dataset, not ad-hoc copies.
+14. _(added 2026-08-28)_ OC-0321 is a must-close: a TOTP key-file read error is
+    treated as absence and the key is replaced. Data-loss class.
+15. _(added 2026-08-28)_ Workstream 7 is smaller than written: per-session
+    listing and individual revocation already exist server-side. B4 adds the
+    new-login event and sign-out-everywhere only.
 
 ### Hold point HP-4 — Irreversible-data review
 
@@ -620,6 +642,9 @@ operation before building their full cross-client experience.
    rotation, and stale-subscription cleanup. There is no OwnCord relay.
 10. Keep automation optional. Human moderation authority and audit remain core
     even if automation becomes a post-beta plugin candidate.
+11. _(added 2026-08-28)_ SEC-03 (bounded per-response and aggregate
+    preview/media reads) is first in line unless B2-9 already landed it. It is
+    P1 and confirmed.
 
 ### Hold point HP-5 — Abuse and privacy review
 
@@ -704,6 +729,17 @@ service.
     SBOM, provenance, checksums, and source-snapshot evidence.
 12. Document local logs, support-bundle generation, capacity limits, ports,
     storage growth, certificate trust, recovery, updates, and safe failure.
+13. _(added 2026-08-28)_ Must-close before any ARM64 server asset ships:
+    OC-0320 (self-update selects linux-amd64 regardless of architecture),
+    OC-0332 (a bare IPv6 address breaks the updater URL), OC-0344 (the
+    HTTP→HTTPS redirect assumes port 443) and OC-0339 (an empty configuration
+    section is reported as unknown).
+14. _(added 2026-08-28)_ The 250/100/25 run starts from
+    `Server/scripts/k6/ws-load.js`. k6 cannot drive voice; a 25-participant
+    LiveKit load harness is a real gap and needs a named owner before HP-6.
+15. _(added 2026-08-28)_ `release.yml` is tag-only with no CI gate (R-09).
+    Wire the existing `verify-gate-evidence.mjs` (B1-7) into it so a tag
+    cannot publish a SHA the blocking matrix never tested.
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -792,6 +828,14 @@ without regressing the current application.
     disclosure, and local support-bundle export.
 12. Build and smoke Windows x64/ARM64 and Linux x64/ARM64 desktop artifacts,
     using native Windows ARM64 evidence and declared Linux ARM64 evidence.
+13. _(added 2026-08-28)_ Delete the two Rust commands nothing invokes,
+    `probe_credential_store` and `ptt_get_key`
+    ([platform-contracts.md](../architecture/platform-contracts.md)).
+14. _(added 2026-08-28)_ Workstream 8 consumes B2's
+    `protocol_epoch_unsupported` frame and `GET /api/v1/server-info`; it
+    defines no new contract.
+15. _(added 2026-08-28)_ Re-run Stryker (C-16) before workstream 6 decomposes
+    modules, so the mutation baseline is honest.
 
 ### Hold point HP-7 — Desktop parity before browser behavior
 
@@ -869,6 +913,10 @@ behavior.
    real supported browsers/devices for release qualification.
 10. Preserve one active server connection and per-server account/profile
     isolation.
+11. _(added 2026-08-28)_ No certificate pinning in a browser. Workstream 7's
+    LAN/offline path uses publicly trusted or local-CA certificates only —
+    never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
+    hard case one).
 
 Service workers, camera/microphone, Web Push, and screen capture require secure
 contexts in normal browser use. The plan follows the relevant
@@ -1038,6 +1086,11 @@ re-verifies every BPR.
     accessibility, support, feedback, and contribution documentation.
 12. Prepare safe release notes and coordinated fixed-vulnerability disclosure.
     Do not publish private exploit material by default.
+13. _(added 2026-08-28)_ `ci.yml` cancels in-progress runs on every ref,
+    `main` included, so item 2's thirty consecutive runs cannot be counted as
+    written. Exempt `main` from `cancel-in-progress` before the count starts.
+14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
+    self-hosted instance and one Docker instance.
 
 ### Hold point HP-10 — Human go/no-go
 
