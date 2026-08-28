@@ -103,7 +103,7 @@ and (b) confirm destructive actions.
 | Operation        | Affordance                      | REST                                                 | Reaction                                                              |
 | ---------------- | ------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
 | Change role      | Member context menu → submenu   | `PATCH /admin/api/users/{id}` `{role_id}`            | Toast; `member_update` reflects live                                  |
-| Kick             | Member menu, two-click confirm  | `DELETE /admin/api/users/{id}/sessions`              | Toast "Kicked {user}"; `member_leave`                                 |
+| Kick             | Member menu, two-click confirm  | `DELETE /admin/api/users/{id}/sessions`              | Toast "Kicked {user}"; the target's sockets drop → `presence` offline |
 | Ban              | Member menu, two-click confirm  | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them                                      |
 | Create channel   | Sidebar → modal                 | `POST /admin/api/channels`                           | Modal closes on success; `channel_create`                             |
 | Edit channel     | Channel menu → modal            | `PATCH /admin/api/channels/{id}`                     | `channel_update`                                                      |

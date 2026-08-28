@@ -1101,23 +1101,6 @@ describe("WS Dispatcher", () => {
     expect(membersStore.getState().members.has(77)).toBe(false);
   });
 
-  it("wires member_leave to members store", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(99, {
-        id: 99,
-        username: "bye",
-        avatar: null,
-        role: "member",
-        status: "online" as const,
-      });
-      return { ...prev, members: m };
-    });
-
-    mock.dispatch("member_leave", { user_id: 99 });
-    expect(membersStore.getState().members.has(99)).toBe(false);
-  });
-
   it("wires voice_state to voice store", () => {
     mock.dispatch("voice_state", {
       channel_id: 2,
@@ -2975,38 +2958,6 @@ describe("WS Dispatcher", () => {
 
     const configs = voiceStore.getState().voiceConfigs;
     expect(configs.get(3)).toBeDefined();
-  });
-
-  it("wires voice_speakers to voice store", () => {
-    voiceStore.setState((prev) => {
-      const users = new Map(
-        [1, 2, 4].map((userId) => [
-          userId,
-          {
-            userId,
-            username: `user${userId}`,
-            muted: false,
-            deafened: false,
-            speaking: false,
-            camera: false,
-            screenshare: false,
-          },
-        ]),
-      );
-      const voiceUsers = new Map(prev.voiceUsers);
-      voiceUsers.set(3, users);
-      return { ...prev, voiceUsers };
-    });
-
-    mock.dispatch("voice_speakers", {
-      channel_id: 3,
-      speakers: [1, 2, 3],
-    });
-
-    const users = voiceStore.getState().voiceUsers.get(3);
-    expect(users?.get(1)?.speaking).toBe(true);
-    expect(users?.get(2)?.speaking).toBe(true);
-    expect(users?.get(4)?.speaking).toBe(false);
   });
 
   it("wires voice_token to handleVoiceToken", async () => {

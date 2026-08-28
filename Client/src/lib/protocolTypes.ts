@@ -29,12 +29,10 @@ export const ServerMessageType = {
   VOICE_STATE: "voice_state",
   VOICE_CONFIG: "voice_config",
   VOICE_TOKEN: "voice_token",
-  VOICE_SPEAKERS: "voice_speakers",
   VOICE_LEAVE: "voice_leave", // broadcast (same string as client msg)
   VOICE_MOVED: "voice_moved",
   VOICE_DISCONNECTED: "voice_disconnected",
   MEMBER_JOIN: "member_join",
-  MEMBER_LEAVE: "member_leave",
   MEMBER_UPDATE: "member_update",
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",

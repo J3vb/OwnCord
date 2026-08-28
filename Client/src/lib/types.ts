@@ -464,7 +464,9 @@ export interface VoiceConfigPayload {
   readonly max_users: number;
 }
 
-/** CRITICAL: uses threshold_mode, NOT mode. */
+/** Argument shape for `voice.store.setSpeakers` — fed by LiveKit's
+ *  ActiveSpeakersChanged, not by a wire message.
+ *  CRITICAL: uses threshold_mode, NOT mode. */
 export interface VoiceSpeakersPayload {
   readonly channel_id: number;
   readonly speakers: readonly number[];
@@ -506,10 +508,6 @@ export interface MemberJoinPayload {
    *  missing value as "offline", not assume "online", so a hidden user does
    *  not render visible just because the field wasn't sent yet. */
   readonly status?: UserStatus;
-}
-
-export interface MemberLeavePayload {
-  readonly user_id: number;
 }
 
 /**
@@ -765,14 +763,12 @@ export type ServerMessage =
   | (WsEnvelope<VoiceStatePayload> & { readonly type: "voice_state" })
   | (WsEnvelope<VoiceLeavePayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
-  | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
   | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
   | (WsEnvelope<VoiceMovedPayload> & { readonly type: "voice_moved" })
   | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
-  | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })

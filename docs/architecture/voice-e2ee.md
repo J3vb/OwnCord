@@ -66,7 +66,7 @@ Supporting pieces:
   `src/lib/screenShare.ts`, `src-tauri/src/livekit_proxy.rs` (tunnel),
   `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
-The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer` / `voice_speakers`)
+The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer`)
 is specified in [protocol.md](../protocol.md) (Voice End-to-End Encryption
 section). Long-term identity: each user publishes an ECDSA identity public key
 (`users.identity_public_key`, migration 017); peers pin it on first contact

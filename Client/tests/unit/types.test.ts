@@ -88,13 +88,12 @@ const sampleVoiceConfig = {
   },
 };
 
-const sampleVoiceSpeakers = {
-  type: "voice_speakers" as const,
-  payload: {
-    channel_id: 10,
-    speakers: [1, 5, 12],
-    threshold_mode: "forwarding" as const,
-  },
+// Not a wire message — VoiceSpeakersPayload is the argument shape for
+// voice.store's setSpeakers, fed by LiveKit's ActiveSpeakersChanged.
+const sampleVoiceSpeakers: VoiceSpeakersPayload = {
+  channel_id: 10,
+  speakers: [1, 5, 12],
+  threshold_mode: "forwarding" as const,
 };
 
 describe("ServerMessage discriminated union", () => {
@@ -142,7 +141,7 @@ describe("AUDIT Critical: threshold_mode (CRIT-2, CRIT-3)", () => {
   });
 
   it("VoiceSpeakersPayload uses threshold_mode NOT mode", () => {
-    const speakers: VoiceSpeakersPayload = sampleVoiceSpeakers.payload;
+    const speakers: VoiceSpeakersPayload = sampleVoiceSpeakers;
     expect(speakers.threshold_mode).toBe("forwarding");
     // @ts-expect-error — mode is not a valid field
     expect(speakers.mode).toBeUndefined();
@@ -153,13 +152,6 @@ describe("AUDIT Critical: threshold_mode (CRIT-2, CRIT-3)", () => {
     if (msg.type === "voice_config") {
       expect(msg.payload.threshold_mode).toBeDefined();
       expect(["forwarding", "selective"]).toContain(msg.payload.threshold_mode);
-    }
-  });
-
-  it("voice_speakers ServerMessage carries threshold_mode", () => {
-    const msg: ServerMessage = sampleVoiceSpeakers;
-    if (msg.type === "voice_speakers") {
-      expect(msg.payload.threshold_mode).toBeDefined();
     }
   });
 });
@@ -185,12 +177,10 @@ describe("AUDIT Critical: no channel_focus message type", () => {
       "voice_state",
       "voice_leave",
       "voice_config",
-      "voice_speakers",
       "voice_offer",
       "voice_answer",
       "voice_ice",
       "member_join",
-      "member_leave",
       "member_update",
       "member_ban",
       "server_restart",

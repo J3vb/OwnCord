@@ -86,14 +86,14 @@ back on failure.
 Renders from `members.store` (`members` map + `typingUsers`). Shows presence and
 role grouping.
 
-| State           | Trigger                                   | Target reaction                                                                                                                        |
-| --------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`         | `ready.members`                           | Grouped by role, sorted; presence dot per member                                                                                       |
-| `empty`         | No online members                         | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                                     |
-| presence change | `presence` event                          | Live dot update; offline members styled distinctly                                                                                     |
-| role change     | `member_update`                           | Re-group live                                                                                                                          |
-| profile change  | `user_update`                             | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| join/leave/ban  | `member_join`/`member_leave`/`member_ban` | Add/remove with no reflow flash                                                                                                        |
+| State           | Trigger                    | Target reaction                                                                                                                        |
+| --------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`         | `ready.members`            | Grouped by role, sorted; presence dot per member                                                                                       |
+| `empty`         | No online members          | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                                     |
+| presence change | `presence` event           | Live dot update; offline members styled distinctly                                                                                     |
+| role change     | `member_update`            | Re-group live                                                                                                                          |
+| profile change  | `user_update`              | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
+| join/ban        | `member_join`/`member_ban` | Add/remove with no reflow flash                                                                                                        |
 
 ### 2.1 Typing indicator
 

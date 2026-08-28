@@ -664,12 +664,12 @@ describe("voice store", () => {
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(false);
     });
 
-    it("updates remote users' speaking state from server", () => {
-      // Server says user 2 is speaking
+    it("updates remote users' speaking state from LiveKit", () => {
+      // LiveKit says user 2 is speaking
       setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(true);
 
-      // Server says nobody is speaking — remote user updated, local unchanged
+      // LiveKit says nobody is speaking — remote user updated, local unchanged
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
     });
