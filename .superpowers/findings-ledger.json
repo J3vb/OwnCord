@@ -1,5 +1,5 @@
 {
-  "nextId": 349,
+  "nextId": 350,
   "findings": [
     {
       "id": "OC-0001",
@@ -7971,6 +7971,23 @@
       "suggestedFix": "Tighten the single shared selector rather than its caller — in members.store.ts getOnlineMembers, change the predicate to `if (member.status !== \"offline\" && member.status !== \"invisible\")`, matching MemberList's isAwayStatus.",
       "confidence": "high",
       "finder": "opus"
+    },
+    {
+      "id": "OC-0349",
+      "title": "voice_join relays the joiner’s own voice_state through the asynchronous hub queue while the rest of the join burst is written directly, so its position on the joiner’s socket is unordered",
+      "file": "Server/ws/voice_join.go",
+      "line": 498,
+      "severity": "low",
+      "why": "voiceJoinComplete writes voice_token (voice_join.go:445), each existing participant’s voice_state (:523), the peers’ voice_e2ee_announce relays (sendVoicePeerKeys, :531) and voice_config (:546) straight into the joiner’s send queue with c.sendMsg, but the joiner’s OWN voice_state goes through h.broadcastVoiceEvent (:498), which hub_broadcast.go:95-168 enqueues on the buffered h.broadcast channel for the broadcast goroutine to fan out later. The joiner is part of that audience (channelReadAudience), so nothing orders its own sequenced voice_state against the four direct frames: it can land before voice_token, between the existing participants’ states, or after voice_config, depending on how backed up the broadcast goroutine is. The B2-1 fixture capture could not pin the join burst and had to document the order as unspecified (docs/protocol.md:927-929) and exclude that one frame from the epoch-1 transcript’s ordered comparison (protocol_epoch1_contract_test.go:69-75, 636-648). A client that treats the reply as an ordered burst — e.g. takes its own voice_state as the signal that the roster before it is complete, or that the join finished before voice_config — reads a state that is right most of the time and wrong under load.",
+      "repro": "cd Server && go test -tags deadlock ./ws -run TestEpoch1Fixtures -count=30 at 1fe3df79 with the voice-join journey’s own-voice_state exclusion removed (protocol_epoch1_contract_test.go:636-648): roughly 1 run in 30 records the joiner’s own voice_state after the existing participants’ states or after voice_config instead of directly after voice_token; the default build reorders less often but is not immune. Equivalently, keep the broadcast goroutine busy (a burst of chat_send into another channel from a second client) while a client sends voice_join and watch the joiner’s own voice_state trail voice_config on its socket.",
+      "evidence": "Server/ws/voice_join.go:445  c.sendMsg(buildVoiceToken(channelID, token, \"/livekit\", h.livekit.URL(), isKeyHolder))   // direct\nServer/ws/voice_join.go:498  h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))                           // hub queue, joiner in audience\nServer/ws/voice_join.go:523  c.sendMsg(buildVoiceState(vs))                                                         // direct, per existing participant\nServer/ws/voice_join.go:531  h.sendVoicePeerKeys(c, channelID)                                                      // direct\nServer/ws/voice_join.go:546  c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))                      // direct\nServer/ws/hub_broadcast.go:95-168  broadcastVoiceEvent -> h.broadcast <- bm (buffered channel; deliverBroadcast fans out on the hub goroutine)\ndocs/protocol.md:927-929  \"Items 1, 3 and 4 are written directly and keep that relative order; item 2 travels through the hub’s broadcast queue, so its position relative to the other three on the joiner’s own socket is not guaranteed.\"\nServer/ws/protocol_epoch1_contract_test.go:69-75, 636-648  the epoch-1 transcript deliberately records the joiner’s own voice_state out of the ordered comparison because under -tags deadlock it was observed arriving after the direct frames.",
+      "status": "open",
+      "found": "2026-08-28",
+      "hunt": "b2-1-fixture-capture-2026-08-28",
+      "lens": "ordering-boundary",
+      "suggestedFix": "Write the joiner’s own voice_state to the joiner directly (c.sendMsg, in program order at :498, so the whole burst on the joiner’s socket is one goroutine’s program order) and broadcast it to everyone except the joiner — broadcastVoiceEventWithLeaver already carries an exclude-user path in hub_broadcast.go, so the fix is one call-site change plus a helper, not a new fan-out. Check the seq contract first: deliverBroadcast is where the sequenced copy is stamped and appended to the replay buffer, so the joiner’s direct copy must carry the same seq (or be documented as the unsequenced form like the relayed existing states) rather than double-stamping. Behaviour change within epoch 1 (same frame set, deterministic position): regenerate the epoch-1 fixture in the same PR (`go test ./ws -run TestEpoch1Fixtures -update`), drop the contract test’s exclusion so the order is asserted, and tighten docs/protocol.md:927-929.",
+      "confidence": "high",
+      "finder": "fable"
     }
   ]
 }

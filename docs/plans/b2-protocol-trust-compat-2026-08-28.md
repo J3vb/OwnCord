@@ -196,10 +196,10 @@ runs the new test under `go test ./...`), `npm run check:client`.
 
 **Evidence, 2026-08-28** — HP-2 question 1 cites this block:
 
-- Branch `feat/b2-1-epoch1-fixtures` from `dev` `fb6b51a0`; PR #1435 to `dev`.
-  Record the pre-squash head at merge time:
-  `gh api repos/J3vb/OwnCord/pulls/1435 --jq .head.sha` (before) or
-  `git ls-remote origin refs/pull/1435/head` (after).
+- Branch `feat/b2-1-epoch1-fixtures` from `dev` `fb6b51a0`; PR #1435 to `dev`,
+  squash-merged 2026-08-28 as `1fe3df79`. Pre-squash head at merge time:
+  `069412db` (`git ls-remote origin refs/pull/1435/head` →
+  `069412dbbfb9fa11318a8a6f16af251563e78d09`); HP-2 question 1 cites it.
 - Pre-squash commits: retirement `dd638f1c` (own commit, before capture);
   fixtures `54cae614` (capture), `c0719519` (end-of-journey barriers,
   present-form optionals), `d5fe06e5` (null forms of `auth_ok`/`member_join`
