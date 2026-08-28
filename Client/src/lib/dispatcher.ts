@@ -75,6 +75,7 @@ import type { DmChannelPayload } from "./types";
 import { isTextLikeChannel } from "./types";
 import type { ApiClient } from "./api";
 import { invalidateReactionUsers } from "@components/message-list/reaction-tooltip";
+import { parseTimestamp } from "@components/message-list/formatting";
 import { notifyIncomingMessage } from "./notifications";
 import { mentionsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
@@ -684,7 +685,7 @@ export function wireDispatcher(
       const isReplayFrame =
         lastReconnectHandshakeAt !== null &&
         Date.now() - lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
-        Date.parse(payload.timestamp) < lastReconnectHandshakeAt - serverClockSkewMs;
+        parseTimestamp(payload.timestamp).getTime() < lastReconnectHandshakeAt - serverClockSkewMs;
       // highlightsCurrentUser (mentions.ts) treats @everyone and @here as one
       // bit, because the wire carries only one: mentions_everyone. But the
       // server's applyMentionCounts (mentions.go) narrows an @here fan-out to
@@ -761,7 +762,7 @@ export function wireDispatcher(
         notifyIncomingMessage(payload);
         // Refresh the skew estimate from this accepted-as-live frame so it
         // stays current for the next reconnect.
-        serverClockSkewMs = Date.now() - Date.parse(payload.timestamp);
+        serverClockSkewMs = Date.now() - parseTimestamp(payload.timestamp).getTime();
       }
     }),
   );
@@ -1060,13 +1061,19 @@ export function wireDispatcher(
       // late-arriving voice_leave for a channel we already left (and rejoined
       // elsewhere) must not kill a newer join. Read the store before
       // leaveVoiceChannel() below clears currentChannelId.
-      const shouldTeardownSession =
-        isSelf && voiceStore.getState().currentChannelId === payload.channel_id;
+      const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
+      const shouldTeardownSession = isSelf && sameChannel;
       // Notify E2EE state machine so key holder can rotate the room key, and
       // (when applicable) tear down the media session — both through one lazy
       // import so the two effects cannot land in different ticks.
+      // OC-0311: voice_leave is broadcast to the whole channelReadAudience,
+      // i.e. everyone with READ_MESSAGES on THAT channel — not just its
+      // voice participants. Scope the E2EE notification to this client's own
+      // voice channel so a peer leaving a channel we merely read (and never
+      // shared a call with) cannot delete their key, clear their
+      // verification, or trigger a room-key rotation in our live session.
       void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-        void handleParticipantLeft(payload.user_id);
+        if (sameChannel) void handleParticipantLeft(payload.user_id);
         if (shouldTeardownSession) void leaveVoice(false);
       });
       // Clear local voice state only for the same channel-match case as the
