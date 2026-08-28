@@ -212,10 +212,15 @@ runs the new test under `go test ./...`), `npm run check:client`.
   byte-identical; both trailing-frame guards proven by negative control.
 - Item 4 grep at HEAD hits only `docs/audit-2026-07-19.md` (dated record) and
   this file's own command text.
-- Item 5 refined: the rule is **shape, not value** — a key-set, type,
-  presence, or order change needs an epoch bump; a seeded default value change
-  is regenerated in the same PR. Normalising seeded values was rejected (hides
-  enum drift).
+- Item 5 refined twice: the rule is **shape, not value** (a seeded default
+  value change is regenerated in the same PR; normalising those values was
+  rejected because it hides enum drift), and an epoch bump is for what older
+  clients cannot process — additive keys stay within the epoch and are
+  regenerated deliberately (Codex review on #1435; B2-2's negotiation fields
+  are the first such regeneration). Open for B2-2/B2-4: whether the epoch-1
+  transcript should also replay with additive tolerance as the "old client
+  still works" check, and whether the captured wire is called epoch 0 (absent
+  `epoch`) or epoch 1 — this plan currently says both.
 - Scope addition: six `docs/protocol.md` statements the captured wire proved
   false were corrected in the same PR (relayed `voice_state` has no `seq`,
   `chat_message.user.display_name`, the six real `auth_error` messages,

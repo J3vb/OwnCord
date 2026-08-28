@@ -57,13 +57,17 @@ go test ./ws -run TestEpoch1Fixtures -update
 
 from `Server/`, then read the diff frame by frame before committing it.
 
-**A fixture's shape may only change with an epoch bump — shape, not value.**
-A diff under `fixtures/epoch-<n>/` that changes a key set, a JSON type, whether
-a key is present at all, or the order of frames on one connection is a protocol
-change: it needs a new `fixtures/epoch-<n+1>/` directory, with the old one kept
-as the record of what earlier clients speak. In a change that does not bump the
-epoch, that diff is a protocol break to revert, not a refactor to accept.
-(Epoch negotiation itself is the next epoch's concern.)
+**A fixture's shape may only change deliberately — and an epoch bump is for
+what older clients cannot process.** Within an epoch, a change an older client
+can ignore — a new key, a new optional field — is allowed: regenerate
+`fixtures/epoch-<n>/` in the same PR, read the diff frame by frame, and
+document the addition in `docs/protocol.md`. A change an older client cannot
+process — a key removed, renamed, or retyped, a frame dropped, or the order of
+frames on one connection changed — needs a new `fixtures/epoch-<n+1>/`
+directory, with the old one kept as the record of what earlier clients speak.
+A diff of that kind in a change that does not bump the epoch is a protocol
+break to revert, not a refactor to accept. (Epoch negotiation itself is an
+additive change and stays on epoch 1.)
 
 A diff confined to a **seeded default value** is not a protocol change. The
 fixtures record real values wherever they are deterministic — role permission
