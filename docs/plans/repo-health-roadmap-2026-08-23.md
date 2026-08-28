@@ -3,7 +3,12 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** proposed implementation sequence; no phase is complete yet  
+**Status:** B0 and B1 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27); B2 in progress from
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md);
+B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+in B3–B10 and the "Phase execution pattern" section. [README.md](README.md) is
+the status authority when this header and a README row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
@@ -43,6 +48,9 @@ change.
 ## Current evidence snapshot
 
 This is audit evidence, not a release claim. It must be refreshed in B0.
+_Superseded 2026-08-25 by
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md), which holds the
+measured numbers. The table below is kept for the audit trail._
 
 | Area               | Evidence at the audited head                                                                                                                                    | Consequence                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -160,6 +168,29 @@ An item is done only when:
 - the exact integration commit has CI evidence;
 - tracker, requirement map, and phase scorecard agree;
 - rollback, compatibility, and data-migration notes exist where applicable.
+
+## Phase execution pattern
+
+_Added 2026-08-28._ What B0 and B1 proved, written once so later phases do not
+rediscover it.
+
+1. Each phase gets an execution plan, `docs/plans/bN-<slug>-<date>.md`, at its
+   start, and a scorecard, `docs/plans/hp-N-scorecard-<date>.md`, at its hold
+   point. The plan re-verifies this roadmap's claims against HEAD before
+   implementing anything — B1 refuted several audit findings on contact — and
+   records each verdict. [README.md](README.md) rows are the status authority;
+   a plan header that disagrees with its README row is stale.
+2. A phase cannot exit while any `OC-*` finding tagged to it in the
+   [issue register](repo-health-issue-register-2026-08-23.md) is open, unless
+   the finding is re-tagged to a later phase with a written reason in the
+   scorecard. The tags exist today; this rule is what enforces them, and it is
+   what makes "zero open P0/P1 at B10" a measured fact rather than a hope.
+3. Record pre-squash pull-request SHAs at merge time whenever a hold point
+   reviews commit structure. `dev` is squash-only, so a pure-move/rewrite or
+   fixture/behaviour split survives only on `refs/pull/<n>/head`
+   ([hp-1-scorecard-2026-08-27.md](hp-1-scorecard-2026-08-27.md)).
+4. `dev` requires branches to be up to date before merging (`strict: true`,
+   applied in B2-0). One pull request per plan step, branched from `dev`.
 
 ## B0 — Restore truth, freeze scope, and reconcile the audit
 
@@ -326,6 +357,9 @@ server services and clients must obey.
 **Primary requirements:** BPR-031, BPR-032, BPR-040, BPR-050, BPR-051, and
 BPR-080 through BPR-083.
 
+**Execution plan** _(added 2026-08-28)_:
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md).
+
 ### Entry gate
 
 - B1 is complete and protocol source has one owner.
@@ -435,6 +469,21 @@ for every later requirement.
 11. Establish performance baselines for permission invalidation, read-state
     writes, broadcast/replay, database waits, reconnect storms, and upload
     admission.
+12. _(added 2026-08-28)_ Build the alpha-shaped test dataset: a deterministic
+    alpha-shape profile in `Server/cmd/seed` plus one anonymised
+    `v1.2.0-alpha.4` database snapshot at a documented path. B4's HP-4 drills,
+    B6's upgrade rehearsal and B10's in-place upgrade all consume it; until B3
+    builds it, nobody owns it.
+13. _(added 2026-08-28)_ Workstreams 2 and 3 are the design already written in
+    [bug-detection-improvements.md](bug-detection-improvements.md), Tiers 3a,
+    3b and 3c. Execute that design; do not write another.
+14. _(added 2026-08-28)_ Workstream 1's coverage floor starts at B0's measured
+    74.6% CI aggregate and ratchets from there.
+15. _(added 2026-08-28)_ Adopt an `authz-chokepoint` rule in
+    `Server/invariants` only if B2-5's predicate inventory shows a mechanical
+    shape. The rule was dropped once for lack of evidence; B2-5 produces it.
+16. _(added 2026-08-28)_ Run the Docker smoke nightly on `dev`. The CI job is
+    `main`-gated, so `dev` never proves the image.
 
 ### Hold point HP-3 — First vertical-slice review
 
@@ -507,6 +556,13 @@ retained, and erasable without central services or misleading privacy claims.
     policies and attachment cleanup.
 12. Keep diagnostics local, make support-bundle export user initiated, and
     prevent automatic product or usage telemetry.
+13. _(added 2026-08-28)_ HP-4's destructive drills run against the B3
+    alpha-shaped dataset, not ad-hoc copies.
+14. _(added 2026-08-28)_ OC-0321 is a must-close: a TOTP key-file read error is
+    treated as absence and the key is replaced. Data-loss class.
+15. _(added 2026-08-28)_ Workstream 7 is smaller than written: per-session
+    listing and individual revocation already exist server-side. B4 adds the
+    new-login event and sign-out-everywhere only.
 
 ### Hold point HP-4 — Irreversible-data review
 
@@ -586,6 +642,9 @@ operation before building their full cross-client experience.
    rotation, and stale-subscription cleanup. There is no OwnCord relay.
 10. Keep automation optional. Human moderation authority and audit remain core
     even if automation becomes a post-beta plugin candidate.
+11. _(added 2026-08-28)_ SEC-03 (bounded per-response and aggregate
+    preview/media reads) is first in line unless B2-9 already landed it. It is
+    P1 and confirmed.
 
 ### Hold point HP-5 — Abuse and privacy review
 
@@ -670,6 +729,21 @@ service.
     SBOM, provenance, checksums, and source-snapshot evidence.
 12. Document local logs, support-bundle generation, capacity limits, ports,
     storage growth, certificate trust, recovery, updates, and safe failure.
+13. _(added 2026-08-28)_ Must-close before any ARM64 server asset ships:
+    OC-0320 (self-update selects linux-amd64 regardless of architecture),
+    OC-0332 (a bare IPv6 address breaks the updater URL), OC-0344 (the
+    HTTP→HTTPS redirect assumes port 443) and OC-0339 (an empty configuration
+    section is reported as unknown).
+14. _(added 2026-08-28)_ The 250/100/25 run starts from
+    `Server/scripts/k6/ws-load.js`. k6 cannot drive voice; a 25-participant
+    LiveKit load harness is a real gap and needs a named owner before HP-6.
+15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
+    (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
+    lands in B2-0. B6 rehearses one tag against both before HP-6.
+16. _(added 2026-08-28)_ Add the browser-hosting flag to
+    `GET /api/v1/server-info` (defined in B2-2) alongside workstream 6's
+    default-off hosting switch, so one endpoint answers "what is this
+    server, and is the browser client on".
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -758,6 +832,14 @@ without regressing the current application.
     disclosure, and local support-bundle export.
 12. Build and smoke Windows x64/ARM64 and Linux x64/ARM64 desktop artifacts,
     using native Windows ARM64 evidence and declared Linux ARM64 evidence.
+13. _(added 2026-08-28)_ Delete the two Rust commands nothing invokes,
+    `probe_credential_store` and `ptt_get_key`
+    ([platform-contracts.md](../architecture/platform-contracts.md)).
+14. _(added 2026-08-28)_ Workstream 8 consumes B2's
+    `protocol_epoch_unsupported` frame and `GET /api/v1/server-info`; it
+    defines no new contract.
+15. _(added 2026-08-28)_ Re-run Stryker (C-16) before workstream 6 decomposes
+    modules, so the mutation baseline is honest.
 
 ### Hold point HP-7 — Desktop parity before browser behavior
 
@@ -835,6 +917,13 @@ behavior.
    real supported browsers/devices for release qualification.
 10. Preserve one active server connection and per-server account/profile
     isolation.
+11. _(added 2026-08-28)_ No certificate pinning in a browser. Workstream 7's
+    LAN/offline path uses publicly trusted or local-CA certificates only —
+    never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
+    hard case one).
+12. _(added 2026-08-28)_ The browser client reads `GET /api/v1/server-info`
+    (B2-2, flag from B6) for the hosting flag and epoch; no separate
+    discovery endpoint.
 
 Service workers, camera/microphone, Web Push, and screen capture require secure
 contexts in normal browser use. The plan follows the relevant
@@ -1004,6 +1093,11 @@ re-verifies every BPR.
     accessibility, support, feedback, and contribution documentation.
 12. Prepare safe release notes and coordinated fixed-vulnerability disclosure.
     Do not publish private exploit material by default.
+13. _(added 2026-08-28)_ `ci.yml` cancels in-progress runs on every ref,
+    `main` included, so item 2's thirty consecutive runs cannot be counted as
+    written. Exempt `main` from `cancel-in-progress` before the count starts.
+14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
+    self-hosted instance and one Docker instance.
 
 ### Hold point HP-10 — Human go/no-go
 
@@ -1103,17 +1197,25 @@ Every hold point and phase exit records at least:
 The actual values and links belong in phase evidence, not as optimistic edits
 to this plan.
 
-## First implementation slice
+## Current implementation slice
 
-Start with B0 only:
+_Updated 2026-08-28._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
+accepted 2026-08-27). The active slice is B2, executed from
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md)
+in this order:
 
-1. repair the two failing Vitest contracts;
-2. make Playwright terminate reliably;
-3. collect matched server lint and Docker evidence;
-4. finish issue/security/requirement reconciliation;
-5. run the exact-SHA full matrix and publish the non-sensitive baseline
-   scorecard.
+1. B2-0 — alpha.4 verified, `dev` synced with `main`, release hygiene, `dev`
+   set to `strict: true`;
+2. B2-1 — epoch-1 fixtures captured **before** any protocol change;
+3. B2-8 — the B2-tagged findings, because they touch the same replay/resume
+   files as B2-2;
+4. B2-2 → B2-3 → B2-4, serialized;
+5. B2-6, B2-7 and B2-9 in parallel where the plan allows; B2-5 is serialized.
 
-Then execute the B1 structural work as isolated changes. Do not begin server
-feature implementation, client architecture extraction, or browser work before
-those two gates close.
+Do not begin B3 domain extraction, client platform extraction, or browser work
+before HP-2 closes.
+
+The original 2026-08-23 slice (B0 only, then B1 as isolated changes) was
+executed as written; see
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md) and
+[b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md).
