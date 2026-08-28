@@ -6,9 +6,9 @@
 // extends this test's key sets. Extend this file, do not replace or delete
 // it.
 //
-// Assertions compare exact key sets (deep-equal on Object.keys), never
-// toHaveProperty, so an unexpected added key fails just as loudly as a
-// missing one.
+// Assertions compare exact key sets (sorted Object.keys -- key order has no
+// wire meaning), never toHaveProperty, so an unexpected added key fails just
+// as loudly as a missing one.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -74,9 +74,9 @@ describe("contract: auth frame key set (epoch 1)", () => {
     // part of the auth-specific payload contract, but it IS part of what
     // actually goes over the wire, so the envelope pin has three keys, not
     // the two the auth message literal at ws.ts:446-453 has on its own.
-    expect(Object.keys(frame)).toEqual(["type", "payload", "id"]);
+    expect(Object.keys(frame).sort()).toEqual(["id", "payload", "type"]);
     expect(frame.type).toBe("auth");
-    expect(Object.keys(frame.payload)).toEqual(["token", "last_seq"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["last_seq", "token"]);
     expect(frame.payload.token).toBe("t");
     expect(frame.payload.last_seq).toBe(0);
   });
@@ -107,7 +107,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload)).toEqual(["token", "last_seq", "active_channel_id"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["active_channel_id", "last_seq", "token"]);
     expect(frame.payload.last_seq).toBe(7);
     expect(frame.payload.active_channel_id).toBe(42);
   });
@@ -137,7 +137,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload)).toEqual(["token", "last_seq"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["last_seq", "token"]);
     expect(frame.payload.last_seq).toBe(3);
   });
 });
