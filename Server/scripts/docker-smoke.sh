@@ -13,6 +13,10 @@
 # died exactly here ("writing default config: permission denied") when /app
 # was still root-owned; adding mounts to the smoke would only hide a repeat.
 set -euo pipefail
+# Git Bash on Windows rewrites the /chatserver argument below into a Windows
+# path unless told not to, and the smoke then reports a false boot failure.
+# Exported here so callers do not have to remember it (ENV-03).
+export MSYS_NO_PATHCONV=1
 
 image="${1:?usage: docker-smoke.sh <image>}"
 name="owncord-smoke-$$"

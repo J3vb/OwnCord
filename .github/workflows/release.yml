@@ -498,6 +498,10 @@ jobs:
         release-server-docker,
       ]
     runs-on: ubuntu-latest
+    # The `release` environment carries a required reviewer; naming it here
+    # is what makes that approval gate fire before anything is signed or
+    # published. Without this line the environment exists but never applies.
+    environment: release
     permissions:
       contents: write
     steps:
