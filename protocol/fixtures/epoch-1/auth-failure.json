@@ -1,0 +1,26 @@
+{
+  "journey": "auth-failure",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "last_seq": "<seq:number>",
+            "token": "<token:string>"
+          },
+          "type": "auth"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "message": "invalid token"
+          },
+          "type": "auth_error"
+        }
+      }
+    ]
+  }
+}

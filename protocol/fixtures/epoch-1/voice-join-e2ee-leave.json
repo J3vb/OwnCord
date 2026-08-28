@@ -1,0 +1,209 @@
+{
+  "journey": "voice-join-e2ee-leave",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "channel_id": 2
+          },
+          "type": "voice_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "direct_url": "ws://localhost:7880",
+            "is_key_holder": true,
+            "token": "<token:string>",
+            "url": "/livekit"
+          },
+          "type": "voice_token"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "bitrate": 64000,
+            "channel_id": 2,
+            "max_users": 0,
+            "mixing_threshold": 0,
+            "quality": "medium",
+            "threshold_mode": "top_speakers",
+            "top_speakers": 5
+          },
+          "type": "voice_config"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "bob"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU="
+          },
+          "type": "voice_e2ee_announce"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "encrypted_key": "ZW5jcnlwdGVkLXJvb20ta2V5LWZpeHR1cmU=",
+            "iv": "aXYtZml4dHVyZS0xMg==",
+            "target_user_id": "<id:number>"
+          },
+          "type": "voice_e2ee_offer"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_leave"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "channel_id": 2
+          },
+          "type": "voice_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "direct_url": "ws://localhost:7880",
+            "is_key_holder": false,
+            "token": "<token:string>",
+            "url": "/livekit"
+          },
+          "type": "voice_token"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "bitrate": 64000,
+            "channel_id": 2,
+            "max_users": 0,
+            "mixing_threshold": 0,
+            "quality": "medium",
+            "threshold_mode": "top_speakers",
+            "top_speakers": 5
+          },
+          "type": "voice_config"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU=",
+            "user_id": "<id:number>"
+          },
+          "type": "voice_e2ee_announce"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "encrypted_key": "ZW5jcnlwdGVkLXJvb20ta2V5LWZpeHR1cmU=",
+            "from_user_id": "<id:number>",
+            "iv": "aXYtZml4dHVyZS0xMg=="
+          },
+          "type": "voice_e2ee_offer"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_leave"
+        }
+      }
+    ]
+  }
+}

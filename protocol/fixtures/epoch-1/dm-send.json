@@ -1,0 +1,83 @@
+{
+  "journey": "dm-send",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 3,
+            "content": "hello over dm"
+          },
+          "type": "chat_send"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>",
+            "timestamp": "<ts:string>"
+          },
+          "type": "chat_send_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "attachments": [],
+            "channel_id": 3,
+            "content": "hello over dm",
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "attachments": [],
+            "channel_id": 3,
+            "content": "hello over dm",
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      }
+    ]
+  }
+}

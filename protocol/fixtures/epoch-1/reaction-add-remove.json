@@ -1,0 +1,87 @@
+{
+  "journey": "reaction-add-remove",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "emoji": "👍",
+            "message_id": "<id:number>"
+          },
+          "type": "reaction_add"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "action": "add",
+            "channel_id": 1,
+            "emoji": "👍",
+            "message_id": "<id:number>",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "reaction_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "emoji": "👍",
+            "message_id": "<id:number>"
+          },
+          "type": "reaction_remove"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "action": "remove",
+            "channel_id": 1,
+            "emoji": "👍",
+            "message_id": "<id:number>",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "reaction_update"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "action": "add",
+            "channel_id": 1,
+            "emoji": "👍",
+            "message_id": "<id:number>",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "reaction_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "action": "remove",
+            "channel_id": 1,
+            "emoji": "👍",
+            "message_id": "<id:number>",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "reaction_update"
+        }
+      }
+    ]
+  }
+}

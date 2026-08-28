@@ -6,6 +6,8 @@
 # Generated, verified by `git diff --exit-code` after regeneration.
 Server/db/dbgen/
 Client/src/lib/protocolTypes.ts
+# Written by `go test ./ws -run TestEpoch1Fixtures -update`; frozen wire records.
+protocol/fixtures/
 
 
 # Dated point-in-time snapshots. scripts/check-doc-counts.mjs already treats
