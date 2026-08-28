@@ -169,6 +169,29 @@ An item is done only when:
 - tracker, requirement map, and phase scorecard agree;
 - rollback, compatibility, and data-migration notes exist where applicable.
 
+## Phase execution pattern
+
+_Added 2026-08-28._ What B0 and B1 proved, written once so later phases do not
+rediscover it.
+
+1. Each phase gets an execution plan, `docs/plans/bN-<slug>-<date>.md`, at its
+   start, and a scorecard, `docs/plans/hp-N-scorecard-<date>.md`, at its hold
+   point. The plan re-verifies this roadmap's claims against HEAD before
+   implementing anything — B1 refuted several audit findings on contact — and
+   records each verdict. [README.md](README.md) rows are the status authority;
+   a plan header that disagrees with its README row is stale.
+2. A phase cannot exit while any `OC-*` finding tagged to it in the
+   [issue register](repo-health-issue-register-2026-08-23.md) is open, unless
+   the finding is re-tagged to a later phase with a written reason in the
+   scorecard. The tags exist today; this rule is what enforces them, and it is
+   what makes "zero open P0/P1 at B10" a measured fact rather than a hope.
+3. Record pre-squash pull-request SHAs at merge time whenever a hold point
+   reviews commit structure. `dev` is squash-only, so a pure-move/rewrite or
+   fixture/behaviour split survives only on `refs/pull/<n>/head`
+   ([hp-1-scorecard-2026-08-27.md](hp-1-scorecard-2026-08-27.md)).
+4. `dev` requires branches to be up to date before merging (`strict: true`,
+   applied in B2-0). One pull request per plan step, branched from `dev`.
+
 ## B0 — Restore truth, freeze scope, and reconcile the audit
 
 **Objective:** replace stale or contradictory status with one reproducible
