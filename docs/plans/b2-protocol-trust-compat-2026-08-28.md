@@ -371,15 +371,15 @@ The seven local reports in `docs/security-findings/` (gitignored, never
 committed; the directory-to-row mapping lives in its local README) and
 where each goes:
 
-| Public row | Owner phase                     | Acceptance test lives                                                                                                    | Lands with                        |
-| ---------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| S-01       | **B2**                          | beside the report until B2-5 merges                                                                                      | B2-5                              |
-| SEC-02     | **B2** (server half)            | beside the report until B2-5 merges                                                                                      | B2-5; UI half in B5               |
-| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                                                        | contract in B2-7 docs; code in B7 |
-| SEC-03     | B2 if small, else **B5**        | beside the report                                                                                                        | B2-9 or B5 item 11                |
-| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                                                               | B4                                |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                                                               | B6                                |
-| OC-0324    | **B4**                          | beside the report — its `why` and `repro` are already public in the tracked ledger, so an advisory would protect nothing | B4                                |
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                        |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
+| S-01       | **B2**                          | beside the report until B2-5 merges                                                      | B2-5                              |
+| SEC-02     | **B2** (server half)            | beside the report until B2-5 merges                                                      | B2-5; UI half in B5               |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7 |
+| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
 local until its fix lands, then lands publicly in the same PR. The two
