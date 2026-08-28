@@ -434,6 +434,54 @@ describe("WS Dispatcher", () => {
     expect(ch?.unreadCount).toBe(1);
   });
 
+  // OC-0328: mirrors the DM-side "does not double-count" test below. A
+  // channel message delivered between the server's registerNow and
+  // buildReady is both counted in `ready`'s snapshot (lastMessageId already
+  // advanced to its id) AND redelivered as a queued chat_message once the
+  // socket drains — the channel path had no replay guard at all.
+  it("does not double-count a channel unread/mention whose id is already reflected in lastMessageId", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(5, {
+        id: 5,
+        name: "off-topic",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 1,
+        mentionCount: 1,
+        lastMessageId: 200, // already reflects message 200 via `ready`
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
+    });
+
+    // The same message redelivered as a queued chat_message.
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 5,
+      user: { id: 2, username: "bob", avatar: null },
+      content: "hey @me",
+      mentions: [5],
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    const ch = channelsStore.getState().channels.get(5);
+    expect(ch?.unreadCount).toBe(1);
+    expect(ch?.mentionCount).toBe(1);
+  });
+
   // OC-0204: "active channel" normally means "the user is watching the live
   // tail", so skipping the unread bump there is correct — until a jump to an
   // old permalink/reply/search hit leaves the SAME active channel showing a
@@ -678,6 +726,84 @@ describe("WS Dispatcher", () => {
       );
     });
   });
+
+  // OC-0315: payload.timestamp is the raw SQLite datetime('now') string —
+  // naive UTC, no 'Z' suffix (the server never emits one). Date.parse (used
+  // by the replay-gate comparison, unlike the parseTimestamp helper built
+  // for exactly this) interprets that as LOCAL time. On a viewer whose zone
+  // is east of UTC, the parsed epoch reads *earlier* than the true instant,
+  // so a genuinely live message can look like it predates the reconnect
+  // handshake and gets silently swallowed by the replay gate — worst when
+  // serverClockSkewMs is still 0 (nothing has been sampled yet this
+  // session), since nothing else offsets the bias. Pin a real east-of-UTC
+  // zone to observe it; skip where the pin isn't honored (see the probe in
+  // renderers.test.ts's DST block for why a worker-thread pool can't).
+  const oc0315OriginalTZ = process.env.TZ;
+  process.env.TZ = "Asia/Tokyo";
+  const oc0315PinHonored = new Date(2026, 0, 15).getTimezoneOffset() === -540;
+  if (oc0315OriginalTZ === undefined) {
+    delete process.env.TZ;
+  } else {
+    process.env.TZ = oc0315OriginalTZ;
+  }
+
+  describe.skipIf(!oc0315PinHonored)(
+    "[OC-0315] naive-UTC server timestamps vs a non-UTC viewer clock",
+    () => {
+      const originalTZ = process.env.TZ;
+
+      beforeEach(() => {
+        process.env.TZ = "Asia/Tokyo";
+        vi.mocked(mockNotifyIncomingMessage).mockClear();
+      });
+
+      afterEach(() => {
+        if (originalTZ === undefined) {
+          delete process.env.TZ;
+        } else {
+          process.env.TZ = originalTZ;
+        }
+      });
+
+      it("does not misclassify a live message as a replay when serverClockSkewMs is still 0 (cold, never sampled)", () => {
+        // Sanity: really pinned east of UTC (Tokyo has no DST, so this is
+        // stable year-round, unlike the America/New_York probe elsewhere).
+        expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-540);
+
+        mock.dispatch("auth_ok", {
+          user: { id: 1, username: "alex", avatar: null, role: "admin" },
+          server_name: "TestServer",
+          motd: "",
+        });
+        const handshakeAt = Date.now();
+        // Second auth_ok in the same dispatcher lifetime = a reconnect.
+        mock.dispatch("auth_ok", {
+          user: { id: 1, username: "alex", avatar: null, role: "admin" },
+          server_name: "TestServer",
+          motd: "",
+        });
+
+        // A genuinely live message, 1s after the handshake, stamped by the
+        // server in its real wire form: naive UTC, no 'Z'.
+        vi.setSystemTime(handshakeAt + 1000);
+        const naiveUtcTimestamp = new Date(Date.now())
+          .toISOString()
+          .replace("T", " ")
+          .replace(/\.\d{3}Z$/, "");
+        mock.dispatch("chat_message", {
+          id: 1,
+          channel_id: 1,
+          user: { id: 2, username: "bob", avatar: null },
+          content: "live now, naive-UTC timestamp",
+          reply_to: null,
+          attachments: [],
+          timestamp: naiveUtcTimestamp,
+        });
+
+        expect(mockNotifyIncomingMessage).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
 
   describe("mention counts", () => {
     function seedChannel(): void {
@@ -2710,6 +2836,37 @@ describe("WS Dispatcher", () => {
     // Exactly one argument: no roster-derived flag riding along that could
     // suppress the departed peer's key retirement.
     expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
+  });
+
+  // OC-0311: voice_leave is broadcast to channelReadAudience(channel), i.e.
+  // everyone with READ_MESSAGES on THAT channel — not just its voice
+  // participants. A client can read channel B (and so receive B's
+  // voice_leave frames) while its own live voice session is in channel A.
+  // Without a channel guard, a peer leaving a channel this client merely
+  // reads mutates this client's own E2EE peer state (deletes the peer's key,
+  // clears their verification badge, retires their key, and can trigger a
+  // room-key rotation) for a call that peer was never part of.
+  it("[OC-0311] does not touch E2EE peer state for a voice_leave from a channel this client is not in", async () => {
+    vi.mocked(mockHandleParticipantLeft).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // This client's live voice session is channel 3.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+    }));
+
+    // A peer leaves channel 99, which this client can merely read (hence
+    // seeing the broadcast) but is not the client's own voice channel.
+    mock.dispatch("voice_leave", {
+      channel_id: 99,
+      user_id: 7,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockHandleParticipantLeft).not.toHaveBeenCalled();
   });
 
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {

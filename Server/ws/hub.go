@@ -663,6 +663,21 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// currently in a voice channel, which is the common case (fresh login).
 	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
 		h.sendVoicePeerKeys(c, voiceChID)
+		// Re-relay THIS client's own stored key back onto VoiceTopic (OC-0316).
+		// voice_e2ee_offer (the room-key-bearing message) is a targeted,
+		// unsequenced send that is silently dropped if this socket was down
+		// when it went out (sendToUserIfInVoiceChannel, voice_e2ee.go) — and
+		// unlike voice_e2ee_announce it has no reconnect-replay recovery
+		// path either. A key rotation sent during the outage otherwise
+		// strands this client on a dead key with no signal and no retry
+		// until the key holder's next periodic rotation. The client's
+		// duplicate-announce handling already re-wraps and re-offers the
+		// CURRENT room key whenever it sees a peer announce a key it
+		// already knows, so re-announcing our own (unchanged) key is enough
+		// to make the key holder re-offer — no client change needed.
+		if key, sig := c.getE2EEPubKey(); key != "" {
+			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, key, sig))
+		}
 	}
 }
 

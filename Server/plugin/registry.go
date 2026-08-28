@@ -148,7 +148,8 @@ func (r *Registry) Sink() *EventSink {
 	return r.sink
 }
 
-// LoadAll scans cfg.Directory and persists every plugin.json found into the
+// LoadAll scans cfg.Directory and persists every plugin manifest found
+// (plugin.toml or plugin.json, via loadManifestFromDir) into the
 // PluginStore. In the wazero-tagged build it then compiles each entrypoint
 // into a runnable module; the default build stops at the persistence step.
 func (r *Registry) LoadAll(ctx context.Context) error {
@@ -231,7 +232,9 @@ func (r *Registry) installFromDisk(ctx context.Context, found foundPlugin) error
 // then renames it into the plugin directory and registers it via
 // installFromDisk. Returns the new plugin name on success.
 //
-// The zip must contain a top-level plugin.json. The plugin's directory name
+// The zip must contain a top-level plugin.json or plugin.toml (not both —
+// see installZipStagedManifest), resolved via the same precedence
+// scanPluginDirectory applies on every restart. The plugin's directory name
 // is taken from manifest.Name (validated by Manifest.Validate to a strict
 // charset). Re-installing an existing plugin replaces it.
 const (
@@ -415,17 +418,27 @@ func installZipWriteEntry(f *zip.File, destAbs string, remaining int64) (int64, 
 	return n, nil
 }
 
-// installZipStagedManifest parses the staged plugin.json and holds the staged
-// tree to the same rules scanPluginDirectory applies to an on-disk plugin (no
-// symlinks anywhere, entrypoint present and not a symlink).
+// installZipStagedManifest resolves the staged plugin's manifest via the
+// same loadManifestFromDir precedence scanPluginDirectory uses (plugin.toml
+// preferred over plugin.json), and holds the staged tree to the same rules
+// scanPluginDirectory applies to an on-disk plugin (no symlinks anywhere,
+// entrypoint present and not a symlink).
+//
+// A zip carrying both plugin.json and plugin.toml is rejected outright
+// rather than silently picking one: shipping both is never intentional, and
+// letting one win invites exactly the admin-approved-a-different-manifest
+// bug OC-0318 was filed for.
 func installZipStagedManifest(stageAbs string) (*Manifest, error) {
-	manifestPath := filepath.Join(stageAbs, "plugin.json")
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
+	if _, jsonErr := os.Stat(filepath.Join(stageAbs, "plugin.json")); jsonErr == nil {
+		if _, tomlErr := os.Stat(filepath.Join(stageAbs, "plugin.toml")); tomlErr == nil {
+			return nil, fmt.Errorf("plugin zip: must not contain both plugin.json and plugin.toml")
+		}
 	}
-	manifest, err := ParseManifest(raw)
+	manifest, err := loadManifestFromDir(stageAbs)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("plugin zip: missing plugin.json at root: %w", err)
+		}
 		return nil, err
 	}
 	// Validate the staged contents the same way scanPluginDirectory does.

@@ -8,6 +8,8 @@ package plugin
 import (
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestPluginNameRegexp(t *testing.T) {
@@ -141,5 +143,36 @@ func TestManifestValidateRejectsUnknownPermission(t *testing.T) {
 	}
 	if err := m.Validate(); err == nil {
 		t.Fatal("expected validation failure for unknown permission")
+	}
+}
+
+// TestManifestTOMLDecodesResourceFields pins OC-0338: BurntSushi/toml
+// resolves a TOML key to a struct field via the `toml` tag, or — absent that
+// tag — the Go field name matched with strings.EqualFold. Resources' fields
+// only carried `json` tags, so snake_case keys like max_memory_mb never
+// matched MaxMemoryMB (underscores break EqualFold) and silently decoded to
+// zero. This test decodes directly with the toml package (no build tag, no
+// -tags wazero needed) so it runs in the default `go test ./...` build that
+// CI always exercises, even though tryLoadPluginTOML itself only compiles
+// under -tags wazero.
+func TestManifestTOMLDecodesResourceFields(t *testing.T) {
+	const src = `
+name = "foo"
+version = "1.0.0"
+entrypoint = "foo.wasm"
+
+[resources]
+cpu_budget_ms = 2000
+max_memory_mb = 128
+`
+	var m Manifest
+	if _, err := toml.Decode(src, &m); err != nil {
+		t.Fatalf("toml.Decode: %v", err)
+	}
+	if m.Resources.CPUBudgetMs != 2000 {
+		t.Errorf("Resources.CPUBudgetMs = %d, want 2000", m.Resources.CPUBudgetMs)
+	}
+	if m.Resources.MaxMemoryMB != 128 {
+		t.Errorf("Resources.MaxMemoryMB = %d, want 128", m.Resources.MaxMemoryMB)
 	}
 }

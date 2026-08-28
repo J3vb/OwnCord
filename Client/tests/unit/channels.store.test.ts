@@ -16,6 +16,7 @@ import {
   UNCATEGORIZED_VOICE_CATEGORY,
   incrementUnread,
   incrementMention,
+  noteChannelMessage,
   clearUnread,
   getUnreadOnOpen,
   resetChannelsStore,
@@ -620,6 +621,67 @@ describe("channels store", () => {
       const before = channelsStore.getState();
 
       incrementUnread(999);
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+  });
+
+  // OC-0328: a message delivered between the server's registerNow and
+  // buildReady is both counted in `ready` (unread_count/last_message_id
+  // already advanced) and redelivered as a queued chat_message — mirrors
+  // dm.store's updateDmLastMessage guard (OC-0242).
+  describe("noteChannelMessage", () => {
+    it("increments unread and advances the watermark for a new message", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 1, last_message_id: 100 }]);
+
+      noteChannelMessage(1, 101, false);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.unreadCount).toBe(2);
+      expect(ch?.lastMessageId).toBe(101);
+    });
+
+    it("also increments mention when isMention is set", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 1, last_message_id: 100 }]);
+
+      noteChannelMessage(1, 101, true);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(1);
+    });
+
+    it("does not bump either counter for a message id already reflected in lastMessageId", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 1, last_message_id: 100 }]);
+
+      noteChannelMessage(1, 100, true); // same id ready already counted
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.unreadCount).toBe(1); // unchanged
+      expect(ch?.mentionCount).toBe(0); // unchanged
+    });
+
+    it("skips increment for the active channel", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 1, last_message_id: 100 }]);
+      setActiveChannel(1);
+
+      noteChannelMessage(1, 101, false);
+
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
+    });
+
+    it("bumps the active channel when evenIfActive is set", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 1, last_message_id: 100 }]);
+      setActiveChannel(1);
+
+      noteChannelMessage(1, 101, false, true);
+
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(1);
+    });
+
+    it("is a no-op for an unknown channel id", () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      noteChannelMessage(999, 1, false);
 
       expect(channelsStore.getState()).toBe(before);
     });

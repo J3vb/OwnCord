@@ -75,8 +75,8 @@ type CommandSpec struct {
 // Resources caps the plugin's runtime budget. Zero means "use the runtime
 // default from PluginsConfig".
 type Resources struct {
-	MaxMemoryMB int `json:"max_memory_mb"`
-	CPUBudgetMs int `json:"cpu_budget_ms"`
+	MaxMemoryMB int `json:"max_memory_mb" toml:"max_memory_mb"`
+	CPUBudgetMs int `json:"cpu_budget_ms" toml:"cpu_budget_ms"`
 }
 
 // UISpec describes the optional client-side rendering surface.
