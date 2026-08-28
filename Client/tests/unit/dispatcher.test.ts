@@ -434,6 +434,54 @@ describe("WS Dispatcher", () => {
     expect(ch?.unreadCount).toBe(1);
   });
 
+  // OC-0328: mirrors the DM-side "does not double-count" test below. A
+  // channel message delivered between the server's registerNow and
+  // buildReady is both counted in `ready`'s snapshot (lastMessageId already
+  // advanced to its id) AND redelivered as a queued chat_message once the
+  // socket drains — the channel path had no replay guard at all.
+  it("does not double-count a channel unread/mention whose id is already reflected in lastMessageId", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(5, {
+        id: 5,
+        name: "off-topic",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 1,
+        mentionCount: 1,
+        lastMessageId: 200, // already reflects message 200 via `ready`
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      });
+      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
+    });
+
+    // The same message redelivered as a queued chat_message.
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 5,
+      user: { id: 2, username: "bob", avatar: null },
+      content: "hey @me",
+      mentions: [5],
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    const ch = channelsStore.getState().channels.get(5);
+    expect(ch?.unreadCount).toBe(1);
+    expect(ch?.mentionCount).toBe(1);
+  });
+
   // OC-0204: "active channel" normally means "the user is watching the live
   // tail", so skipping the unread bump there is correct — until a jump to an
   // old permalink/reply/search hit leaves the SAME active channel showing a

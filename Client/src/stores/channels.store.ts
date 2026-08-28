@@ -388,6 +388,51 @@ export function incrementMention(channelId: number, evenIfActive = false): void 
   });
 }
 
+/**
+ * Record an incoming channel message: bumps unread (and mention, when
+ * `isMention`) unless `messageId` is already reflected in the channel's
+ * watermark — mirrors dm.store's `updateDmLastMessage` (OC-0242).
+ *
+ * OC-0328: a message delivered between the server's registerNow and
+ * buildReady is both counted in `ready`'s snapshot (unread_count/
+ * last_message_id already advanced) AND redelivered as a queued
+ * chat_message once the socket drains. Both counters must sit behind the
+ * SAME watermark read in one setState — splitting the guard across
+ * incrementUnread/incrementMention can't work, since the first call would
+ * already have advanced lastMessageId before the second one checked it.
+ *
+ * `evenIfActive` mirrors incrementUnread's escape hatch — see its doc.
+ */
+export function noteChannelMessage(
+  channelId: number,
+  messageId: number,
+  isMention: boolean,
+  evenIfActive = false,
+): void {
+  channelsStore.setState((prev) => {
+    if (prev.activeChannelId === channelId && !evenIfActive) {
+      return prev;
+    }
+    const existing = prev.channels.get(channelId);
+    if (existing === undefined) {
+      return prev;
+    }
+    const isReplay = existing.lastMessageId !== null && messageId <= existing.lastMessageId;
+    if (isReplay) {
+      return prev;
+    }
+    const updated: Channel = {
+      ...existing,
+      unreadCount: existing.unreadCount + 1,
+      mentionCount: isMention ? existing.mentionCount + 1 : existing.mentionCount,
+      lastMessageId: messageId,
+    };
+    const next = new Map(prev.channels);
+    next.set(channelId, updated);
+    return { ...prev, channels: next };
+  });
+}
+
 /** Clear the unread and mention counts for a channel — they clear together. */
 export function clearUnread(channelId: number): void {
   channelsStore.setState((prev) => {

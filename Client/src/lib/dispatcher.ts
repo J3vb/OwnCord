@@ -13,8 +13,7 @@ import {
   addChannel,
   updateChannel,
   removeChannel,
-  incrementUnread,
-  incrementMention,
+  noteChannelMessage,
 } from "@stores/channels.store";
 import { channelsStore } from "@stores/channels.store";
 import {
@@ -502,8 +501,8 @@ export function wireDispatcher(
       // offline keeps a phantom row here (closeDmLocally fixes this exact
       // shape for the live dm_channel_close path; this is its ready-time
       // equivalent), and a DM read elsewhere keeps a stale unread/mention
-      // count (incrementUnread/incrementMention bump the mirror in parallel
-      // with dmStore once it exists, but only dmStore is restated above).
+      // count (noteChannelMessage bumps the mirror in parallel with dmStore
+      // once it exists, but only dmStore is restated above).
       // Reconcile every dm-typed row against the just-restated payload.
       channelsStore.setState((prev) => {
         const dmById = new Map(dmPayloads.map((d) => [d.channel_id, d]));
@@ -676,7 +675,7 @@ export function wireDispatcher(
       // ones — the burst is exactly the messages missed while away (a
       // full-ready resume sends no burst at all; ready's unread_count values
       // are authoritative there). DM channel IDs are not in channelsStore
-      // (they use dmStore), so incrementUnread is a no-op for DMs, but the
+      // (they use dmStore), so noteChannelMessage is a no-op for DMs, but the
       // own-message guard is applied here for defence-in-depth.
       //
       // isReplayFrame is computed here (rather than only below, where the
@@ -703,15 +702,15 @@ export function wireDispatcher(
       const isDetached = isWindowDetached(payload.channel_id);
 
       if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
-        // incrementUnread/incrementMention skip the active channel by
-        // default — evenIfActive (isDetached here) is a no-op for a
-        // genuinely non-active channel, since their internal guard only
-        // fires when channelId IS the active one.
-        incrementUnread(payload.channel_id, isDetached);
-        // A mention is an unread too — the mention badge just outranks it.
-        if (isMention) {
-          incrementMention(payload.channel_id, isDetached);
-        }
+        // noteChannelMessage skips the active channel by default —
+        // evenIfActive (isDetached here) is a no-op for a genuinely
+        // non-active channel, since its internal guard only fires when
+        // channelId IS the active one. It also guards both counters behind
+        // payload.id vs. the channel's lastMessageId watermark (OC-0328), so
+        // a message already reflected in a `ready` snapshot (delivered
+        // between the server's registerNow and buildReady, then redelivered
+        // as a queued chat_message) does not double-count.
+        noteChannelMessage(payload.channel_id, payload.id, isMention, isDetached);
       }
 
       // Update DM store last message if this message belongs to a DM channel.
@@ -730,7 +729,7 @@ export function wireDispatcher(
           );
         } else {
           // The DM badge reads dmStore's mentionCount (mute-immune, rendered
-          // by DmSidebar) — incrementMention above no-ops for DM ids, which
+          // by DmSidebar) — noteChannelMessage above no-ops for DM ids, which
           // are absent from channelsStore. isMention is passed through so the
           // mention bump sits behind updateDmLastMessage's own message-id
           // guard (OC-0242) — a separate unconditional increment here would
