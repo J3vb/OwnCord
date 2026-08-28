@@ -26,30 +26,46 @@ package ws_test
 //     keys off the field NAME, not the meaning of the value, so a bare "id"
 //     (ready.channels[].id, a request's own id) and active_channel_id ARE
 //     normalised even where that value is in fact a channel id. That is by
-//     design, not an oversight: only the two exact names are exempt.
+//     design, not an oversight: only the two exact names are exempt. It also
+//     costs one relationship: chat_send_ok echoes the id of the chat_send it
+//     answers, and both become "<id:string>", so the fixture pins that the
+//     field is present and a string but not that the two match.
 //     Everything else — extra keys, missing keys, renames, enum values, null
 //     vs absent — is compared verbatim. That is the drift these exist to catch.
 //   - Optional fields are recorded in BOTH forms. alice carries a display
 //     name, an avatar, an about text, a custom status and an E2EE identity
 //     public key, and her voice_e2ee_announce carries a signature; bob carries
-//     none of them. A field frozen only as null/absent would let a rename or a
-//     retype through unseen, so every omitempty field a journey can reach is
-//     present in at least one fixture.
+//     none of them and announces without one. A field frozen only as
+//     null/absent would let a rename or a retype through unseen, and a field
+//     frozen only as present would leave the null form — the one a client must
+//     still handle — unfrozen. So fresh-connect records BOTH handshakes: on
+//     alice's connection auth_ok.user and member_join.user carry every profile
+//     field, on bob's they carry the nulls (auth_ok) and the omissions
+//     (member_join drops display_name and identity_public_key). auth_ok is the
+//     frame B2-2 changes, which is why it is the one recorded twice.
 //   - Only the journey's own frames are recorded. The connect handshake
 //     (auth_ok / ready / member_join / presence) and any channel_focus setup
 //     are drained without recording, EXCEPT in fresh-connect, resume-replay
 //     and auth-failure, where the handshake *is* the journey. Otherwise every
 //     fixture would carry its own copy of the ready payload and one ready
 //     change would rewrite eleven files.
-//   - Every journey ends with a ping/pong barrier on each recorded
-//     connection, and where a frame must produce nothing at all (mark_read,
-//     the sender's own typing_start) that same pair doubles as the absence
-//     proof. pong is a direct reply, so anything the server queued ahead of it
-//     arrives first and fails as `expected "pong", got "X"`. Without the
-//     barrier a frame emitted after a journey's last read would never be
-//     recorded and the fixture would still pass — exactly the drift this file
-//     exists to catch. auth-failure is the exception: the server closes the
-//     socket after auth_error, and that close is the proof nothing follows.
+//   - A recorded connection closes its frame list with a ping/pong barrier
+//     (two exceptions, both named below), and where a frame must produce
+//     nothing at all (mark_read, the sender's own typing_start) that same pair
+//     doubles as the absence proof.
+//     pong is a direct reply on the normal-priority queue, so anything queued
+//     ahead of it there — or on the high-priority queue — arrives first and
+//     fails as `expected "pong", got "X"`. A LOW-priority frame (typing,
+//     presence) pending at the same instant is the one thing pong may overtake
+//     (writePump, serve_pumps.go:83-101); no journey is affected, because
+//     every barrier here is sent on a connection that is otherwise idle.
+//     Without the barrier a frame emitted after a journey's last read would
+//     never be recorded and the fixture would still pass — exactly the drift
+//     this file exists to catch. Two connections take it differently:
+//     auth-failure has no session left to ping, so the server's close after
+//     auth_error is the proof nothing follows; and resume-replay's "b" barriers
+//     where its recording window ends rather than where the journey does (the
+//     comment there says why moving it would be a flake, not a fix).
 //   - One position genuinely is not ordered by the server: a voice joiner's own
 //     voice_state arrives on the hub's asynchronous broadcast queue while the
 //     rest of its join burst is written directly by the handler goroutine. That
@@ -66,6 +82,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"net/http/httptest"
 	"os"
@@ -90,6 +107,10 @@ var updateFixtures = flag.Bool("update", false, "rewrite protocol/fixtures/epoch
 // frameDeadline bounds every individual read and write. A journey that hangs
 // must fail with a named frame, not stall CI until the package timeout.
 const frameDeadline = 5 * time.Second
+
+// authFailureCloseReason is the reason string the server pairs with close code
+// 1008 when the handshake is rejected (serve.go:128).
+const authFailureCloseReason = "authentication failed"
 
 // ─── fixture model ───────────────────────────────────────────────────────────
 
@@ -546,18 +567,24 @@ func (c *wsConn) expect(msgType string) map[string]any {
 // (handlers_ping.go:14) and drops the excess SILENTLY, which would turn a
 // third ping into a 5 s read-deadline failure rather than an error frame. No
 // journey may spend more than two per user per second: focus(_, true) spends
-// one and this spends one, which is the ceiling four journeys already sit on.
-// Need another? Give that user a second connection, do not add a sleep.
+// one and this spends one, which is the ceiling six connections already sit
+// on — bob in chat-send-fanout, chat-edit-delete, reaction-add-remove, typing
+// and resume-replay (a focus barrier plus a closing one), and alice in ping
+// (the journey's own pair). Need another? Give that user a second connection,
+// do not add a sleep.
 func (c *wsConn) barrier() {
 	c.t.Helper()
 	c.send(map[string]any{"type": "ping", "payload": map[string]any{}})
 	c.expect("pong")
 }
 
-// expectClosed asserts the server hung up rather than sending another frame.
-// It is auth-failure's barrier: there is no session left to ping, so the close
-// itself (serve.go:128, StatusPolicyViolation) is the proof that auth_error is
-// the last thing on that socket.
+// expectClosed asserts the server hung up rather than sending another frame,
+// with the close code and reason the handshake failure path uses. It is
+// auth-failure's barrier: there is no session left to ping, so the close
+// itself (serve.go:128 — 1008 policy violation, "authentication failed") is
+// the proof that auth_error is the last thing on that socket. Both halves are
+// part of the epoch-1 contract, so both are asserted here rather than only the
+// code.
 func (c *wsConn) expectClosed() {
 	c.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), frameDeadline)
@@ -566,9 +593,13 @@ func (c *wsConn) expectClosed() {
 	if err == nil {
 		c.t.Fatalf("conn %q: expected the server to close, got frame %s", c.name, raw)
 	}
-	if got := websocket.CloseStatus(err); got != websocket.StatusPolicyViolation {
-		c.t.Fatalf("conn %q: expected close status %v, got %v (%v)",
-			c.name, websocket.StatusPolicyViolation, got, err)
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		c.t.Fatalf("conn %q: expected a WebSocket close, got %v", c.name, err)
+	}
+	if closeErr.Code != websocket.StatusPolicyViolation || closeErr.Reason != authFailureCloseReason {
+		c.t.Fatalf("conn %q: close = %v %q, want %v %q", c.name,
+			closeErr.Code, closeErr.Reason, websocket.StatusPolicyViolation, authFailureCloseReason)
 	}
 }
 
@@ -594,6 +625,7 @@ func (c *wsConn) authenticate(token string) {
 	c.record = false
 	c.send(map[string]any{
 		"type":    "auth",
+		"id":      "req-auth-" + c.name,
 		"payload": map[string]any{"token": token, "last_seq": 0},
 	})
 	c.drain("auth_ok", "ready", "member_join", "presence")
@@ -706,23 +738,57 @@ func TestEpoch1Fixtures(t *testing.T) {
 	}
 }
 
-// journeyFreshConnect records the whole handshake: auth, auth_ok, ready, and
+// journeyFreshConnect records the whole handshake — auth, auth_ok, ready, and
 // the member_join + presence a connect broadcasts (which the connecting client
-// receives too).
+// receives too) — TWICE, once per kind of account.
+//
+// alice has every optional profile field set; bob has none. Recording only
+// alice would freeze auth_ok.user and member_join.user in their populated form
+// alone, so a rename, a retype or a dropped null on display_name, about,
+// custom_status, avatar or identity_public_key would move no fixture. auth_ok
+// is the frame B2-2 edits, which makes it the last one to leave half-frozen.
+//
+// bob's connect is also observed on alice's socket, which is idle by then: the
+// two broadcasts reach her through the hub's per-client FIFO in the order they
+// were sequenced, so her reads stay deterministic. One ping each, well inside
+// the per-user budget (see barrier).
 func journeyFreshConnect(t *testing.T, r *epochRig) {
-	_, _, aliceTok, _ := r.seedBaseline(t)
+	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
 	a := r.dial(t, "a")
 	a.record = true
+	// The real client stamps a correlation id on every frame it sends,
+	// auth included (ws.ts send()); the server ignores it here.
 	a.send(map[string]any{
 		"type":    "auth",
+		"id":      "req-auth-alice",
 		"payload": map[string]any{"token": aliceTok, "last_seq": 0},
 	})
 	a.expect("auth_ok")
 	a.expect("ready")
 	a.expect("member_join")
 	a.expect("presence")
+
+	// bob, recorded: the same five frames with the bare user object — nulls
+	// for avatar/display_name/about/custom_status, identity_public_key omitted.
+	b := r.dial(t, "b")
+	b.record = true
+	b.send(map[string]any{
+		"type":    "auth",
+		"id":      "req-auth-bob",
+		"payload": map[string]any{"token": bobTok, "last_seq": 0},
+	})
+	b.expect("auth_ok")
+	b.expect("ready")
+	b.expect("member_join")
+	b.expect("presence")
+
+	// bob's connect as an already-connected client sees it.
+	a.expect("member_join")
+	a.expect("presence")
+
 	a.barrier()
+	b.barrier()
 }
 
 // journeyAuthFailure records the rejection an unknown session token earns.
@@ -742,6 +808,7 @@ func journeyAuthFailure(t *testing.T, r *epochRig) {
 	a.record = true
 	a.send(map[string]any{
 		"type":    "auth",
+		"id":      "req-auth-rejected",
 		"payload": map[string]any{"token": "not-a-real-session-token", "last_seq": 0},
 	})
 	a.expect("auth_error")
@@ -867,8 +934,9 @@ func journeyReactionAddRemove(t *testing.T, r *epochRig) {
 // absence proof: the typist must not see its own typing frame.
 //
 // "a" focuses the channel first, exactly like the other fan-out journeys. That
-// is what makes the absence proof mean anything: registerNow only subscribes a
-// client to a channel topic when it has focus (hub.go:611-616), so an
+// is what makes the absence proof mean anything: a live client joins a
+// channel's topic only when it focuses that channel (handleChannelFocusV2,
+// handlers_presence.go:97, whose SetChannelID result the hub applies), so an
 // unfocused "a" could not receive the frame no matter what excludeUserID did,
 // and the barrier would be proving the subscription was missing rather than
 // that the server excludes the sender.
@@ -974,10 +1042,15 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 	b.expect("chat_send_ok")
 	b.expect("chat_message")
 	// b's barrier closes ITS recorded list here rather than at the end of the
-	// journey: everything b has to say about the away window is said, and the
-	// resume below broadcasts a presence that lands on b afterwards. That
-	// frame belongs to the resuming connection's transcript, where it is
-	// recorded, not to b's.
+	// journey — the second of the file header's two barrier exceptions.
+	// Everything b has to say about the away window is said, and the only frame
+	// the server can still send it is alice's back-online presence from the
+	// resume below, whose shape is already recorded on a2 as the last frame of
+	// the replay burst. Moving the barrier past the resume is NOT the fix it
+	// looks like: b's ping would then race the tail of the hub's fan-out loop
+	// for that presence, and pong could win — a flake that -race and -tags
+	// deadlock surface on a loaded runner, in a file whose whole job is to fail
+	// only for real drift.
 	b.barrier()
 	b.record = false
 
@@ -985,6 +1058,7 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 	a2.record = true
 	a2.send(map[string]any{
 		"type": "auth",
+		"id":   "req-auth-resume",
 		"payload": map[string]any{
 			"token":             aliceTok,
 			"last_seq":          lastSeq,
@@ -1042,8 +1116,6 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 	// alice publishes her ECDH public key, signed by her identity key; the
 	// server checks only the size and base64-ness of both and relays them
 	// verbatim (voice_e2ee.go:126-140) — it never verifies the signature.
-	// signature is omitempty, so sending one is what records its present form;
-	// a legacy announce without one is the absent form the schema also allows.
 	a.send(map[string]any{
 		"type": "voice_e2ee_announce",
 		"payload": map[string]any{
@@ -1052,6 +1124,20 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 		},
 	})
 	b.expect("voice_e2ee_announce")
+
+	// bob answers with a legacy announce and no signature at all. signature is
+	// omitempty on both the command and the relay, so this is what freezes its
+	// ABSENT form — alice's above froze the present one, and a field recorded
+	// only one way would let the other be renamed or dropped unseen. The relay
+	// excludes its sender and alice is idle, so it is the only frame in flight
+	// on her socket.
+	b.send(map[string]any{
+		"type": "voice_e2ee_announce",
+		"payload": map[string]any{
+			"public_key": "Ym9iLWVjZGgtcHVibGljLWtleS1maXh0dXJl",
+		},
+	})
+	a.expect("voice_e2ee_announce")
 
 	// alice is the key holder (lowest user id in the room) and offers the room
 	// key to bob.

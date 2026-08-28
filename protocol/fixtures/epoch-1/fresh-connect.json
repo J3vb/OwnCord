@@ -5,6 +5,7 @@
       {
         "dir": "c2s",
         "frame": {
+          "id": "<id:string>",
           "payload": {
             "last_seq": "<seq:number>",
             "token": "<token:string>"
@@ -154,6 +155,207 @@
         "frame": {
           "payload": {
             "custom_status": "fixture custom status",
+            "status": "online",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "presence"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "status": "online",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "member_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "custom_status": null,
+            "status": "online",
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "presence"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "last_seq": "<seq:number>",
+            "token": "<token:string>"
+          },
+          "type": "auth"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "motd": "Welcome!",
+            "replay_source": "none",
+            "server_name": "OwnCord Server",
+            "user": {
+              "about": null,
+              "avatar": null,
+              "custom_status": null,
+              "display_name": null,
+              "id": "<id:number>",
+              "role": "member",
+              "status": "online",
+              "username": "bob"
+            }
+          },
+          "type": "auth_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channels": [
+              {
+                "can_send": true,
+                "category": "",
+                "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "mention_count": 0,
+                "name": "general",
+                "nsfw": false,
+                "position": 0,
+                "slow_mode": 0,
+                "topic": "",
+                "type": "text",
+                "unread_count": 0,
+                "voice_max_users": 0,
+                "voice_max_video": 25
+              },
+              {
+                "can_send": true,
+                "category": "",
+                "id": "<id:number>",
+                "name": "Voice",
+                "nsfw": false,
+                "position": 1,
+                "slow_mode": 0,
+                "topic": "",
+                "type": "voice",
+                "voice_max_users": 0,
+                "voice_max_video": 25
+              }
+            ],
+            "dm_channels": [],
+            "members": [
+              {
+                "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "custom_status": "fixture custom status",
+                "display_name": "Alice Fixture",
+                "id": "<id:number>",
+                "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+                "role": "member",
+                "status": "online",
+                "username": "alice"
+              },
+              {
+                "avatar": null,
+                "custom_status": null,
+                "display_name": null,
+                "id": "<id:number>",
+                "role": "member",
+                "status": "online",
+                "username": "bob"
+              }
+            ],
+            "motd": "Welcome!",
+            "roles": [
+              {
+                "color": "#E74C3C",
+                "id": "<id:number>",
+                "is_default": false,
+                "name": "Owner",
+                "permissions": 2147483647,
+                "position": 100
+              },
+              {
+                "color": "#F39C12",
+                "id": "<id:number>",
+                "is_default": false,
+                "name": "Admin",
+                "permissions": 1073741823,
+                "position": 80
+              },
+              {
+                "color": "#3498DB",
+                "id": "<id:number>",
+                "is_default": false,
+                "name": "Moderator",
+                "permissions": 3145727,
+                "position": 60
+              },
+              {
+                "color": null,
+                "id": "<id:number>",
+                "is_default": true,
+                "name": "Member",
+                "permissions": 7779,
+                "position": 40
+              }
+            ],
+            "server_name": "OwnCord Server",
+            "voice_states": []
+          },
+          "type": "ready"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "status": "online",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "member_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "custom_status": null,
             "status": "online",
             "user_id": "<id:number>"
           },

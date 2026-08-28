@@ -5,6 +5,7 @@
       {
         "dir": "c2s",
         "frame": {
+          "id": "<id:string>",
           "payload": {
             "last_seq": "<seq:number>",
             "token": "<token:string>"

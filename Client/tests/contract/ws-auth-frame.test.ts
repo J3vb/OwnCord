@@ -1,6 +1,6 @@
 // CONTRACT TEST. Pins the exact key set of the `auth` frame that
 // Client/src/lib/ws.ts sends as the first message after the WebSocket opens
-// (ws.ts:441-454) -- the client side of the same wire contract a sibling Go
+// (ws.ts:441-453) -- the client side of the same wire contract a sibling Go
 // test freezes for the server. B2-2 adds a protocol-epoch field to this
 // frame; that change MUST fail the assertions below until B2-2 deliberately
 // extends this test's key sets. Extend this file, do not replace or delete

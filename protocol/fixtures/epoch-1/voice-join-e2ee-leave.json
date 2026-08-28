@@ -69,6 +69,16 @@
         }
       },
       {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "public_key": "Ym9iLWVjZGgtcHVibGljLWtleS1maXh0dXJl",
+            "user_id": "<id:number>"
+          },
+          "type": "voice_e2ee_announce"
+        }
+      },
+      {
         "dir": "c2s",
         "frame": {
           "payload": {
@@ -193,6 +203,15 @@
             "public_key": "YWxpY2UtZWNkaC1wdWJsaWMta2V5LWZpeHR1cmU=",
             "signature": "YWxpY2Utc2lnbmF0dXJlLW92ZXItaGVyLWVjZGgta2V5",
             "user_id": "<id:number>"
+          },
+          "type": "voice_e2ee_announce"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "public_key": "Ym9iLWVjZGgtcHVibGljLWtleS1maXh0dXJl"
           },
           "type": "voice_e2ee_announce"
         }
