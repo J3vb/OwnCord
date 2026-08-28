@@ -118,12 +118,15 @@ slash commands (separate plan: `slash-commands.md`).
 - `sounds` table — the soundboard is absent wholesale, so the table has no
   feature to belong to; it and the client's `getSounds`/`deleteSound`, which
   still call unregistered routes, are the largest remaining piece.
-- `voice_speakers` reserved WS type (never sent).
 - `voice_config.bitrate` — sent to clients, never applied client-side.
 - PTT stub on macOS.
 
 **Came off the list:**
 
+- The `voice_speakers` reserved WS type (B2-1) — _retired rather than
+  implemented_. It was never sent, so it is gone from `protocol/schema.json`,
+  both generated constant sets and the client's dispatcher before the epoch-1
+  wire fixtures froze the protocol.
 - `read_states.mention_count` (phase 3) — now written, shipped in `ready` and
   cleared by `channel_focus`.
 - The `emoji` table and the client's `getEmoji`/`deleteEmoji` (phase 6) — the

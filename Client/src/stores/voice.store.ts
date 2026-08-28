@@ -477,9 +477,9 @@ export function setVoiceConfig(payload: VoiceConfigPayload): void {
   });
 }
 
-/** Update speaking state for users from a voice_speakers event or
- *  LiveKit's ActiveSpeakersChanged. Updates ALL users including local
- *  (LiveKit is now the sole authority for speaking detection). */
+/** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
+ *  Updates ALL users including local (LiveKit is the sole authority for
+ *  speaking detection). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);

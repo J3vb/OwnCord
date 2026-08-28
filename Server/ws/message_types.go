@@ -56,12 +56,10 @@ const (
 	MsgTypeVoiceState          = "voice_state"
 	MsgTypeVoiceConfig         = "voice_config"
 	MsgTypeVoiceToken          = "voice_token"
-	MsgTypeVoiceSpeakers       = "voice_speakers"
 	MsgTypeVoiceLeaveBC        = "voice_leave" // broadcast (same string as client msg)
 	MsgTypeVoiceMoved          = "voice_moved"
 	MsgTypeVoiceDisconnected   = "voice_disconnected"
 	MsgTypeMemberJoin          = "member_join"
-	MsgTypeMemberLeave         = "member_leave"
 	MsgTypeMemberUpdate        = "member_update"
 	MsgTypeUserUpdate          = "user_update"
 	MsgTypeMemberBan           = "member_ban"

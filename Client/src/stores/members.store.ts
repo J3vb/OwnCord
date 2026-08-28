@@ -105,7 +105,7 @@ export function addMember(payload: MemberJoinPayload): void {
   });
 }
 
-/** Remove a member from a member_leave event. */
+/** Remove a member from a member_ban event. */
 export function removeMember(userId: number): void {
   membersStore.setState((prev) => {
     const next = new Map(prev.members);

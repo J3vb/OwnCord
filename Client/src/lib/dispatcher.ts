@@ -49,7 +49,6 @@ import {
   updateVoiceUserProfile,
   removeVoiceUser,
   setVoiceConfig,
-  setSpeakers,
   joinVoiceChannel,
   leaveVoiceChannel,
 } from "@stores/voice.store";
@@ -872,13 +871,6 @@ export function wireDispatcher(
   );
 
   unsubs.push(
-    ws.on(S.MEMBER_LEAVE, (payload) => {
-      log.info("Member left", { userId: payload.user_id });
-      removeMember(payload.user_id);
-    }),
-  );
-
-  unsubs.push(
     ws.on(S.MEMBER_BAN, (payload) => {
       log.info("Member banned", { userId: payload.user_id });
       removeMember(payload.user_id);
@@ -1095,12 +1087,6 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.VOICE_CONFIG, (payload) => {
       setVoiceConfig(payload);
-    }),
-  );
-
-  unsubs.push(
-    ws.on(S.VOICE_SPEAKERS, (payload) => {
-      setSpeakers(payload);
     }),
   );
 

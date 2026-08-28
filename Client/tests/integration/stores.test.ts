@@ -530,10 +530,10 @@ describe("Store integration via dispatcher", () => {
   });
 
   // ────────────────────────────────────────────────────────────────
-  // 8. Voice config and speakers
+  // 8. Voice config
   // ────────────────────────────────────────────────────────────────
 
-  describe("voice config and speakers", () => {
+  describe("voice config", () => {
     it("stores voice config from voice_config event", () => {
       ws.simulate("voice_config", {
         channel_id: 3,
@@ -553,65 +553,6 @@ describe("Store integration via dispatcher", () => {
       expect(config!.mixing_threshold).toBe(5);
       expect(config!.top_speakers).toBe(3);
       expect(config!.max_users).toBe(25);
-    });
-
-    it("updates speaking states from voice_speakers event", () => {
-      // First seed voice users in channel 3
-      ws.simulate("ready", {
-        channels: [],
-        members: [],
-        voice_states: [
-          { channel_id: 3, user_id: 1, muted: false, deafened: false },
-          { channel_id: 3, user_id: 2, muted: false, deafened: false },
-          { channel_id: 3, user_id: 3, muted: false, deafened: false },
-        ],
-        roles: [],
-      });
-
-      // User 1 and 3 are speaking
-      ws.simulate("voice_speakers", {
-        channel_id: 3,
-        speakers: [1, 3],
-        threshold_mode: "selective",
-      });
-
-      const channelUsers = voiceStore.getState().voiceUsers.get(3);
-      expect(channelUsers).toBeDefined();
-      expect(channelUsers!.get(1)?.speaking).toBe(true);
-      expect(channelUsers!.get(2)?.speaking).toBe(false);
-      expect(channelUsers!.get(3)?.speaking).toBe(true);
-    });
-
-    it("clears speaking when user is no longer in speakers list", () => {
-      // Seed voice users
-      ws.simulate("ready", {
-        channels: [],
-        members: [],
-        voice_states: [
-          { channel_id: 3, user_id: 1, muted: false, deafened: false },
-          { channel_id: 3, user_id: 2, muted: false, deafened: false },
-        ],
-        roles: [],
-      });
-
-      // User 1 speaking
-      ws.simulate("voice_speakers", {
-        channel_id: 3,
-        speakers: [1],
-        threshold_mode: "forwarding",
-      });
-
-      expect(voiceStore.getState().voiceUsers.get(3)!.get(1)?.speaking).toBe(true);
-
-      // Now nobody speaking
-      ws.simulate("voice_speakers", {
-        channel_id: 3,
-        speakers: [],
-        threshold_mode: "forwarding",
-      });
-
-      expect(voiceStore.getState().voiceUsers.get(3)!.get(1)?.speaking).toBe(false);
-      expect(voiceStore.getState().voiceUsers.get(3)!.get(2)?.speaking).toBe(false);
     });
   });
 
@@ -676,16 +617,6 @@ describe("Store integration via dispatcher", () => {
       const members = membersStore.getState().members;
       expect(members.has(50)).toBe(true);
       expect(members.get(50)!.username).toBe("new-user");
-    });
-
-    it("removes member on member_leave event", () => {
-      ws.simulate("member_join", {
-        user: { id: 51, username: "leaving-user", avatar: null, role: "member", status: "online" },
-      });
-      expect(membersStore.getState().members.has(51)).toBe(true);
-
-      ws.simulate("member_leave", { user_id: 51 });
-      expect(membersStore.getState().members.has(51)).toBe(false);
     });
 
     it("updates member role on member_update event", () => {

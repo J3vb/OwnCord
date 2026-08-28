@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -271,5 +272,74 @@ func TestClientUpdate_GitHubError(t *testing.T) {
 
 	if rr.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestClientUpdate_Epoch1ResponseShape pins the exact JSON shape of the
+// client-update 200 and 204 responses as of protocol epoch 1. B2-3 adds a
+// protocol-epoch field to this response; when it does, this test WILL fail
+// until it is extended on purpose to include the new field in the expected
+// shape below.
+//
+// fakeGitHubRelease always publishes non-empty release notes and has no
+// parameter for an empty body, so this covers the non-empty-notes case
+// (top-level keys exactly {version, notes, platforms}) plus an explicit
+// assertion that "pub_date" — omitempty, and never set by the handler —
+// stays absent.
+func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json; charset=utf-8")
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	want := map[string]any{
+		"version": "2.0.0",
+		"notes":   "Release notes here",
+		"platforms": map[string]any{
+			"windows-x86_64-nsis": map[string]any{
+				"signature": "dW50cnVzdGVkIGNvbW1lbnQ=",
+				"url":       srv.URL + "/download/OwnCord_1.0.0_x64-setup.nsis.zip",
+			},
+		},
+	}
+	if !reflect.DeepEqual(resp, want) {
+		t.Errorf("200 response = %#v, want %#v — a new field (e.g. protocol epoch) must be added here deliberately", resp, want)
+	}
+	if _, ok := resp["pub_date"]; ok {
+		t.Errorf("response has a \"pub_date\" key = %v, want absent", resp["pub_date"])
+	}
+
+	// 204 (already latest) has an empty body, not "{}" or any other JSON.
+	srv204 := fakeGitHubRelease(t, "v1.0.0")
+	u204 := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u204.SetBaseURL(srv204.URL)
+	router204 := buildClientUpdateRouter(u204)
+
+	req204 := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
+	rr204 := httptest.NewRecorder()
+	router204.ServeHTTP(rr204, req204)
+
+	if rr204.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", rr204.Code, rr204.Body.String())
+	}
+	if rr204.Body.Len() != 0 {
+		t.Errorf("204 body length = %d, want 0 (body: %q)", rr204.Body.Len(), rr204.Body.String())
 	}
 }

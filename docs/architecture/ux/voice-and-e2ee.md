@@ -106,7 +106,7 @@ All four are optimistic with rollback; each also emits a WS control message.
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`) |
 | camera on      | Self video tile in the grid                                                                |
 | screenshare on | Screen tile; a stop-share affordance always visible                                        |
-| speaking       | Green ring on the speaking user's tile/avatar (from `voice_speakers` / ActiveSpeakers)     |
+| speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)              |
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
@@ -139,7 +139,6 @@ reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `voice_state`     | Add/update the participant with their flags                                                                                                           |
 | `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already the `voice_leave` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| `voice_speakers`  | Speaking ring on the listed users                                                                                                                     |
 | key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                                   |
 
 Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store).

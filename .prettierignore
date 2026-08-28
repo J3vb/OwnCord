@@ -6,6 +6,10 @@
 # Generated, verified by `git diff --exit-code` after regeneration.
 Server/db/dbgen/
 Client/src/lib/protocolTypes.ts
+# Frozen wire records, written by `go test ./ws -run TestEpoch1Fixtures -update`.
+# Unlike the two above, drift is caught by that test's own frame comparison, not
+# by `git diff --exit-code`.
+protocol/fixtures/
 
 
 # Dated point-in-time snapshots. scripts/check-doc-counts.mjs already treats

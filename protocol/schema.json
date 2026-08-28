@@ -62,7 +62,6 @@
     { "wire": "voice_state", "go": "MsgTypeVoiceState", "ts": "VOICE_STATE" },
     { "wire": "voice_config", "go": "MsgTypeVoiceConfig", "ts": "VOICE_CONFIG" },
     { "wire": "voice_token", "go": "MsgTypeVoiceToken", "ts": "VOICE_TOKEN" },
-    { "wire": "voice_speakers", "go": "MsgTypeVoiceSpeakers", "ts": "VOICE_SPEAKERS" },
     {
       "wire": "voice_leave",
       "go": "MsgTypeVoiceLeaveBC",
@@ -72,7 +71,6 @@
     { "wire": "voice_moved", "go": "MsgTypeVoiceMoved", "ts": "VOICE_MOVED" },
     { "wire": "voice_disconnected", "go": "MsgTypeVoiceDisconnected", "ts": "VOICE_DISCONNECTED" },
     { "wire": "member_join", "go": "MsgTypeMemberJoin", "ts": "MEMBER_JOIN" },
-    { "wire": "member_leave", "go": "MsgTypeMemberLeave", "ts": "MEMBER_LEAVE" },
     { "wire": "member_update", "go": "MsgTypeMemberUpdate", "ts": "MEMBER_UPDATE" },
     { "wire": "user_update", "go": "MsgTypeUserUpdate", "ts": "USER_UPDATE" },
     { "wire": "member_ban", "go": "MsgTypeMemberBan", "ts": "MEMBER_BAN" },

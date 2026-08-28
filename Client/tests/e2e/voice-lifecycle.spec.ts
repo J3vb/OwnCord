@@ -4,7 +4,7 @@
  * These tests use the existing Tauri mock infrastructure to simulate:
  * - WebSocket voice_state and voice_leave events
  * - Voice channel UI (sidebar voice users, voice widget)
- * - Speaker indicators, connection quality, listen-only mode
+ * - Connection quality, listen-only mode
  *
  * NOTE: These tests do NOT exercise real LiveKit/WebRTC connections.
  * Real voice E2E requires the native test infrastructure (Tauri exe + LiveKit binary).
@@ -67,42 +67,6 @@ test.describe("Voice lifecycle", () => {
 
     // Should now have 1 user
     await expect(page.locator(".voice-user-item")).toHaveCount(1, { timeout: 5000 });
-  });
-
-  test("speaker indicator updates on voice_speakers event", async ({ page }) => {
-    // Wait for voice users to render
-    await expect(page.locator(".voice-user-item")).toHaveCount(2, { timeout: 5000 });
-
-    // Emit speakers event — user 3 (in channel 10 per the ready payload) speaks
-    await emitWsMessage(page, {
-      type: "voice_speakers",
-      payload: {
-        channel_id: 10,
-        speakers: [3],
-      },
-    });
-
-    // The speaking user's avatar should have the speaking class
-    const speakingAvatar = page.locator(".voice-user-item.speaking");
-    await expect(speakingAvatar).toBeVisible({ timeout: 5000 });
-  });
-
-  test("speaker indicator clears when user stops speaking", async ({ page }) => {
-    await expect(page.locator(".voice-user-item")).toHaveCount(2, { timeout: 5000 });
-
-    // User starts speaking
-    await emitWsMessage(page, {
-      type: "voice_speakers",
-      payload: { channel_id: 10, speakers: [3] },
-    });
-    await expect(page.locator(".voice-user-item.speaking")).toBeVisible({ timeout: 5000 });
-
-    // User stops speaking (empty speakers list)
-    await emitWsMessage(page, {
-      type: "voice_speakers",
-      payload: { channel_id: 10, speakers: [] },
-    });
-    await expect(page.locator(".voice-user-item.speaking")).toHaveCount(0, { timeout: 5000 });
   });
 });
 
@@ -204,19 +168,7 @@ test.describe("Voice WS flow", () => {
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
   });
 
-  // 3. Speaker indicator animation — voice_speakers event adds .speaking class.
-  test("voice_speakers event adds speaking class to voice user", async ({ page }) => {
-    await expect(page.locator(".voice-user-item")).toHaveCount(2, { timeout: 5000 });
-
-    await emitWsMessage(page, {
-      type: "voice_speakers",
-      payload: { channel_id: 10, speakers: [3] },
-    });
-
-    await expect(page.locator(".voice-user-item.speaking")).toBeVisible({ timeout: 5000 });
-  });
-
-  // 4. Permission recovery button — grant mic button appears when
+  // 3. Permission recovery button — grant mic button appears when
   //    listenOnly is true (display toggled via voice store subscription).
   test("grant mic button appears in listen-only mode", async ({ page }) => {
     await joinVoiceChannelByName(page);
@@ -233,7 +185,7 @@ test.describe("Voice WS flow", () => {
     await expect(grantMicBtn).toBeVisible({ timeout: 5000 });
   });
 
-  // 5. Device hot-swap toast — simulate a toast notification for device change.
+  // 4. Device hot-swap toast — simulate a toast notification for device change.
   test("device change shows toast notification", async ({ page }) => {
     // Toast container is mounted by MainPage — inject a toast element.
     await page.evaluate(() => {
@@ -251,7 +203,7 @@ test.describe("Voice WS flow", () => {
     await expect(toast).toBeVisible({ timeout: 5000 });
   });
 
-  // 6. Connection quality warning — stats pane auto-expands on quality degradation.
+  // 5. Connection quality warning — stats pane auto-expands on quality degradation.
   test("quality degradation auto-expands stats pane", async ({ page }) => {
     await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
@@ -269,7 +221,7 @@ test.describe("Voice WS flow", () => {
     await expect(statsPane).toHaveClass(/visible/, { timeout: 5000 });
   });
 
-  // 7. Mute/deafen toggle — buttons use aria-pressed and .active-ctrl class.
+  // 6. Mute/deafen toggle — buttons use aria-pressed and .active-ctrl class.
   test("mute and deafen buttons toggle state", async ({ page }) => {
     await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
@@ -287,7 +239,7 @@ test.describe("Voice WS flow", () => {
     await expect(deafenBtn).toHaveClass(/active-ctrl/);
   });
 
-  // 8. Voice timer — joinedAt is set by joinVoiceChannel() on click.
+  // 7. Voice timer — joinedAt is set by joinVoiceChannel() on click.
   test("voice timer shows elapsed time", async ({ page }) => {
     await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
@@ -297,7 +249,7 @@ test.describe("Voice WS flow", () => {
     await expect(timer).toHaveText(/\d{2}:\d{2}/, { timeout: 5000 });
   });
 
-  // 9. Token refresh — emitting a new voice_token doesn't disconnect.
+  // 8. Token refresh — emitting a new voice_token doesn't disconnect.
   test("token refresh does not disconnect session", async ({ page }) => {
     await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget']");
