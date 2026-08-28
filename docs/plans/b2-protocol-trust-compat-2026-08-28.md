@@ -456,6 +456,12 @@ phase execution pattern, not silently skipped.
   `go test -tags wazero -count=1 ./plugin/...`, `check:client` plus
   `npx knip` (blocking in CI since 2026-08-04 but not part of
   `check:client`), `check:docs`, `check:hygiene` — all exit 0.
+- Codex review on #1436 (P2): OC-0337’s cap guard treated a complete window of
+  exactly `coldCap` rows as truncated and skipped the reconciliation; fixed
+  test-first in the follow-up commit by fetching `coldCap+1` rows and discarding
+  only when the extra row exists. The sibling `reconnectSelectReplay` keeps its
+  `>=` form deliberately — there the over-approximation only costs a full
+  `ready`, never data.
 - Found, not fixed (workflow tooling, not B2): the `bughunt-fix` gate list
   still runs `npm run format:check` from `Client/` (removed in B1-3; the
   formatting gate is root-scoped) and omits `knip`, so every run ends with a

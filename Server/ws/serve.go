@@ -639,22 +639,26 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 	} else if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
 		coldCap := h.maxColdReplayLimit()
-		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
+		// Fetch one row past the cap so truncation is decided by the presence
+		// of that extra row, not by len == cap: a complete window of exactly
+		// coldCap rows is not truncated and must replay in full (Codex review
+		// on #1436). A result of at most coldCap rows is therefore complete.
+		persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 		if err != nil {
 			return nil
 		}
-		if len(persisted) >= coldCap {
+		if len(persisted) > coldCap {
 			// Same failure mode reconnectSelectReplay guards against above:
-			// the query is "ORDER BY seq ASC LIMIT coldCap", so a full result
-			// means the range exceeds the cap and the NEWEST rows — for a
-			// voice room, quite possibly the peer's voice_leave — were
-			// silently dropped. Replaying the truncated window would install
-			// a join whose matching leave was discarded, which is worse than
-			// the documented best-effort miss this function already returns
-			// on a plain lookup failure. A full ready isn't available here
-			// (registerNow already ran before this supplement runs), so nil
-			// is the correct degradation.
-			slog.Warn("ws liveVoiceEventsSince: cold-tier supplement hit the row cap, skipping truncated window",
+			// the query is "ORDER BY seq ASC LIMIT n", so a result past the
+			// cap means the range exceeds it and any cap-sized window would
+			// have silently dropped the NEWEST rows — for a voice room, quite
+			// possibly the peer's voice_leave. Replaying a truncated window
+			// would install a join whose matching leave was discarded, which
+			// is worse than the documented best-effort miss this function
+			// already returns on a plain lookup failure. A full ready isn't
+			// available here (registerNow already ran before this supplement
+			// runs), so nil is the correct degradation.
+			slog.Warn("ws liveVoiceEventsSince: cold-tier supplement exceeds the row cap, skipping truncated window",
 				"chID", chID, "after_seq", afterSeq, "cap", coldCap)
 			return nil
 		}
