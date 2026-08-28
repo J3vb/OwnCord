@@ -601,12 +601,46 @@ jobs:
             minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
           done
 
-      - name: Install root dependencies (changelogen)
-        run: npm ci
-
-      - name: Generate changelog
+      # The release body is the curated section for THIS tag, never the whole
+      # file. v1.2.0-alpha.4 published all 795 lines of CHANGELOG.md — every
+      # past release, plus the "How to write an entry" style guide aimed at
+      # contributors — because `--notes-file CHANGELOG.md` hands GitHub the
+      # entire file and nothing ever narrowed it.
+      #
+      # The `changelogen --output CHANGELOG.md` step that used to run here is
+      # gone. It ran after the tag existed, so its from-tag and to-tag were the
+      # same commit: it appended an empty `## <tag>...<tag>` heading whose
+      # compare link pointed at itself, and no step consumed the result.
+      # `npm run changelog` still exists for drafting an entry locally, which
+      # is the point in time where generating one is useful.
+      #
+      # Fail closed. Empty notes on a public download page are worse than a
+      # failed run: the run can be re-run once the entry is written, but a
+      # published release with no description has already been fetched.
+      - name: Extract this tag's release notes
         shell: bash
-        run: npx changelogen --output CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+          DOC_BASE: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}
+        run: |
+          # Headings carry an optional title ("## v1.2.0-alpha.1 — Discord
+          # feature parity"), so match the tag as a whole word, not a prefix:
+          # a bare prefix match would let `v1.2.0` swallow `v1.2.0-alpha.4`.
+          awk -v tag="$TAG" '
+            $0 == "## " tag || index($0, "## " tag " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## $TAG' section. Write the entry, then re-run this release."
+            exit 1
+          fi
+
+          # Relative links resolve against the repository, not against a
+          # release page, so every one of them 404s for a release reader.
+          sed -i "s#](docs/#]($DOC_BASE/docs/#g" release-notes.md
+          echo "Release notes: $(wc -l < release-notes.md) lines, $(wc -c < release-notes.md) bytes"
 
       # Sole publish target. This repo is public, so its own Releases page both
       # satisfies AGPL source availability (via the owncord-src snapshot below)
@@ -620,5 +654,5 @@ jobs:
           mapfile -t assets < <(find windows linux -type f)
           assets+=(checksums.sha256 owncord-src-*.tar.gz)
           gh release create "${{ github.ref_name }}" \
-            --notes-file CHANGELOG.md \
+            --notes-file release-notes.md \
             "${assets[@]}"
