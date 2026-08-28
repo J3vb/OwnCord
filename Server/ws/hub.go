@@ -9,13 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/stackutil"
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/stackutil"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // Hub manages all active WebSocket clients and routes messages between them.
@@ -184,6 +184,11 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		// from one who is actually still connected — the same live-connection
 		// rule presentableMembers applies to the members array.
 		svc.Messages.SetOnlineChecker(h.IsUserConnected)
+		// So every DM payload DMService builds (GET/POST /dms, POST
+		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
+		// applies the same live-connection rule instead of only the ready
+		// payload's presentableDMChannels doing so (OC-0304).
+		svc.DMs.SetOnlineChecker(h.IsUserConnected)
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -496,13 +501,48 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
-		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID
+		// A moderator-imposed mute/deafen stashed by voice_mod_move
+		// (setPendingModFlags) lives ONLY on the old *Client between the
+		// target's eviction (which deletes the voice_states row that state
+		// normally lives in) and the target's own re-join, which consumes it
+		// via takePendingModFlags (voice_join.go). Any client replacement —
+		// reconnect or full resync alike — must carry it to the new *Client
+		// or it is silently destroyed and the mute is lost (OC-0302).
+		// Unlike the voice-state transfer below, this has none of the
+		// voiceJoinCompleted supersession concerns, so it is not gated on
+		// c.lastSeq > 0: take-and-clear leaves nothing behind for old to
+		// double-serve, and a stash nobody set is always (false, false).
+		if pendingMuted, pendingDeafened := old.takePendingModFlags(); pendingMuted || pendingDeafened {
+			c.setPendingModFlags(pendingMuted, pendingDeafened)
+		}
 		if c.lastSeq > 0 {
 			// Network reconnect — preserve voice state so the user stays
 			// in voice during brief WS drops.
-			if c.getVoiceChID() == 0 {
+			//
+			// Gated on oldVoiceJoinCompleted (OC-0270): a join that
+			// voiceJoinPersist has merely committed to the DB and set on the
+			// old client, but that voiceJoinComplete has not yet finished, is
+			// still racing its own supersession guards in voice_join.go
+			// (voice_join.go:423, :470) — both compare the old client's live
+			// voiceChID/voiceJoinToken against the values captured when the
+			// join started. Clearing the old client's state above as part of
+			// this very transfer makes those guards read as "superseded" and
+			// abort the join (no token delivered, no voice_state broadcast,
+			// no VoiceTopic subscribe) — while the DB row and the new
+			// client's transferred state still agree, so sweepStaleVoiceStates
+			// never reaps it. Transferring only a completed join avoids
+			// resurrecting exactly that half-finished state; an incomplete
+			// one instead leaves the new client with voiceChID 0, so the
+			// still-committed row now disagrees with hub state and the next
+			// sweep tick reaps it, letting the user rejoin.
+			if c.getVoiceChID() == 0 && oldVoiceJoinCompleted {
 				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+				// c.setVoiceState above resets the fresh-join-in-progress flag
+				// it defaults to; restore it since we just verified the old
+				// client's join over this same (chID, token) had completed.
+				c.markVoiceJoinCompleteIfMatch(oldVoiceChID, oldVoiceJoinToken)
 				// The announced ECDH key must survive with the voice state:
 				// the client keeps its keypair across a WS blip and only
 				// re-announces on a LiveKit-room reconnect, so without the
@@ -605,6 +645,24 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// ordering dependency on pub/sub subscriptions.
 	if replacedVoiceChID != 0 {
 		h.updateKeyHolder(replacedVoiceChID)
+	}
+
+	// Re-sync this connection's local E2EE peer-key map now that it is
+	// reachable (OC-0276). voice_e2ee_announce is delivered as an
+	// unsequenced pub/sub frame (sendToVoiceChannelExcept, voice_e2ee.go),
+	// bypassing deliverBroadcast/h.replayBuf entirely — so on a network
+	// reconnect (the transfer above), neither reconnect replay tier can ever
+	// redeliver a peer's key, or a mid-call key rotation, that was announced
+	// while this socket was down. voiceJoinComplete's relay
+	// (voice_join.go) only runs on a brand-new voice_join, never here, so
+	// without this call a resumed connection's peer-key map would silently
+	// and permanently desync from its (correctly replayed) voice roster.
+	// c.getVoiceChID() reflects the transfer above, so this covers a
+	// resumed connection as well as a client pre-set into a voice channel
+	// (e.g. NewTestClientWithChannel); it is a no-op whenever c is not
+	// currently in a voice channel, which is the common case (fresh login).
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		h.sendVoicePeerKeys(c, voiceChID)
 	}
 }
 

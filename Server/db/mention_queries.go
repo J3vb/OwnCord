@@ -241,6 +241,71 @@ func (d *DB) IncrementMentionCounts(ctx context.Context, channelID, msgID int64,
 	return nil
 }
 
+// DecrementMentionCounts reverses the read_states.mention_count increments
+// IncrementMentionCounts made for msgIDs, when those messages are deleted or
+// purged. Without this, mention_count is a stored counter with no decrementer
+// on the delete path at all: DeleteMessage and PurgeChannelMessages soft-delete
+// the row and leave read_states untouched, while the sibling unread count is
+// computed live and excludes deleted rows — so deleting the only mentioning
+// message in a channel leaves a mention badge pointing at nothing.
+//
+// Each message is decremented separately, guarded exactly like
+// IncrementMentionCounts guarded its own increment (last_message_id < msgID):
+// a recipient who has since marked the channel read already had mention_count
+// zeroed by that read, so this must not decrement it into a negative count
+// that a later, unrelated mention would then have to climb back out of.
+// mention_count > 0 keeps every step monotonic for the same reason.
+//
+// @everyone/@here recipients are not stored per user — message_mentions only
+// holds resolved @user mentions, and the everyone/here fan-out is filtered by
+// presence at send time (OC-0223) rather than persisted — so this reverses
+// only stored direct mentions. That is a smaller, but never wrong, correction.
+//
+// message_mentions stores every resolved mention id, blockers of the author
+// included (insertMentionRows deliberately does not filter — the fan-out,
+// not storage, is what excludes them). But the increment side
+// (applyMentionCounts in service/mentions.go) deletes the author's blockers
+// from the recipient set before ever calling IncrementMentionCounts, so a
+// blocker's read_states row was never bumped for this message. The NOT
+// EXISTS below mirrors that same exclusion here (OC-0293): without it, a
+// blocker who happens to have an unrelated, genuine mention badge on this
+// same channel — from some other message — has that real badge wiped out
+// when the blocked author's message is deleted, because the UPDATE cannot
+// otherwise tell "never counted" apart from "counted, now reversing".
+func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
+	if len(msgIDs) == 0 {
+		return nil
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("DecrementMentionCounts begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, msgID := range msgIDs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE read_states
+			 SET mention_count = mention_count - 1
+			 WHERE channel_id = ?
+			   AND mention_count > 0
+			   AND last_message_id < ?
+			   AND user_id IN (SELECT mentioned_user_id FROM message_mentions WHERE message_id = ?)
+			   AND NOT EXISTS (
+			       SELECT 1 FROM user_blocks b
+			       WHERE b.blocker_id = read_states.user_id
+			         AND b.blocked_id = (SELECT user_id FROM messages WHERE id = ?)
+			   )`,
+			channelID, msgID, msgID, msgID,
+		); err != nil {
+			return fmt.Errorf("DecrementMentionCounts: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("DecrementMentionCounts commit: %w", err)
+	}
+	return nil
+}
+
 // GetMentionCount returns the unread mention count for a user in a channel.
 func (d *DB) GetMentionCount(ctx context.Context, userID, channelID int64) (int, error) {
 	var count int

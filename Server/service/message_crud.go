@@ -2,14 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // SendMessage validates, persists, and prepares broadcast data for a new message.
@@ -82,6 +83,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		Attachments:      attachments,
 		Mentions:         mentions.UserIDs,
 		MentionsEveryone: mentions.Everyone,
+		MentionsHere:     mentions.HereOnly,
 	}
 
 	// DM path: open DM for recipients.
@@ -356,6 +358,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		IsDM:             isDM,
 		Mentions:         mentions.UserIDs,
 		MentionsEveryone: mentions.Everyone,
+		MentionsHere:     mentions.HereOnly,
 	}
 
 	if isDM {
@@ -402,6 +405,32 @@ func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID, cha
 	return nil
 }
 
+// deleteAuthz decides whether userID may delete msg and whether the delete
+// runs as a moderation action (isMod).
+func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, isDM bool) (bool, error) {
+	if isDM {
+		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
+		if dmErr != nil || !ok {
+			return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+		}
+		return false, nil
+	}
+	// Require READ_MESSAGES alongside MANAGE_MESSAGES (and alongside
+	// SEND_MESSAGES on the author path) so a role explicitly denied access to
+	// a channel cannot delete messages in it. Mirrors handleReaction and
+	// checkSendPermission, which both require ReadMessages for non-DM channels.
+	isMsgOwner := msg.UserID == userID
+	canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.ManageMessages)
+	canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.SendMessages))
+	if !canDelete {
+		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	// db.DeleteMessage skips the ownership check when ismod is true, so the
+	// moderation flag must reuse the decision made above rather than
+	// re-checking MANAGE_MESSAGES without READ_MESSAGES.
+	return canManage, nil
+}
+
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
 	// Rate limit.
@@ -417,6 +446,15 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	msg, err := s.st.GetMessage(ctx, msgID)
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	// OC-0284: GetMessage returns tombstones (so callers can broadcast the
+	// deletion event), and every layer beneath a plain re-delete is silently
+	// idempotent. Without this guard a second chat_delete for the same
+	// message reaches DecrementMentionCounts below a second time, which has
+	// no per-message idempotence of its own and eats a mention raised by a
+	// different, still-live message. Mirrors EditMessage's msg.Deleted guard.
+	if msg.Deleted {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
 
 	// Fail closed, mirroring EditMessage: a lookup failure must not fall
@@ -435,30 +473,23 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 		return nil, err
 	}
 
-	var isMod bool
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
-		if dmErr != nil || !ok {
-			return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
-		}
-	} else {
-		// Require READ_MESSAGES alongside MANAGE_MESSAGES (and alongside
-		// SEND_MESSAGES on the author path) so a role explicitly denied access to
-		// a channel cannot delete messages in it. Mirrors handleReaction and
-		// checkSendPermission, which both require ReadMessages for non-DM channels.
-		isMsgOwner := msg.UserID == userID
-		canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.ManageMessages)
-		canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.SendMessages))
-		if !canDelete {
-			return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
-		}
-		// db.DeleteMessage skips the ownership check when ismod is true, so the
-		// moderation flag must reuse the decision made above rather than
-		// re-checking MANAGE_MESSAGES without READ_MESSAGES.
-		isMod = canManage
+	isMod, err := s.deleteAuthz(ctx, userID, msg, isDM)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.st.DeleteMessage(ctx, msgID, userID, isMod); err != nil {
+		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
+		// so a message that raced this request to the writer between the
+		// msg.Deleted check above and this write surfaces here as
+		// db.ErrNotFound. Map it to ErrDeletedMessage rather than the generic
+		// ErrForbidden below so the caller sees the same taxonomy as the
+		// sequential-repeat guard above, and so this request never reaches the
+		// DecrementMentionCounts call past this point for a delete that did
+		// not actually happen.
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+		}
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
@@ -466,6 +497,15 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	// Audit rows must survive a request canceled after the delete committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
+
+	// OC-0275: reverse this message's mention_count increments so a deleted
+	// mention does not leave a red badge on a channel with zero unread.
+	// Detached from ctx like the audit write above and the DM fan-out below —
+	// the soft-delete already committed, so a canceled request must not skip
+	// the correction.
+	if mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), msg.ChannelID, []int64{msgID}); mcErr != nil {
+		slog.Error("MessageService.DeleteMessage DecrementMentionCounts", "err", mcErr, "channel_id", msg.ChannelID, "msg_id", msgID)
+	}
 
 	result := &DeleteMessageResult{
 		MessageID: msgID,

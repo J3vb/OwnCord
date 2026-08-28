@@ -1,0 +1,116 @@
+/* ═══════════════════════════════════════════
+   BASE STYLES — reset, scrollbar, fonts
+   Extracted from ui-mockup.html
+   ═══════════════════════════════════════════ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--font-size, 14px);
+  color: var(--text-normal);
+  background: var(--bg-tertiary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  background: none;
+  color: inherit;
+}
+
+/* Restore focus ring for keyboard nav; mouse clicks stay clean */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  border: none;
+  outline: none;
+}
+
+/* WebView2/Edge injects a native password-reveal eye; the app ships its own
+   toggle (LoginForm), producing two icons. Hide the native controls.
+   Kept as standalone rules — an unknown pseudo-element in a shared selector
+   list would invalidate the other selectors. */
+input::-ms-reveal {
+  display: none;
+}
+
+input::-ms-clear {
+  display: none;
+}
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-auto-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-auto-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #232428;
+}
+
+/* Thin scrollbar for sidebars */
+.channel-list::-webkit-scrollbar,
+.member-list::-webkit-scrollbar {
+  width: 6px;
+}
+.channel-list::-webkit-scrollbar-thumb,
+.member-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thin-thumb);
+}
+
+/* Utility classes */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

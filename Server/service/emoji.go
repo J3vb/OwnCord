@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // EmojiService owns the server-wide custom emoji set: who may change it, what

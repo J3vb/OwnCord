@@ -14,9 +14,9 @@ import (
 	"github.com/livekit/protocol/livekit"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // proxyWebSocket and copyWS carry every LiveKit signaling frame between the

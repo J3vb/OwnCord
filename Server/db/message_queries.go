@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // messageFromGen maps a generated message row to the domain Message model.
@@ -188,6 +188,13 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 
 // DeleteMessage performs a soft delete (sets deleted=1) on the message.
 // The calling user must be the message owner or ismod must be true.
+//
+// OC-0284: the UPDATE is guarded with `AND deleted = 0` (mirroring
+// SetMessagePinned) and RowsAffected is checked, so a message already
+// soft-deleted — by a prior call, or by one that raced this one to the
+// writer — reports ErrNotFound instead of silently succeeding a second time.
+// A caller-visible no-op here is what let a repeated delete run the
+// mention_count reversal twice upstream in MessageService.DeleteMessage.
 func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) error {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -200,8 +207,12 @@ func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) er
 		return fmt.Errorf("DeleteMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	if err := d.q.SoftDeleteMessage(ctx, id); err != nil {
+	res, err := d.q.SoftDeleteMessage(ctx, id)
+	if err != nil {
 		return fmt.Errorf("DeleteMessage: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("DeleteMessage: message %d: %w", id, ErrNotFound)
 	}
 	return nil
 }

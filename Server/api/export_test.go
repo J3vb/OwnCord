@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // BroadcastDMOpenForTest exposes broadcastDMOpen for external tests.

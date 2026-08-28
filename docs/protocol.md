@@ -3,6 +3,7 @@
 All client-server real-time communication happens over a single WebSocket connection. Messages are JSON with a `type` and `payload`.
 
 **Related docs:**
+
 - [api.md](api.md) -- REST endpoints (message history, file uploads, etc.)
 - [schema.md](schema.md) -- Database tables and permission bitfields
 
@@ -47,12 +48,12 @@ The client connects via the Tauri Rust backend's WS proxy rather than native Web
 
 ### Transport Limits
 
-| Limit | Value |
-|-------|-------|
-| Max read size | 1 MB |
-| Max message content | 4000 runes |
-| Write timeout | 10 seconds |
-| Auth deadline | 10 seconds |
+| Limit                  | Value        |
+| ---------------------- | ------------ |
+| Max read size          | 1 MB         |
+| Max message content    | 4000 runes   |
+| Write timeout          | 10 seconds   |
+| Auth deadline          | 10 seconds   |
 | Send buffer per client | 256 messages |
 
 ---
@@ -65,17 +66,17 @@ Every WebSocket message is a JSON object with these fields:
 {
   "type": "message_type",
   "id": "unique-request-id",
-  "payload": { },
+  "payload": {},
   "seq": 42
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Determines how `payload` is interpreted |
-| `id` | string | Client messages only | Client-generated UUID for request/response correlation |
-| `payload` | object | Yes | Contents vary by `type`. Must be present (can be `{}`). |
-| `seq` | uint64 | Broadcast messages only | Monotonically increasing sequence number. Only present on server-to-client broadcast messages. |
+| Field     | Type   | Required                | Description                                                                                    |
+| --------- | ------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `type`    | string | Yes                     | Determines how `payload` is interpreted                                                        |
+| `id`      | string | Client messages only    | Client-generated UUID for request/response correlation                                         |
+| `payload` | object | Yes                     | Contents vary by `type`. Must be present (can be `{}`).                                        |
+| `seq`     | uint64 | Broadcast messages only | Monotonically increasing sequence number. Only present on server-to-client broadcast messages. |
 
 ---
 
@@ -90,15 +91,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category | Has seq? | Examples |
-|----------|----------|---------|
-| Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
-| Global broadcasts | Yes | `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral | No | `typing`, `presence` from a `presence_update` (see below) |
-| DM chat events | Yes | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants |
-| DM lifecycle | No | `dm_channel_open`, `dm_channel_close` |
-| Call signalling | No | `call_incoming`, `call_declined` |
-| Direct responses | No | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong` |
+| Category           | Has seq? | Examples                                                                                                                                                                                           |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                              |
+| Global broadcasts  | Yes      | `member_join`, `member_leave`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                                          |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                            |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                              |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                   |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                            |
 
 **`presence` is split, and only one half is sequenced.** Connect and disconnect
 presence is a normal sequenced global broadcast, so it replays on a warm resume.
@@ -132,11 +133,11 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `token` | string | Yes | Session token obtained from `POST /api/v1/auth/login` |
-| `last_seq` | uint64 | No | Last sequence number received. If > 0, server attempts replay. Default 0. |
-| `active_channel_id` | int64 | No | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
+| Field               | Type   | Required | Description                                                                                                                                                                                                      |
+| ------------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                            |
+| `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                        |
+| `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -250,12 +251,12 @@ Every 30 seconds, the server checks all clients. Any client with no activity for
 
 When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message. The server resolves the reconnect through a **3-tier replay pipeline** (cheapest first):
 
-| Tier | Condition | Server Behavior | `replay_source` |
-|------|-----------|-----------------|-----------------|
-| — | `last_seq == 0` | Full flow: `auth_ok` + `ready` + `member_join` + `presence` | `none` |
-| 1 | seq within the in-memory ring buffer (1000 events) | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer` |
-| 2 | seq within the persistent `events` table (max 5000 events, subject to retention) | Same replay flow, served from the cold tier | `db` |
-| 3 | seq too far behind, or channel visibility changed while away | Full flow (fallback): same as `last_seq == 0` | `none` |
+| Tier | Condition                                                                        | Server Behavior                                                                                                                                  | `replay_source` |
+| ---- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| —    | `last_seq == 0`                                                                  | Full flow: `auth_ok` + `ready` + `member_join` + `presence`                                                                                      | `none`          |
+| 1    | seq within the in-memory ring buffer (1000 events)                               | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
+| 2    | seq within the persistent `events` table (max 5000 events, subject to retention) | Same replay flow, served from the cold tier                                                                                                      | `db`            |
+| 3    | seq too far behind, or channel visibility changed while away                     | Full flow (fallback): same as `last_seq == 0`                                                                                                    | `none`          |
 
 A visibility watermark forces the tier-3 full re-sync whenever channel
 visibility changed while the client was disconnected, so permission changes
@@ -346,12 +347,12 @@ to reconstruct them:
 }
 ```
 
-| Field | Type | Required | Constraints |
-|-------|------|----------|-------------|
-| `channel_id` | number | Yes | Positive integer |
-| `content` | string | Yes* | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty. |
-| `reply_to` | number or null | No | Message ID being replied to |
-| `attachments` | string[] | No | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission. |
+| Field         | Type           | Required | Constraints                                                                  |
+| ------------- | -------------- | -------- | ---------------------------------------------------------------------------- |
+| `channel_id`  | number         | Yes      | Positive integer                                                             |
+| `content`     | string         | Yes*     | Max 4000 runes. HTML-sanitized. *Can be empty if `attachments` is non-empty. |
+| `reply_to`    | number or null | No       | Message ID being replied to                                                  |
+| `attachments` | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.  |
 
 ### chat_send_ok (Server -> Client)
 
@@ -390,15 +391,17 @@ Direct response to sender (no seq):
     "reactions": [],
     "pinned": false,
     "mentions": [7, 9],
-    "mentions_everyone": true
+    "mentions_everyone": true,
+    "mentions_here": false
   }
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `mentions` | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved. |
-| `mentions_everyone` | bool | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
+| Field               | Type     | Description                                                                                                         |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `mentions`          | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                  |
+| `mentions_everyone` | bool     | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
+| `mentions_here`     | bool     | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                             |
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message). An `@word` that
@@ -406,6 +409,16 @@ matches no username, and an `@everyone`/`@here` from an author without
 `MENTION_EVERYONE`, resolve to nothing and stay plain text — clients must
 highlight from these fields rather than re-parsing the content. DMs never carry
 `mentions_everyone`.
+
+`@everyone` and `@here` both raise `mention_count` for every reader except
+`@here` skips a reader with no live connection at send time (the server's
+`applyMentionCounts` treats that reader as unreachable, the same way a push
+notification would). A client cannot tell the two tokens apart from
+`mentions_everyone` alone, which is why `mentions_here` exists: a reconnecting
+client that replays this frame from the gap it was disconnected for must not
+raise a mention badge for a here-only mention the server never counted — there
+is no `ready` in that reconnect tier to correct a wrong badge afterward. A
+direct `mentions` hit is unaffected either way.
 
 ### chat_edit (Client -> Server)
 
@@ -434,15 +447,16 @@ Own messages only. Max 4000 runes.
     "content": "Hello everyone! (edited)",
     "edited_at": "2026-03-14T10:31:00Z",
     "mentions": [7],
-    "mentions_everyone": false
+    "mentions_everyone": false,
+    "mentions_here": false
   }
 }
 ```
 
-`mentions`/`mentions_everyone` are re-resolved from the edited content and
-replace the stored set. Editing never raises anyone's `mention_count`: a badge
-is only ever raised by the original send, so re-adding an already-counted
-mention cannot double-count it.
+`mentions`/`mentions_everyone`/`mentions_here` are re-resolved from the edited
+content and replace the stored set. Editing never raises anyone's
+`mention_count`: a badge is only ever raised by the original send, so
+re-adding an already-counted mention cannot double-count it.
 
 ### chat_delete (Client -> Server)
 
@@ -635,7 +649,7 @@ Advances the caller's read state for `channel_id` to that channel's latest
 message and resets its `mention_count` to 0 — exactly what `channel_focus` does
 to unread state — **without** changing which channel the connection is focused
 on. This is what backs "Mark as Read" in the channel context menu and "Mark All
-as Read": marking a channel the user is *not* looking at must not rebind the
+as Read": marking a channel the user is _not_ looking at must not rebind the
 connection's focused channel, which would misroute unread bookkeeping for the
 channel actually on screen.
 
@@ -793,8 +807,22 @@ dropped intermediate event can never leave a deleted role on screen.
   "type": "roles_update",
   "payload": {
     "roles": [
-      { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647, "position": 100, "is_default": false },
-      { "id": 4, "name": "Member", "color": null, "permissions": 1635, "position": 40, "is_default": true }
+      {
+        "id": 1,
+        "name": "Owner",
+        "color": "#E74C3C",
+        "permissions": 2147483647,
+        "position": 100,
+        "is_default": false
+      },
+      {
+        "id": 4,
+        "name": "Member",
+        "color": null,
+        "permissions": 1635,
+        "position": 40,
+        "is_default": true
+      }
     ]
   }
 }
@@ -885,6 +913,7 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 ```
 
 On success, server sends (in order):
+
 1. `voice_token` -- LiveKit JWT + URL
 2. `voice_state` broadcast -- joiner's state to all clients
 3. Existing `voice_state` messages -- one per existing participant (to joiner only)
@@ -929,11 +958,11 @@ restricted by the user's permissions.
 
 Quality presets:
 
-| Preset | Bitrate |
-|--------|---------|
-| `low` | 32,000 bps |
-| `medium` | 64,000 bps |
-| `high` | 128,000 bps |
+| Preset   | Bitrate     |
+| -------- | ----------- |
+| `low`    | 32,000 bps  |
+| `medium` | 64,000 bps  |
+| `high`   | 128,000 bps |
 
 ### voice_leave (Client -> Server)
 
@@ -1404,26 +1433,26 @@ and the ringer's own 30s window already covers it.
 
 ### Error Codes
 
-| Code | Description |
-|------|-------------|
-| `BAD_REQUEST` | Invalid payload format or field values |
-| `BAD_PAYLOAD` | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets) |
-| `INTERNAL` | Server-side error |
-| `NOT_FOUND` | Channel or message not found |
-| `FORBIDDEN` | Missing required permission |
-| `NOT_KEY_HOLDER` | `voice_e2ee_offer` sent by a participant who is not the channel's key holder |
-| `RATE_LIMITED` | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not) |
-| `ALREADY_JOINED` | Already in this voice channel |
-| `CHANNEL_FULL` | Voice channel at capacity |
-| `VOICE_ERROR` | Voice-specific error |
-| `VIDEO_LIMIT` | Maximum video streams reached |
-| `BANNED` | User is banned |
-| `INVALID_JSON` | Message is not valid JSON |
-| `UNKNOWN_TYPE` | Unrecognized message type |
-| `SLOW_MODE` | Channel has slow mode enabled |
-| `CONFLICT` | Duplicate reaction or constraint violation |
-| `SERVER_MUTED` | Self-unmute refused: a moderator imposed the mute |
-| `SERVER_DEAFENED` | Self-undeafen refused: a moderator imposed the deafen |
+| Code              | Description                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `BAD_REQUEST`     | Invalid payload format or field values                                                                                    |
+| `BAD_PAYLOAD`     | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)     |
+| `INTERNAL`        | Server-side error                                                                                                         |
+| `NOT_FOUND`       | Channel or message not found                                                                                              |
+| `FORBIDDEN`       | Missing required permission                                                                                               |
+| `NOT_KEY_HOLDER`  | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                              |
+| `RATE_LIMITED`    | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not) |
+| `ALREADY_JOINED`  | Already in this voice channel                                                                                             |
+| `CHANNEL_FULL`    | Voice channel at capacity                                                                                                 |
+| `VOICE_ERROR`     | Voice-specific error                                                                                                      |
+| `VIDEO_LIMIT`     | Maximum video streams reached                                                                                             |
+| `BANNED`          | User is banned                                                                                                            |
+| `INVALID_JSON`    | Message is not valid JSON                                                                                                 |
+| `UNKNOWN_TYPE`    | Unrecognized message type                                                                                                 |
+| `SLOW_MODE`       | Channel has slow mode enabled                                                                                             |
+| `CONFLICT`        | Duplicate reaction or constraint violation                                                                                |
+| `SERVER_MUTED`    | Self-unmute refused: a moderator imposed the mute                                                                         |
+| `SERVER_DEAFENED` | Self-undeafen refused: a moderator imposed the deafen                                                                     |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
@@ -1433,27 +1462,27 @@ After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
 All rate limits are enforced server-side using a token bucket rate limiter.
 
-| Action | Limit | Window | Error Response |
-|--------|-------|--------|----------------|
-| Chat send | 10 | 1 second | `RATE_LIMITED` error |
-| Chat edit | 10 | 1 second | `RATE_LIMITED` error |
-| Chat delete | 10 | 1 second | `RATE_LIMITED` error |
-| Typing | 1 | 3 seconds | Silently dropped |
-| Presence | 1 | 10 seconds | `RATE_LIMITED` error |
-| Reactions | 5 | 1 second | `RATE_LIMITED` error |
-| Voice join / leave | 5 | 1 second | `RATE_LIMITED` error |
-| Voice camera | 2 | 1 second | `RATE_LIMITED` error |
-| Voice screenshare | 2 | 1 second | `RATE_LIMITED` error |
-| Voice token refresh | 1 | 60 seconds | `RATE_LIMITED` error |
-| Voice E2EE announce | 5 | 1 second | `RATE_LIMITED` error |
-| Voice E2EE offer | 64 | 1 second | `RATE_LIMITED` error |
-| Voice moderation (mute/deafen/move/kick) | 5 | 1 second | `RATE_LIMITED` error |
-| Call ring | 1 | 3 seconds | `RATE_LIMITED` error |
-| Call decline | 1 | 3 seconds | `RATE_LIMITED` error |
-| Plugin command (`chat_command`) | 5 | 1 second | `RATE_LIMITED` error |
-| Channel focus | 5 | 1 second | Silently dropped |
-| Mark read | 5 | 1 second (own budget, separate from focus) | Silently dropped |
-| Ping | 2 | 1 second | Silently dropped |
+| Action                                   | Limit | Window                                     | Error Response       |
+| ---------------------------------------- | ----- | ------------------------------------------ | -------------------- |
+| Chat send                                | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Chat edit                                | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Chat delete                              | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Typing                                   | 1     | 3 seconds                                  | Silently dropped     |
+| Presence                                 | 1     | 10 seconds                                 | `RATE_LIMITED` error |
+| Reactions                                | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice join / leave                       | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice camera                             | 2     | 1 second                                   | `RATE_LIMITED` error |
+| Voice screenshare                        | 2     | 1 second                                   | `RATE_LIMITED` error |
+| Voice token refresh                      | 1     | 60 seconds                                 | `RATE_LIMITED` error |
+| Voice E2EE announce                      | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice E2EE offer                         | 64    | 1 second                                   | `RATE_LIMITED` error |
+| Voice moderation (mute/deafen/move/kick) | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
+| Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
+| Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Channel focus                            | 5     | 1 second                                   | Silently dropped     |
+| Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
+| Ping                                     | 2     | 1 second                                   | Silently dropped     |
 
 The E2EE offer budget is deliberately higher than the announce budget: a key
 rotation fires one offer per peer in a single burst, so the limit is sized to
@@ -1465,96 +1494,96 @@ recipient from being flooded.
 
 ## Message Type Reference Table
 
-The authoritative type inventory is [protocol-schema.json](protocol-schema.json),
+The authoritative type inventory is [protocol/schema.json](../protocol/schema.json),
 from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
 ### Client -> Server (27 types)
 
-| Type | Rate Limit | Notes |
-|------|-----------|-------|
-| `auth` | N/A (first message) | Token + optional last_seq |
-| `chat_send` | 10/sec | + slow mode per channel |
-| `chat_edit` | 10/sec | Own messages only |
-| `chat_delete` | 10/sec | Own or mod (non-DM) |
-| `reaction_add` | 5/sec | |
-| `reaction_remove` | 5/sec | |
-| `typing_start` | 1/3sec/channel | Silently dropped |
-| `channel_focus` | 5/sec (silently dropped) | Updates read state |
-| `mark_read` | 5/sec, own budget (silently dropped) | Updates read state without moving focus |
-| `presence_update` | 1/10sec | |
-| `voice_join` | 5/sec | |
-| `voice_leave` | 5/sec | Empty payload |
-| `voice_mute` | 2/sec | Refused with `SERVER_MUTED` while server muted |
-| `voice_deafen` | 2/sec | Refused with `SERVER_DEAFENED` while server deafened |
-| `voice_camera` | 2/sec | Requires USE_VIDEO |
-| `voice_screenshare` | 2/sec | Requires SHARE_SCREEN |
-| `voice_mod_mute` | 5/sec | Requires MUTE_MEMBERS + outranks target |
-| `voice_mod_deafen` | 5/sec | Requires MUTE_MEMBERS + outranks target |
-| `voice_mod_move` | 5/sec | Requires MUTE_MEMBERS + outranks target |
-| `voice_mod_kick` | 5/sec | Requires MUTE_MEMBERS + outranks target |
-| `voice_token_refresh` | 1/60sec | Must be in voice |
-| `voice_e2ee_announce` | 5/sec | ECDH pubkey announce |
-| `voice_e2ee_offer` | 64/sec outer, 5/sec per target | Wrapped room key to target (budgeted per key rotation) |
-| `call_ring` | 1/3sec | DM participants only; fans out as `call_incoming` |
-| `call_decline` | 1/3sec | DM participants only; fans out as `call_declined` |
-| `chat_command` | 5/sec | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
-| `ping` | 2/sec (silently dropped) | Heartbeat |
+| Type                  | Rate Limit                           | Notes                                                           |
+| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
+| `auth`                | N/A (first message)                  | Token + optional last_seq                                       |
+| `chat_send`           | 10/sec                               | + slow mode per channel                                         |
+| `chat_edit`           | 10/sec                               | Own messages only                                               |
+| `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
+| `reaction_add`        | 5/sec                                |                                                                 |
+| `reaction_remove`     | 5/sec                                |                                                                 |
+| `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
+| `channel_focus`       | 5/sec (silently dropped)             | Updates read state                                              |
+| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus                         |
+| `presence_update`     | 1/10sec                              |                                                                 |
+| `voice_join`          | 5/sec                                |                                                                 |
+| `voice_leave`         | 5/sec                                | Empty payload                                                   |
+| `voice_mute`          | 2/sec                                | Refused with `SERVER_MUTED` while server muted                  |
+| `voice_deafen`        | 2/sec                                | Refused with `SERVER_DEAFENED` while server deafened            |
+| `voice_camera`        | 2/sec                                | Requires USE_VIDEO                                              |
+| `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
+| `voice_mod_mute`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_mod_deafen`    | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_mod_move`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_mod_kick`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
+| `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
+| `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |
+| `call_ring`           | 1/3sec                               | DM participants only; fans out as `call_incoming`               |
+| `call_decline`        | 1/3sec                               | DM participants only; fans out as `call_declined`               |
+| `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
+| `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
 ### Server -> Client (39 types)
 
-| Type | Has seq? | Delivery |
-|------|----------|----------|
-| `auth_ok` | No | Direct |
-| `auth_error` | No | Direct (then close) |
-| `ready` | No | Direct |
-| `chat_message` | Yes | Channel or DM participants |
-| `chat_send_ok` | No | Direct to sender |
-| `chat_edited` | Yes | Channel or DM participants |
-| `chat_deleted` | Yes | Channel or DM participants |
-| `chat_bulk_deleted` | Yes | Channel |
-| `reaction_update` | Yes | Channel or DM participants |
-| `typing` | No | Channel (excl. sender) or DM |
-| `presence` | Yes | All clients |
-| `channel_create` | Yes | All clients |
-| `channel_update` | Yes | All clients |
-| `channel_delete` | Yes | All clients |
-| `voice_state` | Yes | All clients |
-| `voice_leave` | Yes | All clients |
-| `voice_moved` | No | Direct to moved user |
-| `voice_disconnected` | No | Direct to disconnected user |
-| `voice_config` | No | Direct to joiner |
-| `voice_token` | No | Direct to joiner |
-| `voice_speakers` | No | Reserved — not currently emitted |
-| `member_join` | Yes | All clients |
-| `member_leave` | Yes | Reserved — not currently emitted |
-| `member_update` | Yes | All clients |
-| `user_update` | Yes | All clients (profile changes) |
-| `member_ban` | Yes | All clients |
-| `roles_update` | Yes | All clients (full role list) |
-| `emoji_update` | Yes | All clients (full custom-emoji set) |
-| `dm_channel_open` | No | Direct to participant |
-| `dm_channel_close` | No | Direct to participant |
-| `call_incoming` | No | Direct to each other DM participant |
-| `call_declined` | No | Direct to each other DM participant |
-| `voice_e2ee_announce` | No | Voice channel (excl. sender) |
-| `voice_e2ee_offer` | No | Direct to target participant |
-| `server_restart` | Yes | All clients |
-| `error` | No | Direct to requester |
-| `pong` | No | Direct to pinger |
-| `command_reply` | No | Direct to invoking client (ephemeral plugin reply) |
-| `plugin_broadcast` | Yes | Channel (plugin output posted as a broadcast; sequenced and replayable) |
+| Type                  | Has seq? | Delivery                                                                |
+| --------------------- | -------- | ----------------------------------------------------------------------- |
+| `auth_ok`             | No       | Direct                                                                  |
+| `auth_error`          | No       | Direct (then close)                                                     |
+| `ready`               | No       | Direct                                                                  |
+| `chat_message`        | Yes      | Channel or DM participants                                              |
+| `chat_send_ok`        | No       | Direct to sender                                                        |
+| `chat_edited`         | Yes      | Channel or DM participants                                              |
+| `chat_deleted`        | Yes      | Channel or DM participants                                              |
+| `chat_bulk_deleted`   | Yes      | Channel                                                                 |
+| `reaction_update`     | Yes      | Channel or DM participants                                              |
+| `typing`              | No       | Channel (excl. sender) or DM                                            |
+| `presence`            | Yes      | All clients                                                             |
+| `channel_create`      | Yes      | All clients                                                             |
+| `channel_update`      | Yes      | All clients                                                             |
+| `channel_delete`      | Yes      | All clients                                                             |
+| `voice_state`         | Yes      | All clients                                                             |
+| `voice_leave`         | Yes      | All clients                                                             |
+| `voice_moved`         | No       | Direct to moved user                                                    |
+| `voice_disconnected`  | No       | Direct to disconnected user                                             |
+| `voice_config`        | No       | Direct to joiner                                                        |
+| `voice_token`         | No       | Direct to joiner                                                        |
+| `voice_speakers`      | No       | Reserved — not currently emitted                                        |
+| `member_join`         | Yes      | All clients                                                             |
+| `member_leave`        | Yes      | Reserved — not currently emitted                                        |
+| `member_update`       | Yes      | All clients                                                             |
+| `user_update`         | Yes      | All clients (profile changes)                                           |
+| `member_ban`          | Yes      | All clients                                                             |
+| `roles_update`        | Yes      | All clients (full role list)                                            |
+| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                     |
+| `dm_channel_open`     | No       | Direct to participant                                                   |
+| `dm_channel_close`    | No       | Direct to participant                                                   |
+| `call_incoming`       | No       | Direct to each other DM participant                                     |
+| `call_declined`       | No       | Direct to each other DM participant                                     |
+| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                            |
+| `voice_e2ee_offer`    | No       | Direct to target participant                                            |
+| `server_restart`      | Yes      | All clients                                                             |
+| `error`               | No       | Direct to requester                                                     |
+| `pong`                | No       | Direct to pinger                                                        |
+| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |
+| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable) |
 
 ### Plugin command types
 
 Three wire types exist for the WASM plugin system. Since 2026-08-04 they are
-listed in `protocol-schema.json` like every other type (closing DC-01), so
+listed in `protocol/schema.json` like every other type (closing DC-01), so
 the generated constants cover them and `make protocol-verify` plus the
 `ws` package's protocol-contract test gate them against drift.
 
-| Type | Direction | Notes |
-|------|-----------|-------|
-| `chat_command` | Client -> Server | `{command, args[], channel_id, req_id?}`; max 64 args; unknown commands return an `error`. Rate limited at 5/sec (`RATE_LIMITED`); a channel broadcast is gated by the same `CanPost` policy as a real message send. |
-| `command_reply` | Server -> Client | Ephemeral plugin reply, sent only to the invoking client; echoes `req_id`. Payload: `{text}`. |
-| `plugin_broadcast` | Server -> Client | Plugin output posted to a channel. Payload: `{channel_id, user_id, command, text}`. |
+| Type               | Direction        | Notes                                                                                                                                                                                                                |
+| ------------------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat_command`     | Client -> Server | `{command, args[], channel_id, req_id?}`; max 64 args; unknown commands return an `error`. Rate limited at 5/sec (`RATE_LIMITED`); a channel broadcast is gated by the same `CanPost` policy as a real message send. |
+| `command_reply`    | Server -> Client | Ephemeral plugin reply, sent only to the invoking client; echoes `req_id`. Payload: `{text}`.                                                                                                                        |
+| `plugin_broadcast` | Server -> Client | Plugin output posted to a channel. Payload: `{channel_id, user_id, command, text}`.                                                                                                                                  |

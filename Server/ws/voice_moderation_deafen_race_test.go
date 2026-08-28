@@ -22,7 +22,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // deafenRaceRoleAdmin / deafenRaceRoleMember reuse the default seeded roles

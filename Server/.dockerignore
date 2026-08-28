@@ -13,8 +13,13 @@ data/
 # Local config (users provide their own via volume mount or env)
 config.yaml
 
-# Scripts (not needed in image)
+# Developer tooling (not needed in image; the image builds the root package)
 scripts/
+cmd/
+
+# Plugin examples: source for a disabled subsystem, plus a prebuilt .wasm a
+# developer may still have on disk untracked. Nothing in the image reads either.
+plugin/examples/
 
 # Git metadata
 .git

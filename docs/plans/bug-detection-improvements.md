@@ -3,7 +3,7 @@
 Date: 2026-08-08
 Status: partially implemented (verified 2026-08-19) — Tier 1a's `make fuzz`
 target exists (`Server/Makefile`) and Tier 2's five custom ESLint rules
-shipped 2026-08-08 (`Client/tauri-client/eslint-rules.js`), so the gap table
+shipped 2026-08-08 (`Client/eslint-rules.js`), so the gap table
 below is stale for those two rows; Tiers 1b/1c are on-demand npm scripts;
 Tiers 3–4 remain unimplemented.
 
@@ -20,12 +20,12 @@ by yield per token spent.
 
 ## What already exists and does not run
 
-| Asset | State | Gap |
-| --- | --- | --- |
-| 14 `Fuzz*` harnesses under `Server/**/*_fuzz_test.go` | Committed | `go test ./...` runs a `Fuzz*` function against its **seed corpus only** — one pass per seed, zero generated inputs. `-fuzz` appears nowhere in the repo. |
-| Stryker mutation testing | `stryker.config.mjs` + `npm run test:mutate` | Referenced in `ci.yml` only inside an npm-audit comment. Has never run. |
-| Browser-mode vitest | `vitest.config.browser.ts` + `npm run test:browser` | CI runs jsdom only. |
-| Cross-package coverage | `make cover-all` prints every 0.0%-covered function | Output is not fed to anything. |
+| Asset                                                 | State                                               | Gap                                                                                                                                                       |
+| ----------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 14 `Fuzz*` harnesses under `Server/**/*_fuzz_test.go` | Committed                                           | `go test ./...` runs a `Fuzz*` function against its **seed corpus only** — one pass per seed, zero generated inputs. `-fuzz` appears nowhere in the repo. |
+| Stryker mutation testing                              | `stryker.config.mjs` + `npm run test:mutate`        | Referenced in `ci.yml` only inside an npm-audit comment. Has never run.                                                                                   |
+| Browser-mode vitest                                   | `vitest.config.browser.ts` + `npm run test:browser` | CI runs jsdom only.                                                                                                                                       |
+| Cross-package coverage                                | `make cover-all` prints every 0.0%-covered function | Output is not fed to anything.                                                                                                                            |
 
 Separately, three of the codebase's sharpest invariants are documented in
 `CLAUDE.md` files as prose and asserted nowhere:
@@ -44,7 +44,7 @@ Prose fails no build.
 GitHub Actions.**
 
 Rationale: `go test -fuzz` writes each crashing input to
-`testdata/fuzz/<Target>/<hash>`, and that file *is* a working reproducer. The
+`testdata/fuzz/<Target>/<hash>`, and that file _is_ a working reproducer. The
 root `CLAUDE.md` states: "This repo is public — unfixed defects do not belong
 in commits, issues, or PR descriptions." Actions artifacts on a public repo are
 downloadable by anyone, and a red scheduled job is itself a public signal that
@@ -76,7 +76,7 @@ has no native Windows support (WSL or Docker only), so on this machine it would
 join `make` as tooling that cannot be run locally. ESLint flat config supports
 an inline plugin, so custom rules cost no new dependency — and `npx eslint
 src/` is already a blocking CI gate, which removes the promotion step entirely.
-Rules live in `Client/tauri-client/eslint-rules.js`, tested with `RuleTester`
+Rules live in `Client/eslint-rules.js`, tested with `RuleTester`
 in `tests/unit/eslint-rules.test.ts`. See "Tier 2 — delivered" below.
 
 ## Tier 1 — Turn on what already exists
@@ -135,7 +135,7 @@ configured surface that observes that class.
 
 ### 1d. Prerequisite
 
-Confirm `Client/tauri-client/reports/`, `Client/tauri-client/.stryker-tmp/`,
+Confirm `Client/reports/`, `Client/.stryker-tmp/`,
 `Server/coverage-all.out`, and `Server/**/testdata/fuzz/` interim output are
 covered by `.gitignore` before running any of the above. Add entries where
 they are missing.
@@ -144,7 +144,7 @@ they are missing.
 
 Roughly 200 confirmed real bugs have been fixed across the hunt and harvest
 runs. Each one currently bought exactly one fix. Encoding the recurring
-*classes* converts them into permanent detectors.
+_classes_ converts them into permanent detectors.
 
 **Sources to mine:** bughunt commit history on `fix/bughunt-*` and
 `fix/bughunt-harvest-*` branches, `.superpowers/harvest-med-low-checklist.md`,
@@ -159,13 +159,13 @@ positive fixture that must match and a negative fixture that must not.
 Five rules, all scoped to the modules their invariant governs, all proven to
 fire by reintroducing the historical bug shape into real source and reverting:
 
-| Rule | Encodes |
-| --- | --- |
+| Rule                             | Encodes                                                                                                       |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `no-leave-voice-when-superseded` | A global `leaveVoice()` inside a branch that already confirmed supersession tears down the newer live session |
-| `e2ee-epoch-needs-keypair-check` | A non-key-holder never bumps the epoch, so an epoch-only staleness guard cannot see a restarted session |
-| `e2ee-verified-status-literal` | Keeps `"verified"` tied to a hand-written call site that earned it, never a computed status |
-| `no-identity-scope-fallback` | A `?? 0` placeholder scope mints a keypair under the wrong account |
-| `no-store-write-in-ws-on` | Page-local `ws.on` handlers may read stores, not write them |
+| `e2ee-epoch-needs-keypair-check` | A non-key-holder never bumps the epoch, so an epoch-only staleness guard cannot see a restarted session       |
+| `e2ee-verified-status-literal`   | Keeps `"verified"` tied to a hand-written call site that earned it, never a computed status                   |
+| `no-identity-scope-fallback`     | A `?? 0` placeholder scope mints a keypair under the wrong account                                            |
+| `no-store-write-in-ws-on`        | Page-local `ws.on` handlers may read stores, not write them                                                   |
 
 **Declined: `await`-then-stale-snapshot.** Not AST-expressible. Whether an
 await needs a guard — and whether the guard present is sufficient and correctly
@@ -179,7 +179,7 @@ correct code gets disabled and trains people to ignore the linter.
 `CLAUDE.md` was factually wrong. It claimed `ws.on(...)` appears only in
 `dispatcher.ts`; eight handlers across `main.ts`, `MainPage.ts` and
 `ChannelController.ts` say otherwise. The true invariant — dispatcher is the
-single path by which server events *write to stores* — is what the rule
+single path by which server events _write to stores_ — is what the rule
 encodes, and the doc has been corrected to match.
 
 **Still open:** the server-side `ws` seq/FIFO invariant, which needs a Go
@@ -230,7 +230,7 @@ The 2026-08-08 client hunt fixed 101 bugs and still did not converge. Four
 changes, cheapest first:
 
 1. **Persistent seen-ledger.** Key on `(file, symbol, class)` and persist
-   *across* runs, not only within one. Each run currently starts cold and
+   _across_ runs, not only within one. Each run currently starts cold and
    re-derives ground already covered — the most likely reason convergence never
    arrives.
 2. **Sibling-sweep lens.** For every confirmed bug, enumerate the other callers
@@ -245,15 +245,15 @@ changes, cheapest first:
 
 ## Order and effort
 
-| Step | Effort | Runs in |
-| --- | --- | --- |
-| 1a `make fuzz` | 15 min to write | 10 min/sweep unattended |
-| 1b Stryker hotspots | 0 (already configured) | ~25 min for 3 files |
-| 1d gitignore check | 5 min | — |
-| 2 first four semgrep rules | ~1 afternoon | seconds |
-| 4.1 + 4.2 ledger and sibling lens | ~2 hours | within existing hunt |
-| 1c browser-mode vitest | 0 | minutes |
-| 3 model-based and chaos harnesses | ~1 day | minutes |
+| Step                              | Effort                 | Runs in                 |
+| --------------------------------- | ---------------------- | ----------------------- |
+| 1a `make fuzz`                    | 15 min to write        | 10 min/sweep unattended |
+| 1b Stryker hotspots               | 0 (already configured) | ~25 min for 3 files     |
+| 1d gitignore check                | 5 min                  | —                       |
+| 2 first four semgrep rules        | ~1 afternoon           | seconds                 |
+| 4.1 + 4.2 ledger and sibling lens | ~2 hours               | within existing hunt    |
+| 1c browser-mode vitest            | 0                      | minutes                 |
+| 3 model-based and chaos harnesses | ~1 day                 | minutes                 |
 
 Tier 1a is first because 14 harnesses — the expensive part — are already
 written and produce nothing today.

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // setupRouter creates a test router with an in-memory database.

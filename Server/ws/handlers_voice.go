@@ -3,7 +3,7 @@ package ws
 import (
 	"context"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // registerVoiceControlsV2 registers all voice V2 handlers: the control toggles,
@@ -44,7 +44,14 @@ func handleVoiceLeaveV2(_ context.Context, cmd Command, _ ClientInfo, deps any) 
 	d := deps.(VoiceDeps)
 	ratKey := auth.Key("voice_leave", cmd.UserID())
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceLeaveRateLimit, voiceLeaveWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}}
+		// LeaveVoice stays set even on this refusal: a client that already
+		// tore its local voice session down before sending the (throttled)
+		// frame must not be left stuck with server-side state pointing at a
+		// channel it believes it has left. handlers.go's error path runs
+		// handleVoiceLeave whenever LeaveVoice is set, and handleVoiceLeave is
+		// a documented no-op when the client isn't actually in voice, so a
+		// burst of spurious refusals costs nothing.
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}, LeaveVoice: true}
 	}
 	return Result{LeaveVoice: true}
 }

@@ -67,19 +67,28 @@ jobs:
           TOKEN=$(curl -sk -X POST "$BASE/admin/api/setup" \
             -H 'Content-Type: application/json' \
             -d '{"username":"loadadmin","password":"LoadTest123!Admin"}' | jq -r .token)
-          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "::error::setup failed"; exit 1; }
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::setup failed"
+            exit 1
+          fi
 
           CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"name":"loadtest","type":"text"}' | jq -r .id)
-          [ -n "$CHANNEL_ID" ] && [ "$CHANNEL_ID" != "null" ] || { echo "::error::channel create failed"; exit 1; }
+          if [ -z "$CHANNEL_ID" ] || [ "$CHANNEL_ID" = "null" ]; then
+            echo "::error::channel create failed"
+            exit 1
+          fi
           echo "CHANNEL_ID=$CHANNEL_ID" >> "$GITHUB_ENV"
           echo "ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
           INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"max_uses":0}' | jq -r .code)
-          [ -n "$INVITE" ] && [ "$INVITE" != "null" ] || { echo "::error::invite create failed"; exit 1; }
+          if [ -z "$INVITE" ] || [ "$INVITE" = "null" ]; then
+            echo "::error::invite create failed"
+            exit 1
+          fi
 
           USERS="${{ inputs.users }}"
           for i in $(seq 1 "${USERS:-100}"); do

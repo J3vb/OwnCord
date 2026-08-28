@@ -6,9 +6,9 @@ import (
 	"html"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
 )
 
 // sanitizer is the shared HTML sanitization policy (strips all tags).
@@ -75,6 +75,13 @@ type SendMessageResult struct {
 	// clients highlight from server-resolved data instead of re-guessing.
 	Mentions         []int64
 	MentionsEveryone bool
+	// MentionsHere reports that MentionsEveryone came from @here rather than
+	// @everyone (mentionSet.HereOnly — never both, @here only narrows when
+	// @everyone is absent). applyMentionCounts skips the mention-count bump
+	// for an @here reader with no live connection at send time; clients need
+	// this bit to tell that case apart from a plain @everyone, which reaches
+	// every reader regardless (OC-0271).
+	MentionsHere bool
 }
 
 // EditMessageResult contains the output of a successful message edit.
@@ -90,6 +97,8 @@ type EditMessageResult struct {
 	// Mentions/MentionsEveryone are re-resolved from the edited content.
 	Mentions         []int64
 	MentionsEveryone bool
+	// MentionsHere: see SendMessageResult.MentionsHere.
+	MentionsHere bool
 }
 
 // DeleteMessageResult contains the output of a successful message delete.

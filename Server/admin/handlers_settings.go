@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── Settings Handlers ──────────────────────────────────────────────────────
@@ -128,6 +128,16 @@ func validateRequire2FAUpdate(ctx context.Context, database *db.DB, updates map[
 	}
 	if registrationOpen {
 		return fmt.Errorf("require_2fa cannot be enabled while registration is open")
+	}
+
+	// The enrollment count only matters when this request is actually turning
+	// require_2fa on. Without this guard, an unrelated PATCH (motd, server
+	// name, backup settings, ...) inherits require_2fa's *current* value via
+	// targetBoolSetting's DB fallback and gets rejected by a precondition
+	// about a value it never touches — wedging the whole settings page once
+	// any non-banned user without TOTP exists.
+	if _, changingRequire2FA := updates["require_2fa"]; !changingRequire2FA {
+		return nil
 	}
 
 	count, err := database.CountUsersWithoutTOTP(ctx)

@@ -1,0 +1,40 @@
+# Prettier 3 reads .gitignore by default, so everything ignored there —
+# node_modules/, dist/, coverage/, Client/src/generated/, docs/security-findings/ —
+# is already excluded. Only tracked files need entries here.
+
+
+# Generated, verified by `git diff --exit-code` after regeneration.
+Server/db/dbgen/
+Client/src/lib/protocolTypes.ts
+
+
+# Dated point-in-time snapshots. scripts/check-doc-counts.mjs already treats
+# these as deliberately unmaintained and out of scope to edit; reformatting
+# them would churn frozen records for no reader.
+docs/audit-*.md
+
+# Carried forward from the client's own ignore file — a deliberate exclusion,
+# not an oversight.
+*.html
+
+# Session scratch from the remember plugin. Gitignored by a nested
+# .remember/.gitignore, which Prettier does not read — it honours only the root
+# .gitignore. Untracked and per-machine: a contributor's scratch directory must
+# never be able to turn a shared gate red.
+.remember/
+**/.remember/
+
+# Build output and per-tool scratch. Every path below is gitignored -- but by a
+# NESTED .gitignore, and Prettier honours only the root one. Without these
+# entries the gate goes red the moment a contributor runs a build: `cargo test`
+# alone drops ~850 formattable files into src-tauri/target/.
+# Mirrors Client/.gitignore, .serena/.gitignore and .superpowers/sdd/.gitignore.
+Client/dist/
+Client/coverage/
+Client/playwright-report/
+Client/test-results/
+Client/.vite/
+Client/src-tauri/target/
+Client/src-tauri/gen/
+.serena/
+.superpowers/sdd/

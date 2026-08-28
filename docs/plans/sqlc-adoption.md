@@ -33,6 +33,7 @@ Two mechanical frictions drive the per-domain effort:
 ## Status
 
 ### Phase 1 + 2 — done (2026-07-19)
+
 sqlc is now **load-bearing in production** (previously dead code). **97 `db.DB`
 methods delegate** to `dbgen` across every domain; 43 raw `d.sqlDB` calls
 remain (the `db.go` passthrough helpers, `migrate.go`, and the intentionally
@@ -46,6 +47,7 @@ attachments, voice, dm (simple ops), channels + permission overrides, admin
 pins/read-state).
 
 ### Deliberately kept raw (no clean sqlc mapping)
+
 - **Variable-length `IN(...)`** (sqlc can't express): `GetAttachmentsByMessageIDs`,
   `LinkAttachmentsToMessage`, `GetChannelTypes`.
 - **FTS / dynamic WHERE / cursor pagination**: `GetMessages`, `SearchMessages`,
@@ -63,10 +65,12 @@ accept they stay raw), but none block the D2 goal: `dbgen` is no longer dead
 and owns the SQL for the overwhelming majority of the data layer.
 
 ### Out of scope for D2
+
 - `store/` event + plugin SQL (`store/sqlite_events.go`, plugin store) — these
   live in the store layer being **removed in D3**; converting them is throwaway.
   D3 moves the surviving `db` methods (sqlc-backed) to direct service use.
 
 ## Verification (per phase)
+
 `go build ./...`; `go test -race ./db/ ./service/ ./auth/ ./api/ ./ws/`;
 `make sqlc-verify` (generated output committed & in sync).

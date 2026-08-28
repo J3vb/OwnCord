@@ -28,10 +28,16 @@ docs/research/
 docs/superpowers/
 /skills/
 
+# Detailed security reports for findings that are not yet fixed. This repo is
+# public (docs/security.md): reproduction traces for a live defect must never
+# be committed. Findings are coordinated through private GitHub Security
+# Advisories; only opaque identifiers and safe status go in tracked plans.
+docs/security-findings/
+
 # Mutation-testing output (npm run test:mutate). Local-only by design: a
 # surviving-mutant report maps exactly which behaviour nothing tests.
-Client/tauri-client/.stryker-tmp/
-Client/tauri-client/reports/
+Client/.stryker-tmp/
+Client/reports/
 
 # Server runtime artifacts
 Server/chatserver.exe
@@ -40,6 +46,17 @@ Server/owncord-server.exe
 Server/server.exe
 Server/config.yaml
 Server/data/
+
+# Prebuilt plugin example (RL-08). Built from the main.go beside it with the
+# TinyGo toolchain that directory's README pins. Read by nothing in the build
+# or test graph, and not byte-reproducible on another machine: TinyGo embeds
+# absolute host paths from the building machine's Go SDK and module cache, and
+# has no -trimpath equivalent.
+#
+# Deliberately NOT a blanket *.wasm rule. Client/public/rnnoise.wasm is a
+# vendored npm artifact this repository does not build and the client fetches
+# at runtime; ignoring it would break voice noise suppression.
+Server/plugin/examples/hello/hello.wasm
 
 # Test coverage artifacts
 *.out
@@ -59,7 +76,7 @@ Client/login-mockup.html
 Client/ui-mockup.html
 
 # Tauri typegen (auto-generated IPC bindings)
-Client/tauri-client/src/generated/
+Client/src/generated/
 .typecache
 
 # Node modules
@@ -70,12 +87,16 @@ node_modules/
 .claude-flow/
 .rust-review-results/
 
-# Bug-hunt ledger: shared so contributors can add findings. Only the ledger,
-# its render and its validator are tracked; hunt transcripts, .bak snapshots
-# and debris patches are per-session scratch and stay local.
+# Bug-hunt ledger: shared so contributors can add findings. Only the ledger and
+# its renderer are tracked; hunt transcripts, .bak snapshots and debris patches
+# are per-session scratch and stay local.
+#
+# FINDINGS.md is deliberately NOT tracked (RL-07): it is 100% derived from
+# findings-ledger.json, and every hunt would otherwise write a fresh ~1.06 MB
+# blob into permanent history for a file a reader can regenerate in under a
+# second with `node .superpowers/render-ledger.mjs`.
 .superpowers/*
 !.superpowers/findings-ledger.json
-!.superpowers/FINDINGS.md
 !.superpowers/render-ledger.mjs
 
 .claude/worktrees/
@@ -97,7 +118,7 @@ Client/CLIENT-REVIEW.md
 .serena/
 
 # Client env (holds API keys - never commit)
-Client/tauri-client/.env
+Client/.env
 
 # Rust review output
 .rust-review-results/
@@ -108,12 +129,8 @@ Client/tauri-client/.env
 # local server run logs
 server.log
 
-# Knowledge graph (graphify). The top-level built graph is tracked so a fresh
-# clone can query it without a rebuild. Every subdirectory stays local: cache/
-# is a per-machine AST build cache, and graphify parks the PREVIOUS graph in a
-# dated YYYY-MM-DD/ backup on each rebuild — 18 MB of stale duplicate that is a
-# local rollback aid, not shared state.
-graphify-out/*/
-
-# Transient graphify rebuild-state file.
-graphify-out/.pending_changes
+# Knowledge-graph output. The tool and its 20.41 MB tracked payload were removed
+# in a5f7d95 (#1413, RL-06). The rule stays so a machine that still has the local
+# directory — it reached ~208 MB with cache and dated snapshots — does not see it
+# as untracked noise.
+graphify-out/

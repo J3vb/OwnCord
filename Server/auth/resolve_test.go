@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // fakeStore is a hand-rolled tokenStore so the security-critical resolution

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // GetEmoji returns the emoji with the given id, or (nil, nil) when no such row

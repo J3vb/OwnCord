@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // maxMentionsPerMessage caps how many usernames one message can resolve.

@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestGenerateToken_Length(t *testing.T) {

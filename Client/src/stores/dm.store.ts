@@ -1,0 +1,263 @@
+/**
+ * DM store — holds direct message channel list and unread state.
+ * Immutable state updates only.
+ */
+
+import { createStore } from "@lib/store";
+import { channelsStore, removeChannel } from "@stores/channels.store";
+
+export interface DmUser {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string;
+  readonly status: string;
+  /** Nickname to render instead of `username`. "" = unset. */
+  readonly displayName?: string;
+}
+
+export interface DmChannel {
+  readonly channelId: number;
+  /**
+   * The other participant of a 1:1 DM. For a group it is the first of
+   * `participants`; anything that must be correct for groups reads
+   * `participants` instead. Kept because most 1:1 call sites want exactly one
+   * user and would otherwise all index into an array.
+   */
+  readonly recipient: DmUser;
+  /** Everyone in the DM except the current user. Never empty for a live DM. */
+  readonly participants: readonly DmUser[];
+  /** Optional group name. "" for a 1:1 DM and for an unnamed group. */
+  readonly name: string;
+  /** True for a group DM (3+ participants at creation). */
+  readonly isGroup: boolean;
+  readonly lastMessageId: number | null;
+  readonly lastMessage: string;
+  readonly lastMessageAt: string;
+  readonly unreadCount: number;
+  /**
+   * Unread messages in this DM that mention the current user. Kept independent
+   * of unreadCount so the red mention badge can outrank the plain one, exactly
+   * as it does for channels.
+   */
+  readonly mentionCount: number;
+}
+
+export interface DmState {
+  readonly channels: readonly DmChannel[];
+}
+
+const INITIAL: DmState = { channels: [] };
+
+export const dmStore = createStore<DmState>(INITIAL);
+
+/** Bulk-set DM channels from ready payload. */
+export function setDmChannels(channels: readonly DmChannel[]): void {
+  dmStore.setState(() => ({ channels }));
+}
+
+/**
+ * Add or update a single DM channel (from a `dm_channel_open` event).
+ *
+ * Local unread and mention counts survive the replace when the incoming
+ * payload carries none. `dm_channel_open` is now also how a *membership*
+ * change arrives — a group created, renamed, or left — and those payloads have
+ * no unread state to report, so taking their zeroes literally would clear
+ * everyone's badge every time somebody renamed a group. Between two `ready`s
+ * the client's own count is the authoritative one (it is what the incoming
+ * messages incremented), and a genuine reopen has nothing to lose: its local
+ * count is zero too.
+ */
+export function addDmChannel(channel: DmChannel): void {
+  dmStore.setState((prev) => {
+    const existing = prev.channels.find((c) => c.channelId === channel.channelId);
+    const filtered = prev.channels.filter((c) => c.channelId !== channel.channelId);
+    const merged: DmChannel =
+      existing === undefined
+        ? channel
+        : {
+            ...channel,
+            unreadCount: channel.unreadCount > 0 ? channel.unreadCount : existing.unreadCount,
+            mentionCount: channel.mentionCount > 0 ? channel.mentionCount : existing.mentionCount,
+            // Same reasoning for the preview: a rename does not know what the
+            // last message was, and blanking it would leave the row emptier
+            // than before the rename.
+            lastMessageId: channel.lastMessageId ?? existing.lastMessageId,
+            lastMessage: channel.lastMessage !== "" ? channel.lastMessage : existing.lastMessage,
+            lastMessageAt:
+              channel.lastMessageAt !== "" ? channel.lastMessageAt : existing.lastMessageAt,
+          };
+    return { channels: [merged, ...filtered] };
+  });
+}
+
+/** Remove a DM channel from the list (from dm_channel_close event). */
+export function removeDmChannel(channelId: number): void {
+  dmStore.setState((prev) => ({
+    channels: prev.channels.filter((c) => c.channelId !== channelId),
+  }));
+}
+
+/**
+ * Local close/removal for a DM that is gone — closed here, or reported gone
+ * by the server (`dm_channel_close`, possibly from another signed-in
+ * device). Drops it from dmStore and, if it was the channel being viewed,
+ * runs `fallback` so the message list/composer don't stay mounted against a
+ * channel the server no longer recognizes. `fallback` lets each caller pick
+ * its own landing spot — the sidebar restores the channel visited before the
+ * DM; a background close just needs somewhere safe.
+ *
+ * Also removes the `type: "dm"` mirror row that `addDmToChannelsStore`
+ * synthesizes into channelsStore on selection — otherwise the mirror (and
+ * its unread count) survives the close and every future `ready` rebuild
+ * (`setChannels` deliberately re-carries dm-typed rows), leaving a phantom
+ * entry that keeps "Mark All as Read" lit with nothing unread on screen and
+ * would send `mark_read` for a channel the user no longer has open.
+ */
+export function closeDmLocally(channelId: number, fallback: () => void): void {
+  const wasActive = channelsStore.getState().activeChannelId === channelId;
+  removeDmChannel(channelId);
+  removeChannel(channelId);
+  if (wasActive) fallback();
+}
+
+/** Update last message info for a DM channel (on new message), increment unread,
+ *  and — when `isMention` is set — the mention count too, both behind the same
+ *  message-id monotonicity guard.
+ *
+ *  OC-0242: a DM message delivered between the server's registerNow and
+ *  buildReady is both counted in `ready`'s snapshot (lastMessageId already
+ *  advanced to its id) AND redelivered as a queued chat_message once the
+ *  socket drains. The unread guard below exists precisely for that replay;
+ *  a mention must not double-count in the same case, so it is folded into
+ *  this same setState behind the same guard rather than left as a separate
+ *  unconditional increment in a sibling function — by the time any such
+ *  sibling ran, this function would already have advanced lastMessageId to
+ *  the incoming id, so a guard placed there instead could never see the replay.
+ *  Moves the channel to the top of the list so new messages are always visible. */
+export function updateDmLastMessage(
+  channelId: number,
+  messageId: number,
+  content: string,
+  timestamp: string,
+  isMention = false,
+): void {
+  dmStore.setState((prev) => {
+    const updated = prev.channels.find((c) => c.channelId === channelId);
+    if (updated === undefined) return prev;
+    const rest = prev.channels.filter((c) => c.channelId !== channelId);
+    const isReplay = updated.lastMessageId !== null && messageId <= updated.lastMessageId;
+    return {
+      channels: [
+        {
+          ...updated,
+          lastMessageId: messageId,
+          lastMessage: content,
+          lastMessageAt: timestamp,
+          unreadCount: isReplay ? updated.unreadCount : updated.unreadCount + 1,
+          mentionCount: isMention && !isReplay ? updated.mentionCount + 1 : updated.mentionCount,
+        },
+        ...rest,
+      ],
+    };
+  });
+}
+
+/** Update last message preview for a DM channel without incrementing unread count.
+ *  Used for own messages and messages in the currently focused DM.
+ *  Moves the channel to the top of the list so active conversations stay visible.
+ *
+ *  OC-0301: guarded by the same message-id monotonicity check as its sibling
+ *  `updateDmLastMessage`. A queued chat_message frame can be redelivered for
+ *  an id already behind the channel's current `lastMessageId` (e.g. a `ready`
+ *  snapshot lands mid-burst and advances the watermark past a message that
+ *  is still queued behind it) — applying it here would roll the watermark
+ *  backwards, which `updateDmLastMessage`'s own replay guard on the *next*
+ *  frame in the burst depends on being monotonic, and would also regress the
+ *  visible preview text/timestamp and wrongly re-sort the channel to the top. */
+export function updateDmLastMessagePreview(
+  channelId: number,
+  messageId: number,
+  content: string,
+  timestamp: string,
+): void {
+  dmStore.setState((prev) => {
+    const updated = prev.channels.find((c) => c.channelId === channelId);
+    if (updated === undefined) return prev;
+    if (updated.lastMessageId !== null && messageId <= updated.lastMessageId) return prev;
+    const rest = prev.channels.filter((c) => c.channelId !== channelId);
+    return {
+      channels: [
+        { ...updated, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp },
+        ...rest,
+      ],
+    };
+  });
+}
+
+/** Clear the unread and mention counts for a DM channel — they clear together,
+ *  matching channels.store.clearUnread and the server's read-state advance. */
+export function clearDmUnread(channelId: number): void {
+  dmStore.setState((prev) => ({
+    channels: prev.channels.map((c) =>
+      c.channelId === channelId ? { ...c, unreadCount: 0, mentionCount: 0 } : c,
+    ),
+  }));
+}
+
+/**
+ * The label a DM renders under.
+ *
+ * One function so the sidebar row, the chat header, the quick switcher and the
+ * notification title cannot disagree about what a conversation is called —
+ * which for a group with no name they would, since each would pick its own
+ * order and cut-off for the joined member list.
+ *
+ * A named group uses its name. An unnamed group joins its members' names, and
+ * past three says "and N more" rather than growing without bound. A 1:1 DM is
+ * named by the person on the other end.
+ */
+export function dmDisplayName(dm: DmChannel): string {
+  if (dm.name !== "") return dm.name;
+  const names = dm.participants.map((p) => (p.displayName ?? "") || p.username);
+  if (names.length === 0) {
+    return dm.recipient.username !== ""
+      ? dm.recipient.username
+      : dm.isGroup
+        ? "Empty group"
+        : "Unknown user";
+  }
+  if (!dm.isGroup) return names[0]!;
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+}
+
+/**
+ * Patch a participant's live profile/presence fields (status, username,
+ * avatar, displayName) across every DM channel they appear in — both as
+ * `recipient` and inside `participants`.
+ *
+ * dmStore's copy of a partner's status/username/avatar is otherwise only
+ * ever set wholesale by `setDmChannels` (on `ready`) and `addDmChannel`
+ * (`dm_channel_open` / REST create); presence and profile-change events
+ * patch membersStore only, which the DM sidebar never reads. Without this,
+ * a DM partner going offline or renaming would leave the sidebar row
+ * showing stale status/name for the rest of the session.
+ */
+export function updateDmParticipant(userId: number, patch: Partial<DmUser>): void {
+  dmStore.setState((prev) => {
+    const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
+    let changed = false;
+    const channels = prev.channels.map((c) => {
+      if (c.recipient.id !== userId && c.participants.every((p) => p.id !== userId)) {
+        return c;
+      }
+      changed = true;
+      return {
+        ...c,
+        recipient: patchUser(c.recipient),
+        participants: c.participants.map(patchUser),
+      };
+    });
+    return changed ? { channels } : prev;
+  });
+}

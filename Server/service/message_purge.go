@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // maxPurgeLimit bounds one purge request. Matches the message page size, so a
@@ -77,6 +77,13 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	// request canceled after the delete committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_purge", "channel", channelID,
 		fmt.Sprintf("purged %d messages, limit=%d, before=%d", len(ids), limit, before))
+
+	// OC-0275: reverse the mention_count increments of every purged message,
+	// the same correction a single moderator delete makes in DeleteMessage.
+	// Detached from ctx for the same reason as the audit write above.
+	if mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
+		slog.Error("MessageService.PurgeMessages DecrementMentionCounts", "err", mcErr, "channel_id", channelID)
+	}
 
 	return &PurgeMessagesResult{ChannelID: channelID, MessageIDs: ids}, nil
 }

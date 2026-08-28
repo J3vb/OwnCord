@@ -13,7 +13,7 @@ import (
 // voice_e2ee_announce relays (which carry no channel_id to filter on) for the
 // connection's lifetime, polluting a later session's peer-key store.
 func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
-	oldChID, oldJoinToken := c.clearVoiceState()
+	oldChID, oldJoinToken, _ := c.clearVoiceState()
 	if oldChID != 0 {
 		h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
 	}

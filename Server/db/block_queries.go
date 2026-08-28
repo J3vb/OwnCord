@@ -7,7 +7,7 @@ import (
 
 	"database/sql"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // BlockUser adds a block from blocker to blocked. Idempotent — re-blocking

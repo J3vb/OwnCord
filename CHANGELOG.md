@@ -5,6 +5,114 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
+## How to write an entry
+
+**Scannable lists, never walls of text.** A reader should be able to find what
+affects them in about ten seconds, without reading a paragraph they do not care
+about. Entries below `v1.2.0-alpha.3` do not follow this and are left as
+shipped history; everything from the next release forward does.
+
+The rules:
+
+1. **Open with what is user-visible and what is not.** Most releases carry a
+   mixture. Say which is which up front, so nobody reads twenty lines of
+   repository plumbing looking for a fix.
+2. **Group by the area a user recognises** — Login & connection, Voice,
+   Mentions, Messages & files, Accounts & admin, Desktop UI. Not by subsystem,
+   package, or which PR it came from.
+3. **One line per fix.** If it needs two lines, it needs two entries or it does
+   not belong here.
+4. **Say what was broken, then what it does now.** "Banned users could still
+   connect — ban is re-checked on connect." A reader must be able to tell
+   whether it bit them, without opening the PR.
+5. **Plain language.** Name the thing a user sees, not the function that owned
+   the bug. `voiceJoinLeaveCurrent` means nothing to an operator; "moderator
+   mute survives a channel move" does.
+6. **No `OC-*` ids, no file paths, no PR-body prose.** The ledger and the pull
+   request already carry those, and this file is the one place that does not
+   need them. A PR number is fine where it genuinely helps someone dig.
+7. **Counts belong in a summary line, not per item.** "62 fixes" once at the
+   top beats a number attached to every bullet.
+
+Anything a user cannot observe — repository layout, CI gates, generated-code
+ownership, dependency automation — gets **at most a short block at the end**,
+and only when it changes something a contributor or fork holder must do
+(a moved directory, a renamed module, a new required command).
+
+## v1.2.0-alpha.4
+
+**62 bug fixes**, all user-visible, plus repository work that changes nothing an
+operator can see. Fixes first; the repository half is the short block at the end.
+
+### Login & connection
+
+- Connecting with a failed role lookup silently made you a plain **member** — it
+  now fails closed instead of guessing.
+- **Banned users could still connect.** Ban status is re-checked on connect.
+- Reconnecting left a **phantom voice E2EE key holder** and a stale voice-channel
+  marker behind.
+- Typing indicators in DMs could **disconnect you** under load.
+
+### Voice
+
+- Moderator mute and deafen are **preserved across a channel move** — they were
+  silently dropped.
+- Voice E2EE keys **re-sync on reconnect**, and a departed peer's key is always
+  retired so a replayed announce cannot overwrite a fresh one.
+- A kicked client no longer receives frames.
+- A rolled-back join now reaches everyone present, including people without
+  permission to read the channel.
+- A **failed microphone unmute now shows as failed** instead of quietly
+  reporting you as unmuted.
+- Noise suppression rebuilds correctly after a microphone restart.
+
+### Mentions
+
+- **`@here` no longer behaves like `@everyone`** — the two are distinguished.
+- Mention badges are reversed on delete, purge and account deletion, and can no
+  longer be reversed twice.
+
+### Messages & files
+
+- Deleting a message now **actually deletes its attachment files**.
+- A failed avatar upload no longer deletes a committed file's reference.
+
+### Accounts & admin
+
+- The `require_2fa` enrollment gate misfired after a temporary ban lapsed, and
+  applied its precondition to unrelated settings.
+- A DM partner with no live connection now shows **offline everywhere** — it was
+  inconsistent between views.
+- Plugin installation rolls back properly when it fails.
+- The diagnostics endpoint honours trusted proxies.
+
+### Desktop app
+
+- Fixed event-listener leaks in the message list, member list, emoji picker,
+  quick switcher, sidebar popovers and drag-reorder.
+- Recent emoji, channel mutes and custom status are now **per-server** instead of
+  bleeding between servers.
+- The DM sidebar filter survives updates, the call button cannot redial, the
+  incoming-call banner uses nicknames, and Ctrl+I unwraps correctly on bold text.
+
+### Repository — no runtime effect
+
+Phases B0 and B1 of the
+[repository-health roadmap](docs/plans/repo-health-roadmap-2026-08-23.md).
+Desktop behaviour, release asset names and the update contract are unchanged by
+design. Three items affect anyone holding a working copy or a fork:
+
+- **`Client/tauri-client/` is now `Client/`** (#1411). Rebase an in-flight
+  branch rather than merging across the move.
+- **The Go module is now `github.com/J3vb/OwnCord/Server`** (#1417), was
+  `github.com/owncord/server`.
+- **The protocol schema is now `protocol/schema.json`** (#1417), was
+  `docs/protocol-schema.json`.
+
+One command runs what CI gates on, Windows and Linux, no `make` needed:
+`npm run bootstrap`, then `npm run check`. Go-only contributors still do not
+need Node.
+
 ## v1.2.0-alpha.3
 
 - **fix:** eight bug-hunt batches closed **199 verified defects** since
@@ -19,7 +127,7 @@ behavioural changes operators must know about.
   `room.setE2EEEnabled(true)`, so every audio and video frame reached the
   SFU in plaintext. It is enabled now, and a dead E2EE worker is no longer
   invisible to the Secured badge. Related voice-crypto fixes: a joining key
-  holder sent its room-key offers *before* its own announce, so existing
+  holder sent its room-key offers _before_ its own announce, so existing
   participants dropped them as "unknown peer" (#1370, #1374); rotation
   offers exceeded the server rate limit in large channels and permanently
   starved the same peers; both rotation paths and the reconnect-to-Secured
@@ -37,18 +145,18 @@ behavioural changes operators must know about.
   reaction, pin, purge, delete and `channel_focus` still mutated or
   subscribed to archived channels (every write sink now routes through one
   `requireChannelWritable` gate); `EditMessage` and `handleReaction` DM
-  detection failed *open* on a `GetChannel` error, skipping the block gate;
+  detection failed _open_ on a `GetChannel` error, skipping the block gate;
   group-DM creation only block-checked the creator, letting a third party
   force two users who blocked each other into a shared room; an invisible
   user's real custom status leaked on both presence emitters; `PATCH
-  /users/{id}` with `banned` + `role_id` committed and broadcast the ban
+/users/{id}` with `banned` + `role_id` committed and broadcast the ban
   before authorizing the role change; admin API-token creation accepted a
   negative `expires_hours` and minted a token that never expires; upload
   rejections echoed raw storage errors (absolute server paths) to any
   authenticated user; the GIF proxy's log redaction missed the
   percent-encoded API key; `chat_command` was the only client message type
   without a rate limiter while each frame ran a WASM plugin invocation; and
-  the login and typing rate limiters built their keys from *unvalidated*
+  the login and typing rate limiters built their keys from _unvalidated_
   input, letting an unauthenticated caller pin unbounded heap for six hours.
 - **fix(auth):** accounts whose username contains `'`, `"` or `&` were
   permanently unloggable — registration HTML-escaped the name but login did
@@ -60,7 +168,7 @@ behavioural changes operators must know about.
   reverse-proxy address as the session IP.
 - **server:** WS hub, reconnect and replay (#1369, #1371, #1372, #1374,
   #1375) — REST DM events never bumped the visibility watermark, while
-  *every* ordinary DM message re-emitted `dm_channel_open` and bumped the
+  _every_ ordinary DM message re-emitted `dm_channel_open` and bumped the
   global watermark, forcing every other client's next reconnect into a full
   resync; the client's `lastSeq` was never reset by a full-ready resync and
   desynced permanently; cold-tier replay had no interior-gap detection, so
@@ -79,7 +187,7 @@ behavioural changes operators must know about.
   into a permanent hub/SFU ghost no sweep could heal; the stale-state sweep
   could delete a just-committed join's row, leaving the client in voice with
   no DB row; `handleVoiceJoin` handed out a live 5-minute LiveKit credential
-  *after* a concurrent kick/move/revocation had already torn the membership
+  _after_ a concurrent kick/move/revocation had already torn the membership
   down (the token is now withheld); the `participant_left` webhook never
   told the leaver, and a transient DB read error on `participant_joined`
   ejected a legitimate participant mid-call; `voice_mod_move` lacked the
@@ -152,7 +260,7 @@ behavioural changes operators must know about.
   create/edit/delete modals locked up permanently on an API failure; login
   to an IPv6-literal host was impossible; a host stored with an explicit
   `:443` lost its bearer token and cert-pinned proxy on attachment fetches;
-  one malformed stored server profile discarded *all* saved profiles; a
+  one malformed stored server profile discarded _all_ saved profiles; a
   banned/revoked token reconnected forever if the session ended before
   MainPage mounted; a previous server's block list, collapsed categories and
   DM notes bled into the next server; the Rust HTTP proxy tunnel's data
@@ -208,7 +316,7 @@ behavioural changes operators must know about.
 - **deploy:** new `chatserver healthcheck` subcommand probes `/health`
   pinning the server's own certificate from disk (WebPKI when none exists,
   i.e. ACME) and is now the docker-compose healthcheck — the distroless
-  image has no shell; plain `docker compose` only *surfaces* unhealthy, pair
+  image has no shell; plain `docker compose` only _surfaces_ unhealthy, pair
   it with a watchdog for auto-restart. Compose gains json-file log rotation
   (`10m` × 3) on both services. `release.yml` now cold-boots the freshly
   built server binaries and Docker image and probes them healthy **before
@@ -305,7 +413,7 @@ behavioural changes operators must know about.
   incorrectly documented all presence events as sequenced. Older
   clients/servers are unaffected — it is a new, ignorable field.
 - **security(client):** identity/TOFU and transport (#1332) — an in-flight
-  change to scope the identity keypair by host *and* user id would have
+  change to scope the identity keypair by host _and_ user id would have
   re-minted a fresh key on every existing install, firing the TOFU "verify
   out-of-band" re-pin warning at the entire alpha population simultaneously,
   exactly the pattern that teaches users to click through the one warning
@@ -315,7 +423,7 @@ behavioural changes operators must know about.
   bearer token forward into the next login request; `api.setConfig` now
   drops it when the host changes without a replacement. A hand-copied,
   un-lowercased host normalizer in `main.ts` meant an uppercase hostname's
-  cert-mismatch *reject* path skipped `disconnect()`/`clearAuth()`, leaving
+  cert-mismatch _reject_ path skipped `disconnect()`/`clearAuth()`, leaving
   a user who refused a changed certificate still connected to that server —
   the single lowercased implementation in `ws.ts` is now shared everywhere.
 - **fix(client):** voice mic/camera reliability (#1331, #1332) — six
@@ -372,7 +480,7 @@ behavioural changes operators must know about.
   PUT (A-2026-08-01); the admin channel list/edit/delete surface no longer
   sees DM channels, answering 404 for their ids (A-2026-08-02); DM call
   rings respect blocks like every other DM interaction (A-2026-08-03).
-  Behavioural note: deleting a channel override for a *nonexistent* role now
+  Behavioural note: deleting a channel override for a _nonexistent_ role now
   returns 404 (was 204), matching PUT.
 - **server:** migration **029** drops the never-used `sounds` table (dead
   since the initial schema; A-2026-07-13). Applies automatically on first
@@ -627,14 +735,14 @@ claimed behaviour — no product code changed and no assertion weakened.
   logged (`livekit proxy: origin rejected`) so the next such failure is
   diagnosable from the server log.
 - **API tokens can use the admin log stream.** `POST
-  /admin/api/logs/ticket` required a browser login session, so headless
+/admin/api/logs/ticket` required a browser login session, so headless
   clients (the `mcp-introspect` dev tool, bots) could reach every other
   `/admin/api/*` route but not `server_logs`. Tickets are now bound to
   whichever credential authenticated the request; revoking a token cuts
   an in-flight stream, exactly as session revocation always has.
 - **The desktop client now actually uses the OS credential store.** The
   `keyring` crate declares no `default` feature, so the previous
-  `keyring = "3"` dependency compiled its in-memory *mock* store on
+  `keyring = "3"` dependency compiled its in-memory _mock_ store on
   Windows, macOS and Linux alike: saves reported success and the next
   read in the same process returned nothing, and no credential was ever
   written to Credential Manager / Keychain / Secret Service. The visible

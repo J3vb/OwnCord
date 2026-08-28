@@ -40,6 +40,13 @@ type Querier interface {
 	// everyone exactly while some user's avatar points at it. Covered by the
 	// partial index on users(avatar) added in migration 027.
 	CountUsersWithAvatar(ctx context.Context, avatar *string) (int64, error)
+	// A lapsed temporary ban must not hide a TOTP-less user from this count: the
+	// ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause /
+	// ListMembers above), which treats an elapsed ban as "not banned" and lets
+	// the user log in. Without it, require_2fa can be enabled while such a user
+	// still exists, and their next login is refused forever with no recovery
+	// path. The replace() normalises the space-separator form of ban_expires to
+	// 'T' before comparing, because ' ' sorts below 'T'.
 	CountUsersWithoutTOTP(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (sql.Result, error)
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) error
@@ -63,6 +70,17 @@ type Querier interface {
 	// users.avatar URL is what keeps them alive and authorizes serving them
 	// (migration 027). Excluding them here is what stops the sweep from destroying
 	// every avatar in the instance. idx_users_avatar makes the lookup cheap.
+	//
+	// OC-0279: a message delete is a soft delete (messages.deleted=1, the row
+	// survives), so an attachment linked to a deleted message keeps a non-NULL
+	// message_id forever -- message_id IS NULL alone never matches it, so its
+	// file was permanently unreclaimable even though serveFileResolve already
+	// 404s it once the owning message is deleted. The second EXISTS below
+	// catches that case by joining back to messages.deleted instead. Matching on
+	// messages.deleted=1 here (rather than unlinking message_id in the delete
+	// path) is deliberate: unlinking would move the row onto the "unlinked
+	// attachment" access branch in serveFileAuthorize and make it downloadable
+	// again by the uploader.
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
 	DeleteRole(ctx context.Context, id int64) error
@@ -187,6 +205,13 @@ type Querier interface {
 	// reaches the ON CONFLICT branch. It is scoped to the voice session:
 	// leaving voice deletes the row, so a rejoin starts clean.
 	JoinVoiceChannel(ctx context.Context, arg JoinVoiceChannelParams) error
+	// The channel-wide row count excludes the joining user's own existing row
+	// (if any), mirroring the OC-0081 fix on EnableCameraIfUnderLimit /
+	// EnableScreenshareIfUnderLimit below. Without this, a user who already
+	// holds a row on the target channel (e.g. retrying a join after a failed
+	// channel-switch left their old row in place) gets counted against their
+	// own capacity slot, so a full channel refuses an upsert that would only
+	// replace the row already there (OC-0255).
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
@@ -247,7 +272,7 @@ type Querier interface {
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetRolePosition(ctx context.Context, arg SetRolePositionParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
-	SoftDeleteMessage(ctx context.Context, id int64) error
+	SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error)
 	TouchAPIToken(ctx context.Context, tokenHash string) error
 	TouchSession(ctx context.Context, token string) error
 	UnbanUser(ctx context.Context, id int64) error

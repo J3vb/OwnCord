@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // Voice join/leave rate limits. voice_join and voice_leave each fan out a
@@ -199,17 +199,23 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 	// that branch is never reached: the flags are snapshotted here and
 	// reapplied once the new row exists.
 	//
-	// This covers the self-switch only. voice_mod_move deletes the row on the
-	// moderator's goroutine (DisconnectFromVoice) before the target's client
-	// re-joins, so by the time this handler runs there is nothing left to read
-	// and currentChID is already 0 — preserving the flags across a move needs
-	// state that outlives the row (see the cross-batch note on v029).
+	// currentChID > 0 is the self-switch case: the row is still there to read.
+	// voice_mod_move instead deletes the row on the moderator's goroutine
+	// (DisconnectFromVoice) before the target's client re-joins, so by the
+	// time this handler runs there is nothing left to read and currentChID is
+	// already 0 — the flags for that case were snapshotted onto this client by
+	// handleVoiceModMoveV2 before the delete ran (see setPendingModFlags /
+	// voicePendingModFlagsSetter in voice_moderation.go) and are taken back
+	// out here instead. Take-and-clear so an ordinary first join, unrelated to
+	// any move, is unaffected by a stash nobody consumed.
 	var wasServerMuted, wasServerDeafened bool
 	if currentChID > 0 {
 		if prevState, prevErr := h.db.GetVoiceState(ctx, c.userID); prevErr == nil && prevState != nil {
 			wasServerMuted = prevState.ServerMuted
 			wasServerDeafened = prevState.ServerDeafened
 		}
+	} else {
+		wasServerMuted, wasServerDeafened = c.takePendingModFlags()
 	}
 
 	// If user is already in a different voice channel, leave it first.
@@ -461,7 +467,22 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	// that was deliberately torn down: subscribed to the voice topic and
 	// broadcast as present, with no row behind it. Their decision wins; a
 	// same-instance state is the only thing this join may finish.
-	if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
+	// markVoiceJoinCompleteIfMatch performs the same same-instance check as the
+	// old plain getVoiceState comparison, but atomically with recording that
+	// this join has now completed — closing the gap a separate check-then-set
+	// would leave between confirming the match and marking it, which a
+	// concurrent eviction landing in between could otherwise turn into a
+	// completed flag surviving a state that was cleared out from under it.
+	// registerNow (OC-0270) relies on this flag being set only for a join
+	// that genuinely reached this point: a network reconnect transfers a
+	// replaced connection's voice state onto the resuming client solely when
+	// this is true, so that an in-flight join still racing its own
+	// supersession guards (the OC-0008 check above, and this one) is never
+	// handed off — doing so would make those guards misread the transfer
+	// itself as an eviction and abandon the join while its voice_states row
+	// stays behind for nothing to reap.
+	if !c.markVoiceJoinCompleteIfMatch(channelID, state.JoinedAt) {
+		curChID, _ := c.getVoiceState()
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
 		return
@@ -478,16 +499,16 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 
 	// Send existing channel voice states to the joiner.
 	//
-	// OC-0172: this read is the ONLY place the server ever relays an existing
-	// participant's stored ECDH public key (voice_e2ee_announce) to a joiner
-	// — mid-call peers never counter-announce, they only answer an offer. A
-	// swallowed error here used to just `return`, leaving the joiner's own
-	// voice_state already broadcast to everyone (above) but the joiner
-	// itself blind to who else is in the channel and unable to complete the
-	// E2EE key exchange: it times out ~15s later with no explanation. Treat
-	// this the same as every other post-commit failure in this handler
-	// (rollbackVoiceJoin + an error frame), broadcasting the compensating
-	// voice_leave for the voice_state that already went out.
+	// OC-0172: this is the ONLY place a brand-new voice_join relays an
+	// existing participant's stored ECDH public key (voice_e2ee_announce) to
+	// a joiner — mid-call peers never counter-announce, they only answer an
+	// offer. A swallowed error here used to just `return`, leaving the
+	// joiner's own voice_state already broadcast to everyone (above) but the
+	// joiner itself blind to who else is in the channel and unable to
+	// complete the E2EE key exchange: it times out ~15s later with no
+	// explanation. Treat this the same as every other post-commit failure in
+	// this handler (rollbackVoiceJoin + an error frame), broadcasting the
+	// compensating voice_leave for the voice_state that already went out.
 	existing, err := h.db.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", err)
@@ -500,13 +521,14 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 			continue
 		}
 		c.sendMsg(buildVoiceState(vs))
-		// Send existing participant's ECDH public key (and its identity
-		// signature, F3 TOFU) so the joiner can participate in the
-		// client-side E2EE key exchange.
-		if pubKey, sig := h.getClientE2EEPubKey(vs.UserID); pubKey != "" {
-			c.sendMsg(buildVoiceE2EEAnnounce(vs.UserID, pubKey, sig))
-		}
 	}
+	// Send every other current participant's ECDH public key (and its
+	// identity signature, F3 TOFU) so the joiner can complete the E2EE key
+	// exchange. Factored into sendVoicePeerKeys (voice_e2ee.go) so the WS
+	// resume path (registerNow, hub.go) can reuse the exact same relay for a
+	// reconnecting client — voice_e2ee_announce itself is an unsequenced
+	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
+	h.sendVoicePeerKeys(c, channelID)
 
 	// Send voice_config to the joiner.
 	quality := "medium"
@@ -672,6 +694,6 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64,
 		}
 	}
 	if broadcast {
-		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, c.userID))
+		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
 	}
 }

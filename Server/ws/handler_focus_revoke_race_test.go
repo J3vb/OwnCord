@@ -2,11 +2,14 @@ package ws_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestApplySetChannelID_RevalidatesAfterConcurrentRevoke pins OC-0024: the
@@ -207,5 +210,55 @@ func TestApplySetChannelID_ArchivedChannel_Unwinds(t *testing.T) {
 	}
 	if got := ws.ClientChannelIDForTest(c); got != 0 {
 		t.Errorf("client channelID = %d, want 0 after focusing a channel archived mid-race", got)
+	}
+}
+
+// erroringOverridesStore wraps a service.Store and makes every
+// GetChannelOverridesFor call fail, standing in for a transient DB hiccup
+// (SQLITE_BUSY, an I/O error) on the permission-lookup query that
+// PermissionService.getOrPopulate issues after the role fetch succeeds. All
+// other methods pass straight through to the embedded real store.
+type erroringOverridesStore struct {
+	service.Store
+}
+
+func (s *erroringOverridesStore) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error) {
+	return nil, errors.New("simulated transient lookup failure")
+}
+
+// TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus pins
+// OC-0266: the same "a transient lookup error is NOT a denial" contract that
+// handlers.go documents and implements for the GetChannel leg (see
+// TestApplySetChannelID_TransientLookupError_KeepsFocus above) must also hold
+// for the permission-lookup leg reached through hasChannelAccess ->
+// PermissionService.HasChannelPerm. That closes the whole DB, so the FIRST
+// GetChannel call fails and the function returns before the permission leg
+// ever runs — vacuously "passing" while a hiccup on GetChannelOverridesFor
+// (or GetRoleForUser) alone, with GetChannel healthy, still gets collapsed to
+// a denial and silently kills the channel's live message stream.
+func TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus(t *testing.T) {
+	database := openHandlerDB(t)
+	limiter := auth.NewRateLimiter()
+	store := &erroringOverridesStore{Store: database}
+	svc := service.New(store, limiter)
+	hub := ws.NewHub(database, limiter, svc)
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+
+	user := seedMemberUser(t, database, "focus-permerr-user")
+	ch := seedTestChannel(t, database, "focus-permerr-chan")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.ApplySetChannelIDForTest(c, ch)
+
+	if !hub.SubscribedToChannelTopicForTest(c, ch) {
+		t.Error("a transient permission-lookup failure must not unwind a just-admitted focus")
+	}
+	if got := ws.ClientChannelIDForTest(c); got != ch {
+		t.Errorf("client channelID = %d, want %d (focus must survive a transient permission-lookup error)", got, ch)
 	}
 }

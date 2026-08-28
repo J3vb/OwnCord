@@ -16,9 +16,16 @@ ON CONFLICT(user_id) DO UPDATE SET
     joined_at   = excluded.joined_at;
 
 -- name: JoinVoiceChannelIfCapacity :execresult
+-- The channel-wide row count excludes the joining user's own existing row
+-- (if any), mirroring the OC-0081 fix on EnableCameraIfUnderLimit /
+-- EnableScreenshareIfUnderLimit below. Without this, a user who already
+-- holds a row on the target channel (e.g. retrying a join after a failed
+-- channel-switch left their old row in place) gets counted against their
+-- own capacity slot, so a full channel refuses an upsert that would only
+-- replace the row already there (OC-0255).
 INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare, joined_at)
 SELECT ?, ?, 0, 0, 0, 0, 0, ?
-WHERE (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ?) < ?
+WHERE (SELECT COUNT(*) FROM voice_states AS vs2 WHERE vs2.channel_id = ? AND vs2.user_id <> ?) < ?
 ON CONFLICT(user_id) DO UPDATE SET
     channel_id  = excluded.channel_id,
     muted       = 0,

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // HandleMessageForTest dispatches a raw WebSocket message from client c.
@@ -26,6 +26,19 @@ func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
+	// kickClient (hub_sweep.go and the ban/expiry paths below) removes c from
+	// the hub and closes its send channels, but never touches the underlying
+	// connection or signals readPump — readPump keeps calling handleMessage
+	// for every frame it reads until the write side eventually times out and
+	// closes the conn (OC-0285). isSendClosed is the same "this client has
+	// been cut off" flag Subscribe already treats as canonical (pubsub.go)
+	// and that closeSend sets synchronously before kickClient returns, so
+	// checking it here — before the session recheck even runs — drops every
+	// frame a kicked/banned/expired client's connection still has buffered,
+	// regardless of which goroutine did the kicking.
+	if c.isSendClosed() {
+		return
+	}
 	if h.handleMessageSessionRecheck(c) {
 		return
 	}
@@ -273,8 +286,20 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
 			return
 		}
-	} else if ch != nil && !ch.Archived && hasChannelAccess(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages) {
-		return
+	} else if ch != nil && !ch.Archived {
+		// hasPermChecked, not hasChannelAccess: ch is already in hand and known
+		// non-DM here, so the role/override bit is the whole answer (a second
+		// hasChannelAccess-internal GetChannel would only repeat the read
+		// above), and unlike hasChannelAccess it reports a lookup failure
+		// instead of collapsing it to a denial — required by the "transient
+		// lookup error is NOT a denial" contract documented above (OC-0266).
+		allowed, permErr := hasPermChecked(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages)
+		if permErr != nil {
+			return
+		}
+		if allowed {
+			return
+		}
 	}
 	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
 	c.mu.Lock()

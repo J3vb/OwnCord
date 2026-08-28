@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // PermissionService.RequireChannelAccess had no coverage. It is the single

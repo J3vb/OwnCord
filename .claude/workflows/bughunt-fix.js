@@ -1,32 +1,34 @@
 export const meta = {
-  name: 'bughunt-fix',
-  description: 'Fix open ledger findings test-first: per-file agents, mechanical revert-proof, serial commits, one ci-check gate',
-  whenToUse: 'After a bughunt run has been written to the findings ledger and a human has skimmed it. Consumes open findings, produces commits on a branch. Never opens a PR.',
+  name: "bughunt-fix",
+  description:
+    "Fix open ledger findings test-first: per-file agents, mechanical revert-proof, serial commits, one ci-check gate",
+  whenToUse:
+    "After a bughunt run has been written to the findings ledger and a human has skimmed it. Consumes open findings, produces commits on a branch. Never opens a PR.",
   phases: [
-    { title: 'Plan', detail: 'cluster open findings by file' },
-    { title: 'Fix', detail: 'sonnet/xhigh: one agent per file, test-first, no git' },
-    { title: 'Prove', detail: 'opus/high: serial revert-proof then commit per cluster' },
-    { title: 'Gate', detail: 'sonnet/xhigh: ci-check for the touched stacks, once' },
+    { title: "Plan", detail: "cluster open findings by file" },
+    { title: "Fix", detail: "sonnet/xhigh: one agent per file, test-first, no git" },
+    { title: "Prove", detail: "opus/high: serial revert-proof then commit per cluster" },
+    { title: "Gate", detail: "sonnet/xhigh: ci-check for the touched stacks, once" },
   ],
-}
+};
 
 // args has been observed arriving JSON-stringified; coerce it the same way bughunt.js does.
 const ARGS = (() => {
-  if (typeof args === 'string') {
+  if (typeof args === "string") {
     try {
-      return JSON.parse(args) || {}
+      return JSON.parse(args) || {};
     } catch {
-      return {}
+      return {};
     }
   }
-  return args || {}
-})()
+  return args || {};
+})();
 
-const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 }
-const BRANCH = ARGS.branch || 'fix/bughunt'
-const ONLY = Array.isArray(ARGS.only) && ARGS.only.length ? new Set(ARGS.only) : null
-const MAX_SEVERITY = ARGS.maxSeverity || 'low'
-const ALL = Array.isArray(ARGS.findings) ? ARGS.findings : []
+const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+const BRANCH = ARGS.branch || "fix/bughunt";
+const ONLY = Array.isArray(ARGS.only) && ARGS.only.length ? new Set(ARGS.only) : null;
+const MAX_SEVERITY = ARGS.maxSeverity || "low";
+const ALL = Array.isArray(ARGS.findings) ? ARGS.findings : [];
 // Circuit breaker: stop a run that is going systematically wrong instead of spending a
 // high-effort agent on every remaining cluster. `declined` is not a failure - it is a
 // judgement the fix prompt explicitly invites - so only `blocked` counts.
@@ -37,23 +39,23 @@ const BREAKER =
     : {
         threshold: ARGS.circuitBreaker?.threshold ?? 0.5,
         minAttempts: ARGS.circuitBreaker?.minAttempts ?? 3,
-      }
-let breaker = null // set to a report object if it trips
+      };
+let breaker = null; // set to a report object if it trips
 
 // ---------- phase 1: plan ----------
-phase('Plan')
+phase("Plan");
 
-const excluded = []
-const selected = []
+const excluded = [];
+const selected = [];
 for (const f of ALL) {
-  if (f.status && f.status !== 'open') {
-    excluded.push({ id: f.id, reason: `status is ${f.status}, not open` })
+  if (f.status && f.status !== "open") {
+    excluded.push({ id: f.id, reason: `status is ${f.status}, not open` });
   } else if (ONLY && !ONLY.has(f.id)) {
-    excluded.push({ id: f.id, reason: 'not in only' })
+    excluded.push({ id: f.id, reason: "not in only" });
   } else if ((SEV_RANK[f.severity] ?? 3) > (SEV_RANK[MAX_SEVERITY] ?? 3)) {
-    excluded.push({ id: f.id, reason: 'below maxSeverity' })
+    excluded.push({ id: f.id, reason: "below maxSeverity" });
   } else {
-    selected.push(f)
+    selected.push(f);
   }
 }
 
@@ -61,59 +63,68 @@ for (const f of ALL) {
 // and what makes a root-cause fix possible - the agent sees every defect in the file at once.
 // Normalize the grouping key (backslashes -> forward slashes) so a path reported with the
 // "wrong" separator does not silently split one real file into two clusters.
-const byFile = new Map()
+const byFile = new Map();
 for (const f of selected) {
-  const key = String(f.file).replace(/\\/g, '/')
-  if (!byFile.has(key)) byFile.set(key, [])
-  byFile.get(key).push(f)
+  const key = String(f.file).replace(/\\/g, "/");
+  if (!byFile.has(key)) byFile.set(key, []);
+  byFile.get(key).push(f);
 }
 const clusters = [...byFile.entries()].map(([file, findings]) => ({
   file,
   ids: findings.map((f) => f.id),
   findings,
-}))
+}));
 
-log(`plan: ${selected.length} finding(s) in ${clusters.length} file cluster(s) on ${BRANCH}` +
-  (BREAKER
-    ? ` (breaker: stop above ${Math.round(BREAKER.threshold * 100)}% failures after ${BREAKER.minAttempts} attempts)`
-    : ' (breaker disabled)'))
-for (const c of clusters) log(`  ${c.file}: ${c.ids.join(', ')}`)
+log(
+  `plan: ${selected.length} finding(s) in ${clusters.length} file cluster(s) on ${BRANCH}` +
+    (BREAKER
+      ? ` (breaker: stop above ${Math.round(BREAKER.threshold * 100)}% failures after ${BREAKER.minAttempts} attempts)`
+      : " (breaker disabled)"),
+);
+for (const c of clusters) log(`  ${c.file}: ${c.ids.join(", ")}`);
 // Announce every exclusion by id. Silent truncation reads as "covered everything" when it did not.
-for (const e of excluded) log(`  excluded ${e.id}: ${e.reason}`)
+for (const e of excluded) log(`  excluded ${e.id}: ${e.reason}`);
 
-const publicClusters = clusters.map((c) => ({ file: c.file, ids: c.ids }))
+const publicClusters = clusters.map((c) => ({ file: c.file, ids: c.ids }));
 
 // ---------- schemas ----------
 const FIX_RESULTS = {
-  type: 'object',
-  required: ['results', 'touchedPaths'],
+  type: "object",
+  required: ["results", "touchedPaths"],
   properties: {
     results: {
-      type: 'array',
+      type: "array",
       items: {
-        type: 'object',
-        required: ['id', 'outcome', 'testPath', 'rationale'],
+        type: "object",
+        required: ["id", "outcome", "testPath", "rationale"],
         properties: {
-          id: { type: 'string', description: 'the ledger id, e.g. OC-0042' },
-          outcome: { type: 'string', enum: ['fixed', 'declined', 'blocked'] },
-          testPath: { type: 'string', description: 'repo-relative path of the test that pins this finding; empty if not fixed' },
-          rationale: { type: 'string', description: 'required for declined and blocked; empty for fixed' },
+          id: { type: "string", description: "the ledger id, e.g. OC-0042" },
+          outcome: { type: "string", enum: ["fixed", "declined", "blocked"] },
+          testPath: {
+            type: "string",
+            description:
+              "repo-relative path of the test that pins this finding; empty if not fixed",
+          },
+          rationale: {
+            type: "string",
+            description: "required for declined and blocked; empty for fixed",
+          },
         },
       },
     },
     touchedPaths: {
-      type: 'array',
-      items: { type: 'string' },
+      type: "array",
+      items: { type: "string" },
       description:
-        'every non-test SOURCE file this agent modified while working this cluster, repo-relative, forward ' +
-        'slashes - including cluster.file itself if it was touched, and any shared file outside the cluster ' +
-        'the root-cause fix required. Test files belong in testPath (per finding), not here.',
+        "every non-test SOURCE file this agent modified while working this cluster, repo-relative, forward " +
+        "slashes - including cluster.file itself if it was touched, and any shared file outside the cluster " +
+        "the root-cause fix required. Test files belong in testPath (per finding), not here.",
     },
   },
-}
+};
 
 // ---------- phase 2: fix ----------
-phase('Fix')
+phase("Fix");
 
 function fixPrompt(cluster) {
   return (
@@ -150,65 +161,82 @@ function fixPrompt(cluster) {
     `alone, return outcome "declined" with a rationale. Do not invent a fix you do not believe in.\n` +
     `  8. If you cannot fix it for a mechanical reason (missing fixture, unclear repro), return "blocked" ` +
     `with a rationale.\n\n` +
-    `Client tests run from Client/tauri-client with:\n` +
+    `Client tests run from Client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
     `  go test ./<pkg>/ -run <TestName>\n\n` +
     `Return one result per finding id, all ${cluster.ids.length} of them, plus touchedPaths.\n\n` +
     `--- FINDINGS IN ${cluster.file} ---\n${JSON.stringify(cluster.findings, null, 2)}`
-  )
+  );
 }
 
 const fixOutcomes = await parallel(
-  clusters.map((cluster) => () =>
-    agent(fixPrompt(cluster), {
-      label: `fix:${cluster.file}`,
-      phase: 'Fix',
-      model: 'sonnet',
-      effort: 'xhigh',
-      schema: FIX_RESULTS,
-    }).then((r) => ({
-      cluster,
-      results: (r && r.results) || [],
-      touchedPaths: r && Array.isArray(r.touchedPaths) ? r.touchedPaths.filter((p) => typeof p === 'string' && p) : [],
-    })),
+  clusters.map(
+    (cluster) => () =>
+      agent(fixPrompt(cluster), {
+        label: `fix:${cluster.file}`,
+        phase: "Fix",
+        model: "sonnet",
+        effort: "xhigh",
+        schema: FIX_RESULTS,
+      }).then((r) => ({
+        cluster,
+        results: (r && r.results) || [],
+        touchedPaths:
+          r && Array.isArray(r.touchedPaths)
+            ? r.touchedPaths.filter((p) => typeof p === "string" && p)
+            : [],
+      })),
   ),
-)
+);
 
 // A null slot means the agent died or threw. Its findings are blocked, its siblings are unaffected.
-const fixed = []
+const fixed = [];
 for (let i = 0; i < clusters.length; i++) {
-  const cluster = clusters[i]
-  const outcome = fixOutcomes[i]
+  const cluster = clusters[i];
+  const outcome = fixOutcomes[i];
   if (!outcome) {
-    log(`fix ${cluster.file}: agent failed - ${cluster.ids.length} finding(s) blocked`)
+    log(`fix ${cluster.file}: agent failed - ${cluster.ids.length} finding(s) blocked`);
     fixed.push({
       cluster,
-      results: cluster.ids.map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent failed or returned nothing' })),
+      results: cluster.ids.map((id) => ({
+        id,
+        outcome: "blocked",
+        testPath: "",
+        rationale: "fix agent failed or returned nothing",
+      })),
       touchedPaths: [],
       union: [cluster.file],
-    })
-    continue
+    });
+    continue;
   }
   // A hallucinated id, or one copy-pasted from a different cluster, must not merge in silently.
-  const ownIds = new Set(cluster.ids)
-  const ownResults = outcome.results.filter((r) => ownIds.has(r.id))
-  const foreignResults = outcome.results.filter((r) => !ownIds.has(r.id))
+  const ownIds = new Set(cluster.ids);
+  const ownResults = outcome.results.filter((r) => ownIds.has(r.id));
+  const foreignResults = outcome.results.filter((r) => !ownIds.has(r.id));
   if (foreignResults.length) {
-    log(`fix ${cluster.file}: dropped ${foreignResults.length} result(s) for id(s) not in this cluster - ${foreignResults.map((r) => r.id).join(', ')}`)
+    log(
+      `fix ${cluster.file}: dropped ${foreignResults.length} result(s) for id(s) not in this cluster - ${foreignResults.map((r) => r.id).join(", ")}`,
+    );
   }
   // An agent that skipped a finding entirely leaves it blocked rather than silently dropped.
-  const reported = new Set(ownResults.map((r) => r.id))
+  const reported = new Set(ownResults.map((r) => r.id));
   const missing = cluster.ids
     .filter((id) => !reported.has(id))
-    .map((id) => ({ id, outcome: 'blocked', testPath: '', rationale: 'fix agent returned no result for this finding' }))
-  if (missing.length) log(`fix ${cluster.file}: ${missing.length} finding(s) unreported by the agent - blocked`)
+    .map((id) => ({
+      id,
+      outcome: "blocked",
+      testPath: "",
+      rationale: "fix agent returned no result for this finding",
+    }));
+  if (missing.length)
+    log(`fix ${cluster.file}: ${missing.length} finding(s) unreported by the agent - blocked`);
   fixed.push({
     cluster,
     results: [...ownResults, ...missing],
     touchedPaths: outcome.touchedPaths,
     union: [...new Set([cluster.file, ...outcome.touchedPaths])],
-  })
+  });
 }
 
 // ---------- phase 2.5: cross-cluster overlap guard ----------
@@ -220,82 +248,97 @@ for (let i = 0; i < clusters.length; i++) {
 // staged at all. Block both clusters rather than guess which one "owns" the shared file.
 for (let i = 0; i < fixed.length; i++) {
   for (let j = i + 1; j < fixed.length; j++) {
-    const a = fixed[i]
-    const b = fixed[j]
-    const shared = a.union.filter((p) => b.union.includes(p))
-    if (!shared.length) continue
-    log(`blocked: ${a.cluster.file} and ${b.cluster.file} both touch ${shared.join(', ')} - both clusters blocked`)
-    for (const [entry, other] of [[a, b], [b, a]]) {
+    const a = fixed[i];
+    const b = fixed[j];
+    const shared = a.union.filter((p) => b.union.includes(p));
+    if (!shared.length) continue;
+    log(
+      `blocked: ${a.cluster.file} and ${b.cluster.file} both touch ${shared.join(", ")} - both clusters blocked`,
+    );
+    for (const [entry, other] of [
+      [a, b],
+      [b, a],
+    ]) {
       for (const r of entry.results) {
-        if (r.outcome === 'fixed') {
-          r.outcome = 'blocked'
-          r.rationale = `cross-cluster edit: shares ${shared.join(', ')} with ${other.cluster.file} - needs a human`
+        if (r.outcome === "fixed") {
+          r.outcome = "blocked";
+          r.rationale = `cross-cluster edit: shares ${shared.join(", ")} with ${other.cluster.file} - needs a human`;
         }
       }
     }
   }
 }
 
-const allResults = fixed.flatMap((f) => f.results)
-log(`fix: ${allResults.filter((r) => r.outcome === 'fixed').length} fixed, ` +
-  `${allResults.filter((r) => r.outcome === 'declined').length} declined, ` +
-  `${allResults.filter((r) => r.outcome === 'blocked').length} blocked`)
+const allResults = fixed.flatMap((f) => f.results);
+log(
+  `fix: ${allResults.filter((r) => r.outcome === "fixed").length} fixed, ` +
+    `${allResults.filter((r) => r.outcome === "declined").length} declined, ` +
+    `${allResults.filter((r) => r.outcome === "blocked").length} blocked`,
+);
 
 // ---------- phase 2.6: circuit breaker (fix stage) ----------
 // A high blocked rate here means the fixing itself is failing - bad ledger coordinates, a
 // broken test runner, agents that cannot run the suite. Proving each of those costs a
 // serial agent per cluster and cannot succeed, so stop before spending it.
 if (BREAKER) {
-  const attempted = allResults.filter((r) => r.outcome !== 'declined').length
-  const failed = allResults.filter((r) => r.outcome === 'blocked').length
+  const attempted = allResults.filter((r) => r.outcome !== "declined").length;
+  const failed = allResults.filter((r) => r.outcome === "blocked").length;
   if (attempted >= BREAKER.minAttempts && failed / attempted > BREAKER.threshold) {
     breaker = {
-      trippedAt: 'fix',
+      trippedAt: "fix",
       attempted,
       failed,
       threshold: BREAKER.threshold,
       reason: `${failed}/${attempted} finding(s) could not be fixed - skipping prove and commit entirely`,
-    }
-    log(`CIRCUIT BREAKER: ${breaker.reason}`)
+    };
+    log(`CIRCUIT BREAKER: ${breaker.reason}`);
   }
 }
 
 // ---------- phase 3: prove + commit ----------
-phase('Prove')
+phase("Prove");
 
 const PROVE_RESULT = {
-  type: 'object',
-  required: ['committed', 'sha', 'redObserved', 'greenObserved', 'redOutput', 'greenOutput', 'note'],
+  type: "object",
+  required: [
+    "committed",
+    "sha",
+    "redObserved",
+    "greenObserved",
+    "redOutput",
+    "greenOutput",
+    "note",
+  ],
   properties: {
-    committed: { type: 'boolean' },
-    sha: { type: 'string', description: 'short sha of the commit, empty when not committed' },
-    redObserved: { type: 'boolean', description: 'did the tests FAIL with the source reverted' },
-    greenObserved: { type: 'boolean', description: 'did the tests PASS with the fix restored' },
+    committed: { type: "boolean" },
+    sha: { type: "string", description: "short sha of the commit, empty when not committed" },
+    redObserved: { type: "boolean", description: "did the tests FAIL with the source reverted" },
+    greenObserved: { type: "boolean", description: "did the tests PASS with the fix restored" },
     redOutput: {
-      type: 'string',
+      type: "string",
       description:
-        'the ACTUAL output of the test run performed with the source reverted (step 4), including the ' +
-        'command that was run. This run must FAIL. Paste the real captured output verbatim - not a ' +
-        'summary, not a paraphrase.',
+        "the ACTUAL output of the test run performed with the source reverted (step 4), including the " +
+        "command that was run. This run must FAIL. Paste the real captured output verbatim - not a " +
+        "summary, not a paraphrase.",
     },
     greenOutput: {
-      type: 'string',
+      type: "string",
       description:
-        'the ACTUAL output of the test run performed after the fix was restored (step 6), including the ' +
-        'command that was run. This run must PASS. Paste the real captured output verbatim - not a ' +
-        'summary, not a paraphrase.',
+        "the ACTUAL output of the test run performed after the fix was restored (step 6), including the " +
+        "command that was run. This run must PASS. Paste the real captured output verbatim - not a " +
+        "summary, not a paraphrase.",
     },
-    note: { type: 'string', description: 'why it was not committed, empty on success' },
+    note: { type: "string", description: "why it was not committed, empty on success" },
   },
-}
+};
 
 function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
   return (
     `You are proving and committing ONE cluster of fixes in the OwnCord repo ` +
     `(checked out at your current working directory - do not assume any absolute path), on branch ${BRANCH}.\n\n` +
-    `Source file(s): ${sourcePaths.join(', ')}\n` +
-    `Findings fixed here: ${fixedIds.join(', ')}\n` +
-    `Test files written: ${testPaths.join(', ') || '(none reported)'}\n\n` +
+    `Source file(s): ${sourcePaths.join(", ")}\n` +
+    `Findings fixed here: ${fixedIds.join(", ")}\n` +
+    `Test files written: ${testPaths.join(", ") || "(none reported)"}\n\n` +
     `You are running SERIALLY. No other agent is touching git right now, so you may use git freely.\n\n` +
     `Do exactly this, in order:\n` +
     `  1. Run: git rev-parse --abbrev-ref HEAD\n` +
@@ -305,7 +348,7 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `by this agent.\n` +
     `  2. Copy the current (fixed) contents of ALL source file(s) listed above to a scratch location ` +
     `outside the repo.\n` +
-    `  3. Run: git checkout HEAD -- ${sourcePaths.join(' ')}\n` +
+    `  3. Run: git checkout HEAD -- ${sourcePaths.join(" ")}\n` +
     `     Revert every source path listed above, and nothing else. Do NOT revert or delete the test ` +
     `files - a brand-new test file is untracked and this leaves it alone, and a new case in an existing ` +
     `test file is a modification to a path you did not name, so it survives too. Either way the new ` +
@@ -325,27 +368,27 @@ function provePrompt(cluster, fixedIds, testPaths, sourcePaths) {
     `regenerated output can carry their hunks. A test function or comment citing a finding id not ` +
     `listed above, or a hunk in a generated/shared file unrelated to your findings, must NOT be ` +
     `committed - set committed=false, name the foreign content in note, and STOP.\n` +
-    `  8. Stage ALL source file(s) listed above (git add ${sourcePaths.join(' ')}) AND the test files. ` +
+    `  8. Stage ALL source file(s) listed above (git add ${sourcePaths.join(" ")}) AND the test files. ` +
     `Then check git status --porcelain for OTHER modified tracked test files in the same package(s)/` +
     `directory(ies) as your source files: a fix in this cluster may have rewritten a pre-existing test ` +
     `that locked the old behavior, or widened an interface that a fake/mock in a sibling test file must ` +
     `now implement - leaving such a companion uncommitted makes the committed branch fail or not compile ` +
     `on its own. If the modification's content belongs to THIS cluster's fix (per the step-7 check), ` +
     `stage it too; if it cites another cluster's findings, leave it. Commit with subject:\n` +
-    `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(', ')})\n` +
+    `     fix(<area>): ${fixedIds.length} defect(s) (${fixedIds.join(", ")})\n` +
     `     Use a conventional-commit area matching the file (voice, ws, client, identity...). Do not add a ` +
     `Co-Authored-By trailer.\n` +
     `  9. Return the short sha.\n\n` +
-    `Client tests run from Client/tauri-client with:\n` +
+    `Client tests run from Client with:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npx vitest run <testfile>\n` +
     `Server tests run from Server with:\n` +
     `  go test ./<pkg>/ -run <TestName>`
-  )
+  );
 }
 
-const commits = []
-let proveAttempts = 0
-let proveFailures = 0
+const commits = [];
+let proveAttempts = 0;
+let proveFailures = 0;
 // Serial on purpose: parallel git commands collide on .git/index.lock.
 for (const { cluster, results, union } of fixed) {
   if (breaker) {
@@ -353,20 +396,20 @@ for (const { cluster, results, union } of fixed) {
     // from here on was never attempted; say so rather than leaving it reported as fixed,
     // which would put a `fixed` status in the ledger with no commit behind it.
     for (const r of results) {
-      if (r.outcome === 'fixed') {
-        r.outcome = 'blocked'
-        r.rationale = `circuit breaker tripped before this cluster was attempted (${breaker.reason}); edits are uncommitted in the working tree`
+      if (r.outcome === "fixed") {
+        r.outcome = "blocked";
+        r.rationale = `circuit breaker tripped before this cluster was attempted (${breaker.reason}); edits are uncommitted in the working tree`;
       }
     }
-    continue
+    continue;
   }
-  const fixedHere = results.filter((r) => r.outcome === 'fixed')
+  const fixedHere = results.filter((r) => r.outcome === "fixed");
   if (!fixedHere.length) {
-    log(`prove ${cluster.file}: no fixes to prove - skipped`)
-    continue
+    log(`prove ${cluster.file}: no fixes to prove - skipped`);
+    continue;
   }
-  const ids = fixedHere.map((r) => r.id)
-  const testPaths = [...new Set(fixedHere.map((r) => r.testPath).filter(Boolean))]
+  const ids = fixedHere.map((r) => r.id);
+  const testPaths = [...new Set(fixedHere.map((r) => r.testPath).filter(Boolean))];
   // A dead/thrown prove agent must not take down the sibling clusters still waiting in this
   // serial loop - same "one blocked cluster does not poison the rest" rule Phase 2 gets from
   // parallel()'s catch. Fold it into a null result so the ok/why logic below handles it uniformly.
@@ -375,73 +418,80 @@ for (const { cluster, results, union } of fixed) {
   // regenerated-file hunk from another cluster's uncommitted work without noticing either.
   const p = await agent(provePrompt(cluster, ids, testPaths, union), {
     label: `prove:${cluster.file}`,
-    phase: 'Prove',
-    model: 'opus',
-    effort: 'high',
+    phase: "Prove",
+    model: "opus",
+    effort: "high",
     schema: PROVE_RESULT,
-  }).catch(() => null)
+  }).catch(() => null);
 
   // Counted before the ok check on purpose: successes belong in the denominator. Increment
   // this inside the failure branch instead and the ratio is failures-over-failures, which is
   // always 1.0 - the breaker would trip on the first failed cluster at any threshold.
-  proveAttempts++
-  const ok = p && p.committed && p.redObserved && p.greenObserved && p.sha
+  proveAttempts++;
+  const ok = p && p.committed && p.redObserved && p.greenObserved && p.sha;
   if (!ok) {
     const why = !p
-      ? 'prove agent failed'
+      ? "prove agent failed"
       : !p.redObserved
-        ? `revert-proof failed: tests still passed with the fix reverted (${p.note || 'no note'})`
+        ? `revert-proof failed: tests still passed with the fix reverted (${p.note || "no note"})`
         : !p.greenObserved
-          ? `tests did not pass after restoring the fix (${p.note || 'no note'})`
-          : `not committed (${p.note || 'no note'})`
-    log(`prove ${cluster.file}: ${why} - ${ids.length} finding(s) blocked`)
+          ? `tests did not pass after restoring the fix (${p.note || "no note"})`
+          : `not committed (${p.note || "no note"})`;
+    log(`prove ${cluster.file}: ${why} - ${ids.length} finding(s) blocked`);
     for (const r of results) {
-      if (r.outcome === 'fixed') {
-        r.outcome = 'blocked'
-        r.rationale = why
+      if (r.outcome === "fixed") {
+        r.outcome = "blocked";
+        r.rationale = why;
       }
     }
-    proveFailures++
-    if (BREAKER && proveAttempts >= BREAKER.minAttempts && proveFailures / proveAttempts > BREAKER.threshold) {
+    proveFailures++;
+    if (
+      BREAKER &&
+      proveAttempts >= BREAKER.minAttempts &&
+      proveFailures / proveAttempts > BREAKER.threshold
+    ) {
       breaker = {
-        trippedAt: 'prove',
+        trippedAt: "prove",
         attempted: proveAttempts,
         failed: proveFailures,
         threshold: BREAKER.threshold,
         reason: `${proveFailures}/${proveAttempts} cluster(s) failed their revert-proof - stopping before the rest`,
-      }
-      log(`CIRCUIT BREAKER: ${breaker.reason}`)
+      };
+      log(`CIRCUIT BREAKER: ${breaker.reason}`);
     }
-    continue
+    continue;
   }
-  commits.push({ sha: p.sha, file: cluster.file, ids })
-  log(`prove ${cluster.file}: committed ${p.sha} (${ids.join(', ')})`)
+  commits.push({ sha: p.sha, file: cluster.file, ids });
+  log(`prove ${cluster.file}: committed ${p.sha} (${ids.join(", ")})`);
 }
 
 // ---------- phase 4: gate ----------
 const GATE_RESULT = {
-  type: 'object',
-  required: ['passed', 'stacks', 'output'],
+  type: "object",
+  required: ["passed", "stacks", "output"],
   properties: {
-    passed: { type: 'boolean' },
-    stacks: { type: 'array', items: { type: 'string' } },
-    output: { type: 'string', description: 'the failing command and its output, or a short ok summary' },
+    passed: { type: "boolean" },
+    stacks: { type: "array", items: { type: "string" } },
+    output: {
+      type: "string",
+      description: "the failing command and its output, or a short ok summary",
+    },
   },
-}
+};
 
 function stacksFor(files) {
-  const s = new Set()
+  const s = new Set();
   for (const f of files) {
-    if (f.startsWith('Server/')) s.add('server')
-    else if (f.startsWith('Client/tauri-client/src-tauri/')) s.add('rust')
-    else if (f.startsWith('Client/')) s.add('client')
+    if (f.startsWith("Server/")) s.add("server");
+    else if (f.startsWith("Client/src-tauri/")) s.add("rust");
+    else if (f.startsWith("Client/")) s.add("client");
   }
-  return [...s]
+  return [...s];
 }
 
 const GATE_COMMANDS = {
   client:
-    `From Client/tauri-client:\n` +
+    `From Client:\n` +
     `  NODE_OPTIONS=--no-experimental-webstorage npm test\n` +
     `  npm run typecheck\n` +
     `  npm run lint\n` +
@@ -456,38 +506,48 @@ const GATE_COMMANDS = {
     `  make sqlc-verify protocol-verify   # generated output must not be stale. If make is not on PATH, ` +
     `run the equivalent commands directly instead: ` +
     `"sqlc generate && git diff --exit-code db/dbgen" and ` +
-    `"go run ./scripts/genprotocol && git diff --exit-code ws/message_types.go ../Client/tauri-client/src/lib/protocolTypes.ts" ` +
+    `"go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts" ` +
     `- a non-empty diff in either means generated code is stale and the gate fails`,
   rust:
-    `From Client/tauri-client/src-tauri:\n` +
-    `  cargo test\n` +
-    `  cargo clippy --all-targets -- -D warnings`,
-}
+    `From Client/src-tauri:\n` + `  cargo test\n` + `  cargo clippy --all-targets -- -D warnings`,
+};
 
-let gate = null
+let gate = null;
 if (commits.length) {
-  phase('Gate')
-  const stacks = stacksFor(commits.map((c) => c.file))
+  phase("Gate");
+  const stacks = stacksFor(commits.map((c) => c.file));
   gate = await agent(
     `Run the OwnCord CI gates locally for the stacks touched by this fix run, on branch ${BRANCH}.\n\n` +
       `This runs ONCE for the whole run - a full gate per fix would take longer than the fixing did.\n\n` +
-      `Touched stacks: ${stacks.join(', ')}\n\n` +
-      stacks.map((s) => GATE_COMMANDS[s]).join('\n\n') +
+      `Touched stacks: ${stacks.join(", ")}\n\n` +
+      stacks.map((s) => GATE_COMMANDS[s]).join("\n\n") +
       `\n\nRun every command for every touched stack. Report passed=false if ANY of them fails, and put ` +
       `the failing command plus the relevant output in "output". Do NOT fix anything, do NOT amend or ` +
       `revert any commit, and do NOT push. Reporting the failure accurately is the whole job.\n\n` +
       `Known false alarm: a windows -race failure inside ws whose stack mentions runtime.scanstack or ` +
       `runtime.(*unwinder).next is a Go 1.26.5 runtime GC fault, not a real failure - rerun that package ` +
       `once before reporting it.`,
-    { label: 'gate', phase: 'Gate', model: 'sonnet', effort: 'xhigh', schema: GATE_RESULT },
-  ).catch(() => null)
+    { label: "gate", phase: "Gate", model: "sonnet", effort: "xhigh", schema: GATE_RESULT },
+  ).catch(() => null);
   // A malformed/missing report (dead agent, or a schema the caller didn't honor) is treated as a
   // failed gate, same as the null-check pattern in phases 2 and 3 - never crash on shape here.
-  if (!gate || typeof gate.passed !== 'boolean' || !Array.isArray(gate.stacks))
-    gate = { passed: false, stacks, output: (gate && gate.output) || 'gate agent failed to report' }
-  log(`gate: ${gate.passed ? 'PASS' : 'FAIL'} (${gate.stacks.join(', ')})`)
+  if (!gate || typeof gate.passed !== "boolean" || !Array.isArray(gate.stacks))
+    gate = {
+      passed: false,
+      stacks,
+      output: (gate && gate.output) || "gate agent failed to report",
+    };
+  log(`gate: ${gate.passed ? "PASS" : "FAIL"} (${gate.stacks.join(", ")})`);
 } else {
-  log('gate: nothing committed - skipped')
+  log("gate: nothing committed - skipped");
 }
 
-return { branch: BRANCH, clusters: publicClusters, excluded, commits, results: allResults, gate, breaker }
+return {
+  branch: BRANCH,
+  clusters: publicClusters,
+  excluded,
+  commits,
+  results: allResults,
+  gate,
+  breaker,
+};

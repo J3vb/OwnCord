@@ -15,30 +15,30 @@ Renders from `channels.store` (`channels` map, `activeChannelId`), grouped by
 category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`):
 `channels` and `dms`.
 
-| State | Trigger | Target reaction |
-|-------|---------|-----------------|
-| `ready` | Channels loaded from `ready` | Grouped, collapsible category list |
-| `empty` | Zero channels | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
-| category collapsed | User toggles | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state |
-| active channel | `setActiveChannel` | Highlighted; unread cleared |
-| unread | `chat_message` in a non-active channel | Unread pill; badge on the channel |
+| State              | Trigger                                | Target reaction                                                                                                 |
+| ------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ready`            | Channels loaded from `ready`           | Grouped, collapsible category list                                                                              |
+| `empty`            | Zero channels                          | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
+| category collapsed | User toggles                           | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                              |
+| active channel     | `setActiveChannel`                     | Highlighted; unread cleared                                                                                     |
+| unread             | `chat_message` in a non-active channel | Unread pill; badge on the channel                                                                               |
 
 ### 1.1 Channel type affordances
 
 Each channel type gets a distinct icon and interaction:
 
-| Type | Icon | Click behavior |
-|------|------|----------------|
-| `text` | hash | Focus → load messages |
+| Type           | Icon           | Click behavior                                                                                             |
+| -------------- | -------------- | ---------------------------------------------------------------------------------------------------------- |
+| `text`         | hash           | Focus → load messages                                                                                      |
 | `announcement` | megaphone (D1) | Focus → load messages; **composer read-only unless MANAGE_MESSAGES** (see [messaging.md §2](messaging.md)) |
-| `voice` | speaker | Join voice (see [voice-and-e2ee.md](voice-and-e2ee.md)); shows the participant roster inline |
-| `dm` | — | Not in the channel list; lives in DM mode |
+| `voice`        | speaker        | Join voice (see [voice-and-e2ee.md](voice-and-e2ee.md)); shows the participant roster inline               |
+| `dm`           | —              | Not in the channel list; lives in DM mode                                                                  |
 
 ### 1.1a Per-channel notification mutes
 
 The channel context menu offers "Mute Channel" / "Unmute Channel"
 (the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/channel-mutes.ts`).
-Discord semantics, deliberately: a mute silences the channel's *noise* — no
+Discord semantics, deliberately: a mute silences the channel's _noise_ — no
 desktop notification, no chime — while the unread badge still counts but
 renders dimmed, and a message that mentions you still notifies and shows the
 red mention badge. It is a client-side preference on purpose (stored in
@@ -63,6 +63,7 @@ sequenceDiagram
 ```
 
 **Target rules:**
+
 - Switching is instantaneous from cache; the message area shows its own loading
   state for uncached history ([messaging.md §1](messaging.md)), never a global block.
 - If the active channel is **deleted** server-side (`channel_delete`), redirect to
@@ -85,14 +86,14 @@ back on failure.
 Renders from `members.store` (`members` map + `typingUsers`). Shows presence and
 role grouping.
 
-| State | Trigger | Target reaction |
-|-------|---------|-----------------|
-| `ready` | `ready.members` | Grouped by role, sorted; presence dot per member |
-| `empty` | No online members | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`) |
-| presence change | `presence` event | Live dot update; offline members styled distinctly |
-| role change | `member_update` | Re-group live |
-| profile change | `user_update` | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| join/leave/ban | `member_join`/`member_leave`/`member_ban` | Add/remove with no reflow flash |
+| State           | Trigger                                   | Target reaction                                                                                                                        |
+| --------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`         | `ready.members`                           | Grouped by role, sorted; presence dot per member                                                                                       |
+| `empty`         | No online members                         | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                                     |
+| presence change | `presence` event                          | Live dot update; offline members styled distinctly                                                                                     |
+| role change     | `member_update`                           | Re-group live                                                                                                                          |
+| profile change  | `user_update`                             | Name/avatar update; if it's us, also patch `auth.store` (already the `user_update` handler in `wireDispatcher()`, `lib/dispatcher.ts`) |
+| join/leave/ban  | `member_join`/`member_leave`/`member_ban` | Add/remove with no reflow flash                                                                                                        |
 
 ### 2.1 Typing indicator
 
@@ -122,14 +123,14 @@ role), consistent with the affordance principle.
 DM mode (`sidebarMode: "dms"`) renders from `dm.store` (`channels` list, each with
 recipient, last-message preview, unread).
 
-| State | Trigger | Target reaction |
-|-------|---------|-----------------|
-| `ready` | `ready.dm_channels` | DM list sorted by recency |
-| `empty` | No DMs | "No direct messages yet" + "Start one from a member's profile" |
-| open DM | `dm_channel_open` | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`) |
-| close DM | `dm_channel_close` | Remove from list |
-| new DM message | `chat_message` in a DM | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active |
-| last-message empty | Never messaged | "No messages yet" fallback (already the `lastMessage` fallback in `buildDmConversations()`, `pages/main-page/SidebarDmHelpers.ts`) |
+| State              | Trigger                | Target reaction                                                                                                                    |
+| ------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`            | `ready.dm_channels`    | DM list sorted by recency                                                                                                          |
+| `empty`            | No DMs                 | "No direct messages yet" + "Start one from a member's profile"                                                                     |
+| open DM            | `dm_channel_open`      | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`)                                                        |
+| close DM           | `dm_channel_close`     | Remove from list                                                                                                                   |
+| new DM message     | `chat_message` in a DM | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active                 |
+| last-message empty | Never messaged         | "No messages yet" fallback (already the `lastMessage` fallback in `buildDmConversations()`, `pages/main-page/SidebarDmHelpers.ts`) |
 
 ### 3.1 Opening a DM
 
@@ -166,11 +167,11 @@ other participant).
 Blocking gates DM delivery server-side (a blocked user can't post into the DM,
 and `IsEitherBlocked` is bidirectional). **Target UX:**
 
-| Action | Reaction |
-|--------|----------|
-| Block user | Confirm → block; DM composer becomes read-only with "You've blocked this user. Unblock to send messages." |
+| Action        | Reaction                                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Block user    | Confirm → block; DM composer becomes read-only with "You've blocked this user. Unblock to send messages."                                                    |
 | Being blocked | Composer read-only with a neutral "You can't message this user right now." (do not reveal the block state explicitly — the server returns a generic refusal) |
-| Unblock | Composer re-enables |
+| Unblock       | Composer re-enables                                                                                                                                          |
 
 > **✅ Wired (composer gating).** DM block state now drives the same
 > disabled-with-reason composer mode (see [messaging.md §2](messaging.md)) via

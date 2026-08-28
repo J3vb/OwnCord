@@ -24,17 +24,17 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/diskutil"
-	"github.com/owncord/server/logctx"
-	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/storage"
-	"github.com/owncord/server/telemetry"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/logctx"
+	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/storage"
+	"github.com/J3vb/OwnCord/Server/telemetry"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".

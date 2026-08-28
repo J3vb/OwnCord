@@ -2,7 +2,7 @@
 
 **Verified against:** commit `5630aa1`, 2026-08-04
 
-Single Go binary (`github.com/owncord/server`, Go 1.26). Pure-Go SQLite
+Single Go binary (`github.com/J3vb/OwnCord/Server`, Go 1.26). Pure-Go SQLite
 (`modernc.org/sqlite`, no CGO), chi router, `github.com/coder/websocket`,
 LiveKit for voice, Wazero for plugins (build-tag gated), optional OpenTelemetry
 (`-tags otel`). Roughly 42k LOC of production code and 71k LOC of tests.

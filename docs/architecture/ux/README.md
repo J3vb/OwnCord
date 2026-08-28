@@ -17,13 +17,13 @@ this set doubles as a UX improvement backlog. Gaps are grounded in real
 
 ## Documents
 
-| Doc | Covers |
-|-----|--------|
-| [connection-and-auth.md](connection-and-auth.md) | App boot, server profiles, connect/health, login, TOTP, register-by-invite, the connected handshake, reconnect, and cert-TOFU trust prompts |
-| [messaging.md](messaging.md) | Composer + send (optimistic), edit/delete, reactions, attachments, replies, pins, search, read/unread, slow-mode, announcement read-only gating |
-| [channels-members-dms.md](channels-members-dms.md) | Channel list/switch/categories, member list + presence + typing, roles, DM open/close, blocking |
-| [voice-and-e2ee.md](voice-and-e2ee.md) | Voice join/leave, mute/deafen/camera/screenshare, push-to-talk, active-speaker, and the E2EE securing/key-ready indicators |
-| [settings-and-admin.md](settings-and-admin.md) | Settings tabs, profile/password/2FA/delete-account, appearance/theming, the inline admin surface (ban/kick/roles, channel CRUD, invites), and the updater |
+| Doc                                                | Covers                                                                                                                                                    |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [connection-and-auth.md](connection-and-auth.md)   | App boot, server profiles, connect/health, login, TOTP, register-by-invite, the connected handshake, reconnect, and cert-TOFU trust prompts               |
+| [messaging.md](messaging.md)                       | Composer + send (optimistic), edit/delete, reactions, attachments, replies, pins, search, read/unread, slow-mode, announcement read-only gating           |
+| [channels-members-dms.md](channels-members-dms.md) | Channel list/switch/categories, member list + presence + typing, roles, DM open/close, blocking                                                           |
+| [voice-and-e2ee.md](voice-and-e2ee.md)             | Voice join/leave, mute/deafen/camera/screenshare, push-to-talk, active-speaker, and the E2EE securing/key-ready indicators                                |
+| [settings-and-admin.md](settings-and-admin.md)     | Settings tabs, profile/password/2FA/delete-account, appearance/theming, the inline admin surface (ban/kick/roles, channel CRUD, invites), and the updater |
 
 The cross-cutting vocabulary and global reaction matrices below apply to **every**
 document; the per-flow docs reference them rather than repeating them.
@@ -37,18 +37,18 @@ choose a defined presentation for each (a view may legitimately collapse some �
 e.g. a view that can never be empty — but that must be a decision, not an
 omission):
 
-| State | Meaning | Default presentation |
-|-------|---------|----------------------|
-| `loading` | A fetch/subscription is in flight and no cached data is shown yet | Skeleton or inline spinner in the view's own region — **never** a full-screen blocker except the initial connected handshake |
-| `ready` | Data present and current | The normal view |
-| `empty` | Fetch succeeded, zero items | A labelled empty state with a one-line "what goes here / what to do next" hint |
-| `error` | Fetch/action failed | Inline error with a **Retry** affordance for recoverable errors; a toast only for fire-and-forget actions |
-| `stale` | Data shown but known out of date (e.g. during reconnect) | The normal view plus a non-blocking status hint (connection banner); interactions that require a live socket are disabled with a reason |
-| `permission-denied` | The user may see the view but not act | The view renders read-only; the disallowed control is **disabled with a visible reason**, never hidden silently and never enabled-then-rejected |
-| `offline` | No live socket | Live-only controls disabled with the connection status surfaced |
+| State               | Meaning                                                           | Default presentation                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `loading`           | A fetch/subscription is in flight and no cached data is shown yet | Skeleton or inline spinner in the view's own region — **never** a full-screen blocker except the initial connected handshake                    |
+| `ready`             | Data present and current                                          | The normal view                                                                                                                                 |
+| `empty`             | Fetch succeeded, zero items                                       | A labelled empty state with a one-line "what goes here / what to do next" hint                                                                  |
+| `error`             | Fetch/action failed                                               | Inline error with a **Retry** affordance for recoverable errors; a toast only for fire-and-forget actions                                       |
+| `stale`             | Data shown but known out of date (e.g. during reconnect)          | The normal view plus a non-blocking status hint (connection banner); interactions that require a live socket are disabled with a reason         |
+| `permission-denied` | The user may see the view but not act                             | The view renders read-only; the disallowed control is **disabled with a visible reason**, never hidden silently and never enabled-then-rejected |
+| `offline`           | No live socket                                                    | Live-only controls disabled with the connection status surfaced                                                                                 |
 
 **Principle — no silent states.** Every terminal outcome (success, empty,
-failure, denial) produces *some* observable feedback. A control that will be
+failure, denial) produces _some_ observable feedback. A control that will be
 rejected by the server must be pre-disabled with a reason; an action that
 succeeds without a visible result must emit a confirmation.
 
@@ -59,16 +59,16 @@ succeeds without a visible result must emit a confirmation.
 The client has a fixed set of feedback surfaces. Each has one job; pick by the
 decision table, don't improvise.
 
-| Primitive | Source | Use for | Do **not** use for |
-|-----------|--------|---------|--------------------|
-| **Toast** (`info`/`success`/`error`, 5 s auto-dismiss, max 5) | `lib/toast.ts` → `components/Toast.ts` | Transient results of an explicit user action (sent, copied, saved, "couldn't reach server") | Anything the user must act on; anything that must survive navigation |
-| **Inline field error** | per-form | Validation and per-field server rejections (bad password, weak input) | Global/connection state |
-| **Inline section error + Retry** | per-view | A failed load of a view's own data (messages, invites, pins) | One-shot actions (use a toast) |
-| **Persistent banner** | `components/ServerBanner.ts` (reconnect/restart), ad-hoc cert banner | Connection status: reconnecting, server-restart countdown, first-trust cert notice | Per-action results |
-| **Blocking modal** | `lib/modalFactory.ts` (+ `CertMismatchModal`) | Decisions that must be made before proceeding: cert mismatch, destructive confirm | Routine feedback; anything dismissable-by-ignoring |
-| **Two-click / inline confirm** | `AdminActions.ts` `withConfirmation`, `PendingDeleteManager` | Reversible-ish destructive actions in dense menus (kick, ban, delete channel, delete message) | Irreversible account-level actions (use a modal with typed confirm) |
-| **Disabled control + reason** | per-control | Actions not currently permitted (offline, no permission, slow-mode cooldown, upload in flight) | Errors that already happened |
-| **Transient-error store** (`ui.store.setTransientError`) | survives navigation | A message that must appear on the *connect* page after a forced disconnect (banned, kicked, restart) | In-session messaging (use a toast) |
+| Primitive                                                     | Source                                                               | Use for                                                                                              | Do **not** use for                                                   |
+| ------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Toast** (`info`/`success`/`error`, 5 s auto-dismiss, max 5) | `lib/toast.ts` → `components/Toast.ts`                               | Transient results of an explicit user action (sent, copied, saved, "couldn't reach server")          | Anything the user must act on; anything that must survive navigation |
+| **Inline field error**                                        | per-form                                                             | Validation and per-field server rejections (bad password, weak input)                                | Global/connection state                                              |
+| **Inline section error + Retry**                              | per-view                                                             | A failed load of a view's own data (messages, invites, pins)                                         | One-shot actions (use a toast)                                       |
+| **Persistent banner**                                         | `components/ServerBanner.ts` (reconnect/restart), ad-hoc cert banner | Connection status: reconnecting, server-restart countdown, first-trust cert notice                   | Per-action results                                                   |
+| **Blocking modal**                                            | `lib/modalFactory.ts` (+ `CertMismatchModal`)                        | Decisions that must be made before proceeding: cert mismatch, destructive confirm                    | Routine feedback; anything dismissable-by-ignoring                   |
+| **Two-click / inline confirm**                                | `AdminActions.ts` `withConfirmation`, `PendingDeleteManager`         | Reversible-ish destructive actions in dense menus (kick, ban, delete channel, delete message)        | Irreversible account-level actions (use a modal with typed confirm)  |
+| **Disabled control + reason**                                 | per-control                                                          | Actions not currently permitted (offline, no permission, slow-mode cooldown, upload in flight)       | Errors that already happened                                         |
+| **Transient-error store** (`ui.store.setTransientError`)      | survives navigation                                                  | A message that must appear on the _connect_ page after a forced disconnect (banned, kicked, restart) | In-session messaging (use a toast)                                   |
 
 ---
 
@@ -104,11 +104,11 @@ source of truth in `ui.store.connectionStatus`
 > LiveKit's own reconnection keeps retrying underneath — only the UI is gated,
 > never LiveKit's machinery.
 
-| Status | Composer / send | Voice controls | Presence picker | Reconnect banner |
-|--------|-----------------|----------------|-----------------|------------------|
-| `connected` | enabled | enabled | enabled | hidden |
-| `reconnecting` | disabled, "Reconnecting…" | frozen, retrying underneath | disabled | visible, spinner |
-| `disconnected` | disabled | torn down | disabled | visible or → connect page on fatal |
+| Status         | Composer / send           | Voice controls              | Presence picker | Reconnect banner                   |
+| -------------- | ------------------------- | --------------------------- | --------------- | ---------------------------------- |
+| `connected`    | enabled                   | enabled                     | enabled         | hidden                             |
+| `reconnecting` | disabled, "Reconnecting…" | frozen, retrying underneath | disabled        | visible, spinner                   |
+| `disconnected` | disabled                  | torn down                   | disabled        | visible or → connect page on fatal |
 
 ---
 
@@ -116,33 +116,33 @@ source of truth in `ui.store.connectionStatus`
 
 The dispatcher (`src/lib/dispatcher.ts`) is the single fan-in from the socket to
 the stores. Target: **every** inbound message type produces a defined store
-mutation *and*, where user-visible, a defined UI reaction. The per-flow docs
+mutation _and_, where user-visible, a defined UI reaction. The per-flow docs
 detail each; this is the index.
 
-| Inbound event | Store effect | Target UI reaction |
-|---------------|--------------|--------------------|
-| `auth_ok` | `auth.setAuth` | Advance handshake → ready overlay |
-| `auth_error` | `ui.setTransientError` + `auth.clearAuth` | Return to connect page with the reason shown |
-| `ready` | bulk-load channels/roles/members/voice/dm | Render main view; resolve the connected overlay |
-| `chat_message` | `messages.addMessage` (+ unread/DM/notify) | Append; reconcile a pending optimistic row if it's our echo |
-| `chat_send_ok` | `messages.confirmSend` | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md)) |
-| `chat_edited` / `chat_deleted` | `messages.editMessage` / `deleteMessage` | In-place edit / tombstone |
-| `chat_bulk_deleted` | `messages.bulkDeleteMessages` | Remove every purged row in one pass |
-| `reaction_update` | `messages.updateReaction` | Toggle the pill + count, reflect `me` |
-| `typing` | `members.setTyping` (5 s auto-clear) | Typing indicator |
-| `presence` / `member_update` / `user_update` | `members.*` | Live member-list update |
-| `member_join` / `member_leave` / `member_ban` | `members.add/remove` | Member-list add/remove |
-| `channel_create` / `channel_update` / `channel_delete` | `channels.*` | Sidebar update; redirect if the active channel was deleted |
-| `roles_update` | `channels.setRoles` | Refresh name colors + permission-gated affordances |
-| `emoji_update` | `emoji.setCustomEmoji` | Refresh picker, autocomplete, and rendered custom emoji |
-| `voice_state` / `voice_leave` / `voice_config` / `voice_speakers` | `voice.*` | Voice roster + speaking rings |
-| `voice_moved` / `voice_disconnected` | `voice.*` + `livekitSession` | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
-| `voice_token` / `voice_e2ee_*` | `livekitSession.*` | Drive the voice-join + securing indicators |
-| `dm_channel_open` / `dm_channel_close` | `dm.*` | DM list add/remove |
-| `server_restart` | `ui.setTransientError` | Restart banner with countdown |
-| `error` | `ui.setTransientError` (+ `clearAuth` on `BANNED`) | Map the code → the reaction in §5 |
+| Inbound event                                                     | Store effect                                       | Target UI reaction                                                                                                |
+| ----------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `auth_ok`                                                         | `auth.setAuth`                                     | Advance handshake → ready overlay                                                                                 |
+| `auth_error`                                                      | `ui.setTransientError` + `auth.clearAuth`          | Return to connect page with the reason shown                                                                      |
+| `ready`                                                           | bulk-load channels/roles/members/voice/dm          | Render main view; resolve the connected overlay                                                                   |
+| `chat_message`                                                    | `messages.addMessage` (+ unread/DM/notify)         | Append; reconcile a pending optimistic row if it's our echo                                                       |
+| `chat_send_ok`                                                    | `messages.confirmSend`                             | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md))                                        |
+| `chat_edited` / `chat_deleted`                                    | `messages.editMessage` / `deleteMessage`           | In-place edit / tombstone                                                                                         |
+| `chat_bulk_deleted`                                               | `messages.bulkDeleteMessages`                      | Remove every purged row in one pass                                                                               |
+| `reaction_update`                                                 | `messages.updateReaction`                          | Toggle the pill + count, reflect `me`                                                                             |
+| `typing`                                                          | `members.setTyping` (5 s auto-clear)               | Typing indicator                                                                                                  |
+| `presence` / `member_update` / `user_update`                      | `members.*`                                        | Live member-list update                                                                                           |
+| `member_join` / `member_leave` / `member_ban`                     | `members.add/remove`                               | Member-list add/remove                                                                                            |
+| `channel_create` / `channel_update` / `channel_delete`            | `channels.*`                                       | Sidebar update; redirect if the active channel was deleted                                                        |
+| `roles_update`                                                    | `channels.setRoles`                                | Refresh name colors + permission-gated affordances                                                                |
+| `emoji_update`                                                    | `emoji.setCustomEmoji`                             | Refresh picker, autocomplete, and rendered custom emoji                                                           |
+| `voice_state` / `voice_leave` / `voice_config` / `voice_speakers` | `voice.*`                                          | Voice roster + speaking rings                                                                                     |
+| `voice_moved` / `voice_disconnected`                              | `voice.*` + `livekitSession`                       | Follow a mod move by rejoining the new channel / tear down after a mod kick with an error toast naming the reason |
+| `voice_token` / `voice_e2ee_*`                                    | `livekitSession.*`                                 | Drive the voice-join + securing indicators                                                                        |
+| `dm_channel_open` / `dm_channel_close`                            | `dm.*`                                             | DM list add/remove                                                                                                |
+| `server_restart`                                                  | `ui.setTransientError`                             | Restart banner with countdown                                                                                     |
+| `error`                                                           | `ui.setTransientError` (+ `clearAuth` on `BANNED`) | Map the code → the reaction in §5                                                                                 |
 
-`call_incoming` / `call_declined` are deliberately *not* routed through the
+`call_incoming` / `call_declined` are deliberately _not_ routed through the
 dispatcher: `MainPage.ts` subscribes to them directly (page-scoped listeners)
 and drives the ring state machine in `lib/call-ring.ts` +
 `components/IncomingCallBanner.ts`.
@@ -162,26 +162,26 @@ One canonical reaction per failure class, applied everywhere. Today error
 handling is per-call-site with no shared mapper (`doFetch()` in `lib/api.ts` centralizes only
 401); this matrix is the target contract.
 
-| Class | Source | Target reaction |
-|-------|--------|-----------------|
-| **401 Unauthorized** | any REST call | Global: `clearAuth()` → disconnect → connect page, with "Your session expired — sign in again." (centralized in `api.ts` + `main.ts`; since 2026-07 `uploadFile` honors it too, and the connect page shows the session-expired reason) |
-| **403 Forbidden** (action) | REST/WS | Toast "You don't have permission to do that." **and** pre-disable the control so it can't be attempted again in that context |
-| **403 Suspended/Banned** | login REST / WS `BANNED` | Transient-error store → connect page: "Your account has been suspended." Force logout, no reconnect |
-| **429 Rate-limited** | REST/WS `RATE_LIMITED` | Non-destructive toast "You're doing that too fast — try again in a moment." Keep the user's input; re-enable the control after a short cooldown |
-| **Slow-mode** | WS `SLOW_MODE` | Disable send with a live countdown in the composer; do not drop the drafted message |
-| **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars in the `handleFormSubmit()` catch block, `pages/connect-page/LoginForm.ts`; apply everywhere) |
-| **Conflict/Not-found (404/409)** | REST/WS | Contextual inline message + refresh the affected view (the target moved/vanished) |
-| **5xx / network** | REST | Inline section error + **Retry**; for one-shot actions, a toast "Couldn't reach the server." Never a silent drop |
-| **Transport backpressure** | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent) |
-| **Cert first-use** | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy *rejects* the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: the `ws.onCertFirstUse(...)` handler in `main.ts`) |
-| **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: the `ws.onCertMismatch(...)` handler in `main.ts`) |
+| Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
+| -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **401 Unauthorized**             | any REST call               | Global: `clearAuth()` → disconnect → connect page, with "Your session expired — sign in again." (centralized in `api.ts` + `main.ts`; since 2026-07 `uploadFile` honors it too, and the connect page shows the session-expired reason)                           |
+| **403 Forbidden** (action)       | REST/WS                     | Toast "You don't have permission to do that." **and** pre-disable the control so it can't be attempted again in that context                                                                                                                                     |
+| **403 Suspended/Banned**         | login REST / WS `BANNED`    | Transient-error store → connect page: "Your account has been suspended." Force logout, no reconnect                                                                                                                                                              |
+| **429 Rate-limited**             | REST/WS `RATE_LIMITED`      | Non-destructive toast "You're doing that too fast — try again in a moment." Keep the user's input; re-enable the control after a short cooldown                                                                                                                  |
+| **Slow-mode**                    | WS `SLOW_MODE`              | Disable send with a live countdown in the composer; do not drop the drafted message                                                                                                                                                                              |
+| **Validation (400)**             | REST                        | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars in the `handleFormSubmit()` catch block, `pages/connect-page/LoginForm.ts`; apply everywhere)                                                             |
+| **Conflict/Not-found (404/409)** | REST/WS                     | Contextual inline message + refresh the affected view (the target moved/vanished)                                                                                                                                                                                |
+| **5xx / network**                | REST                        | Inline section error + **Retry**; for one-shot actions, a toast "Couldn't reach the server." Never a silent drop                                                                                                                                                 |
+| **Transport backpressure**       | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent)                                                                              |
+| **Cert first-use**               | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy _rejects_ the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: the `ws.onCertFirstUse(...)` handler in `main.ts`) |
+| **Cert mismatch**                | Rust `cert-tofu: mismatch`  | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: the `ws.onCertMismatch(...)` handler in `main.ts`)                                                                                                  |
 
 ---
 
 ## 6. Cross-cutting principles
 
 1. **Optimistic where the user acts, authoritative where the server decides.**
-   Local actions (send, react, mute) reflect immediately with a *pending* marker,
+   Local actions (send, react, mute) reflect immediately with a _pending_ marker,
    then reconcile against the server echo; on failure they roll back visibly with
    a retry — never silently.
 2. **Permission is expressed as affordance, not as rejection.** If the server

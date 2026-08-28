@@ -1,0 +1,128 @@
+{
+  "identifier": "default",
+  "description": "Default capability granting core permissions to the main window. NOTE: http:allow-fetch is the ONLY URL-scoped HTTP identifier — tauri-plugin-http validates the URL once, in the `fetch` command; `fetch_send` and `fetch_read_body` take an already-validated ResourceId and never consult a scope, so allow/deny blocks on those identifiers are inert. Do not re-add them.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-is-minimized",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-available-monitors",
+    "core:window:allow-center",
+    "core:window:allow-request-user-attention",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "notification:allow-is-permission-granted",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        {
+          "url": "https://*:*"
+        },
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://127.0.0.1:*"
+        }
+      ],
+      "deny": [
+        {
+          "url": "https://localhost"
+        },
+        {
+          "url": "https://localhost:*"
+        },
+        {
+          "url": "https://127.0.0.1"
+        },
+        {
+          "url": "https://127.0.0.1:*"
+        }
+      ]
+    },
+    "http:allow-fetch-send",
+    "http:allow-fetch-read-body",
+    "http:allow-fetch-cancel",
+    "opener:default",
+    "dialog:default",
+    "process:allow-restart",
+    "window-state:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "deep-link:default",
+    "deep-link:allow-register",
+    "fs:default",
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "$APPLOG/**"
+        }
+      ]
+    }
+  ]
+}

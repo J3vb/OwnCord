@@ -8,7 +8,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // roleFromGen maps the sqlc-generated Role row to the domain Role model,

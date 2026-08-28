@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // entry records individual request timestamps for sliding-window limiting.

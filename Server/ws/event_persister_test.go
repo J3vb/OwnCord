@@ -7,12 +7,27 @@
 package ws
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
+
+// captureLogs redirects the default slog logger to a buffer for the duration
+// of fn and returns everything it wrote.
+func captureLogs(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	fn()
+	return buf.String()
+}
 
 // openPersisterTestDB opens an in-memory database with migrations applied for
 // EventPersister tests. *db.DB satisfies the EventStore interface the persister
@@ -156,5 +171,52 @@ func TestEventPersisterStopDrains(t *testing.T) {
 	persisted, _, _, _ := p.Stats()
 	if persisted != 5 {
 		t.Fatalf("expected 5 persisted after Stop drain, got %d", persisted)
+	}
+}
+
+// TestEventPersisterEnqueueAfterStopDropsLoudly locks the fixed contract this
+// package's own doc comment promises ("when the queue is full, events are
+// dropped and a counter is incremented"): a call into Enqueue after Stop has
+// fully returned must count as a drop and log loudly, not vanish silently
+// into a channel nothing reads anymore. main.go's shutdown order lets exactly
+// this race happen — the hub can still be broadcasting (e.g. the
+// server_restart notice window) after the persister's Stop has returned, so
+// callers into a stopped persister are an expected shutdown path, not a bug
+// at the call site.
+func TestEventPersisterEnqueueAfterStopDropsLoudly(t *testing.T) {
+	mem := openPersisterTestDB(t)
+	p := NewEventPersister(mem, 64, 50, time.Hour)
+	p.Start(context.Background())
+	p.Stop(context.Background())
+
+	_, droppedBefore, _, _ := p.Stats()
+
+	out := captureLogs(t, func() {
+		p.Enqueue(42, "broadcast", 7, []byte(`{"type":"x"}`))
+	})
+
+	_, droppedAfter, _, _ := p.Stats()
+	if droppedAfter != droppedBefore+1 {
+		t.Errorf("dropped counter = %d, want %d (post-Stop Enqueue must count as a loud drop)", droppedAfter, droppedBefore+1)
+	}
+	for _, want := range []string{
+		"event dropped",
+		"seq=42",
+		"channel_id=7",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q: %s", want, out)
+		}
+	}
+
+	// The event must not have landed in the store either — a silent success
+	// into a dead channel would otherwise let the row race with (or follow)
+	// main.go's LIFO database.Close().
+	rows, err := mem.GetEventsSince(context.Background(), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows persisted post-stop, got %d", len(rows))
 	}
 }

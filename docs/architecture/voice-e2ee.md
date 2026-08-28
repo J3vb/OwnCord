@@ -74,6 +74,6 @@ and surface a blocking mismatch modal if it later changes (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/tauri-client/src/lib/livekitSession.ts`,
-`Client/tauri-client/src/lib/e2eeCrypto.ts`,
-`Client/tauri-client/src-tauri/src/livekit_proxy.rs`.
+`Client/src/lib/livekitSession.ts`,
+`Client/src/lib/e2eeCrypto.ts`,
+`Client/src-tauri/src/livekit_proxy.rs`.

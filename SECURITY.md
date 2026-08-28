@@ -5,10 +5,10 @@
 OwnCord is in alpha. Only the **latest release** receives security fixes.
 There are no backports.
 
-| Version | Supported |
-| ------- | --------- |
-| Latest release (see [Releases](https://github.com/J3vb/OwnCord/releases)) | Yes |
-| Anything older | No |
+| Version                                                                   | Supported |
+| ------------------------------------------------------------------------- | --------- |
+| Latest release (see [Releases](https://github.com/J3vb/OwnCord/releases)) | Yes       |
+| Anything older                                                            | No        |
 
 ## Reporting a vulnerability
 

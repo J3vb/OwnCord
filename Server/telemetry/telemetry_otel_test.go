@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/config"
+	"github.com/J3vb/OwnCord/Server/config"
 )
 
 func TestOtelInitPrometheusExporter(t *testing.T) {

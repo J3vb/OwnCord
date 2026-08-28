@@ -13,8 +13,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 const oc0006VideoStreamRoleID = int64(211)

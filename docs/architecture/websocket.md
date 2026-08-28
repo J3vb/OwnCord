@@ -7,10 +7,10 @@ implements the real-time engine: a single `Hub` owning all client connections,
 a topic-based pub/sub, a monotonic sequence counter, a 3-tier reconnect replay
 pipeline, and a single typed (V2) command dispatch.
 
-Message-type constants are **generated**: `docs/protocol-schema.json` is the
-single source of truth, and `Server/scripts/genprotocol` emits both
+Message-type constants are **generated**: `protocol/schema.json` is the
+single source of truth, and `Server/cmd/genprotocol` emits both
 `Server/ws/message_types.go` and
-`Client/tauri-client/src/lib/protocolTypes.ts` from it
+`Client/src/lib/protocolTypes.ts` from it
 (`make protocol-generate`; CI fails on drift via `make protocol-verify`).
 The one exception is the plugin command family (`chat_command`,
 `command_reply`, `plugin_broadcast`), declared by hand in

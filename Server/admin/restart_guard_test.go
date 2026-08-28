@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/updater"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 // ─── The restart handoff: swap success paths and the serialization guard ────

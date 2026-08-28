@@ -4,11 +4,11 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ClientInfo holds a read-only snapshot of client state for V2 handlers.
@@ -176,6 +176,34 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 		return false
 	}
 	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
+}
+
+// hasPermChecked is hasPerm's error-preserving counterpart: it distinguishes
+// "the role/override lookup failed" (err != nil, verdict meaningless) from
+// "the lookup answered and the bit is absent" (false, nil error). hasPerm and
+// hasChannelAccess both collapse that distinction to a fail-closed false,
+// which is the correct posture for every gate that sends FORBIDDEN on denial
+// (requireChannelAccess, requirePerm, and friends) — do not route those
+// through this helper. It exists for a caller like applySetChannelID's
+// post-Subscribe revalidation (OC-0266), which documents that a transient
+// lookup error must NOT be treated as a denial: unwinding on a DB hiccup
+// would silently kill the channel's live message stream with no error frame
+// ever sent to the client.
+func hasPermChecked(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) (bool, error) {
+	if permSvc != nil {
+		return permSvc.HasChannelPermChecked(ctx, userID, channelID, perm)
+	}
+	if database == nil || perms == nil {
+		return false, nil
+	}
+	role, err := database.GetRoleForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if role == nil {
+		return false, nil
+	}
+	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm), nil
 }
 
 // hasChannelAccess is the gate to use when the channel id comes from the client:

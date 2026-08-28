@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // TestSetupLimiter_ReapsStaleEntries pins OC-0076: setupLimiter — the

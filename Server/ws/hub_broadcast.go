@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -928,6 +928,22 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 		return false
 	}
 	c.sendHighMsg(msg)
+	return true
+}
+
+// SendToUserLow sends a low-priority message to a specific user. Unlike
+// SendToUserHigh, an overflow is silently dropped rather than disconnecting
+// the client — the targeted-delivery sibling of BroadcastToAllLow /
+// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
+// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.sendLowMsg(msg)
 	return true
 }
 

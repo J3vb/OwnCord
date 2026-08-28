@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestRateLimiter_UnderLimitAllowed(t *testing.T) {

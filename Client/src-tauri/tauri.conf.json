@@ -1,0 +1,72 @@
+{
+  "productName": "OwnCord",
+  "version": "1.2.0-alpha.4",
+  "identifier": "com.owncord.client",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OwnCord",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 940,
+        "minHeight": 500,
+        "decorations": true,
+        "resizable": true,
+        "center": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream"
+      }
+    ],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://ipc.localhost https: wss: http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' blob: https: data:; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-src https://www.youtube.com https://youtube.com; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": "v1Compatible",
+    "targets": ["nsis", "appimage", "deb"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "libsecret-1-0"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "category": "SocialNetworking",
+    "shortDescription": "Self-hosted chat platform",
+    "longDescription": "OwnCord is a self-hosted voice and text chat platform with end-to-end encryption and full media support.",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJCQkQ0NzM1MjkxRTlGQTIKUldTaW54NHBOVWU5dTRqYW0yalI5VTJBd0NXOUZwM2UrcDM4YkhCSmlMZWJKWWVXaGJWdHBaSHgK",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["owncord"]
+      }
+    }
+  }
+}

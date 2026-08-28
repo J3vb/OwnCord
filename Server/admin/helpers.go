@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/db"
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ValidateUsername checks that a (pre-trimmed) username meets naming rules:

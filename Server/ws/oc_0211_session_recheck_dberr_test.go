@@ -13,7 +13,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestHandleMessageSessionRecheck_TransientDBErrorDoesNotKick(t *testing.T) {

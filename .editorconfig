@@ -1,0 +1,30 @@
+# Editor baseline for OwnCord. Pairs with .gitattributes (`* text=auto eol=lf`)
+# and the repository Prettier config — all three agree on LF and trailing
+# newlines, so an editor that honours this file produces bytes CI accepts.
+#
+# This is a baseline, not a gate. Prettier, gofmt and rustfmt are what actually
+# fail the build; nothing lints this file.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# gofmt emits tabs and is the authority for Go.
+[*.go]
+indent_style = tab
+
+[{go.mod,go.sum}]
+indent_style = tab
+
+# rustfmt default profile.
+[*.rs]
+indent_size = 4
+
+# Recipe lines are tab-significant to make(1).
+[Makefile]
+indent_style = tab

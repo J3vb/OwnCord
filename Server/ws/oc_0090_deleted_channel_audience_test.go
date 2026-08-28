@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // OC-0090: channelReadAudience fails closed on a GetChannel *error*, but a

@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/updater"
 )
 
 //go:embed static

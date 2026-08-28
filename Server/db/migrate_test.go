@@ -30,7 +30,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // failReadDirFS is an fs.FS whose root Open succeeds but ReadDir always errors.

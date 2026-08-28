@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/migrations"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 )
 
 // TestDeleteExpiredSessions_SargableFormat locks the migration-031 contract:

@@ -6,7 +6,7 @@ import (
 	"go.uber.org/goleak"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/owncord/server/auth"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestMain(m *testing.M) {
@@ -17,6 +17,6 @@ func TestMain(m *testing.M) {
 		// Hub.Run starts long-lived goroutines that are stopped via Hub.Stop().
 		// API tests create routers (which start hubs) but don't always call
 		// Stop() — these are expected background goroutines, not leaks.
-		goleak.IgnoreTopFunction("github.com/owncord/server/ws.(*Hub).Run.func1"),
+		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).Run.func1"),
 	)
 }

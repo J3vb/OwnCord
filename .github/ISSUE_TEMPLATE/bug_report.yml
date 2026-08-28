@@ -1,0 +1,169 @@
+# A YAML issue form, not a Markdown template: only this format can mark a field
+# required, so the environment detail a maintainer needs to reproduce a bug
+# arrives with the report instead of after a round trip.
+#
+# Nothing in this repository validates this file's schema — prettier checks it
+# parses as YAML and actionlint does not read it. A form that is valid YAML but
+# an invalid issue form silently stops appearing in the chooser, so changes here
+# want a look at the live "New issue" page afterwards.
+name: Bug report
+description: Something in the server, desktop client, or admin panel is broken.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** Use
+        [private security reporting](https://github.com/J3vb/OwnCord/security/advisories/new)
+        instead — a public issue discloses the problem before there is a fix.
+
+        Questions, ideas and feedback belong in
+        [Discussions](https://github.com/J3vb/OwnCord/discussions), not here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from a known starting state. A bug nobody can reproduce cannot be fixed.
+      placeholder: |
+        1. Start the server with …
+        2. In the client, open …
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Server
+        - Desktop client
+        - Admin panel
+        - Both server and client
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version
+      description: >-
+        Admin panel → Updates, or the banner the server prints at startup. It is
+        deliberately not exposed on the unauthenticated /health endpoint, so
+        "unknown" is a fine answer if you are not the operator. A server built
+        from source reports "dev".
+      placeholder: "1.2.0-alpha.4 / dev / unknown"
+    validations:
+      required: false
+
+  - type: input
+    id: client-version
+    attributes:
+      label: Client version
+      description: Settings → Logs shows it. Leave blank for a server-only bug.
+      placeholder: "1.2.0-alpha.4"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: CPU architecture
+      description: ARM64 currently applies to the Linux desktop client; there is no ARM64 server release yet.
+      options:
+        - x64
+        - ARM64 (aarch64)
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How is the server deployed
+      options:
+        - Prebuilt binary (Windows)
+        - Prebuilt binary (Linux)
+        - Built from source
+        - Docker / Compose
+        - Linux systemd service
+        - Windows service (NSSM or Task Scheduler)
+        - Not applicable — client-only bug
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tls-mode
+    attributes:
+      label: TLS mode
+      description: The `tls.mode` setting in config.yaml.
+      options:
+        - self_signed
+        - acme
+        - manual
+        - "off"
+        - Not applicable / not sure
+    validations:
+      required: false
+
+  - type: dropdown
+    id: topology
+    attributes:
+      label: How do clients reach the server
+      options:
+        - Same machine or LAN, direct
+        - Port forwarding to a public IP
+        - Behind a reverse proxy
+        - Tailscale
+        - Not sure
+    validations:
+      required: false
+
+  - type: dropdown
+    id: webview
+    attributes:
+      label: Client webview
+      description: >-
+        The desktop client renders through the OS webview — WebView2 on Windows,
+        WebKitGTK on Linux — so rendering and networking bugs often depend on it.
+        Skip this for a server-only bug.
+      options:
+        - WebView2 (Windows)
+        - WebKitGTK (Linux)
+        - Not applicable / not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or anything else
+      description: >-
+        Server console output or Settings → Logs from the client. Redact tokens,
+        invite codes and anything else you would not post publicly.
+    validations:
+      required: false

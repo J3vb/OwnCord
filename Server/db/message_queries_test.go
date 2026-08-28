@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // seedUser inserts a minimal test user and returns its ID.

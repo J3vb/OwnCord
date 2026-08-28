@@ -3,7 +3,7 @@ package ws
 import (
 	"time"
 
-	"github.com/owncord/server/syncutil"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // TopicRateLimiter enforces per-topic throughput caps to prevent a single

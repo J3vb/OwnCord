@@ -43,13 +43,13 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 
 ### 2.1 Server profiles & health
 
-| State | Trigger | Target reaction |
-|-------|---------|-----------------|
-| `loading` | Profile list resolving from the Rust store (`owncord:profiles`) | Skeleton rows; no flash of "no servers" |
-| `ready` | Profiles loaded | List with per-profile health dot |
-| `empty` | No saved profiles | "Add a server to get started" with an inline add affordance |
-| health: reachable | `GET /api/v1/health` ok within 3 s | Green dot + server name/MOTD preview |
-| health: unreachable | timeout/opaque error | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
+| State               | Trigger                                                         | Target reaction                                                             |
+| ------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `loading`           | Profile list resolving from the Rust store (`owncord:profiles`) | Skeleton rows; no flash of "no servers"                                     |
+| `ready`             | Profiles loaded                                                 | List with per-profile health dot                                            |
+| `empty`             | No saved profiles                                               | "Add a server to get started" with an inline add affordance                 |
+| health: reachable   | `GET /api/v1/health` ok within 3 s                              | Green dot + server name/MOTD preview                                        |
+| health: unreachable | timeout/opaque error                                            | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
 
 Health polls every 15 s (interval wired in `main.ts`, profile data via
 `profiles.ts`); auto-connect, if enabled for the active profile, drives the
@@ -61,14 +61,14 @@ The form is an explicit FSM: `idle | loading | totp | connecting | error |
 auto-connecting` (the `FormState` type in `pages/connect-page/LoginForm.ts`). This is the model other views should
 follow.
 
-| State | Presentation | Exit |
-|-------|--------------|------|
-| `idle` | Enabled fields; Login/Register toggle | submit → validate |
-| `loading` | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`) | `auth.login` resolves |
-| `totp` | 6-digit overlay, Verify/Cancel | code → `verifyTotp` |
-| `connecting` | "Connecting…" while WS handshakes | ws `connected` |
-| `auto-connecting` | Dedicated spinner card for saved-profile auto-login | any key/click cancels to `idle` |
-| `error` | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle` |
+| State             | Presentation                                                                                                                      | Exit                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `idle`            | Enabled fields; Login/Register toggle                                                                                             | submit → validate               |
+| `loading`         | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`)                   | `auth.login` resolves           |
+| `totp`            | 6-digit overlay, Verify/Cancel                                                                                                    | code → `verifyTotp`             |
+| `connecting`      | "Connecting…" while WS handshakes                                                                                                 | ws `connected`                  |
+| `auto-connecting` | Dedicated spinner card for saved-profile auto-login                                                                               | any key/click cancels to `idle` |
+| `error`           | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle`             |
 
 **Client-side validation before any request** (`validateForm()` in `LoginForm.ts`): host,
 username, password required; password ≥ 8; register mode also requires the invite
@@ -105,14 +105,14 @@ sequenceDiagram
 
 **Auth branches → reaction** (server `auth_handler.go`):
 
-| Server result | Target reaction |
-|---------------|-----------------|
-| `200 {token, user}` | Proceed to WS connect |
+| Server result                       | Target reaction                                                                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200 {token, user}`                 | Proceed to WS connect                                                                                                                                    |
 | `200 {partial_token, requires_2fa}` | TOTP overlay; on cancel, clear the partial token (already cleared: the `onTotpSubmit` handler's `finally` in `main.ts` resets `pendingTotpPartialToken`) |
-| `403` banned/suspended | Error banner with the server message; remain on the form |
-| `403` require-2FA-but-none-set | Error banner directing the user to set up 2FA on the web panel |
-| `400` invalid input | Inline field error |
-| `429` rate-limited | "Too many attempts — wait a moment." Keep entered username; re-enable after cooldown |
+| `403` banned/suspended              | Error banner with the server message; remain on the form                                                                                                 |
+| `403` require-2FA-but-none-set      | Error banner directing the user to set up 2FA on the web panel                                                                                           |
+| `400` invalid input                 | Inline field error                                                                                                                                       |
+| `429` rate-limited                  | "Too many attempts — wait a moment." Keep entered username; re-enable after cooldown                                                                     |
 
 ### 2.4 Register-by-invite
 
@@ -145,7 +145,7 @@ sequenceDiagram
     OVL->>OVL: onReady → router.navigate("main")
 ```
 
-**Target rule:** the ready overlay is the *only* full-screen blocker in the app.
+**Target rule:** the ready overlay is the _only_ full-screen blocker in the app.
 It exists specifically so Main never renders mid-populate. Everything else
 (message load, member load) uses in-region loading, not a global block.
 
@@ -168,19 +168,19 @@ stateDiagram-v2
     Restarting --> Reconnecting: server drops us
 ```
 
-| Phase | Target reaction |
-|-------|-----------------|
-| `reconnecting` | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved |
-| replay resync | Silent when the ring buffer covers `last_seq`; deduped so no double-render (the replay-dedup block inside `handleMessage()`, `lib/ws.ts`); unread suppressed during replay (the `chat_message` handler's `!ws.isReplaying()` guard in `wireDispatcher()`, `lib/dispatcher.ts`) |
-| full resync | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action |
-| `server_restart` | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`) |
-| fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page |
+| Phase                | Target reaction                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reconnecting`       | `ServerBanner.showReconnecting()` (already `applyConnectionStatus()`, `components/ServerBanner.ts`, invoked from MainPage's connectionStatus subscription); **live-only controls disable** via connection status (§3 of README); drafted input preserved                       |
+| replay resync        | Silent when the ring buffer covers `last_seq`; deduped so no double-render (the replay-dedup block inside `handleMessage()`, `lib/ws.ts`); unread suppressed during replay (the `chat_message` handler's `!ws.isReplaying()` guard in `wireDispatcher()`, `lib/dispatcher.ts`) |
+| full resync          | If `last_seq` predates buffer coverage, server replays from the events table or forces a full `ready`; the UI simply re-populates — no user action                                                                                                                             |
+| `server_restart`     | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                |
+| fatal (`auth_error`) | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                       |
 
 **Target rule:** reconnection is invisible on the happy path and honest on the
 sad path. The user should never wonder whether the app is live — the banner and
 the disabled live-controls answer it. This is where consolidating connection
 status onto `ui.store` (README §3) pays off: the composer, voice controls, and
-presence picker all disable *reactively* while reconnecting, instead of accepting
+presence picker all disable _reactively_ while reconnecting, instead of accepting
 a click and failing.
 
 ---
@@ -189,16 +189,16 @@ a click and failing.
 
 The Rust proxies validate the server cert against the per-host pin store and
 emit `cert-tofu` events. **Deciding never writes a pin** (`tofu.rs`): an
-unknown host's first connection is *rejected* until the user confirms the
+unknown host's first connection is _rejected_ until the user confirms the
 fingerprint, so no credential is ever sent to an unconfirmed host. The HTTP
 proxy usually sees the host first (the connect page's health check precedes
 login and WS).
 
-| Event | Target reaction | Current |
-|-------|-----------------|---------|
+| Event       | Target reaction                                                                                                                                                                                                                                                                | Current                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `first_use` | **Blocking trust modal** (`createCertFirstUseModal`) showing host + fingerprint; **Accept** stores the pin (`accept_cert_fingerprint`), re-runs the connect-page health check and resumes a pending connect; **Cancel** leaves the host untrusted (health stays "unreachable") | Implemented in the `ws.onCertFirstUse(...)` handler in `main.ts`; shares a `certModalActive` guard with the mismatch modal so the two never stack |
-| `trusted` | No UI (silent, expected) | — |
-| `mismatch` | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page | Implemented in the `ws.onCertMismatch(...)` handler in `main.ts`; reconnect blocked until resolved (`certMismatchBlock`) |
+| `trusted`   | No UI (silent, expected)                                                                                                                                                                                                                                                       | —                                                                                                                                                 |
+| `mismatch`  | **Blocking** `CertMismatchModal`: explain the fingerprint changed; **Accept** re-pins (`accept_cert_fingerprint`) + reconnects; **Reject** disconnects, `clearAuth()`, → connect page                                                                                          | Implemented in the `ws.onCertMismatch(...)` handler in `main.ts`; reconnect blocked until resolved (`certMismatchBlock`)                          |
 
 ```mermaid
 sequenceDiagram
@@ -219,7 +219,7 @@ sequenceDiagram
     end
 ```
 
-**Target rule:** a cert mismatch is the one moment the client must *stop and ask*
+**Target rule:** a cert mismatch is the one moment the client must _stop and ask_
 — never auto-accept, never silently reconnect. This is correct today; the spec
 locks it.
 
@@ -227,12 +227,12 @@ locks it.
 
 ## 6. Logout & session lifecycle
 
-| Trigger | Target behavior |
-|---------|-----------------|
-| User logout | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page |
-| 401 anywhere | Same as logout, with "Your session expired — sign in again." |
-| WS `BANNED` | Transient-error → connect page, no reconnect |
-| Cert reject | Disconnect → connect page |
+| Trigger      | Target behavior                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page |
+| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                          |
+| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                          |
+| Cert reject  | Disconnect → connect page                                                                                                                             |
 
 > **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
 > logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper

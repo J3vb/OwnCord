@@ -11,11 +11,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // newTestModService builds a real ModerationService over the test database so
@@ -1119,6 +1119,55 @@ func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate verifies
+// that the 2FA-enrollment precondition only applies to requests that actually
+// change require_2fa. Once require_2fa is already on, a later PATCH that
+// leaves it untouched (e.g. only motd) must not be rejected just because some
+// user without TOTP now exists (targetBoolSetting falls back to the stored
+// value, which is still "true", so validateRequire2FAUpdate must not
+// re-run the enrollment count for a key nobody asked to change).
+func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	token := createAdminUser(t, database)
+
+	// Enroll the admin so the initial require_2fa enable succeeds.
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
+		t.Fatalf("enroll admin user: %v", err)
+	}
+
+	enableBody := map[string]string{
+		"registration_open": "false",
+		"require_2fa":       "true",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, enableBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enabling require_2fa: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// A user without TOTP now exists (e.g. created after the gate closed, or
+	// unbanned once a temporary ban lapsed) — CountUsersWithoutTOTP is now > 0.
+	if _, err := database.CreateUser(context.Background(), "no-totp-user", "hash", 3); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// An unrelated settings PATCH that never mentions require_2fa must still
+	// succeed and actually write the change.
+	motdBody := map[string]string{"motd": "Back online"}
+	w = doRequest(t, handler, http.MethodPatch, "/settings", token, motdBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	val, err := database.GetSetting(context.Background(), "motd")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if val != "Back online" {
+		t.Errorf("motd = %q, want %q (unrelated PATCH must not be blocked by the require_2fa enrollment gate)", val, "Back online")
 	}
 }
 

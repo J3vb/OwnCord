@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/syncutil"
-	"github.com/owncord/server/telemetry"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
 // UserService handles user profile and session operations.
@@ -227,9 +227,34 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		}
 		return nil, fmt.Errorf("%w: failed to update profile: %v", ErrInternal, err)
 	}
-	user, err := s.st.GetUserByID(ctx, userID)
+	// This re-read, like the audit write below, must survive a request ctx
+	// canceled after the write above committed — otherwise a client that
+	// hangs up right after the commit turns a successful write into
+	// ErrInternal here, and the caller (handleUpdateProfile) never reaches
+	// broadcastUserUpdate: every other connected client is left showing the
+	// stale profile indefinitely even though the DB already has the new one.
+	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch updated user: %v", ErrInternal, err)
+		// OC-0297: the write above already committed, so this re-read failing
+		// (SQLITE_BUSY, an I/O error, pool exhaustion — anything short of the
+		// context cancellation the comment above already covers) must not be
+		// reported as ErrInternal. A caller that treats any UpdateProfile
+		// error as "the write never landed" — handleUploadAvatar deletes the
+		// file it just stored on that assumption — would otherwise delete a
+		// file the committed avatar column now points at, permanently
+		// breaking it with no user_update ever broadcast. UpdateUserProfile
+		// only ever writes username/avatar/display_name/about, so merging
+		// those four onto the pre-write snapshot (current) reconstructs the
+		// row that is now actually in the database without needing the read
+		// to succeed.
+		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
+			"user_id", userID, "error", err)
+		merged := *current
+		merged.Username = username
+		merged.Avatar = avatar
+		merged.DisplayName = displayName
+		merged.About = about
+		user = &merged
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
@@ -271,7 +296,12 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
 		return nil, fmt.Errorf("%w: failed to update identity key", ErrInternal)
 	}
-	user, err := s.st.GetUserByID(ctx, userID)
+	// Detached for the same reason as UpdateProfile's post-commit re-read: a
+	// request ctx canceled right after the write above commits must not turn
+	// an already-successful key rotation into ErrInternal here, which would
+	// stop the caller from broadcasting the new key to peers relying on it
+	// for TOFU pinning.
+	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
 	}

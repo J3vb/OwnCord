@@ -10,4 +10,4 @@ scrape_configs:
       - targets: ["host.docker.internal:8443"]
     scheme: https
     tls_config:
-      insecure_skip_verify: true  # dev-only; real certs in staging/prod
+      insecure_skip_verify: true # dev-only; real certs in staging/prod

@@ -10,9 +10,9 @@
 > `Server/db/` now); `src/state/` does not exist in the client (state modules
 > live in `src/stores/`). One slice of this plan did land separately: the
 > manifest `commands` name-only ACL (see the inline note in §"Manifest").
-**Owner:** TBD
-**Tracks:** deferred feature backlog (post-beta; see CHANGELOG "Deferred work")
-**Estimated effort:** 1–2 weeks of focused work
+> **Owner:** TBD
+> **Tracks:** deferred feature backlog (post-beta; see CHANGELOG "Deferred work")
+> **Estimated effort:** 1–2 weeks of focused work
 
 ## Why
 
@@ -119,7 +119,7 @@ truth for the per-command schema; the runtime never trusts what the plugin
 says at dispatch time. Example:
 
 > **Partially landed 2026-07-20** (audit-2026-04-07 CRITICAL #3): the
-> *name-only* slice of this block exists today — `plugin.json` accepts
+> _name-only_ slice of this block exists today — `plugin.json` accepts
 > `"commands": [{"name": "kick"}]` and `Registry.RegisterCommand` refuses any
 > command the manifest did not declare, so `list_commands` can no longer bind
 > names behind the admin's back. `description` / `options` /
@@ -197,25 +197,25 @@ namespace collisions are confusing for users.
 
 ### Code surface
 
-| File | Change |
-|---|---|
-| `Server/ws/message_types.go` | Add `MsgTypeCommandInvoke`, `MsgTypeCommandAutocomplete`, `MsgTypeCommandReply`, `MsgTypeCommandAutocompleteResult`. |
-| `Server/ws/command.go` | Add `CommandInvokeCmd`, `CommandAutocompleteCmd` structs and constructors. Validate name regex + arg count cap (25) at parse time so the dispatcher trusts its input. |
-| `Server/ws/handlers_command.go` | **New file.** `handleCommandInvokeV2`, `handleCommandAutocompleteV2`. Pure handlers — return a `Result` like the existing chat handlers. |
-| `Server/ws/handlers.go` | Register the new handlers via `r.RegisterV2(MsgTypeCommandInvoke, handleCommandInvokeV2, deps)`. |
-| `Server/ws/deps.go` | Add a `CommandDeps` carrying `*plugin.Registry`, `service.PermissionService`, and `service.MessageService`. |
-| `Server/plugin/host_commands.go` | Extend `DispatchCommand` to take a typed arg map (`map[string]any`) instead of `[]string`. Add `Autocomplete(ctx, name, focused, partial)`. |
-| `Server/plugin/manifest.go` | Add `Commands []CommandSpec` to `Manifest`, `validateCommands()`, and a `Manifest.Command(name)` lookup. |
-| `Server/store/sqlite_plugin_commands.go` | **New file.** CRUD over the `plugin_commands` table. |
-| `Server/migrations/016_plugin_commands.sql` | New migration. |
-| `Client/tauri-client/src/state/commands.ts` | **New module.** Caches per-server command list (fetched at `auth_ok` time via a new `commands_list` REST endpoint), feeds the autocomplete UI. |
-| `Client/tauri-client/src/components/Composer/SlashCommandPopup.tsx` | New component — autocomplete dropdown that opens when the message buffer starts with `/`. |
-| `docs/protocol.md` | Document the four new wire messages. |
+| File                                                   | Change                                                                                                                                                                |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Server/ws/message_types.go`                           | Add `MsgTypeCommandInvoke`, `MsgTypeCommandAutocomplete`, `MsgTypeCommandReply`, `MsgTypeCommandAutocompleteResult`.                                                  |
+| `Server/ws/command.go`                                 | Add `CommandInvokeCmd`, `CommandAutocompleteCmd` structs and constructors. Validate name regex + arg count cap (25) at parse time so the dispatcher trusts its input. |
+| `Server/ws/handlers_command.go`                        | **New file.** `handleCommandInvokeV2`, `handleCommandAutocompleteV2`. Pure handlers — return a `Result` like the existing chat handlers.                              |
+| `Server/ws/handlers.go`                                | Register the new handlers via `r.RegisterV2(MsgTypeCommandInvoke, handleCommandInvokeV2, deps)`.                                                                      |
+| `Server/ws/deps.go`                                    | Add a `CommandDeps` carrying `*plugin.Registry`, `service.PermissionService`, and `service.MessageService`.                                                           |
+| `Server/plugin/host_commands.go`                       | Extend `DispatchCommand` to take a typed arg map (`map[string]any`) instead of `[]string`. Add `Autocomplete(ctx, name, focused, partial)`.                           |
+| `Server/plugin/manifest.go`                            | Add `Commands []CommandSpec` to `Manifest`, `validateCommands()`, and a `Manifest.Command(name)` lookup.                                                              |
+| `Server/store/sqlite_plugin_commands.go`               | **New file.** CRUD over the `plugin_commands` table.                                                                                                                  |
+| `Server/migrations/016_plugin_commands.sql`            | New migration.                                                                                                                                                        |
+| `Client/src/state/commands.ts`                         | **New module.** Caches per-server command list (fetched at `auth_ok` time via a new `commands_list` REST endpoint), feeds the autocomplete UI.                        |
+| `Client/src/components/Composer/SlashCommandPopup.tsx` | New component — autocomplete dropdown that opens when the message buffer starts with `/`.                                                                             |
+| `docs/protocol.md`                                     | Document the four new wire messages.                                                                                                                                  |
 
 ### Permission model
 
 `default_member_permissions` is enforced **server-side** in
-`handleCommandInvokeV2` *before* the plugin is invoked, by calling
+`handleCommandInvokeV2` _before_ the plugin is invoked, by calling
 `PermissionService.HasChannelPerm` for each declared permission. Plugins
 do not get to decide who can use their commands; the manifest declares,
 the host enforces.
@@ -229,10 +229,10 @@ no plugin invocation, no telemetry leak.
 Two slash commands ship in-tree (no plugin required), to validate the
 dispatcher and to give bare-metal deployments something useful:
 
-| Command | Implementation | Why in-tree |
-|---|---|---|
+| Command      | Implementation                            | Why in-tree                    |
+| ------------ | ----------------------------------------- | ------------------------------ |
 | `/me <text>` | Built-in handler in `handlers_command.go` | Discord parity, IRC tradition. |
-| `/shrug` | Built-in handler | Same. Trivial. |
+| `/shrug`     | Built-in handler                          | Same. Trivial.                 |
 
 A future PR can add `/poll`, `/remind`, `/nick` etc. — all should follow
 the same handler shape so a plugin author can read the source as the
@@ -254,18 +254,19 @@ canonical example.
 
 ## Failure modes & UX
 
-| Failure | Server response | Client UX |
-|---|---|---|
-| No such command | `command_reply` ephemeral: `Unknown command: /foo` | Red banner under composer. |
-| Plugin runtime not built (default build) | Existing fallback in `DispatchCommand` returns the helpful error message | Same banner, no crash. |
-| Plugin handler timeout (>3s) | `command_reply` ephemeral: `/foo timed out` + audit log entry | Banner + telemetry tag. |
-| Plugin handler panics | Recovered in the runtime, ephemeral error, plugin auto-disabled after 3 panics in 60s | Banner + plugin marked unhealthy in admin panel. |
-| Permission denied | `command_invoke` returns `ErrCodeForbidden` before invocation | Banner: "You lack permission". |
-| Argument validation fails | `command_invoke` returns `ErrCodeBadPayload` with the field name | Composer highlights the bad option. |
+| Failure                                  | Server response                                                                       | Client UX                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| No such command                          | `command_reply` ephemeral: `Unknown command: /foo`                                    | Red banner under composer.                       |
+| Plugin runtime not built (default build) | Existing fallback in `DispatchCommand` returns the helpful error message              | Same banner, no crash.                           |
+| Plugin handler timeout (>3s)             | `command_reply` ephemeral: `/foo timed out` + audit log entry                         | Banner + telemetry tag.                          |
+| Plugin handler panics                    | Recovered in the runtime, ephemeral error, plugin auto-disabled after 3 panics in 60s | Banner + plugin marked unhealthy in admin panel. |
+| Permission denied                        | `command_invoke` returns `ErrCodeForbidden` before invocation                         | Banner: "You lack permission".                   |
+| Argument validation fails                | `command_invoke` returns `ErrCodeBadPayload` with the field name                      | Composer highlights the bad option.              |
 
 ## Testing strategy
 
 Unit:
+
 - `manifest_test.go` — extend with command validation (name regex, option
   type enum, max 25 options, max 100 char description).
 - `host_commands_test.go` — `DispatchCommand` with a stub `Instance`,
@@ -274,11 +275,13 @@ Unit:
   V2 test pattern (`stubMessageSvc`, `stubPermSvc`).
 
 Integration:
+
 - Add a new in-tree test plugin under `Server/plugin/examples/echo` (no
   wasm needed — installable via the default build) that registers `/echo`
   and is loaded inside `ws_integration_test.go`.
 
 Contract:
+
 - `docs/protocol.md` round trip — JSON examples kept in sync with the
   parser via golden tests.
 
@@ -341,7 +344,7 @@ Each step is independently shippable.
 - [ ] `Server/ws/deps.go` — `CommandDeps`
 - [ ] `Server/ws/handlers_command_test.go`
 - [ ] `Server/api/router.go` — `GET /api/v1/commands` (cached schema dump)
-- [ ] `Client/tauri-client/src/state/commands.ts`
-- [ ] `Client/tauri-client/src/components/Composer/SlashCommandPopup.tsx`
+- [ ] `Client/src/state/commands.ts`
+- [ ] `Client/src/components/Composer/SlashCommandPopup.tsx`
 - [ ] `docs/protocol.md` — four new wire messages
 - [ ] `CHANGELOG.md` — Phase D entry

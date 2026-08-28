@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // unbanMockHub wraps mockHub (admin/api_test.go) and additionally implements
@@ -96,7 +96,7 @@ func TestAdminAPI_PatchUser_RoleChangeRefreshesVisibility(t *testing.T) {
 // because handlePatchUser calls that exactly once, synchronously, right
 // after ChangeUserRole succeeds and right before the vulnerable re-read.
 type roleDeletingInvalidator struct {
-	database                    *db.DB
+	database                     *db.DB
 	deleteRoleID, fallbackRoleID int64
 }
 

@@ -9,11 +9,11 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── schema used by handler tests ─────────────────────────────────────────────
@@ -1910,5 +1910,73 @@ func TestHandleMessage_BannedUser_GetKickedAfterSessionCheck(t *testing.T) {
 	// The ban check kicks synchronously (kickClient) inside handleMessage.
 	if hub.ClientCount() != 0 {
 		t.Error("banned user was not kicked after session check")
+	}
+}
+
+// TestHandleMessage_KickedClient_FrameNotDispatched pins OC-0285.
+//
+// kickClient (hub_sweep.go) only removes the client from the hub map and
+// closes its send channels — it never touches the underlying connection or
+// signals readPump. readPump (serve_pumps.go) loops on conn.Read and hands
+// every frame it reads to hub.handleMessage with no check that the client
+// was just kicked, so any frame already in flight (pipelined by the peer, or
+// sitting in the kernel receive buffer) is still dispatched with full
+// authority after the kick decision was made — including, for chat_send, a
+// DB write and a broadcast to everyone else in the channel. This reproduces
+// that window directly: kick the client via the same ban-triggered path
+// handleMessageSessionRecheck uses, then feed one more chat_send exactly as
+// readPump would, and confirm it does not get executed.
+func TestHandleMessage_KickedClient_FrameNotDispatched(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "kicked-user1")
+	chID := seedTestChannel(t, database, "kicked-chan1")
+
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	hash := auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), user.ID, hash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithTokenHash(hub, user, hash, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	// Ban the user, then drive msgCount to exactly SessionCheckInterval so the
+	// next call is the one where handleMessageSessionRecheck discovers the
+	// ban and kicks. Each of these warm-up calls is a normal chat_send, which
+	// dispatches and persists like any pre-kick traffic.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET banned=1, ban_reason='test ban', ban_expires=NULL WHERE id=?`,
+		user.ID,
+	); err != nil {
+		t.Fatalf("ban user: %v", err)
+	}
+	for i := range ws.SessionCheckInterval {
+		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("warmup %d", i)))
+	}
+	if hub.ClientCount() != 0 {
+		t.Fatal("banned user was not kicked after crossing the session-check threshold")
+	}
+
+	// The bug: nothing stops readPump (simulated here by calling
+	// HandleMessageForTest directly on the same, now-kicked client) from
+	// still handing frames to handleMessage. msgCount was just reset to 0 by
+	// the kicking call, so this frame is far from the next recheck and, on
+	// the buggy code, sails straight through to the chat_send handler.
+	const postKickContent = "post-kick-should-not-persist"
+	hub.HandleMessageForTest(c, chatSendMsg(chID, postKickContent))
+
+	msgs, err := database.GetMessages(context.Background(), chID, 0, 50)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	for _, m := range msgs {
+		if m.Content == postKickContent {
+			t.Fatalf("chat_send from a kicked client was persisted (id=%d): handleMessage dispatched a frame after kickClient had already removed the client and closed its send channels", m.ID)
+		}
 	}
 }

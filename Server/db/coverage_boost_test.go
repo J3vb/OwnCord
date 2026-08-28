@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── JoinVoiceChannelIfCapacity ─────────────────────────────────────────────
@@ -74,6 +74,41 @@ func TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(t *testing.T) {
 	state, _ := database.GetVoiceState(context.Background(), u1)
 	if state == nil || state.ChannelID != ch2 {
 		t.Errorf("expected channel %d, got %v", ch2, state)
+	}
+}
+
+// OC-0255: a user who already holds the sole occupied-by-them row on the
+// target channel must be able to re-issue the same join (e.g. retrying after
+// a failed channel-switch leaves their old row in place) even when the
+// channel is at capacity, because the upsert only replaces their own row --
+// it does not add a new occupant. The capacity gate must exclude the
+// requester's own existing row from the count, mirroring the OC-0081 fix
+// already applied to EnableCameraIfUnderLimit / EnableScreenshareIfUnderLimit.
+func TestVoice_JoinVoiceChannelIfCapacity_RejoinSameChannelAtLimit(t *testing.T) {
+	database := newVoiceTestDB(t)
+	u1 := seedVoiceUser(t, database, "cap-rejoin-u1")
+	u2 := seedVoiceUser(t, database, "cap-rejoin-u2")
+	chanID := seedVoiceChannel(t, database, "cap-rejoin-ch")
+
+	// Fill channel to capacity (max 2).
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, chanID, 2); err != nil {
+		t.Fatalf("first join: %v", err)
+	}
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u2, chanID, 2); err != nil {
+		t.Fatalf("second join: %v", err)
+	}
+
+	// u1 re-issues a join for the SAME channel it already occupies. The
+	// channel is at capacity (2/2), but u1 is one of the two occupants, so
+	// this must succeed as a no-op replace of u1's own row, not be refused
+	// as ErrChannelFull.
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, chanID, 2); err != nil {
+		t.Fatalf("rejoin of own channel at capacity should succeed, got: %v", err)
+	}
+
+	state, _ := database.GetVoiceState(context.Background(), u1)
+	if state == nil || state.ChannelID != chanID {
+		t.Errorf("expected u1 still in channel %d, got %v", chanID, state)
 	}
 }
 

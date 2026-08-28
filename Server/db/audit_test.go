@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // fakeAuditor lets a test drive WriteAudit down either the success or the

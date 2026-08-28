@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // DeleteAccount anonymises and disables a user account within a single
@@ -67,6 +67,47 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 
 	if err := deleteAccountCloseDMChannels(ctx, tx, userID, dmChannelIDs); err != nil {
 		return err
+	}
+
+	// Reverse the read_states.mention_count bumps this user's own messages
+	// made, before soft-deleting them below. DeleteMessage and PurgeMessages
+	// already do this on every other message-removal path via
+	// DecrementMentionCounts (OC-0275); DeleteAccount must too (OC-0294), or a
+	// mention badge from a message that no longer exists survives forever —
+	// the live unread count excludes deleted rows, but mention_count is a
+	// stored counter nothing else ever zeroes. This runs inline in the
+	// existing transaction rather than calling DecrementMentionCounts, which
+	// opens its own writer transaction and would contend with this one.
+	//
+	// The subquery mirrors DecrementMentionCounts' own guard: only messages
+	// still undeleted (deleted = 1 flips below), past the recipient's
+	// last_message_id (a reader who has since marked the channel read is left
+	// alone), and excluding mentions to a user who has blocked the departing
+	// author — applyMentionCounts (service/mentions.go) never counted those in
+	// the first place (OC-0293), so reversing them would wipe out a genuine,
+	// unrelated badge sitting on the same read_states row. MAX(0, …) keeps the
+	// result monotonic.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE read_states
+		 SET mention_count = MAX(0, mention_count - (
+		     SELECT COUNT(*)
+		     FROM message_mentions mm
+		     JOIN messages m ON m.id = mm.message_id
+		     WHERE mm.mentioned_user_id = read_states.user_id
+		       AND m.channel_id = read_states.channel_id
+		       AND m.user_id = ?
+		       AND m.deleted = 0
+		       AND m.id > read_states.last_message_id
+		       AND NOT EXISTS (
+		           SELECT 1 FROM user_blocks b
+		           WHERE b.blocker_id = read_states.user_id
+		             AND b.blocked_id = m.user_id
+		       )
+		 ))
+		 WHERE mention_count > 0`,
+		userID,
+	); err != nil {
+		return fmt.Errorf("DeleteAccount mention counts: %w", err)
 	}
 
 	// Soft-delete messages: mark as deleted and clear content so the rows

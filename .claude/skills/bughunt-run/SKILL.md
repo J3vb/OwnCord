@@ -24,9 +24,7 @@ directive.
 
 Before launching, in order:
 
-1. **Rebuild the graph** (stale coordinates aim the explore lens at moved code):
-   `graphify update . --no-cluster` — local tree-sitter, zero LLM cost, ~10.7k nodes.
-2. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
+1. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
    `.superpowers/explore-ranking.json`: EVERY non-test source file (~419 rows), each with
    `examined` (already carries a ledger finding or a LIVE explored-clean record → the hunt
    pre-seeds its covered set), `risky` (top coupling ∪ past-bug clusters ∪ top churn,
@@ -39,7 +37,7 @@ Before launching, in order:
    must be `examined` in the inventory — a `known` file the inventory does not mark
    examined can never be drawn (the seen-filter blocks it) nor covered, which would
    strand `uncoveredCount()` above zero and block convergence.
-3. Read the ledger and pass every record in as `known`, so the hunt does not
+2. Read the ledger and pass every record in as `known`, so the hunt does not
    re-derive anything already found, fixed, declined, or refuted.
 
 ```
@@ -123,9 +121,16 @@ candidate counts make an anomalously empty lens visible after the fact.
 
 ## 2. Gate (human)
 
-Read `.superpowers/FINDINGS.md`. Mark anything you do not want fixed as
-`declined` with a rationale — declined findings are fed back into the next hunt's
-prompts and never re-reported.
+Generate the readable rendering, then read it — it is gitignored, so a fresh
+clone has no copy until you make one:
+
+```bash
+node .superpowers/render-ledger.mjs   # writes .superpowers/FINDINGS.md
+```
+
+Mark anything you do not want fixed as `declined` with a rationale — declined
+findings are fed back into the next hunt's prompts and never re-reported. Edit
+`findings-ledger.json` to do that, not the rendering.
 
 ## 3. Fix
 
@@ -187,6 +192,15 @@ points: the fix stage (before any prove agent runs) and inside the prove loop.
 being on the wrong branch, a broken test runner, or ledger coordinates gone stale
 after a rebase. Re-running without fixing the cause just spends the budget again.
 
+**Re-verify a blocked finding against HEAD before fixing it.** A deferred item
+ages against a moving codebase: later hunts routinely fix a blocked finding as a
+side effect of an overlapping sibling, and a saved debris patch stops applying
+once a refactor rewrites the files it touched. Check the _mechanism_ still exists
+at HEAD, not just the line coordinates. If it is already covered, mark it fixed
+with a pointer to the covering commit instead of re-fixing it. Of 6 findings
+blocked on 2026-08-14, 2 were already fixed 5 days later and the debris patch no
+longer applied at all.
+
 Findings from clusters the run never reached come back `blocked` with a rationale
 naming the breaker. Set those back to `open` once the underlying problem is fixed
 — they were never attempted. Their edits are sitting uncommitted in the working
@@ -229,7 +243,7 @@ lines) locates the mechanism in minutes.
 
 ## 4. Verify the fixes independently — REQUIRED
 
-The workflow's prove agent *self-reports* that each test went RED with the fix
+The workflow's prove agent _self-reports_ that each test went RED with the fix
 reverted. Nothing inside the workflow can verify that: workflow scripts have no
 filesystem access. You do. Run the independent proof over every commit the
 workflow made:
@@ -314,10 +328,12 @@ finding must be excised from history (amend + rebase onto the amended
 commit), not merely removed by a follow-up commit.
 
 Then review the branch against the merge-base — `git diff
-origin/main...HEAD` (three-dot), never two-dot: a concurrent merge plus a
-background fetch can move origin/main mid-run and turn the two-dot diff into
-phantom deletions. If origin moved, confirm zero file overlap and a clean
-`git merge-tree --write-tree origin/main HEAD` before opening the PR by
+origin/dev...HEAD` (three-dot), never two-dot: a concurrent merge plus a
+background fetch can move the base mid-run and turn the two-dot diff into
+phantom deletions. `dev` is the integration branch every PR targets
+(docs/contributing.md#branch-and-pr-model); use `origin/main` only for a
+release PR cut from `dev`. If origin moved, confirm zero file overlap and a
+clean `git merge-tree --write-tree origin/dev HEAD` before opening the PR by
 hand. The workflow never
 pushes and never opens a PR.
 

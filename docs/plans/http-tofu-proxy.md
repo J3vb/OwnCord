@@ -76,7 +76,7 @@ decisions live in Rust:
 - **Pin store:** the same per-host fingerprint store used by `ws_proxy.rs`
   (`certs.json` via `commands.rs`); one fingerprint per host covers all three
   transports.
-- **First contact:** unlike today, the *first* TLS contact with a server is
+- **First contact:** unlike today, the _first_ TLS contact with a server is
   the login HTTP request, not the WS connect. The HTTP proxy must therefore
   implement the same first-trust flow as `ws_proxy.rs`: unknown host →
   accept, store fingerprint, emit `cert-tofu` event (banner); known host +

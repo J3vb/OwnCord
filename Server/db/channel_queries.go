@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/owncord/server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // channelFields carries the 14 columns shared by GetChannelRow and

@@ -1,5 +1,23 @@
+# Issues are the bug tracker only. Ideas, questions and feedback go to
+# Discussions; vulnerabilities go to private security reporting. Keeping
+# blank_issues_enabled false is what makes that routing hold — a blank issue
+# bypasses every form and every warning on it.
+#
+# The ?category= slugs must match this repository's actual Discussions
+# categories. A slug that does not exist silently drops the user on the category
+# picker rather than erroring, so check the live Discussions tab after changing
+# one.
 blank_issues_enabled: false
 contact_links:
-  - name: Community Support
+  - name: Report a security vulnerability
+    url: https://github.com/J3vb/OwnCord/security/advisories/new
+    about: Private disclosure. Never open a public issue for a security bug.
+  - name: Ask a question
+    url: https://github.com/J3vb/OwnCord/discussions/categories/q-a
+    about: Setup, deployment and usage questions.
+  - name: Suggest an idea
+    url: https://github.com/J3vb/OwnCord/discussions/categories/ideas
+    about: Feature requests and design suggestions start here, not as issues.
+  - name: General discussion and feedback
     url: https://github.com/J3vb/OwnCord/discussions
-    about: Ask questions and get help from the community
+    about: Anything that is not a reproducible bug.

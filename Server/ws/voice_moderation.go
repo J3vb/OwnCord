@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // Voice moderation handlers: server mute, server deafen, move, disconnect.
@@ -156,6 +156,49 @@ func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, ch
 		return scoped.DisconnectFromVoiceInChannel(ctx, targetID, channelID)
 	}
 	return mod.DisconnectFromVoice(ctx, targetID)
+}
+
+// voicePendingModFlagsSetter lets a server-driven leave (voice_mod_move)
+// stash a moderator-imposed mute/deafen on the target's in-memory connection
+// before the delete below erases the voice_states row those flags normally
+// live in. handleVoiceJoin's shared join helper (voiceJoinLeaveCurrent, in
+// voice_join.go) takes the stash back out when there is no row left to read
+// (currentChID == 0) and re-applies it exactly as it already does for a
+// self-initiated channel switch — one guard in the shared consumer instead of
+// a second, divergent restore path here.
+//
+// Widening VoiceModerator itself lives in deps.go; until then *Hub also
+// satisfies this optional extension, mirroring voiceChannelDisconnector.
+type voicePendingModFlagsSetter interface {
+	SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool) bool
+}
+
+// stashPendingModFlags is a best-effort no-op when mod does not support the
+// optional extension or the target has no connection on this node — the
+// eviction that follows still proceeds either way, exactly as it did before
+// this stash existed, so a missing implementation only loses the
+// preservation, never blocks the move.
+func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serverDeafened bool) {
+	if !serverMuted && !serverDeafened {
+		return
+	}
+	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
+		setter.SetPendingVoiceModFlags(targetID, serverMuted, serverDeafened)
+	}
+}
+
+// clearPendingModFlags unconditionally wipes any stash left by
+// stashPendingModFlags. Unlike stashPendingModFlags it cannot early-return on
+// "both false" — false/false IS the clear — so it calls the setter directly.
+// Used when a move that stashed flags in anticipation of an eviction turns
+// out not to have evicted anyone (OC-0278): without this, a refused move
+// leaves an unbound, unexpiring stash that the target's next unrelated
+// voice_join (taken with no live row to read the real flags from) would
+// re-apply as a server mute/deafen nobody currently ordered.
+func clearPendingModFlags(mod VoiceModerator, targetID int64) {
+	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
+		setter.SetPendingVoiceModFlags(targetID, false, false)
+	}
 }
 
 // handleVoiceModMuteV2 processes a voice_mod_mute command. The DB row is the
@@ -405,11 +448,23 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
+	// Stash the target's server_muted/server_deafened (already loaded by
+	// voiceModTarget above) on their live connection before the disconnect
+	// below deletes the voice_states row those flags live in — see
+	// voicePendingModFlagsSetter. The target's own re-join (handleVoiceJoin,
+	// via voiceJoinLeaveCurrent in voice_join.go) has no row left to read
+	// (currentChID == 0 by then) and takes this stash back out instead.
+	stashPendingModFlags(d.Mod, c.TargetID(), state.ServerMuted, state.ServerDeafened)
 	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID(), state.ChannelID) {
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
 		// target left the checked channel while this handler was deciding, in
-		// which case the move must not follow them.
+		// which case the move must not follow them. Either way the eviction
+		// that would have justified the stash above never happened, so undo
+		// it (OC-0278): left in place, it has no expiry and no binding to
+		// this move, and the target's next unrelated voice_join would consume
+		// it as if a moderator had just muted them.
+		clearPendingModFlags(d.Mod, c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	d.Mod.SendToUser(c.TargetID(), buildVoiceMoved(c.ToChannelID()))
@@ -518,4 +573,19 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 		return false
 	}
 	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID)
+}
+
+// SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
+// userID's live connection, satisfying voicePendingModFlagsSetter. Reports
+// false when the user has no connection on this node — the same "nothing to
+// do here" case DisconnectFromVoiceInChannel reports, since without a live
+// *Client there is nowhere to stash the flags and no re-join on this node to
+// consume them.
+func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool) bool {
+	c := h.GetClient(userID)
+	if c == nil {
+		return false
+	}
+	c.setPendingModFlags(serverMuted, serverDeafened)
+	return true
 }

@@ -2,40 +2,40 @@ version: "2"
 
 linters:
   enable:
-    - gocritic       # opinionated checks for bugs, performance, style
-    - gosec          # security-focused static analysis (SQL injection, hardcoded creds, weak crypto)
-    - errcheck       # ensures all errors are checked
-    - bodyclose      # detects unclosed HTTP response bodies
-    - contextcheck   # verifies context.Context propagation
-    - nilerr         # detects returning nil when err is not nil
-    - prealloc       # suggests pre-allocating slices for performance
-    - unconvert      # removes unnecessary type conversions
-    - unparam        # finds unused function parameters
-    - wastedassign   # finds wasted assignments
-    - staticcheck    # advanced static analysis (correctness, performance, deprecation)
-    - modernize      # flags outdated idioms (slices/maps/min/max, range-over-int, any, fmt.Appendf)
+    - gocritic # opinionated checks for bugs, performance, style
+    - gosec # security-focused static analysis (SQL injection, hardcoded creds, weak crypto)
+    - errcheck # ensures all errors are checked
+    - bodyclose # detects unclosed HTTP response bodies
+    - contextcheck # verifies context.Context propagation
+    - nilerr # detects returning nil when err is not nil
+    - prealloc # suggests pre-allocating slices for performance
+    - unconvert # removes unnecessary type conversions
+    - unparam # finds unused function parameters
+    - wastedassign # finds wasted assignments
+    - staticcheck # advanced static analysis (correctness, performance, deprecation)
+    - modernize # flags outdated idioms (slices/maps/min/max, range-over-int, any, fmt.Appendf)
 
     # Complexity budgets. These are a RATCHET, not a standard: each threshold sits
     # just above today's worst offender, so the build is green now and the budget
     # only blocks regression past the current extreme. Tighten them over time — each
     # step is a one-line edit here plus the refactor it forces. Measured values and
     # the work each budget is waiting on are in the settings block below.
-    - funlen         # function length (lines and statements)
-    - cyclop         # cyclomatic complexity per function
-    - nestif         # deeply nested if-blocks
-    - dupl           # verbatim duplicated blocks
+    - funlen # function length (lines and statements)
+    - cyclop # cyclomatic complexity per function
+    - nestif # deeply nested if-blocks
+    - dupl # verbatim duplicated blocks
 
   settings:
     staticcheck:
       checks:
         - "all"
-        - "-SA1019"  # suppress deprecated usage warnings (websocket library migration tracked separately)
+        - "-SA1019" # suppress deprecated usage warnings (websocket library migration tracked separately)
     gocritic:
       enabled-tags:
         - diagnostic
         - performance
       disabled-checks:
-        - hugeParam   # too noisy for struct-heavy code
+        - hugeParam # too noisy for struct-heavy code
     # Complexity budgets set to a TARGET, not to whatever passes today. Existing
     # offenders are deliberately left failing rather than excluded: an exclusion
     # list goes stale and quietly becomes permanent, whereas a failing check is a
@@ -70,10 +70,10 @@ linters:
       threshold: 150
     gosec:
       excludes:
-        - G104  # unhandled errors — errcheck covers this better
-        - G304  # file path from variable — expected in file storage code
-        - G306  # WriteFile perms ≤0600 — our only hits are generated source files (genprotocol), which must stay world-readable or multi-stage container builds break
-        - G706  # log injection — false positive with slog structured logging (values are typed key-value pairs, not interpolated)
+        - G104 # unhandled errors — errcheck covers this better
+        - G304 # file path from variable — expected in file storage code
+        - G306 # WriteFile perms ≤0600 — our only hits are generated source files (cmd/genprotocol), which must stay world-readable or multi-stage container builds break
+        - G706 # log injection — false positive with slog structured logging (values are typed key-value pairs, not interpolated)
 
   exclusions:
     # Suppress noisy linters in test files
@@ -89,6 +89,21 @@ linters:
       # a shared helper that hides what each case is doing.
       - linters: [funlen, cyclop, nestif, dupl]
         path: _test\.go
+
+# gofmt is the required Go formatting gate (S-05). It lives here rather than as a
+# standalone CI step because `gofmt -l` prints offenders and still exits 0, so a
+# `gofmt -l` step cannot fail a build. Running it as a formatter inside
+# golangci-lint means it reports through the already-pinned Lint check.
+#
+# In v2 the formatters moved out of `linters.enable` into their own section, and
+# they carry their own exclusion list.
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      # sqlc output, verified by `git diff --exit-code db/dbgen` after regeneration.
+      - db/dbgen
 
 # Report every finding. The defaults hide work three separate ways, which is fine
 # when the list is meant to be empty and actively misleading when it is a backlog:

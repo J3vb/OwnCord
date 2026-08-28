@@ -14,11 +14,11 @@ import (
 	"github.com/coder/websocket"
 	"go.uber.org/goleak"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/config"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestRun_ServeErrorReturn_StopsHubDispatchGoroutine pins OC-0027:

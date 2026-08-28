@@ -3,7 +3,7 @@ package ws_test
 import (
 	"testing"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestOriginAcceptOptions_WildcardEnablesInsecureSkipVerify verifies that

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/ws"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // OC-0058: the admin unban path type-asserts its hub against an optional

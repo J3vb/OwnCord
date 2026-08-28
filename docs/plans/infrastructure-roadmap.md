@@ -119,7 +119,7 @@ The highest-impact track. Ordered.
    writable; ACME needs `AmbientCapabilities=CAP_NET_BIND_SERVICE`;
    `TimeoutStopSec=35` matches the 30s drain), a "Linux (systemd)" deployment
    section, and a cron backup one-liner. Add a "Reverse Proxy Topology" section
-   with a working nginx snippet — and state correctly that LiveKit *signaling*
+   with a working nginx snippet — and state correctly that LiveKit _signaling_
    is already proxied at `/livekit/*`; only WebRTC media (UDP range / TCP
    fallback) must be directly reachable.
 6. **Backup robustness.** Make the backup directory configurable (mirror the

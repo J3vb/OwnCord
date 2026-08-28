@@ -23,14 +23,14 @@ unleash:
 
   # Mutation operators to apply
   mutant_types:
-    - CONDITIONALS_BOUNDARY      # < to <=, > to >=
-    - CONDITIONALS_NEGATION      # == to !=
-    - INCREMENT_DECREMENT        # ++ to --
-    - INVERT_NEGATIVES           # -x to x
-    - ARITHMETIC_BASE            # + to -, * to /
-    - INVERT_LOGICAL             # && to ||
-    - INVERT_LOOPCTRL            # break to continue
-    - REMOVE_SELF_ASSIGNMENTS    # x += 1 to x
+    - CONDITIONALS_BOUNDARY # < to <=, > to >=
+    - CONDITIONALS_NEGATION # == to !=
+    - INCREMENT_DECREMENT # ++ to --
+    - INVERT_NEGATIVES # -x to x
+    - ARITHMETIC_BASE # + to -, * to /
+    - INVERT_LOGICAL # && to ||
+    - INVERT_LOOPCTRL # break to continue
+    - REMOVE_SELF_ASSIGNMENTS # x += 1 to x
 
   # Thresholds for pass/fail
   threshold:

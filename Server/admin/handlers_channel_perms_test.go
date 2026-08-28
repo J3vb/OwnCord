@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/owncord/server/admin"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // mockPermInvalidator records permission-cache invalidation calls.

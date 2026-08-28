@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/admin"
+	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 func listBackupFiles(t *testing.T, dir string) []string {

@@ -28,8 +28,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/owncord/server/auth"
-	"github.com/owncord/server/permissions"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *testing.T) {

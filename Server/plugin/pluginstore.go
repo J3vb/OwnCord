@@ -3,7 +3,7 @@ package plugin
 import (
 	"context"
 
-	"github.com/owncord/server/db"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // PluginStore manages installed plugins and per-plugin KV namespaces.

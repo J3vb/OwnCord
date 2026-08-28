@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/api"
-	"github.com/owncord/server/updater"
 )
 
 // fakeGitHubRelease returns a test HTTP server that mimics the GitHub

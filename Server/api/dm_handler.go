@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
-	"github.com/owncord/server/db"
-	"github.com/owncord/server/service"
-	"github.com/owncord/server/ws"
 )
 
 // DMBroadcaster is the interface needed to send WebSocket events from REST
@@ -162,11 +162,16 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		if result.Recipient.DisplayName != nil {
 			displayName = *result.Recipient.DisplayName
 		}
+		// PresentableStatus applies the "no live connection is offline,
+		// whatever the row says" half of the rule ws/serve_ready.go's
+		// presentableMembers documents — StatusForViewer alone only
+		// collapses invisible to offline and would otherwise ship a
+		// disconnected recipient's saved idle/dnd verbatim (OC-0304).
 		dmUser := db.DMUser{
 			ID:          result.Recipient.ID,
 			Username:    result.Recipient.Username,
 			Avatar:      avatarStr,
-			Status:      db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID),
+			Status:      svc.DMs.PresentableStatus(result.Recipient.ID, db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID)),
 			DisplayName: displayName,
 		}
 
