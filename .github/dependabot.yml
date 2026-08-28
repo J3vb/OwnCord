@@ -22,10 +22,16 @@ version: 2
 # reason — see docs/contributing.md#dependency-policy for the measured decision
 # against adopting npm workspaces.
 
+# Every block targets `dev`, not the default branch. `dev` is the integration
+# branch and the only branch that takes PRs; `main` carries releases. Without
+# this, Dependabot opens against `main`, and retargeting by hand does not stick
+# — `@dependabot rebase` recreates the PR against the configured target.
+
 updates:
   # Go server dependencies
   - package-ecosystem: gomod
     directory: /Server
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -49,6 +55,7 @@ updates:
   # together — not a standalone merge.
   - package-ecosystem: docker
     directory: /Server
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -69,6 +76,7 @@ updates:
   # Tauri client npm dependencies
   - package-ecosystem: npm
     directory: /Client
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -89,6 +97,7 @@ updates:
   # Root tooling npm dependencies (changelogen, prettier)
   - package-ecosystem: npm
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -109,6 +118,7 @@ updates:
   # tools/mcp-introspect npm dependencies (local dev MCP server)
   - package-ecosystem: npm
     directory: /tools/mcp-introspect
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -129,6 +139,7 @@ updates:
   # Tauri Rust/Cargo dependencies
   - package-ecosystem: cargo
     directory: /Client/src-tauri
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -161,6 +172,7 @@ updates:
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
