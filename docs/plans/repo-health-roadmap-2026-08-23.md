@@ -3,7 +3,12 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** proposed implementation sequence; no phase is complete yet  
+**Status:** B0 and B1 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27); B2 in progress from
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md);
+B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+in B3–B10 and the "Phase execution pattern" section. [README.md](README.md) is
+the status authority when this header and a README row disagree.
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
@@ -43,6 +48,9 @@ change.
 ## Current evidence snapshot
 
 This is audit evidence, not a release claim. It must be refreshed in B0.
+_Superseded 2026-08-25 by
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md), which holds the
+measured numbers. The table below is kept for the audit trail._
 
 | Area               | Evidence at the audited head                                                                                                                                    | Consequence                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -325,6 +333,9 @@ server services and clients must obey.
 
 **Primary requirements:** BPR-031, BPR-032, BPR-040, BPR-050, BPR-051, and
 BPR-080 through BPR-083.
+
+**Execution plan** _(added 2026-08-28)_:
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md).
 
 ### Entry gate
 
@@ -1103,17 +1114,25 @@ Every hold point and phase exit records at least:
 The actual values and links belong in phase evidence, not as optimistic edits
 to this plan.
 
-## First implementation slice
+## Current implementation slice
 
-Start with B0 only:
+_Updated 2026-08-28._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
+accepted 2026-08-27). The active slice is B2, executed from
+[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md)
+in this order:
 
-1. repair the two failing Vitest contracts;
-2. make Playwright terminate reliably;
-3. collect matched server lint and Docker evidence;
-4. finish issue/security/requirement reconciliation;
-5. run the exact-SHA full matrix and publish the non-sensitive baseline
-   scorecard.
+1. B2-0 — alpha.4 verified, `dev` synced with `main`, release hygiene, `dev`
+   set to `strict: true`;
+2. B2-1 — epoch-1 fixtures captured **before** any protocol change;
+3. B2-8 — the B2-tagged findings, because they touch the same replay/resume
+   files as B2-2;
+4. B2-2 → B2-3 → B2-4, serialized;
+5. B2-5, B2-6, B2-7 and B2-9 in parallel where the plan allows.
 
-Then execute the B1 structural work as isolated changes. Do not begin server
-feature implementation, client architecture extraction, or browser work before
-those two gates close.
+Do not begin B3 domain extraction, client platform extraction, or browser work
+before HP-2 closes.
+
+The original 2026-08-23 slice (B0 only, then B1 as isolated changes) was
+executed as written; see
+[b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md) and
+[b1-repository-foundation-2026-08-25.md](b1-repository-foundation-2026-08-25.md).
