@@ -91,15 +91,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                           |
-| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                              |
-| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                          |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants            |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                              |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                   |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                            |
+| Category           | Has seq? | Examples                                                                                                                                                                                                       |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                                          |
+| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below)                                                                                                                                                      |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                        |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`                                                                                                                                                                          |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                               |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                        |
 
 **`presence` is split, and only one half is sequenced.** Connect and disconnect
 presence is a normal sequenced global broadcast, so it replays on a warm resume.
@@ -197,10 +197,15 @@ buffer), or `"db"` (persistent `events` table). See
 {
   "type": "auth_error",
   "payload": {
-    "message": "Invalid or expired token"
+    "message": "invalid token"
   }
 }
 ```
+
+`message` is one of a fixed set the server actually sends: `invalid message`
+(the first frame did not parse as JSON), `first message must be auth` (the
+first frame was not type `auth`), `missing token`, `invalid token`, `session
+expired`, and `user not found`.
 
 After sending `auth_error`, the server closes the connection.
 
@@ -213,8 +218,8 @@ After `auth_ok`, the server sends a `ready` message containing all initial state
 The server broadcasts to all connected clients:
 
 ```json
-{ "type": "member_join", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
-{ "type": "presence", "payload": { "user_id": 1, "status": "online", "custom_status": null } }
+{ "type": "member_join", "seq": 15, "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
+{ "type": "presence", "seq": 16, "payload": { "user_id": 1, "status": "online", "custom_status": null } }
 ```
 
 ### Periodic Session Revalidation
@@ -382,7 +387,8 @@ Direct response to sender (no seq):
       "id": 1,
       "username": "alex",
       "avatar": "uuid.png",
-      "role": "admin"
+      "role": "admin",
+      "display_name": "Alex A."
     },
     "content": "Hello everyone!",
     "reply_to": null,
@@ -396,6 +402,9 @@ Direct response to sender (no seq):
   }
 }
 ```
+
+`user.display_name` is the author's nickname to render instead of `username`;
+present only when the author has one, omitted otherwise (see `member_join`).
 
 | Field               | Type     | Description                                                                                                         |
 | ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -906,12 +915,16 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 { "type": "voice_join", "payload": { "channel_id": 10 } }
 ```
 
-On success, server sends (in order):
+On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
 2. `voice_state` broadcast -- joiner's state to all clients
 3. Existing `voice_state` messages -- one per existing participant (to joiner only)
 4. `voice_config` -- channel audio settings (to joiner only)
+
+Items 1, 3 and 4 are written directly and keep that relative order; item 2
+travels through the hub's broadcast queue, so its position relative to the
+other three on the joiner's own socket is not guaranteed.
 
 ### voice_token (Server -> Client, direct)
 
@@ -1002,6 +1015,14 @@ Quality presets:
 Moderation](#voice-moderation)). `muted` / `deafened` are always set alongside
 them, so a client that ignores the two new fields still renders the user as
 silenced; they exist so the UI can show that the user may not lift it.
+
+`voice_state` also arrives **unsequenced** in one case: when a client joins a
+voice channel, the states of participants already in the room are relayed to
+it directly, one message per participant (see the `voice_join` reply order
+above) — those relayed copies carry no `seq` and are not replayed on resume.
+Every other `voice_state` — a join, a leave, a mute/unmute, anything that
+changes an existing participant's state — is the sequenced broadcast form
+shown above.
 
 ### voice_mute / voice_deafen (Client -> Server)
 
