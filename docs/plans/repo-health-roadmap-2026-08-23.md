@@ -8,7 +8,7 @@
 [b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md);
 B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
 in B3–B10 and the "Phase execution pattern" section. [README.md](README.md) is
-the status authority when this header and a README row disagree.
+the status authority when this header and a README row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
