@@ -693,6 +693,26 @@ func TestRegistry_InstallFromZip_Rejections(t *testing.T) {
 	}
 }
 
+// OC-0318: a zip carrying both plugin.json and plugin.toml is ambiguous —
+// installZipStagedManifest used to validate only the JSON while the on-disk
+// loader (scanPluginDirectory) prefers TOML, so the manifest an admin
+// approved at install time was not necessarily the one that governed the
+// plugin after the next restart. Reject the ambiguity outright instead of
+// silently picking one file over the other.
+func TestRegistry_InstallFromZip_RejectsBothManifests(t *testing.T) {
+	r, _, _ := newRegistryWithDir(t)
+
+	zipBytes := buildZip(t, map[string]string{
+		"plugin.json": simpleManifest("dual"),
+		"plugin.toml": "name = \"dual\"\nversion = \"1.0.0\"\nentrypoint = \"dual.wasm\"\n",
+		"dual.wasm":   "\x00asm\x01\x00\x00\x00",
+	})
+
+	if _, err := r.InstallFromZip(context.Background(), zipBytes); err == nil {
+		t.Fatal("InstallFromZip accepted a zip containing both plugin.json and plugin.toml; want a rejection of the ambiguity")
+	}
+}
+
 func TestRegistry_InstallFromZip_NotConfigured(t *testing.T) {
 	store := openPluginTestDB(t)
 	r, err := NewRegistry(Config{Store: store}) // no Directory

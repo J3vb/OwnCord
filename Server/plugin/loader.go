@@ -11,8 +11,9 @@
 //	    detector.wasm
 //	    assets/...
 //
-// Loader walks the directory, parses every plugin.json, and returns a slice
-// of foundPlugin records. The Registry then persists each into the store.
+// Loader walks the directory, parses every plugin.toml (wazero build) or
+// plugin.json manifest via loadManifestFromDir, and returns a slice of
+// foundPlugin records. The Registry then persists each into the store.
 
 package plugin
 
@@ -30,11 +31,38 @@ type foundPlugin struct {
 	WASMPath string
 }
 
-// scanPluginDirectory walks dir non-recursively and parses plugin.json from
-// every immediate subdirectory. A per-plugin failure (malformed manifest,
-// missing or symlinked entrypoint, a stray symlink anywhere in that plugin's
-// tree) is recorded and that one subdirectory is skipped — it does not stop
-// the scan. The returned error is non-nil whenever at least one subdirectory
+// loadManifestFromDir resolves the manifest that governs one plugin
+// directory, preferring plugin.toml (wazero build) over plugin.json — the
+// precedence scanPluginDirectory has always applied on the on-disk restart
+// path. Every caller that resolves a plugin manifest from a directory must
+// route through here, so the manifest a zip install validates is
+// byte-for-byte the one the next restart loads (OC-0318): two callers
+// disagreeing on precedence let an admin approve a narrow manifest while a
+// broader one, never reviewed, silently takes over after the next restart.
+//
+// Returns an error satisfying os.IsNotExist when neither manifest file is
+// present, so callers that treat "not a plugin directory" as non-fatal
+// (scanPluginDirectory, walking arbitrary subdirectories) can tell that
+// apart from a real parse failure.
+func loadManifestFromDir(dir string) (*Manifest, error) {
+	if m, ok, err := tryLoadPluginTOML(dir); err != nil {
+		return nil, err
+	} else if ok {
+		return m, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	if err != nil {
+		return nil, err
+	}
+	return ParseManifest(raw)
+}
+
+// scanPluginDirectory walks dir non-recursively and parses a manifest
+// (plugin.toml or plugin.json, via loadManifestFromDir) from every immediate
+// subdirectory. A per-plugin failure (malformed manifest, missing or
+// symlinked entrypoint, a stray symlink anywhere in that plugin's tree) is
+// recorded and that one subdirectory is skipped — it does not stop the
+// scan. The returned error is non-nil whenever at least one subdirectory
 // was skipped, joining every such failure, but `found` still holds every
 // plugin that scanned cleanly. Callers that need the scan to be all-or-
 // nothing should check the returned error before using `found`; LoadAll
@@ -60,29 +88,15 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		}
 		pluginDir := filepath.Join(dir, e.Name())
 
-		// Prefer plugin.toml (wazero build) over plugin.json.
-		manifest, ok, tomlErr := tryLoadPluginTOML(pluginDir)
-		if tomlErr != nil {
-			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), tomlErr))
+		manifest, manifestErr := loadManifestFromDir(pluginDir)
+		if manifestErr != nil {
+			if os.IsNotExist(manifestErr) {
+				// Neither plugin.toml nor plugin.json present — not a plugin
+				// directory, skip silently.
+				continue
+			}
+			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), manifestErr))
 			continue
-		}
-		if !ok {
-			// Fall back to plugin.json.
-			manifestPath := filepath.Join(pluginDir, "plugin.json")
-			raw, rdErr := os.ReadFile(manifestPath)
-			if rdErr != nil {
-				if os.IsNotExist(rdErr) {
-					continue
-				}
-				scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr))
-				continue
-			}
-			var parseErr error
-			manifest, parseErr = ParseManifest(raw)
-			if parseErr != nil {
-				scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), parseErr))
-				continue
-			}
 		}
 		// Reject any symlinks anywhere in the plugin directory tree. The asset
 		// handler enforces that resolved paths stay rooted at pluginDir, but
