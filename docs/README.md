@@ -60,6 +60,7 @@ and a PR touching those updates the blueprint in the same change.
 - [data-model.md](architecture/data-model.md), [websocket.md](architecture/websocket.md), [voice-e2ee.md](architecture/voice-e2ee.md)
 - [ux/](architecture/ux/README.md) — target-state UX spec, per-view states and event→reaction maps
 - [platform-contracts.md](architecture/platform-contracts.md) — target-state desktop/browser seam: what has to move behind a contract before the client can run in a browser (B7)
+- [plugins.md](architecture/plugins.md) — the experimental WASM plugin boundary: off by default, compiled out of releases, no API promise, what may become a plugin after beta and what never moves
 
 [client-architecture.md](client-architecture.md) is a redirect stub; the live
 document is [architecture/client.md](architecture/client.md).
