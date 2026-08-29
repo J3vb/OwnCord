@@ -20,19 +20,21 @@ dated snapshots that were true when written and were never updated, and
 | Report a bug            | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose) |
 | Ask, or suggest an idea | [Discussions](https://github.com/J3vb/OwnCord/discussions)  |
 | Report a vulnerability  | [security.md](security.md)                                  |
+| Know who can read what  | [trust-model.md](trust-model.md)                            |
 
 ## Guidance
 
-| Document                                 | Covers                                                                                           |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [quick-start.md](quick-start.md)         | Getting a server running with the fewest steps.                                                  |
-| [deployment.md](deployment.md)           | Production deployment on Windows and Linux.                                                      |
-| [contributing.md](contributing.md)       | Environment setup, **the branch and PR model**, coding standards, how to run the checks CI runs. |
-| [security.md](security.md)               | How to report a vulnerability, and how findings are handled in public vs private.                |
-| [livekit-setup.md](livekit-setup.md)     | Standing up the LiveKit SFU for voice and video.                                                 |
-| [port-forwarding.md](port-forwarding.md) | Making a server reachable from outside the LAN.                                                  |
-| [tailscale.md](tailscale.md)             | Remote access without port forwarding.                                                           |
-| [mcp-introspect.md](mcp-introspect.md)   | Dev-only MCP server for introspecting a running instance.                                        |
+| Document                                 | Covers                                                                                                         |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [quick-start.md](quick-start.md)         | Getting a server running with the fewest steps.                                                                |
+| [deployment.md](deployment.md)           | Production deployment on Windows and Linux.                                                                    |
+| [contributing.md](contributing.md)       | Environment setup, **the branch and PR model**, coding standards, how to run the checks CI runs.               |
+| [security.md](security.md)               | How to report a vulnerability, and how findings are handled in public vs private.                              |
+| [trust-model.md](trust-model.md)         | Who can read what: operator-readable text and files, E2EE media, transport, at rest, what beta does not claim. |
+| [livekit-setup.md](livekit-setup.md)     | Standing up the LiveKit SFU for voice and video.                                                               |
+| [port-forwarding.md](port-forwarding.md) | Making a server reachable from outside the LAN.                                                                |
+| [tailscale.md](tailscale.md)             | Remote access without port forwarding.                                                                         |
+| [mcp-introspect.md](mcp-introspect.md)   | Dev-only MCP server for introspecting a running instance.                                                      |
 
 ## Reference
 

@@ -33,6 +33,13 @@ written here so the citation points at something.
 
 This repository is public. A commit message is a disclosure channel.
 
+## Trust model
+
+What the server operator can and cannot read, what is end-to-end encrypted,
+how transport and at-rest data are protected, and what beta does not claim are
+stated in one place: [trust-model.md](trust-model.md). Every claim there cites
+the code line or test that makes it true.
+
 ## Two-Factor Authentication
 
 OwnCord supports TOTP-based 2FA:
