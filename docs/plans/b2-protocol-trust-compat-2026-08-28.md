@@ -704,6 +704,17 @@ Runs in parallel with B2-1 and B2-6.
   `appimagetool` at build time (`Client/scripts/strip-appimage-bundled-libs.sh:25-26`);
   the claim is now scoped to scripts the server runs, with that build-time
   fetch listed.
+- Codex round 6 of `5f4da93b`: two P1 and one P2, all accepted. P1 — the
+  quick-start cross-link still said voice and video are "not readable by the
+  operator"; it now says end-to-end encrypted with the stated limits. P1 —
+  the document claimed peers pin each device separately; pins are keyed
+  `{host}:{userId}` (`identity.ts:11-12`, `livekitE2EE.ts:521`, `:612`), one
+  per account, so a second device overwrites the pin and the first device
+  then mismatches; both places now say so. P2 — the outbound-host table
+  omitted the supervised LiveKit process's WebRTC media (UDP 50000–60000,
+  TCP 7881, `livekit_process.go:123-144`), which would have made any voice
+  call a false finding for B6; the row is added and the capture contract is
+  scoped to traffic the server initiates.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
