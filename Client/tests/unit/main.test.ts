@@ -81,6 +81,14 @@ vi.mock("@lib/profiles", () => ({
 // `api.getConfig().host` read (main.ts:776) after a login sets it via
 // `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
+// UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
+// calls checkForUpdate; stub the Tauri-backed updater so the test observes the
+// call instead of an invoke() into nothing.
+const mockCheckForUpdate = vi.fn();
+vi.mock("@lib/updater", () => ({
+  checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
+  downloadAndInstallUpdate: vi.fn(),
+}));
 const mockApiState = { host: "" };
 vi.mock("@lib/api", () => ({
   createApiClient: vi.fn(() => ({
@@ -151,6 +159,7 @@ vi.mock("@lib/dispatcher", async () => {
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { clearAuth } from "@stores/auth.store";
+import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
@@ -377,5 +386,35 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // would go on to suppress the auto-login that a later, unrelated
     // clearAuth("server_shutdown") deliberately relies on.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+  });
+});
+
+describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
+  it("mounts the update notifier on the connect page so a refused client can update in place", async () => {
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    // The real dispatcher's auth_error handler records the host when the
+    // server says this client's epoch is too old (dispatcher.test.ts covers
+    // that); the dispatcher is stubbed here, so set what it would have set,
+    // then end the session the way auth_error does.
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost("server-a.example:8443");
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-a.example:8443");
+    // Consumed on mount: the next connect page must not re-check.
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
   });
 });

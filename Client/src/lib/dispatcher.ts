@@ -5,7 +5,7 @@
 import type { WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
 import { authStore, setAuth, clearAuth, updateUser } from "@stores/auth.store";
-import { setTransientError, setConnectionStatus } from "@stores/ui.store";
+import { setTransientError, setConnectionStatus, setUpdateRequiredHost } from "@stores/ui.store";
 import {
   setChannels,
   setRoles,
@@ -81,7 +81,7 @@ import { ensureIdentityKeyPublished } from "@lib/identity";
 import { markChannelRead } from "./read-state";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
-import { ServerMessageType as S } from "./protocolTypes";
+import { ServerMessageType as S, PROTOCOL_EPOCH } from "./protocolTypes";
 // SidebarDmHelpers is page-level, but addDmToChannelsStore is the only
 // place the DM->channelsStore mirror row is synthesized (selectDmConversation
 // on open); the dm_channel_close fallback below needs the same synthesis for
@@ -292,6 +292,14 @@ export function wireDispatcher(
     ws.on(S.AUTH_ERROR, (payload) => {
       log.error("Auth failed", { message: payload.message });
       setTransientError(payload.message);
+      // The server speaks a newer protocol than this build: hand the host to
+      // the connect page so it can offer the client update right there.
+      if (
+        payload.code === "protocol_epoch_unsupported" &&
+        (payload.server_epoch ?? 0) > PROTOCOL_EPOCH
+      ) {
+        setUpdateRequiredHost(api?.getConfig?.().host ?? null);
+      }
       clearAuth();
     }),
   );

@@ -14,6 +14,12 @@ export interface UiState {
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   readonly persistentError: string | null;
+  /**
+   * Host of a server that refused this client's protocol epoch as too old.
+   * main.ts consumes it when the connect page mounts, to offer the update
+   * there — the main page's own notifier never mounts on a refusal.
+   */
+  readonly updateRequiredHost: string | null;
   readonly collapsedCategories: ReadonlySet<string>;
   readonly sidebarMode: "channels" | "dms";
   readonly activeDmUserId: number | null;
@@ -28,6 +34,7 @@ const INITIAL_STATE: UiState = {
   connectionStatus: "disconnected",
   transientError: null,
   persistentError: null,
+  updateRequiredHost: null,
   collapsedCategories: new Set(),
   sidebarMode: "channels",
   activeDmUserId: null,
@@ -108,6 +115,10 @@ export function setTransientError(msg: string | null): void {
 }
 
 /** Set a persistent error message that requires user action. */
+export function setUpdateRequiredHost(host: string | null): void {
+  uiStore.setState((prev) => ({ ...prev, updateRequiredHost: host }));
+}
+
 export function setPersistentError(msg: string | null): void {
   uiStore.setState((prev) => ({
     ...prev,

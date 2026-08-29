@@ -12,7 +12,7 @@ import { createApiClient } from "@lib/api";
 import { createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { setTransientError } from "@stores/ui.store";
+import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
@@ -20,6 +20,8 @@ import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
 import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
+import { createUpdateNotifier } from "@components/UpdateNotifier";
+import type { MountableComponent } from "@lib/safe-render";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
@@ -626,6 +628,19 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     safeMount(connectPage, appEl!);
 
+    // A server just refused this client's protocol epoch as too old: offer
+    // the update on the connect page itself. The main page's notifier never
+    // mounts on a refusal, so without this the user would have to fetch the
+    // installer by hand.
+    const updateHost = uiStore.getState().updateRequiredHost;
+    let updateNotifier: MountableComponent | null = null;
+    if (updateHost) {
+      setUpdateRequiredHost(null);
+      const notifier = createUpdateNotifier({ serverUrl: `https://${updateHost}` });
+      notifier.mount(appEl!);
+      updateNotifier = notifier;
+    }
+
     // Periodic health check — re-run every 15s so offline servers update when they come back
     const healthCheckInterval = setInterval(() => {
       runHealthChecks(connectPage, getProfileList());
@@ -635,6 +650,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     currentPage = {
       destroy() {
         clearInterval(healthCheckInterval);
+        updateNotifier?.destroy?.();
         connectPage.destroy?.();
       },
     };
