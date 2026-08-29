@@ -357,8 +357,11 @@ BPR-083):
   a friend on one means nothing on the other. Even the voice E2EE identity is
   pinned per host (`Client/src/lib/identity.ts:11-12`, key `{host}:{userId}`).
 - **No required external service.** A server on a LAN with no internet works.
-  Every outbound connection it can make is in the next table, each with its off
-  switch.
+  Every outbound connection it can make is in the next table, each with the
+  condition that triggers it and the control where one exists. Two rows have
+  a condition but no configuration switch: GitHub release metadata (only on
+  request, never on a timer) and LiveKit signalling (only on a voice join,
+  to `voice.livekit_url`).
 
 The proof is three tests in `Server/api/absence_contract_test.go`, one per
 boundary a new feature has to cross, each failing on the pattern
@@ -425,8 +428,13 @@ answers (`Server/plugin/host_http.go:182-249`; tests
 `TestGuardedDial_FallsBackAcrossVettedIPs`,
 `TestGuardedDial_PrivateRecordRefusesBeforeAnyDial`).
 
-The **desktop client** reaches, on its own: the server; LiveKit through the
-server's `/livekit/*` proxy; `www.youtube.com` and `img.youtube.com` for video
+The **desktop client** reaches, on its own: the server; LiveKit **signalling**
+through the server's `/livekit/*` proxy for remote servers, or **directly** to
+the LiveKit URL the server hands out when the server is local
+(`Client/src/lib/livekitSession.ts:711-738`, `direct_url`); LiveKit **media**
+always directly, to the SFU's advertised ICE endpoints on TCP 7881 / UDP
+50000–60000 (`Server/ws/livekit_process.go:130-133`; `docs/deployment.md`
+§Firewall and Ports); `www.youtube.com` and `img.youtube.com` for video
 embeds (`Client/src/components/message-list/media.ts:173-174`, `:210`, `:229`);
 the Klipy CDN for GIF media; GitHub for its own updates via the server's
 `client-update` endpoint; and any URL a user posted, for link previews — the

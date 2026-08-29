@@ -739,6 +739,12 @@ Runs in parallel with B2-1 and B2-6.
   auth frame and payloads. The identity keychain account is
   `identity:{userId}@{host}` (`identity.ts:221-222`, `credentials.rs:214-220`),
   not the legacy `identity:{host}`; corrected.
+- Codex round 9 of `a0ee10c0`: two P2, both accepted. The absence bullet
+  promised an off switch for every outbound row while two rows have none;
+  it now says condition-plus-control and names the two. The desktop-client
+  inventory listed LiveKit only via `/livekit/*`; local servers use
+  `direct_url` (`livekitSession.ts:711-738`) and media always goes straight
+  to the SFU's ICE endpoints (TCP 7881 / UDP 50000–60000); both listed.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
