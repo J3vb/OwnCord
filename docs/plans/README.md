@@ -66,7 +66,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Ledger at 2026-08-29: **315 fixed / 56 open / 3 declined / 1 duplicate = 375**.
+Ledger at 2026-08-29: **315 fixed / 59 open / 3 declined / 1 duplicate = 378**.
 All 38 open records still resolved to a live `file:line` at
 `5cc0888964e26276d1aca145e83270a2c1b9febd` when that sweep was run — it was a
 manual pass, not something a command reproduces. What the tooling does check:
