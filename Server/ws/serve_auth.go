@@ -50,10 +50,18 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 		// the handshake instead of leaving it unsubscribed until the
 		// post-auth_ok channel_focus round trip lands.
 		ActiveChannelID int64 `json:"active_channel_id"`
+		// Epoch is the wire epoch the client speaks (docs/protocol.md,
+		// Compatibility). Absent means 0: clients up to v1.2.0-alpha.4 predate
+		// the field.
+		Epoch int `json:"epoch"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
 		return nil, "", resumeHint{}, fmt.Errorf("auth: missing token")
+	}
+	if p.Epoch < minClientEpoch || p.Epoch > ProtocolEpoch {
+		_ = conn.Write(ctx, websocket.MessageText, buildProtocolEpochError(p.Epoch))
+		return nil, "", resumeHint{}, fmt.Errorf("auth: protocol epoch %d outside [%d, %d]", p.Epoch, minClientEpoch, ProtocolEpoch)
 	}
 
 	hash := auth.HashToken(p.Token)

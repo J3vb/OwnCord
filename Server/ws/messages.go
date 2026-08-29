@@ -376,6 +376,40 @@ func buildAuthError(message string) []byte {
 	})
 }
 
+// minClientEpoch is the oldest wire epoch the auth handshake still accepts.
+// It is 0 for epoch 1 only, because clients up to v1.2.0-alpha.4 send no
+// epoch at all and must keep connecting.
+// ponytail: one accepted epoch by policy — set this to ProtocolEpoch on the
+// next bump; widen to ProtocolEpoch-1 only if a compatibility window is ever
+// actually wanted.
+const minClientEpoch = 0
+
+// ErrCodeProtocolEpoch is the auth_error code for a client whose wire epoch
+// this server does not speak.
+const ErrCodeProtocolEpoch = "protocol_epoch_unsupported"
+
+// buildProtocolEpochError is the auth_error for an epoch outside
+// [minClientEpoch, ProtocolEpoch]. The message names which side to update;
+// the numbers let a client decide for itself.
+func buildProtocolEpochError(clientEpoch int) []byte {
+	message := fmt.Sprintf("this client speaks protocol epoch %d but the server needs %d; update the client",
+		clientEpoch, ProtocolEpoch)
+	if clientEpoch > ProtocolEpoch {
+		message = fmt.Sprintf("this client speaks protocol epoch %d but the server only speaks %d; update the server",
+			clientEpoch, ProtocolEpoch)
+	}
+	return buildJSON(map[string]any{
+		"type": MsgTypeAuthError,
+		"payload": map[string]any{
+			"message":      message,
+			"code":         ErrCodeProtocolEpoch,
+			"client_epoch": clientEpoch,
+			"server_epoch": ProtocolEpoch,
+			"min_epoch":    minClientEpoch,
+		},
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Typed message builders.
 // ---------------------------------------------------------------------------
