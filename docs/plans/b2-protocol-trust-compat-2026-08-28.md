@@ -571,7 +571,9 @@ Runs in parallel with B2-1 and B2-6.
    neither is not an option.
 
 **Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
-`2b2d58ab`; PR #1443 to `dev`. HP-2 questions 3 and 6 cite this block.
+`2b2d58ab`; PR #1443 to `dev`, squash-merged 2026-08-29 as `88c7a824`
+(16 commits; 11 Codex rounds, all documentation-only). HP-2 questions 3 and 6
+cite this block.
 
 - Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
   links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
