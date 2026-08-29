@@ -5,7 +5,8 @@
 ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — claims
 verified at `bf7b886d`  
 **Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
-B3-0 in review 2026-08-29 (evidence in its section; closes entry-gate item 3).
+B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
+B3-1 in progress 2026-08-29.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -30,19 +31,19 @@ surface to it.
 
 ## Steps at a glance
 
-| Step     | What                                                                                                  | Size     | Parallel with          |
-| -------- | ----------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
-| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph     | 1–2 days | B3-6, B3-7             |
-| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths      | 1 day    | B3-6, B3-7             |
-| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral               | 2–3 days | B3-6, B3-7             |
-| **HP-3** | First vertical-slice review — scorecard                                                               | —        | —                      |
-| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                   | 1–2 days | B3-4                   |
-| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                      | 1 day    | after B3-3             |
-| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites       | 2–3 days | after B3-3/B3-4        |
-| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules   | 3–4 days | B3-0..B3-2             |
-| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                        | 1–2 days | B3-0..B3-2             |
-| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family | spread   | after HP-3, per-family |
-| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 (test-first, `bughunt-fix` shape)                   | 1 day    | any                    |
+| Step     | What                                                                                                                               | Size     | Parallel with          |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
+| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7             |
+| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths                                   | 1 day    | B3-6, B3-7             |
+| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7             |
+| **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                      |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                   |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                   | 1 day    | after B3-3             |
+| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                    | 2–3 days | after B3-3/B3-4        |
+| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                | 3–4 days | B3-0..B3-2             |
+| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                     | 1–2 days | B3-0..B3-2             |
+| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                              | spread   | after HP-3, per-family |
+| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 (test-first, `bughunt-fix` shape)                                                | 1 day    | any                    |
 
 Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
 and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
@@ -138,7 +139,8 @@ red on a synthetic violation; the graph table exists for the three auth
 files. One PR.
 
 **Evidence, 2026-08-29** — branch `feat/b3-0-boundary-inventory` from `dev`
-`ad4defc2`; PR to `dev` recorded below. Closes entry-gate item 3.
+`ad4defc2`; PR #1448 to `dev`, squash-merged 2026-08-29 as `d383d8c7`.
+Closes entry-gate item 3.
 
 - **Inventory:** `docs/architecture/server-boundaries.md`, linked from
   `docs/architecture/server.md` §D2 and `docs/architecture/README.md`. The
