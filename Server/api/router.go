@@ -181,7 +181,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// which case lifecycle calls return 503 and list returns []).
 		r.Group(func(r chi.Router) {
 			r.Use(admin.RequireAdminAuth(database))
-			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database, database))
 		})
 	})
 

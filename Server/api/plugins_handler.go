@@ -7,12 +7,17 @@
 package api
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/go-chi/chi/v5"
 )
@@ -26,13 +31,14 @@ const maxPluginUploadBytes = 16 * 1024 * 1024
 type PluginAdminHandler struct {
 	registry *plugin.Registry
 	store    plugin.PluginStore
+	audit    db.Auditor // nil disables audit writes (unit tests)
 }
 
 // NewPluginAdminHandler builds an http.Handler that the router can mount.
 // Pass a nil registry when plugin support is disabled — the handler then
 // reports an empty list and 503 on lifecycle calls.
-func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore) http.Handler {
-	h := &PluginAdminHandler{registry: registry, store: st}
+func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore, audit db.Auditor) http.Handler {
+	h := &PluginAdminHandler{registry: registry, store: st, audit: audit}
 	r := chi.NewRouter()
 	r.Get("/", h.list)
 	r.Post("/install", h.install)
@@ -104,6 +110,7 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	h.writeAudit(r, "plugin_install", h.installedID(r.Context(), name), name)
 	writeJSON(w, http.StatusCreated, map[string]any{"name": name})
 }
 
@@ -170,12 +177,51 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
 		return
 	}
+	// Registry.UninstallPlugin is idempotent on an unknown id, so check the
+	// row here: a stale or repeated delete must answer 404 and must not
+	// record a plugin_uninstall that never happened.
+	if h.store != nil {
+		if _, err := h.store.GetPlugin(r.Context(), id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "plugin not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("plugin lookup failed", "id", id, "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
 	if err := h.registry.UninstallPlugin(r.Context(), id); err != nil {
 		slog.Error("plugin uninstall failed", "id", id, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	h.writeAudit(r, "plugin_uninstall", id, "")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeAudit records a plugin lifecycle mutation (B2-6) against the admin
+// principal RequireAdminAuth put on the request. A nil auditor (unit tests
+// that only exercise the HTTP surface) records nothing.
+func (h *PluginAdminHandler) writeAudit(r *http.Request, action string, pluginID int64, detail string) {
+	if h.audit == nil {
+		return
+	}
+	db.WriteAudit(context.WithoutCancel(r.Context()), h.audit, admin.ActorIDFromContext(r.Context()),
+		action, "plugin", pluginID, detail)
+}
+
+// installedID resolves a freshly installed plugin's row id for its audit
+// entry; 0 when the store cannot answer (the name in detail still identifies it).
+func (h *PluginAdminHandler) installedID(ctx context.Context, name string) int64 {
+	if h.store == nil {
+		return 0
+	}
+	row, err := h.store.GetPluginByName(ctx, name)
+	if err != nil || row == nil {
+		return 0
+	}
+	return row.ID
 }
 
 // pluginRuntimeState reports whether lifecycle calls will work, for the

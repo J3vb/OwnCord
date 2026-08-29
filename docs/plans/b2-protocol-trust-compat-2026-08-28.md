@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 and B2-7 are next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -445,6 +445,86 @@ half stands on those two tests.
 3. A second table asserts `detail` never carries a token, password, recovery
    secret, or message body — a denylist over the recorded corpus. Fix any hit
    at the call site, never by loosening the list.
+
+**Evidence, 2026-08-29** — branch `feat/b2-6-audit-coverage` from `dev`
+`67fdd18d`; PR #1441 to `dev`. HP-2 cites this block.
+
+- Step 1 — the mutation inventory, crossed with the 43 non-test `Audit(` call
+  sites at `67fdd18d` (`WriteAudit`, `LogAudit`, `EnqueueAudit`). "Before" is
+  whether the mutation wrote an audit row at that SHA; "table" names the B2-6
+  test that now asserts it (`TestAuditCoverage_*` in `service`, `api` and
+  `admin`, each over a fake `db.AuditStore` from `Server/db/audittest`).
+
+  | Mutation                  | Handler                                                        | Action                                                   | Before | Table                                                          |
+  | ------------------------- | -------------------------------------------------------------- | -------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+  | Password change           | `service/user.go` `ChangePassword`                             | `password_change`                                        | yes    | service                                                        |
+  | Session revoke            | `service/user.go` `RevokeSession`                              | `session_revoke`                                         | yes    | service                                                        |
+  | TOTP enrol                | `api/totp_handler.go` confirm                                  | `totp_enabled`                                           | yes    | api                                                            |
+  | TOTP disable              | `api/totp_handler.go` disable                                  | `totp_disabled`                                          | yes    | api                                                            |
+  | Role assignment           | `service/moderation.go` `ChangeUserRole`                       | `role_change`                                            | yes    | service                                                        |
+  | Invite create             | `service/invite.go` `CreateInvite`                             | `invite_create`                                          | **no** | service — added (S-02)                                         |
+  | Invite revoke             | `service/invite.go` `RevokeInvite`                             | `invite_revoke`                                          | **no** | service — added (S-02); actor threaded from the handler        |
+  | Ban / unban               | `service/moderation.go` `BanUser` / `UnbanUser`                | `user_ban` / `user_unban`                                | yes    | service                                                        |
+  | Kick (sessions)           | `service/moderation.go` `ForceLogout`                          | `force_logout`                                           | yes    | service                                                        |
+  | Kick (voice)              | `ws/voice_moderation.go` `handleVoiceModKick`                  | `voice_mod_kick`                                         | yes    | existing `TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget` |
+  | Timeout                   | — no timeout mutation exists on the server                     | —                                                        | n/a    | —                                                              |
+  | Channel role overrides    | `admin/handlers_channel_perms.go` put / delete                 | `channel_perms_update` / `channel_perms_clear`           | yes    | admin                                                          |
+  | Channel user overrides    | `admin/handlers_channel_perms.go` put / delete (user layer)    | `channel_user_perms_update` / `channel_user_perms_clear` | yes    | admin                                                          |
+  | TLS / config change       | `admin/setup_handler.go` `setupApplyWizard`                    | `config_write` (with `server_setup`)                     | yes    | admin                                                          |
+  | Settings change           | `admin/handlers_settings.go` `handlePatchSettings`             | `setting_change`                                         | yes    | admin                                                          |
+  | API token create / revoke | `admin/handlers_tokens.go` (`token_cli.go` shares the actions) | `api_token_create` / `api_token_revoke`                  | yes    | admin                                                          |
+  | Plugin install            | `api/plugins_handler.go` `install`                             | `plugin_install`                                         | **no** | api — added                                                    |
+  | Plugin uninstall          | `api/plugins_handler.go` `uninstall`                           | `plugin_uninstall`                                       | **no** | api — added                                                    |
+  | Account deletion          | `api/auth_handler.go` delete account                           | `account_deleted`                                        | yes    | api                                                            |
+  | Message deletion          | `service/message_crud.go` `DeleteMessage`                      | `message_delete`                                         | yes    | service                                                        |
+  | Message purge             | `service/message_purge.go` `PurgeMessages`                     | `message_purge`                                          | yes    | service                                                        |
+
+  Call sites outside the security-sensitive list (channel CRUD, emoji,
+  profile, identity key, backups, login/logout/register, `ws_connect`, the
+  other three voice moderation actions) keep their existing rows and are not
+  in the table; the denylist in step 3 does not run over them.
+
+- Pre-squash SHAs, one commit per step: `ea914e66` (step 1, the table
+  above), `a06499f2` (step 2, tables + the four audit calls), `6193a709`
+  (step 3, denylist + its self-test). `474ec74c` and `cbbf41c1` are the
+  register/CHANGELOG/security.md edits, committed from outside the session
+  while the step-2 gate ran; content unchanged, kept as-is.
+- Step 2 — fixture: `Server/db/audittest` installs a `db.AuditWriter` over a
+  recording `AuditStore` via `SetAuditWriter`, so every `WriteAudit` through
+  the test's `*db.DB` lands in memory regardless of package. Tables:
+  `TestAuditCoverage_ServiceMutations` (10 rows), `TestAuditCoverage_APIMutations`
+  (3), `TestAuditCoverage_PluginLifecycle` (2, package-internal fixtures),
+  `TestAuditCoverage_AdminMutations` (8). Red at `ea914e66` + tests on exactly
+  the four rows the table predicts — `invite_create`, `invite_revoke`,
+  `plugin_install`, `plugin_uninstall` (each `no "<action>" audit entry
+recorded; recorded actions: []`); every other row green before any
+  production change. Green after the four calls. `RevokeInvite` gained the
+  actor parameter (threaded from `handleRevokeInvite`); the plugin handler
+  gained a `db.Auditor` and `admin.ActorIDFromContext` was exported so its
+  rows name the `RequireAdminAuth` principal. S-02's failure half:
+  `TestAuditCoverage_InviteRevokeFailureEmitsNothing`.
+- Step 3 — `audittest.AssertSafeDetails` runs over the union corpus each
+  table recorded: shape denylist (bcrypt/argon2 hashes, `password=` /
+  `token=` / `secret=` / recovery-code key-value leaks, `otpauth://`,
+  `Bearer `) plus every fixture secret the rows return (raw session and API
+  tokens and their hashes, passwords, TOTP secrets and codes, invite codes,
+  message bodies, the setup password). `TestAssertSafeDetails_Bites` proves
+  each class rejects and ordinary details pass. Zero hits on the corpus at
+  `6193a709`; no call site changed.
+- Gates from `Server/` before each commit: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  (one `contextcheck` round: hoisted `ctx` in the tables, inlined),
+  `sqlc generate` and `genprotocol` drift — all exit 0. Docs commits:
+  `npm run check:docs`, `npm run check:hygiene`.
+- Closes S-02 (register: resolved/superseded). Ledger untouched.
+- Codex review on #1441, two P2s, both fixed test-first in `aadd911b`, same
+  gate green: `CreateInvite` read the invite back on the request context, so
+  a cancel after the committed insert failed the call and skipped
+  `invite_create` — read-back and audit now run on `context.WithoutCancel`
+  (`TestCreateInvite_AuditSurvivesCanceledLookup`); and
+  `Registry.UninstallPlugin` is idempotent on an unknown id, so the handler
+  audited uninstalls that never happened — it now checks the row first and
+  answers 404 with no audit (`TestPluginsHandlerUninstallUnknownID`).
 
 ## B2-7 — Trust model, absence proofs, plugin boundary (documents)
 

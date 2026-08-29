@@ -54,7 +54,7 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`
-- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `plugin_install`, `plugin_uninstall`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
