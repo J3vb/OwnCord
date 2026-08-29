@@ -656,9 +656,12 @@ operation before building their full cross-client experience.
    rotation, and stale-subscription cleanup. There is no OwnCord relay.
 10. Keep automation optional. Human moderation authority and audit remain core
     even if automation becomes a post-beta plugin candidate.
-11. _(added 2026-08-28)_ SEC-03 (bounded per-response and aggregate
-    preview/media reads) is first in line unless B2-9 already landed it. It is
-    P1 and confirmed.
+11. _(added 2026-08-28; re-tagged here by B2-9 on 2026-08-29)_ SEC-03 (bounded
+    per-response and aggregate preview/media reads) is first in line. It is P1
+    and confirmed. Shape: the C-09 contract in `docs/trust-model.md` clause 6
+    (time, streaming byte ceiling, content-type list, concurrency cap) plus
+    aggregate budgets and byte-weighted cache eviction; implement the byte
+    accounting once, at the boundary B7's native broker will own.
 
 ### Hold point HP-5 — Abuse and privacy review
 

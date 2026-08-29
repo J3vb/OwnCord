@@ -844,7 +844,7 @@ where each goes:
 | S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440) — done                |
 | SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440) — done; UI half in B5 |
 | C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7     |
-| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                    |
+| SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below       |
 | SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                    |
 | SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                    |
 | OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                    |
@@ -856,7 +856,28 @@ New draft), not by CLI with the report text; their IDs are recorded in
 `docs/security-findings/README.md`, which is local. Public commits, issues and
 PR bodies never name the mechanism (`docs/security.md`).
 
-## HP-2 — Protocol and threat-model sign-off
+**Evidence, 2026-08-29** — branch `feat/b2-9-hp2` from `dev` `88c7a824`;
+PR to `dev` recorded below. HP-2 cites this block for exit-gate condition 7.
+
+- **SEC-03 verdict: B5, not B2.** Sized against the code the local report
+  cites at `88c7a824` before deciding. What the register's closure line
+  requires — streaming limits enforced before any buffering, aggregate
+  memory and concurrency budgets, timeout, cancellation, adversarial
+  boundary tests — is not one guard: it is a shared bounded reader behind
+  every automatic fetch the desktop renderer makes (four call sites across
+  three client modules, ~1.1k lines), byte-weighted budgets at more than
+  one level, cache eviction by bytes instead of entry count, plus server
+  support (bounded thumbnails, range-capable media) that does not exist.
+  A per-response cap alone is a few dozen lines but would not close the
+  row, and it would land in the per-call-site TypeScript layer that the
+  C-09 contract (`docs/trust-model.md` §"Desktop preview destination
+  policy", clause 6: "bound time, bytes and concurrency … enforced while
+  reading") exists to retire. Doing it twice is the wrong kind of small.
+  So: register row re-tagged `B2/B5` → `B5`; roadmap B5 item 11 loses its
+  "unless B2-9 already landed it" clause and names clause 6 as the shape
+  the fix takes, so B5 implements the byte accounting once, where B7's
+  broker will own it. No acceptance test lands here — it stays local
+  beside the report until the fix, per the rule above.
 
 `docs/plans/hp-2-scorecard-<date>.md`, in the HP-1 shape. Questions it must
 answer with commands, not assertions:
