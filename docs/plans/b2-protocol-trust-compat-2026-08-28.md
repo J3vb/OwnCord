@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done and the HP-2 scorecard written 2026-08-29, in review — **HP-2 awaits the owner's signature** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)).
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done 2026-08-29 (PR #1444 = `2bfc5e30`); **HP-2 accepted 2026-08-29** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — **B2 is complete, B3 may begin.**
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -46,7 +46,7 @@ one to one and a half weeks with agents working steps in parallel.
 | **B2-7** | Trust model, absence proofs, plugin boundary — **DONE 2026-08-29 (PR #1443)**                                     | 1 day    | B2-1, B2-6             |
 | **B2-8** | The nine B2-tagged findings — **DONE 2026-08-28 (PR #1436)**                                                      | 1 day    | before B2-2            |
 | **B2-9** | Security owners and acceptance tests — **DONE 2026-08-29** (SEC-03 → B5; table closed)                            | spread   | —                      |
-| **HP-2** | Protocol and threat-model sign-off — **scorecard written 2026-08-29, awaiting signature**                         | —        | —                      |
+| **HP-2** | Protocol and threat-model sign-off — **ACCEPTED 2026-08-29**                                                      | —        | —                      |
 
 Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
 own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
