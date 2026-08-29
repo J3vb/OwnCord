@@ -53,13 +53,16 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 		return nil, fmt.Errorf("%w: failed to create invite: %v", ErrInternal, err)
 	}
 
-	invite, err := s.st.GetInvite(ctx, code)
+	// The invite is committed from here on: a request canceled during the
+	// read-back must neither fail the creation nor skip its audit row.
+	tailCtx := context.WithoutCancel(ctx)
+	invite, err := s.st.GetInvite(tailCtx, code)
 	if err != nil || invite == nil {
 		return nil, fmt.Errorf("%w: failed to retrieve invite: %v", ErrInternal, err)
 	}
 	// S-02: the row names the invite by id, never by code; the code is the
 	// credential.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, createdBy, "invite_create", "invite", invite.ID,
+	db.WriteAudit(tailCtx, s.st, createdBy, "invite_create", "invite", invite.ID,
 		fmt.Sprintf("max_uses=%d expires_in_hours=%d", maxUses, expiresInHours))
 	return invite, nil
 }

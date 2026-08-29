@@ -8,6 +8,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -174,6 +176,20 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
 		return
+	}
+	// Registry.UninstallPlugin is idempotent on an unknown id, so check the
+	// row here: a stale or repeated delete must answer 404 and must not
+	// record a plugin_uninstall that never happened.
+	if h.store != nil {
+		if _, err := h.store.GetPlugin(r.Context(), id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "plugin not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("plugin lookup failed", "id", id, "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := h.registry.UninstallPlugin(r.Context(), id); err != nil {
 		slog.Error("plugin uninstall failed", "id", id, "error", err)

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/db/audittest"
@@ -79,4 +80,22 @@ func TestAuditCoverage_PluginLifecycle(t *testing.T) {
 		}
 		audittest.AssertSafeDetails(t, corpus)
 	})
+}
+
+// TestPluginsHandlerUninstallUnknownID pins Codex's P2 on #1441: the registry
+// treats an unknown id as an idempotent no-op, so the handler must answer 404
+// and write no plugin_uninstall row for a plugin that never existed.
+func TestPluginsHandlerUninstallUnknownID(t *testing.T) {
+	reg, mem := newTestPluginRegistryWithStore(t)
+	h := NewPluginAdminHandler(reg, mem, mem)
+	rec := audittest.Install(t, mem)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("DELETE", "/999", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body = %s", w.Code, w.Body.String())
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := rec.Entries(); len(got) != 0 {
+		t.Fatalf("unknown plugin must not audit; got %v", got)
+	}
 }

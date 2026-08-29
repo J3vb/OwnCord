@@ -166,3 +166,33 @@ func TestAuditCoverage_InviteRevokeFailureEmitsNothing(t *testing.T) {
 		t.Fatalf("failed revoke must not audit; got %v", got)
 	}
 }
+
+// cancelAfterCreateStore cancels the request context the moment the insert
+// has committed, modelling a client that drops the connection mid-request.
+type cancelAfterCreateStore struct {
+	*db.DB
+	cancel context.CancelFunc
+}
+
+func (s *cancelAfterCreateStore) CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error) {
+	code, err := s.DB.CreateInvite(ctx, createdBy, maxUses, expiresAt)
+	s.cancel()
+	return code, err
+}
+
+// TestCreateInvite_AuditSurvivesCanceledLookup pins Codex's P2 on #1441: once
+// the invite row is committed, a canceled request context must neither turn
+// the creation into an error nor skip its audit row.
+func TestCreateInvite_AuditSurvivesCanceledLookup(t *testing.T) {
+	_, database := newTestModerationService(t)
+	rec := audittest.Install(t, database)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inv, err := NewInviteService(&cancelAfterCreateStore{DB: database, cancel: cancel}).CreateInvite(ctx, 1, 5, 24)
+	if err != nil {
+		t.Fatalf("committed invite must not fail on a canceled lookup: %v", err)
+	}
+	if e := rec.Wait(t, "invite_create"); e.TargetID != inv.ID {
+		t.Fatalf("invite_create target = %d, want %d", e.TargetID, inv.ID)
+	}
+}
