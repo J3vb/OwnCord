@@ -1,0 +1,468 @@
+# B3 — Strengthen server architecture and permanent guardrails
+
+**Drafted:** 2026-08-29  
+**Base commit:** `bf7b886d` (`dev`, post-PR #1445); HP-2 accepted 2026-08-29
+([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — claims
+verified at `bf7b886d`  
+**Status:** drafted — entry gate 2 of 3 met at draft time (see below); no step
+started. Update this line, not only the step table, when a step lands.
+
+Primary inputs:
+
+- [beta roadmap](repo-health-roadmap-2026-08-23.md), B3 section (17
+  workstreams) and HP-3
+- [layout-refactor supplement](developer-experience-layout-refactor-2026-08-29.md),
+  Phases 1–3, "Pull-request and commit strategy", Phase 8, "First actionable
+  slice" — bound into the roadmap as B3 workstream 17
+- [bug-detection-improvements.md](bug-detection-improvements.md), Tier 3 —
+  the design behind workstreams 2 and 3 (roadmap workstream 13)
+- [HP-2 scorecard](hp-2-scorecard-2026-08-29.md), "Open items carried past
+  B2" and question 5's residue table
+- [issue register](repo-health-issue-register-2026-08-23.md) — every row
+  tagged `B3`: S-03, S-04, S-06, S-08, S-09, S-10, S-11, OC-0323, OC-0345,
+  OC-0346 (S-12 closed in B2-5)
+
+B3 has no primary product requirement. It is the engineering-enabling phase
+every later server phase stands on: the server must stop mixing transport,
+domain and persistence before B4–B6 add identity, moderation and operations
+surface to it.
+
+## Steps at a glance
+
+| Step     | What                                                                                                  | Size     | Parallel with          |
+| -------- | ----------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
+| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph     | 1–2 days | B3-6, B3-7             |
+| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths      | 1 day    | B3-6, B3-7             |
+| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral               | 2–3 days | B3-6, B3-7             |
+| **HP-3** | First vertical-slice review — scorecard                                                               | —        | —                      |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                   | 1–2 days | B3-4                   |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                      | 1 day    | B3-3                   |
+| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites       | 2–3 days | after B3-3/B3-4        |
+| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules   | 3–4 days | B3-0..B3-2             |
+| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                        | 1–2 days | B3-0..B3-2             |
+| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family | spread   | after HP-3, per-family |
+| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 (test-first, `bughunt-fix` shape)                   | 1 day    | any                    |
+
+Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 + B3-4 → B3-5 → B3-8. B3-6, B3-7
+and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
+and baseline measurement may run while the first vertical slice is prepared)
+provided they do not touch `Server/api/auth_handler.go`, `Server/auth/` or
+`Server/service/` — B3-6's hub simulation lives in `ws`, B3-7 in `cmd/seed`.
+After HP-3, families in B3-8 proceed in parallel only when they share no
+migration, predicate or hub lifecycle ownership.
+
+## Entry gate
+
+| Condition                                                       | State 2026-08-29                                                                                                                                                                                        |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B2 contracts are frozen and covered by compatibility tests      | **Met.** HP-2 accepted 2026-08-29; `TestEpoch1Fixtures`, `TestAuth_ProtocolEpoch`, the three `TestAbsenceContract_*`, two predicate parity tables — all under the required `Server Build & Test` check. |
+| Server baseline, race, deadlock and security tests are green    | **Met.** #1445 = `bf7b886d`: both `Server Build & Test` jobs green (four tag variants, `-race`, `-tags deadlock ./ws/`, lint); zero B2-owned security rows open (HP-2 condition 7).                     |
+| Hotspots and direct database call sites have an owned inventory | **B3-0.** Does not exist. The layout-refactor supplement counts them (44 files) but assigns no dispositions; the count is re-measured below and is already off by one.                                  |
+
+## Verify before you implement
+
+Every claim the roadmap's B3 section and the supplement rest on, re-tested
+against `bf7b886d`. Commands are the ones B3-0 automates.
+
+| Claim                                                                        | Verdict                   | What it means for the work                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 44 production files in `ws`/`admin`/`api` import `db` (17/16/11)             | **Confirmed, 45**         | `ws` 17, `admin` 16, `api` **12** (`grep -l '"github.com/J3vb/OwnCord/Server/db"'` over non-test files). `service` imports it from 16 of 18 files — expected, it is the layer that should. `auth` from 2 of 10. B3-0 lists every file, not the count.                                                                                                                                                                                   |
+| `main.go` exceeds 1,000 lines and owns twelve responsibilities               | **Confirmed**             | 1,019 lines. B3-3 moves the wiring into `internal/app/`; `main.go` stays the `go build .` entry.                                                                                                                                                                                                                                                                                                                                        |
+| `hub_broadcast.go`, `serve.go`, `hub.go` are the coordination hotspots       | **Confirmed**             | 1,032 / 990 / 819 lines; `router.go` 721, `voice_join.go` 680. `ws` is 45 production files, 12,738 lines. B3-5 splits inside the package — the supplement's rule ("keep `ws` one package while its lock invariants need shared private state") stands.                                                                                                                                                                                  |
+| Hub wiring uses post-construction setters (S-11)                             | **Confirmed, 7**          | `SetEventPersister`, `SetEventStore`, `SetPluginRegistry`, `SetPluginEventSink` (`hub_events.go`), `SetLiveKit`, `SetLiveKitProcess` (`hub_livekit.go`), `SetPendingVoiceModFlags` (`voice_moderation.go:599`). B3-4 decides for each: required (constructor option, validated) or genuinely replaceable (setter stays).                                                                                                                |
+| Auth routes consume raw database ownership (S-10)                            | **Confirmed**             | `api/auth_handler.go` (786 lines) takes `*db.DB` in `MountAuthRoutes`, `handleRegister`, `handleLogin`, `loginAuthenticate`, `handleLogout`, `handleDeleteAccount`, `issueSession`, `isRequire2FAEnabled`, `isRegistrationOpen`, `getBooleanSetting`; 26 `db.` references. `totp_handler.go` 475 lines, same shape. No `service/auth.go` exists.                                                                                        |
+| A useful service seam exists but does not own all use cases                  | **Confirmed**             | `Server/service/` has 18 production files (block, channel, dm, emoji, invite, mentions, message\*, moderation, permission, role, user). Nothing for auth, sessions, TOTP, uploads, settings, audit or plugins.                                                                                                                                                                                                                          |
+| Coverage is 74.6% with no floor (S-06)                                       | **Confirmed**             | `ci.yml:73` runs `go test -race -coverprofile=coverage.out -cover` and uploads the profile (`:91-96`); nothing reads it. B0 measured 74.6% (`b0-baseline-2026-08-25.md:46`). B3-6 adds the floor at exactly that number.                                                                                                                                                                                                                |
+| Tier 3 (hub simulation, fault transport, model tests) is designed, not built | **Confirmed**             | `bug-detection-improvements.md` §Tier 3; `make fuzz` (Tier 1a) exists (`Server/Makefile:5`). No `ws` simulation test, no fault-injecting transport, no `fc.commands` model test in `Client/tests/unit/*.property.test.ts`. B3-6 builds 3b and 3c; 3a is a client test file and is included (it touches no client structure — B7's rule is about `src/`).                                                                                |
+| `Server/invariants` has rules to extend                                      | **Confirmed, one rule**   | `Rules = []Rule{syncutilLocks}` (`invariants.go:64`). The `seq-enqueue-paired` rule the 2026-08-18 measurement recorded as "adopted narrowed" was never merged under that name — `git log -S seq-enqueue-paired` is empty at `bf7b886d` — so B3-6 item 7 adds `authz-chokepoint` as the registry's second rule and does not build on a sibling that does not exist. `authz-chokepoint` gets HP-2 question 5's residue as its allowlist. |
+| The seed tool has no alpha-shaped profile (workstream 12)                    | **Confirmed**             | `Server/cmd/seed/main.go` (372 lines) takes `-db` and `-confirm-dev` only. No snapshot exists anywhere in the tree. B3-7 builds both.                                                                                                                                                                                                                                                                                                   |
+| Docker smoke never runs on `dev` (workstream 16)                             | **Confirmed**             | `Server Docker Build (verify)` skips on every `dev` PR (HP-2 gate run; #1444, #1445 both `skipping`). B3-6 adds a `schedule:` trigger to `ci.yml` scoped to that job.                                                                                                                                                                                                                                                                   |
+| Permission rules are mirrored (workstream 7)                                 | **Refuted, done in B2-5** | Six predicates in `Server/permissions/predicates.go`, parity tables in `service/` and `ws/`; residue classified in HP-2 question 5. Workstream 7 reduces to the `authz-chokepoint` rule (workstream 15) and to keeping the residue table current when B3-8 moves families.                                                                                                                                                              |
+| Register rows OC-0323, OC-0345, OC-0346 are open                             | **Confirmed**             | All three `open`, low, in `.superpowers/findings-ledger.json`; B3/B5, B3/B4, B3/B6 tags. Roadmap rule 2: B3 cannot exit with any of them open unless re-tagged with a written reason in HP-3.                                                                                                                                                                                                                                           |
+
+Net effect: workstream 7 is already done; the inventory (entry-gate item 3)
+is the first real work; the auth slice is exactly the size S-10 says; `api`
+has one more `db` importer than the supplement counted; one invariant rule
+believed adopted is absent and must be traced before B3-6 counts on it.
+
+## B3-0 — Boundary inventory
+
+Layout-refactor Phase 1, items 1–4 and 6. Closes entry-gate item 3 and is the
+"boundary and database-call inventory with dispositions" the B3 exit gate
+requires.
+
+1. **Database-call inventory.** New `docs/architecture/server-boundaries.md`,
+   linked from `docs/architecture/server.md` §D2 and `docs/architecture/README.md`.
+   One row per production file outside `Server/db` and `Server/service` that
+   imports `db` (45 today + `main.go` + `plugin/`), listing the `db` symbols it
+   uses and **one disposition** from the supplement's four:
+   `move` (behind a service), `adapter` (retained transport adapter, e.g. a
+   handler that only decodes a request and calls one query), `boundary`
+   (explicit transaction/composition, e.g. `main.go` opening the database),
+   `remove`. The command that produces the file list is recorded in the
+   document so the inventory can be re-run:
+   ```bash
+   cd Server && git grep -l '"github.com/J3vb/OwnCord/Server/db"' -- '*.go' ':!*_test.go' ':!db/*' ':!service/*'
+   ```
+   Every `move` row names its target family (auth, channel, message, role,
+   invite, upload, settings, audit, plugin, admin-UI) so B3-8 is a list, not a
+   discovery.
+2. **Hub lifecycle inventory.** Same document, second section: the seven
+   setters with what calls each and when (`main.go` line), which are required
+   before `Run` and which are genuinely replaceable; every lock in `Hub` with
+   its owner and the order the `-tags deadlock` pass has proven; the
+   start/stop/drain sequence in `main.go` as it exists today, including every
+   `defer` and every place a failure returns early. This is B3-3's and B3-4's
+   input.
+3. **Before-state dependency graph for the auth slice.** `go list -deps` and
+   `go mod graph` are module-level; the file-level graph the supplement asks
+   for is produced with a small script in `docs/plans/` (like
+   `hp-2-trust-model-anchors.py`): for each of `api/auth_handler.go`,
+   `api/totp_handler.go`, `auth/*.go`, the imports and the `db.*` symbols
+   called. Committed as a table, not an image. Re-run after B3-2 for the
+   after-state.
+4. **Narrowest mechanical check.** An `invariants` rule `db-import-boundary`
+   that fails on any **new** production `db` importer outside `db/`,
+   `service/`, `main.go` and the files the inventory marks `adapter` or
+   `boundary` — the inventory's rows are the allowlist, checked in as a Go
+   slice beside the rule so the document and the gate cannot drift. RED
+   proven by adding an import to a file not on the list. This is Phase 1 item
+   6 and the exit-gate's "checks can detect a newly introduced violation
+   without false positives".
+5. Refreshing the **client** baselines (Phase 1 item 5) is **not** B3 — it is
+   B7's entry work and is recorded as such here so nobody looks for it.
+
+Exit: every `db` importer has a disposition; the rule is green on HEAD and
+red on a synthetic violation; the graph table exists for the three auth
+files. One PR.
+
+## B3-1 — Auth characterization tests
+
+Layout-refactor Phase 2 item 1 and the supplement's PR strategy step 1
+("add or tighten characterization/contract tests" **before** any move). Lands
+before B3-2 touches a line of `auth_handler.go`, in its own PR, so the slice's
+diff is reviewable against a frozen behaviour set.
+
+1. `Server/api/auth_characterization_test.go`: table tests over the mounted
+   router (the `setupRouter`-style harness B2-7's absence test uses) pinning,
+   per route (`/register`, `/login`, `/logout`, `/me`, `/account` DELETE, the
+   TOTP routes):
+   - **enumeration defence** — unknown user vs wrong password vs disabled
+     account vs locked-out account return byte-identical status, body and
+     timing class (the existing constant-time guard in `auth/` is asserted, not
+     re-implemented);
+   - **sentinel mapping** — each `db` sentinel (`ErrNotFound`, unique
+     violation, `ErrDisabled`, …) to its HTTP status and public message;
+   - **session issue/revoke** — cookie/bearer shape, `issueSession` fields,
+     logout revokes server-side (the register's admin-logout row is B4's, but
+     the user-path behaviour is pinned here);
+   - **TOTP** — enrol, verify, partial-login store, `require_2fa` setting;
+   - **rate limits** — the `auth.RateLimiter` paths and the persisted
+     lockout;
+   - **failure paths** — a database that returns an error (not a sentinel)
+     yields 500/503 with no enumeration leak, never 401/403.
+2. Every row is written against **today's** behaviour. A row that reveals a
+   defect is not fixed here: it is pinned as-is with a `// ponytail:`-free,
+   plain `// known:` comment and a ledger entry, and fixed in B3-9 or the
+   owning phase — the slice must move behaviour, not change it.
+3. Coverage of `api/auth_handler.go` and `api/totp_handler.go` after this step
+   is recorded in the evidence block (`go test -coverprofile` filtered to the
+   two files) so B3-2's "behaviour-neutral" claim has a number behind it.
+
+Exit: the characterization file is green on HEAD; its row count and the two
+files' coverage are in the evidence block. One PR.
+
+## B3-2 — The auth vertical slice (S-10)
+
+Layout-refactor Phase 2 items 2–6; the HP-3 subject. One PR, commits in the
+supplement's order: boundary + rule, move one responsibility, mechanical
+rewrite, remove old path — with B3-1's tests green after every commit.
+
+1. **Interface beside the consumer.** `Server/api/auth_deps.go` declares the
+   narrow interface the handlers need — nothing more than the calls the B3-0
+   graph table shows them making (register, authenticate, issue/revoke
+   session, read the two boolean settings, delete account, TOTP enrol/verify).
+   Consumer-owned, per the supplement's dependency direction.
+2. **`Server/service/auth.go`** implements it: `AuthService` constructed with
+   `*db.DB`, the `auth.RateLimiter`, the partial-login store and the
+   broadcaster the delete path needs. Orchestration moves here verbatim —
+   the enumeration guard, the sentinel-to-domain-error mapping (`service`
+   already has the `ErrPermissionDenied`-style sentinel pattern from B2-5;
+   auth errors join it), the transaction intent. Persistence stays in `db`.
+3. **Handlers become thin**: decode, call the interface, encode. `*db.DB`
+   leaves every handler signature in `auth_handler.go` and `totp_handler.go`;
+   `MountAuthRoutes` takes the interface. `main.go` constructs the service
+   (B3-3 later moves that into `internal/app/`).
+4. **Error semantics preserved at the boundary**: B3-1's sentinel-mapping rows
+   are the proof; they do not change in this PR. If a mapping must change to
+   be expressible through the service, that is a behaviour change and goes to
+   a separate PR first (supplement: "Functional changes discovered during
+   extraction belong in separate pull requests").
+5. **After-state graph** — the B3-0 script re-run; `db-import-boundary`
+   allowlist loses `api/auth_handler.go` and `api/totp_handler.go` in the same
+   commit that removes their import, so the rule proves the move.
+6. Evidence block records: pre-squash SHAs per commit, the before/after graph
+   tables, `go test -race ./api/ ./service/ ./auth/`, the full server gate,
+   and coverage of the two files before and after (must not drop).
+
+Exit: HP-3.
+
+## HP-3 — First vertical-slice review
+
+`docs/plans/hp-3-scorecard-<date>.md`, in the HP-2 shape. Questions:
+
+1. Did the slice move behaviour without changing it? B3-1's characterization
+   file unchanged and green at every pre-squash commit; the sentinel-mapping
+   table byte-identical.
+2. Did it reduce coupling? Before/after graph tables; `db` importers in `api`
+   12 → 10; the interface's method count vs the `db` symbols the handlers used
+   to touch.
+3. Did it weaken a B2 contract? `TestEpoch1Fixtures` (`auth-failure`,
+   `fresh-connect`), `TestAuth_ProtocolEpoch`, the absence tests, the
+   predicate parity tables — all unchanged and green.
+4. Is the pattern repeatable? The interface/service/handler shape written down
+   in `docs/architecture/server.md` as the rule for B3-8, with the one thing
+   that was awkward named honestly.
+5. Are the guardrails from B3-6 that landed in parallel green on the slice's
+   SHA (coverage floor, `db-import-boundary`, hub simulation)?
+
+Owner signs. Acceptance authorises B3-3 onward and B3-8's per-family repeats.
+
+## B3-3 — Lifecycle extraction into `internal/app/`
+
+Roadmap workstream 8; supplement Phase 3 item 1. After HP-3.
+
+1. `Server/internal/app/` owns: config and data-directory preparation,
+   database open/migrate, telemetry, plugin registry, event persistence,
+   audit writer, maintenance workers, HTTP server construction, health,
+   replay seeding, and **one composite close** — `App.Close(ctx)` that stops
+   in the reverse of start order and reports the first error without skipping
+   later closes. `main.go` becomes `cfg := …; app, err := app.New(cfg); err =
+app.Run(ctx)`.
+2. Moved in the supplement's order: pure move of each block into a named
+   file (`app/database.go`, `app/telemetry.go`, `app/plugins.go`,
+   `app/http.go`, `app/lifecycle.go`), then the rewrite that threads
+   dependencies through `App` fields instead of `main` locals — adjacent
+   commits, HP-1's normalised-diff proof (`sort | uniq -u` over the
+   substituted lines) recorded for the move commit.
+3. **Failure-injection test** (`internal/app/lifecycle_test.go`): each
+   collaborator's start made to fail in turn; assert no goroutine leaks
+   (`goleak`, the server's convention), the database handle is closed, the
+   listener is not left bound, and the returned error names the stage. This
+   is the exit gate's "lifecycle failure-injection report".
+4. `go build .` from `Server/` still produces `chatserver`; `release.yml` and
+   `Dockerfile` are untouched (B2-7's no-`wazero`-tag finding stays true).
+
+Exit: `main.go` under 150 lines; the failure-injection test green under
+`-race`; four tag variants build. One PR.
+
+## B3-4 — Hub constructor options (S-11)
+
+Roadmap workstream 6; supplement Phase 3 item 2. Parallel with B3-3 (touches
+`ws/hub*.go` and the one construction site, not `main.go`'s other blocks —
+coordinate the construction-site line).
+
+1. From B3-0's setter table: each of the seven becomes either a field of
+   `HubOptions` validated in `NewHub` (required → construction fails without
+   it; the failure is a test) or stays a setter with a comment naming why it
+   is replaceable at runtime (`SetPendingVoiceModFlags` is the likely
+   survivor; `SetLiveKitProcess` depends on whether the supervised process can
+   restart).
+2. `NewHub` returns `(*Hub, error)`; the single call site (`main.go`, or
+   `internal/app/` once B3-3 lands) passes everything it used to set. Tests
+   that build a `Hub` use a `testHubOptions()` helper so 170+ test files do
+   not each grow a struct literal.
+3. RED first: a test that constructs a `Hub` without a required collaborator
+   and expects an error — it fails today because construction succeeds and
+   `Run` panics or silently drops events later.
+
+Exit: no required collaborator can be omitted after construction; the
+`-tags deadlock` pass still green. One PR.
+
+## B3-5 — `ws` in-package split (S-08)
+
+Roadmap workstream 9; supplement Phase 3 item 3. After B3-3/B3-4.
+
+1. One pure-move commit per responsibility, each followed by its mechanical
+   rewrite commit, in this order: handshake authentication (`serve_auth.go`
+   exists — grow it from `serve.go`), fresh-connect initialisation
+   (`serve_ready.go` exists), replay selection and delivery (`replay*.go`),
+   registry and supersession (`registry.go` — today inside `hub.go`),
+   visibility and permission refresh (`hub_visibility.go` — today inside
+   `hub_broadcast.go`), broadcast delivery and backpressure
+   (`hub_broadcast.go` keeps only this), voice session and moderation
+   lifecycle (already `voice_*.go`; only leftovers move).
+2. **No new package.** The lock order proven by `-tags deadlock` is shared
+   private state; a subpackage would force exports. `Server/CLAUDE.md`'s
+   FIFO/seq statement is re-read before every move and the `-tags deadlock
+-count=10 ./ws/` pass runs after each.
+3. Every move commit carries HP-1's proof: `git diff -M --summary` shows only
+   renames/moves, and the normalised-diff of the rewrite commit is empty or
+   its residue is listed.
+4. `hub_broadcast.go` and `serve.go` each under 500 lines at exit; `hub.go`
+   under 400. Numbers, not adjectives, in the evidence block.
+
+Exit: the file table in `docs/architecture/server-boundaries.md` §hub updated;
+race + deadlock + `TestEpoch1Fixtures` green on every commit. One PR per two
+responsibilities at most, so each is reviewable.
+
+## B3-6 — Permanent guardrails
+
+Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;
+each item is its own PR so none blocks another. Nothing here edits
+`api/auth_*`, `auth/` or `service/`.
+
+1. **Coverage floor (S-06, workstreams 1 and 14).** `Server/scripts/coverage-floor.sh`
+   reads `coverage.out`, computes the aggregate and per-package figures for a
+   named core set (`ws`, `service`, `permissions`, `auth`, `db`), and fails
+   below `Server/coverage-floor.json` — aggregate starts at **74.6**, core
+   packages at their measured value on the SHA that lands this, exclusions
+   (generated `db/dbgen`, `cmd/`) listed in the JSON. Wired into `ci.yml` after
+   the test step; the ratchet rule ("a PR that raises a figure raises the
+   floor in the same PR; nobody lowers it without an HP entry") written into
+   `Server/CLAUDE.md`. RED proven by setting the floor to 99 locally.
+2. **Hub simulation (Tier 3b, workstreams 2 and 13).** `Server/ws/hub_sim_test.go`:
+   a seeded `math/rand/v2` interleaving of subscribe, broadcast, ack,
+   disconnect and reconnect-transfer over a real `Hub` under `-race`,
+   asserting per-client FIFO and monotonic `seq` (the `Server/CLAUDE.md`
+   statement) after every step; the seed printed on failure and settable via
+   `OWNCORD_SIM_SEED` so a failure replays exactly. 200 steps × 20 seeds in
+   CI; `make sim` runs 10,000.
+3. **Fault-injected transport (Tier 3c).** `Server/ws/faultconn_test.go` — a
+   test-only `net.Conn`/frame wrapper that drops, duplicates, reorders and
+   delays frames from a seed; used by the simulation's reconnect cases and
+   exported through `export_test.go` for the epoch-fixture harness.
+4. **Client model test (Tier 3a).** `Client/tests/unit/connection.model.test.ts`
+   with `fc.commands` (`Connect`, `Disconnect`, `RegisterNow`, `Receive(seq)`,
+   `Supersede`, `Resync`, `Logout`) against a minimal model; invariants from
+   the design (no duplicate ids, monotonic seq, verified never flips to
+   unverified and back, aborted attempt never tears down a newer session).
+   A test file only — no `Client/src/` change, so B7's rule holds.
+5. **Fuzz seeds (workstream 3).** Corpus entries under `testdata/fuzz/` for
+   the targets `make fuzz` already loops over, plus new `Fuzz*` targets for
+   `protocol` parsing (`ws/messages.go` decoders), `permissions.Subject`
+   round-trips, upload admission and recovery-token parsing — each seeded from
+   the epoch-1 fixtures so CI's replay covers the real wire.
+6. **Benchmarks and baselines (workstream 11).** `Benchmark*` for permission
+   invalidation, read-state write, broadcast fan-out, replay selection,
+   reconnect storm (the simulation with N clients) and upload admission;
+   `Server/scripts/bench-baseline.sh` writes `benchstat` output to
+   `docs/plans/b3-bench-baseline-<date>.md`. Baselines are recorded, not
+   gated — the gate is B6's.
+7. **`authz-chokepoint` rule (workstream 15).** Added to `Server/invariants`
+   with HP-2 question 5's residue table as its allowlist (the 21 hits by
+   file:line-independent symbol, since lines move); RED proven by a synthetic
+   `permissions.HasPerm` call in `api/`. B3-8 shrinks the allowlist as
+   families move.
+8. **Docker smoke nightly on `dev` (workstream 16).** `ci.yml` gains
+   `schedule: [{cron: "0 3 * * *"}]` and the `Server Docker Build (verify)`
+   job's condition becomes `github.ref == 'refs/heads/main' ||
+github.event_name == 'schedule'`; `concurrency` and `timeout-minutes`
+   already present (B1-7's guard check enforces both).
+9. **Machine-readable contract drift (workstream 10).** `check:server`
+   already diffs the two generators; this adds `docs/api.md` route-table
+   generation from the mounted router (the absence test's walker, printed as
+   a table) and a `git diff --exit-code` on it, plus `docs/schema.md` from
+   `sqlc`'s catalog. Configuration keys: the koanf walker from
+   `TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys`, printed
+   into `docs/deployment.md`'s reference table.
+
+Exit: each item green in CI on its own PR; the numbers (floor, seeds, bench
+baseline) in this section's evidence block.
+
+## B3-7 — Alpha-shaped test dataset
+
+Roadmap workstream 12. Beside the slice.
+
+1. `Server/cmd/seed -profile alpha` — deterministic (fixed seed, fixed clock):
+   member count, channel count, message volume, attachment count, role and
+   override distribution, DM share and voice-session history matching the
+   documented alpha shape (numbers from the load-baseline workflow's
+   parameters, `load-baseline.yml`, so the two agree). `-confirm-dev` stays
+   mandatory.
+2. One anonymised `v1.2.0-alpha.4` snapshot at `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite`
+   (Git LFS if over 5 MB; the path documented in `docs/deployment.md`
+   §Upgrading and in `Server/CLAUDE.md`), produced by running alpha.4 against
+   the profile and scrubbing identities with a script committed beside it.
+   Consumers named in the file's README: B4 HP-4 drills, B6 upgrade
+   rehearsal, B10 in-place upgrade.
+3. A test that opens the snapshot with HEAD's migrations and asserts the
+   migration count and a row-count checksum — the "upgrade still applies"
+   canary.
+
+Exit: profile reproducible byte-for-byte across two runs; snapshot opens and
+migrates on HEAD. One PR.
+
+## B3-8 — Remaining domain families behind services (S-09)
+
+Roadmap workstream 5; supplement Phase 3 item 5. After HP-3, one PR per
+family, the B3-2 pattern each time (characterization → interface → service →
+thin handler → allowlist shrinks). Families from B3-0's `move` rows, in an
+order that keeps shared migrations apart: settings/audit → channel (S-03's
+rune/normalisation contract and S-04's one non-DM resolution policy land
+here, test-first, because they are exactly the "canonical rule the handlers
+mirror" the family exists to own) → invite → upload → role → message/read
+state (OC-0323 lands here) → admin-UI adapters last (most stay `adapter`).
+Each family's evidence block: before/after `db` importer count, allowlist
+diff, the family's characterization file.
+
+Exit: every remaining `db` importer above the domain layer is `adapter` or
+`boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
+direct database use above the domain layer is justified or removed".
+
+## B3-9 — The B3-tagged findings
+
+Roadmap rule 2. `bughunt-fix` on OC-0345 (owner middleware role re-read →
+reuse the authenticated context; unavailable stays 503, not 403) and OC-0346
+(recovery middleware ordered after tracing so the panic log carries the
+trace id). OC-0323 rides B3-8's message/read-state family. Any of the three
+that cannot land in B3 is re-tagged in HP-3's scorecard with the reason.
+
+## Exit gate
+
+The roadmap's six conditions, with the evidence each maps to:
+
+| #   | Condition                                                                                             | Evidence                                                            |
+| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 1   | Every direct database use above the domain layer is justified or removed                              | `server-boundaries.md` — zero rows without a disposition; B3-8 done |
+| 2   | Required hub wiring cannot be omitted after construction                                              | B3-4 RED/GREEN                                                      |
+| 3   | Permission rules have one production implementation per security property                             | B2-5 + `authz-chokepoint` rule green (B3-6 item 7)                  |
+| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | B3-3 failure-injection test                                         |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | The gate run on the exit SHA; B3-6 items 1, 2, 5, 6                 |
+| 6   | No measured regression exists outside a recorded tradeoff accepted at HP-3                            | Coverage and bench figures before/after; HP-3 tradeoff table        |
+| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | B3-9; ledger read-back in the exit scorecard                        |
+
+Required evidence per the roadmap: boundary and database-call inventory
+(B3-0), before/after dependency graph per extraction (B3-2, B3-8), coverage /
+benchmark / race / deadlock / fuzz / model-test reports (B3-6), lifecycle
+failure-injection report (B3-3), generated-contract drift check (B3-6 item
+9). There is no HP at B3's exit — HP-3 sits mid-phase; the exit evidence is
+appended to the HP-3 scorecard as a dated "B3 exit" section the owner signs.
+
+## Explicitly out of scope for B3
+
+- `Client/src/platform/` and every client feature move (B7). B3-6 item 4 is a
+  test file, not a seam.
+- Refreshing the client baselines (supplement Phase 1 item 5) — B7 entry.
+- Any schema change beyond what a family move strictly needs; new domain
+  services for B4–B6 features.
+- Turning the benchmark baselines into gates (B6).
+- The `ws` subpackage split — in-package only.
+
+## Traps carried forward
+
+- **Squash merges hide structure.** Every B3 PR that a hold point reviews
+  (B3-2, B3-3, B3-5, every B3-8 family) records `refs/pull/<n>/head` SHAs at
+  merge time in its evidence block, as HP-1/HP-2 did.
+- **`strict: true`.** One PR in flight per hot file; B3-6's PRs never touch
+  `api/auth_*`, `auth/`, `service/` while B3-1/B3-2 are open.
+- **The shell cwd persists between commands** (HP-2 obs #95): every
+  multi-step command starts with `cd /d/Local-Lab/Repos/OwnCord` or scopes
+  its `cd` in a subshell.
+- **A pinning test needs a negative control on the exact branch** (HP-2 obs
+  #96): a mutation that does not fail the test is a finding about the test.
+- **Check the PR is still open before pushing a review fix** (HP-2 obs #97).
+- **`make` is not on PATH on Windows**; `npm run check:server` runs the same
+  steps. `go test -tags deadlock -count=10 ./ws/` after every `ws` move.
+- **`check:docs` counts.** `docs/plans/README.md` is watched; the register's
+  row count and the ledger's status counts must agree with it.
