@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is in review 2026-08-29 (evidence in its section).
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done and the HP-2 scorecard written 2026-08-29, in review — **HP-2 awaits the owner's signature** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)).
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -42,11 +42,11 @@ one to one and a half weeks with agents working steps in parallel.
 | **B2-3** | Server-first updates through the signed manifest — folded into B2-2                                               | ½ day    | after B2-2             |
 | **B2-4** | Compatibility matrix — folded into B2-2                                                                           | ½ day    | after B2-2             |
 | **B2-5** | One permission predicate per security property — **DONE 2026-08-29 (PR #1440)**                                   | 1–2 days | serialized             |
-| **B2-6** | Safe audit coverage                                                                                               | ½ day    | B2-1, B2-7             |
-| **B2-7** | Trust model, absence proofs, plugin boundary                                                                      | 1 day    | B2-1, B2-6             |
-| **B2-8** | The nine B2-tagged findings                                                                                       | 1 day    | before B2-2            |
-| **B2-9** | Security owners and acceptance tests                                                                              | spread   | —                      |
-| **HP-2** | Protocol and threat-model sign-off                                                                                | —        | —                      |
+| **B2-6** | Safe audit coverage — **DONE 2026-08-29 (PR #1441)**                                                              | ½ day    | B2-1, B2-7             |
+| **B2-7** | Trust model, absence proofs, plugin boundary — **DONE 2026-08-29 (PR #1443)**                                     | 1 day    | B2-1, B2-6             |
+| **B2-8** | The nine B2-tagged findings — **DONE 2026-08-28 (PR #1436)**                                                      | 1 day    | before B2-2            |
+| **B2-9** | Security owners and acceptance tests — **DONE 2026-08-29** (SEC-03 → B5; table closed)                            | spread   | —                      |
+| **HP-2** | Protocol and threat-model sign-off — **scorecard written 2026-08-29, awaiting signature**                         | —        | —                      |
 
 Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
 own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
@@ -571,7 +571,9 @@ Runs in parallel with B2-1 and B2-6.
    neither is not an option.
 
 **Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
-`2b2d58ab`; PR #1443 to `dev`. HP-2 questions 3 and 6 cite this block.
+`2b2d58ab`; PR #1443 to `dev`, squash-merged 2026-08-29 as `88c7a824`
+(16 commits; 11 Codex rounds, all documentation-only). HP-2 questions 3 and 6
+cite this block.
 
 - Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
   links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
@@ -837,15 +839,15 @@ The seven local reports in `docs/security-findings/` (gitignored, never
 committed; the directory-to-row mapping lives in its local README) and
 where each goes:
 
-| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                            |
-| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
-| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440) — done                |
-| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440) — done; UI half in B5 |
-| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7     |
-| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                    |
-| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                    |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                    |
-| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                    |
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                                                      |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440, `67fdd18d`) — done                              |
+| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440, `67fdd18d`) — done; UI half in B5               |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs (PR #1443, `88c7a824`) — done; code in B7 |
+| SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below                                 |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                                              |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                                              |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                                              |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
 local until its fix lands, then lands publicly in the same PR. The two
@@ -854,7 +856,43 @@ New draft), not by CLI with the report text; their IDs are recorded in
 `docs/security-findings/README.md`, which is local. Public commits, issues and
 PR bodies never name the mechanism (`docs/security.md`).
 
-## HP-2 — Protocol and threat-model sign-off
+**Evidence, 2026-08-29** — branch `feat/b2-9-hp2` from `dev` `88c7a824`;
+PR to `dev` recorded below. HP-2 cites this block for exit-gate condition 7.
+
+- **SEC-03 verdict: B5, not B2.** Sized against the code the local report
+  cites at `88c7a824` before deciding. What the register's closure line
+  requires — streaming limits enforced before any buffering, aggregate
+  memory and concurrency budgets, timeout, cancellation, adversarial
+  boundary tests — is not one guard: it is a shared bounded reader behind
+  every automatic fetch the desktop renderer makes (four call sites across
+  three client modules, ~1.1k lines), byte-weighted budgets at more than
+  one level, cache eviction by bytes instead of entry count, plus server
+  support (bounded thumbnails, range-capable media) that does not exist.
+  A per-response cap alone is a few dozen lines but would not close the
+  row, and it would land in the per-call-site TypeScript layer that the
+  C-09 contract (`docs/trust-model.md` §"Desktop preview destination
+  policy", clause 6: "bound time, bytes and concurrency … enforced while
+  reading") exists to retire. Doing it twice is the wrong kind of small.
+  So: register row re-tagged `B2/B5` → `B5`; roadmap B5 item 11 loses its
+  "unless B2-9 already landed it" clause and names clause 6 as the shape
+  the fix takes, so B5 implements the byte accounting once, where B7's
+  broker will own it. No acceptance test lands here — it stays local
+  beside the report until the fix, per the rule above.
+- **Table closed.** B2-owned rows, all done with their public acceptance
+  tests in the tree: S-01 and the SEC-02 server half (B2-5, PR #1440 →
+  `67fdd18d`), the C-09 contract (B2-7, PR #1443 → `88c7a824`; the client
+  code is B7's). Rows that stay where the table puts them: SEC-03 → B5
+  (above), OC-0324 and SEC-01 → B4, SEC-04 → B6. Exit-gate condition 7 ("no
+  unresolved B2 security advisory remains") is therefore met on the B2-owned
+  set: zero B2-owned rows open, and no advisory was needed for any of them.
+- **Advisories for the deferred rows** — created by the owner in the GitHub
+  UI (Security → Advisories → New draft), never by CLI, report text never
+  leaves the local package. IDs, once created (the local
+  `docs/security-findings/README.md` is the record of which report each maps
+  to): SEC-01 — `GHSA-____-____-____`; SEC-04 — `GHSA-____-____-____`.
+- Pre-squash SHAs: `355b1fc1` (records #1443's squash SHA in the B2-7
+  block), `be8454d0` (item 1, SEC-03 verdict), the commit carrying this
+  bullet (item 2, table closure); HP-2's commits are listed in its own block.
 
 `docs/plans/hp-2-scorecard-<date>.md`, in the HP-1 shape. Questions it must
 answer with commands, not assertions:
@@ -879,6 +917,29 @@ answer with commands, not assertions:
 
 The owner signs. Acceptance authorises B3 and claims nothing about beta
 readiness.
+
+**Evidence, 2026-08-29** — the scorecard is
+[hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md), measured at
+`83a535c3` on `feat/b2-9-hp2` (same PR as B2-9).
+
+- All seven questions answered with commands and their output; the B2 exit
+  gate walked, nine conditions, all met (condition 1 at the slim one-epoch
+  scope, condition 4 with one gap recorded). Every pre-squash SHA the
+  questions cite was resolved on the fetched PR refs.
+- Question 4 added three adversarial tests (`a51e2e89`,
+  `Client/tests/unit/livekit-e2ee.test.ts`): the modified-server unknown
+  member at first contact (a known gap — pinned as today's behaviour, its RED
+  against the desired rule recorded in the scorecard), the second device
+  overwriting the one-per-account pin, and the holder side of OC-0316
+  (resumed peer re-keyed with the rotated key). The last two were proven able
+  to fail by temporary code mutation, restored with `git checkout`.
+- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 117
+  `path:line` anchors in `trust-model.md`, 0 unresolvable at HEAD.
+- Pre-squash SHAs: `a51e2e89` (Q4 tests), the commit carrying this block
+  (scorecard, this block, plan index, roadmap slice); B2-9's are in its block.
+- **Owner lines, left blank on purpose:** the BPR-051 reader line in the B2-7
+  block (Question 3 quotes it), the owner-review date in Question 3, and the
+  decision and signature lines at the top and bottom of the scorecard.
 
 ## Exit gate
 

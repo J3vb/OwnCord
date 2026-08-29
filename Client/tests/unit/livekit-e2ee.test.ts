@@ -1842,3 +1842,149 @@ describe("E2EEManager", () => {
     }
   });
 });
+
+// ── HP-2 question 4: adversarial membership and key-change rules ───────────
+// Each test pins one rule from docs/trust-model.md §"What is end-to-end
+// encrypted" that had no dedicated test before HP-2, or records a known gap
+// so the fix has a RED waiting for it.
+
+describe("E2EEManager — HP-2 adversarial membership and key-change rules", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMembers.clear();
+    mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
+    mockVoiceState.voiceUsers.clear();
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "unpinned" });
+    vi.mocked(storeIdentityPin).mockResolvedValue("stored");
+  });
+
+  it("[HP-2 known gap] a modified server that adds an unknown member at first contact gets the room key wrapped to it", async () => {
+    // Membership is server-controlled and the client accepts any first-sight
+    // identity (verifyPeerAnnounce). A server that inserts a member row it
+    // holds the identity key for, then relays a well-signed announce for it,
+    // is keyed by the holder like any real peer. The client has no
+    // independent membership evidence — the voice roster is server state
+    // too, and here it does not even list the newcomer.
+    //
+    // This pins TODAY's behaviour. When authenticated membership (or
+    // "refuse unrecognised participants") lands, this test goes RED and the
+    // expectations below invert. docs/trust-model.md §"What beta does not
+    // claim" names the gap.
+    const INTRUDER = 99;
+    mockMembers.set(INTRUDER, { identityPublicKey: "server-supplied-identity-b64" });
+    expect(mockVoiceState.voiceUsers.size).toBe(0);
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    ws.send.mockClear();
+
+    await mgr.handleAnnounce(INTRUDER, "aW50cnVkZXI=", "sig-the-server-can-make");
+
+    // Today: keyed, pinned, verified — the RED of the desired rule (no offer,
+    // no pin) is recorded in docs/plans/hp-2-scorecard-2026-08-29.md Q4.
+    const offers = sendsOfType(ws, "voice_e2ee_offer");
+    expect(offers).toHaveLength(1);
+    expect((offers[0] as any).payload.target_user_id).toBe(INTRUDER);
+    expect(mgr.peerPublicKeys.has(INTRUDER)).toBe(true);
+    expect(storeIdentityPin).toHaveBeenCalledWith(
+      "localhost:7880",
+      String(INTRUDER),
+      "server-supplied-identity-b64",
+    );
+    expect(setPeerVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: INTRUDER, status: "verified" }),
+    );
+  });
+
+  it("[HP-2] a second device's key, once trusted, overwrites the account pin — the first device then mismatches", async () => {
+    // Pins are one per account ({host}:{userId}) while identity keys are per
+    // install (identity.ts; migration 017 holds one identity_public_key per
+    // user). Trusting device 2 therefore evicts device 1's pin, and device
+    // 1's next announce is blocked as a mismatch. docs/trust-model.md
+    // §"What is end-to-end encrypted" states the flip-flop; this pins it.
+    const DEVICE1 = "device1-identity-b64";
+    const DEVICE2 = "device2-identity-b64";
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE1 });
+    mockMembers.set(PEER_ID, { identityPublicKey: DEVICE2 }); // server row: last announcer wins
+    const ws = { send: vi.fn() };
+    const mgr = createManager(ws);
+    await mgr.setupKeyExchange(true, 1);
+    ws.send.mockClear();
+
+    // Device 2 announces: pinned key differs → blocked, nothing wrapped.
+    await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMg==", "sig2");
+    expect(setPeerVerification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+    );
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+
+    // The human clicks "Trust new key": the ONE slot is overwritten and the
+    // buffered announce replays against the new pin, so device 2 is keyed.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: DEVICE2 });
+    expect(await mgr.rePinPeerIdentity(PEER_ID, DEVICE2)).toBe(true);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+    expect(storeIdentityPin).toHaveBeenCalledWith("localhost:7880", String(PEER_ID), DEVICE2);
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    const importsBefore = vi.mocked(importPublicKey).mock.calls.length;
+
+    // Device 1 comes back (the server row carries its key again) and is the
+    // one that mismatches now — no offer, no key imported, no second pin.
+    mockMembers.set(PEER_ID, { identityPublicKey: DEVICE1 });
+    await mgr.handleAnnounce(PEER_ID, "ZGV2aWNlMQ==", "sig1");
+    expect(setPeerVerification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+    );
+    expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+    expect(vi.mocked(importPublicKey).mock.calls.length).toBe(importsBefore);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(1);
+  });
+
+  it("[HP-2 / OC-0316] a peer whose socket dropped across a rotation is re-keyed with the rotated key when the server replays its announce", async () => {
+    // Server side: hub.go re-relays the resumed client's stored announce to
+    // the channel (TestRegisterNow_ReannouncesOwnKeyOnResume). Holder side,
+    // pinned here: that replay is a duplicate announce, and the offer it
+    // triggers must carry the CURRENT room key and epoch — not the key the
+    // peer held before its outage.
+    // Round-trip import/export so the replayed announce is recognised as the
+    // SAME ephemeral key (the duplicate path), not a changed one.
+    vi.mocked(importPublicKey).mockImplementation(
+      async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
+    );
+    vi.mocked(exportPublicKey).mockImplementation(async (key: CryptoKey) =>
+      (key as unknown as { type: string }).type.replace("peer-key-", ""),
+    );
+    try {
+      const ws = { send: vi.fn() };
+      const mgr = createManager(ws);
+      await mgr.setupKeyExchange(true, 1);
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(mgr.epoch).toBe(1);
+
+      // Peer's WebSocket drops (media stays up, so no participant-left); the
+      // periodic rotation fires meanwhile.
+      await mgr.rotateKeyPeriodically();
+      expect(mgr.epoch).toBe(2);
+      const rotatedKey = (mgr as any)._roomKey as Uint8Array;
+      ws.send.mockClear();
+      vi.mocked(wrapRoomKey).mockClear();
+      vi.mocked(importPublicKey).mockClear();
+
+      // Peer resumes; the server replays its unchanged announce to us.
+      await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(importPublicKey).not.toHaveBeenCalled(); // duplicate, not a new key
+      const offers = sendsOfType(ws, "voice_e2ee_offer");
+      expect(offers).toHaveLength(1);
+      expect((offers[0] as any).payload.target_user_id).toBe(PEER_ID);
+      expect(wrapRoomKey).toHaveBeenCalledTimes(1);
+      const [, , wrappedKey, wrappedEpoch] = vi.mocked(wrapRoomKey).mock.calls[0]!;
+      expect(wrappedKey).toBe(rotatedKey);
+      expect(wrappedEpoch).toBe(2);
+    } finally {
+      vi.mocked(importPublicKey).mockImplementation(
+        async () => ({ type: "public" }) as unknown as CryptoKey,
+      );
+      vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+    }
+  });
+});
