@@ -1,7 +1,11 @@
 """Every `path:line[-line]` anchor in docs/trust-model.md must name a tracked
 file whose line count covers the cited line. A bare basename (the document's
 short form after a full path in the same sentence) resolves when exactly one
-tracked file has that basename. Prints the misses; exit 1 if any."""
+tracked file has that basename. Prints the misses; exit 1 if any.
+
+No extension allowlist (Codex on #1444): a path is anything with a directory
+separator, or a bare name with an alphabetic extension. `Server/Dockerfile:13`
+and `foo.sh:25-26` count; `8.8.8.8:80` does not."""
 import os, re, subprocess, sys
 
 doc = open("docs/trust-model.md", encoding="utf-8").read()
@@ -10,7 +14,9 @@ tracked_set = set(tracked)
 by_base = {}
 for p in tracked:
     by_base.setdefault(os.path.basename(p), []).append(p)
-pat = re.compile(r"`([A-Za-z0-9_./-]+\.(?:go|ts|rs|md|json|yml|toml|sql)):(\d+)(?:-(\d+))?")
+pat = re.compile(
+    r"`((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+\.[A-Za-z][A-Za-z0-9]*):(\d+)(?:-(\d+))?"
+)
 seen, short, bad = 0, 0, []
 for m in pat.finditer(doc):
     path, lo, hi = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))

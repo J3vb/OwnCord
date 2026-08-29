@@ -933,8 +933,13 @@ readiness.
   overwriting the one-per-account pin, and the holder side of OC-0316
   (resumed peer re-keyed with the rotated key). The last two were proven able
   to fail by temporary code mutation, restored with `git checkout`.
-- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 117
+- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 119
   `path:line` anchors in `trust-model.md`, 0 unresolvable at HEAD.
+- Codex review of `f3d6103d` (P2, accepted): the checker's extension
+  allowlist skipped the `.sh` anchor — and, found on the read-back, the
+  extensionless `Server/Dockerfile:13`. The allowlist is gone (any path with
+  a `/`, or a basename with an alphabetic extension); 117 → 119 checked, 0
+  unresolvable. Fixed in the follow-up commit; no re-review requested.
 - Pre-squash SHAs: `a51e2e89` (Q4 tests), the commit carrying this block
   (scorecard, this block, plan index, roadmap slice); B2-9's are in its block.
 - **Owner lines, left blank on purpose:** the BPR-051 reader line in the B2-7
