@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // deafenRaceRoleAdmin / deafenRaceRoleMember reuse the default seeded roles
@@ -98,7 +99,7 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 
 	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: true}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database}
+	deps := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 
@@ -181,7 +182,7 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 	// test above.
 	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: false}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database}
+	deps := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 
