@@ -11,7 +11,15 @@ the B2-9/HP-2 branch (table below)
 (every B2-_n_ evidence block), [hp-1-scorecard-2026-08-27.md](hp-1-scorecard-2026-08-27.md)
 (open items carried in)
 
-**Decision: \_\_\_\_ — 2026-08-\_\_ by J3vb (repository owner).**
+**Decision: ACCEPTED — 2026-08-29 by J3vb (repository owner).**
+
+All nine exit conditions are evidenced below. Condition 1 is accepted **at
+the slim one-epoch scope** the owner chose for B2-2; condition 4 is accepted
+**with the first-contact membership gap recorded and disclaimed**, not fixed
+— it stays under "What beta does not claim" (Question 4's recommendation,
+taken). The BPR-051 non-developer read (Question 3) and the SEC-01/SEC-04
+advisory IDs (B2-9 block) remain owner follow-ups and do not gate B3.
+**B2 is complete and B3 may begin.**
 
 HP-2 asks seven questions. Each is answered below with the command that
 produces the evidence and what it printed on the measured tree, not with an
@@ -170,7 +178,8 @@ fixed in the document (B2-7 evidence block).
 
 The human half:
 
-- **Owner review** of `docs/trust-model.md` at `88c7a824`: **\_\_\_\_** (date).
+- **Owner review** of `docs/trust-model.md` at `88c7a824`: 2026-08-29, with
+  the acceptance of this scorecard.
 - **Non-developer read** of "The short answer" — BPR-051's exit evidence.
   Reader: **\_\_\_\_**. Date: **\_\_\_\_**. Answer given to "who can read my
   messages?": **\_\_\_\_**. (Quoted from the B2-7 evidence block, where the
@@ -451,4 +460,5 @@ Accepting HP-2 authorises B3 to begin. It does **not** claim:
 - that the deferred security rows are fixed — they are owned and scheduled
   (B2-9 table), not resolved.
 
-**Signed:** **\_\_\_\_** (J3vb, repository owner), 2026-08-\_\_.
+**Signed:** J3vb (repository owner), 2026-08-29 — accepted in session, recorded
+by this commit.
