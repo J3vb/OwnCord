@@ -290,6 +290,39 @@ files' coverage are in the evidence block. One PR.
   failing (crypto/rand), and the partial-token TTL expiry (no clock on the
   store). B3-2's service interface is where a seam for these would go; they are
   not behaviour the slice moves.
+- **Characterization file:** `Server/api/auth_characterization_test.go` —
+  **12 tests, 44 table rows** (56 `PASS` lines under `-v`), green on HEAD and
+  under `-race`. Fault injection is the database itself (`ALTER TABLE x RENAME
+TO x_gone` for read faults, `RAISE(FAIL)` triggers for write faults), so no
+  handler is mocked. Three `// known:` rows → ledger **OC-0376**, **OC-0377**,
+  **OC-0378** (all `low`, open, B3-9). Because a pinning test is green by
+  construction, three mutations stood in for RED: `401→500` in
+  `totpChallengeSecret` (2 rows RED), `500→401` in `loginAuthenticate` (1 row
+  RED), `503→401` in `AuthMiddleware` (1 test RED); tree restored.
+- **Coverage** (`go test -coverprofile ./api/`, statements, filtered to the two
+  files — B3-2 must not drop it):
+
+  | File                  | Before (`d383d8c7`) | After B3-1          |
+  | --------------------- | ------------------- | ------------------- |
+  | `api/auth_handler.go` | 198/254 = **78.0%** | 229/254 = **90.2%** |
+  | `api/totp_handler.go` | 141/179 = **78.8%** | 163/179 = **91.1%** |
+  | `api` package         | 83.5%               | 85.8%               |
+
+  Functions still short of 100%: `handleRegister` 80.6% (the post-commit
+  `GetUserByID` failure and `GenerateToken` failure, not injectable),
+  `registerReadRequest`/`loginReadRequest` (invalid-username and
+  password-strength branches are `auth/` tests), `handleMe` 66.7% (the
+  no-principal branch is unreachable behind `AuthMiddleware`), `issueSession`
+  83.3% (`GenerateToken` failure).
+
+- **Pre-squash SHAs:** `659c8cbd` (B3-0 SHA recorded), `0905a942` (inventory
+  table), `b7317d03` (characterization file + ledger + claim updates), plus the
+  coverage commit that carries this bullet.
+- Gates before every commit: `check:docs`, `check:hygiene`; from `Server/` the
+  four build-tag variants, `go vet`, `go test -race ./...`, `go test -tags
+deadlock ./ws/`, `golangci-lint run` (first run tripped `prealloc` and
+  `modernize` on the timing row — fixed), `sqlc generate` and `genprotocol`
+  drift checks.
 
 ## B3-2 — The auth vertical slice (S-10)
 
