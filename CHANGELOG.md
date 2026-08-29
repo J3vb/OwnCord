@@ -51,7 +51,8 @@ protocol now carries a version number.
   still connect.
 - A client too old for its server is told "update the client" on the connect
   screen, with the usual Update Now button — instead of failing in confusing
-  ways.
+  ways. The saved login is kept, so the updated client signs back in by
+  itself.
 - **Upgrade the server before the clients.** The server only offers client
   releases that speak its own protocol epoch, so a protocol-changing release
   reaches clients once the server runs it. Releases that do not change the

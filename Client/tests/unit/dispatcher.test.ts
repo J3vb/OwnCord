@@ -302,6 +302,9 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().updateRequiredHost).toBe("chat.example:8443");
     expect(uiStore.getState().transientError).toBe("update the client");
     expect(authStore.getState().isAuthenticated).toBe(false);
+    // The token is still valid — main.ts keeps the stored credential on this
+    // reason so the update relaunches straight into auto-login (Codex P2).
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
   });
 
   it("does not offer a client update when the SERVER is the older side, or on an ordinary auth_error", () => {
@@ -319,8 +322,13 @@ describe("WS Dispatcher", () => {
     });
     expect(uiStore.getState().updateRequiredHost).toBeNull();
 
+    // Server older than the client: still a protocol refusal, still a valid
+    // token — the credential must survive this one too.
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
+
     mock.dispatch("auth_error", { message: "Invalid token" });
     expect(uiStore.getState().updateRequiredHost).toBeNull();
+    expect(authStore.getState().logoutReason).toBe("user");
   });
 
   it("wires ready to channels, members, and voice stores", () => {
