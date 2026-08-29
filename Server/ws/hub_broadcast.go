@@ -673,7 +673,16 @@ func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 // dropQueuedPresenceAndBroadcast reliably, so tests use this hook to
 // reproduce that interleaving deterministically. Mirrors the established
 // refreshChannelVisibilityRaceHook / voiceJoinPostTokenRaceHook pattern.
-var presenceFlushRaceHook func()
+//
+// It is handed the Hub being flushed, and a test that installs it MUST
+// ignore calls for any other Hub. The hook is package-global but flushes are
+// per-Hub, and QueuePresence's AfterFunc outlives the test that armed it:
+// dropQueuedPresenceAndBroadcast clears the queue without disarming the
+// timer, so a sibling test's 300ms flush fires long after that test returned
+// — into whatever hook is installed by then. Passing the Hub is what lets the
+// installer tell its own flush from that stray one; without it, a hook body
+// that is only safe to run once (closing a channel, say) panics.
+var presenceFlushRaceHook func(*Hub)
 
 // flushPresenceQueue drains the coalescer and broadcasts each user's latest
 // presence, all under presenceMu (OC-0005). Runs on the AfterFunc timer
@@ -696,7 +705,7 @@ func (h *Hub) flushPresenceQueue() {
 	h.presenceQueue = nil
 	h.presenceFlushArmed = false
 	if presenceFlushRaceHook != nil {
-		presenceFlushRaceHook()
+		presenceFlushRaceHook(h)
 	}
 	for uid, p := range queued {
 		h.BroadcastPresence(uid, p.status, p.customStatus)

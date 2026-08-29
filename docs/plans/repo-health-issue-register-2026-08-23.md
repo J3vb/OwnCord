@@ -77,12 +77,14 @@ together as if each row were a unique defect:
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     315 |
-| Open      |      30 |
+| Open      |      56 |
 | Declined  |       3 |
 | Duplicate |       1 |
-| **Total** | **349** |
+| **Total** | **375** |
 
-All 38 open records are listed below. Closing a planning row does not close an
+The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt, nine of
+which have since been fixed; `OC-0349`–`OC-0375` are recorded in the ledger and
+are not yet enumerated here. Closing a planning row does not close an
 `OC-*` record: the implementation, regression test, focused verification, full
 required gates, and ledger update must land together.
 

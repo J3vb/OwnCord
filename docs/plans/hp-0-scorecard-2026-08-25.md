@@ -37,7 +37,7 @@ baseline is **truthful, reproducible, and sufficient to begin B1**.
 | Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                     |
 | Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                            |
 | Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                  |
-| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 349 records**                 | re-verified at `6a1561fa`                                           |
+| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 375 records**                 | re-verified 2026-08-29                                              |
 | Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                               |
 | 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                          |
 | Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                  |
@@ -63,27 +63,33 @@ Nothing here is a B1 blocker.
 
 **No confirmed issue blocks B1.**
 
-Open ledger, re-verified at `6a1561fa`:
+Open ledger, re-verified 2026-08-29:
 
 | Status    | Count   |
 | --------- | ------- |
 | fixed     | 315     |
-| open      | **30**  |
+| open      | **56**  |
 | declined  | 3       |
 | duplicate | 1       |
-| **total** | **349** |
+| **total** | **375** |
 
-Of the 38 open records:
+Of the 56 open records:
 
-- **11 medium, 27 low. Zero high, zero critical.**
-- All from one hunt, `general-2026-08-22-b`.
-- **All 38 resolve to a live `file:line`** — 0 dead paths across all 348 records,
-  re-checked at this commit, not carried from B0's check at `5cc08889`.
-- 22 sit under `Client/tauri-client/`, 16 under `Server/`.
-- **None is assigned to B1.** Their register phases span B2–B10 only.
+- **1 high, 12 medium, 43 low. Zero critical.** The high is `OC-0350`, an
+  admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
+- Three hunts: 29 from `general-2026-08-22-b`, 26 from `general-2026-08-29`,
+  1 from `b2-1-fixture-capture-2026-08-28`.
+- **55 of the 56 resolve to a live `file:line`** — 0 dead paths across all 375
+  records, re-checked 2026-08-29. `OC-0323` is the exception: its line drifted
+  past end of file when B2 work shortened `Server/service/channel.go`, so it
+  needs re-pointing before it is fixed.
+- 33 sit under `Client/`, 23 under `Server/`.
+- **None of the 2026-08-22 records is assigned to B1**; their register phases
+  span B2–B10. The 2026-08-29 records are not yet phased in the register.
 
-They are therefore accepted as _counted, non-stale, and assigned_ rather than
-individually adjudicated. Deciding each is bughunt-fix work. The 22 under the
+The 2026-08-22 records are therefore accepted as _counted, non-stale, and
+assigned_ rather than individually adjudicated; the 2026-08-29 records are
+counted and path-checked but not yet phased. Deciding each is bughunt-fix work. The 22 under the
 client path are a **sequencing input to B1-1**, not a blocker: the flatten must
 re-point their recorded paths, and the same dead-path check above is the proof.
 
