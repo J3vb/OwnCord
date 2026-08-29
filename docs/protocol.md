@@ -138,7 +138,7 @@ After the WebSocket connection is established, the client sends the first messag
 | `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                            |
 | `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                        |
 | `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
-| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                              |
+| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                 |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
