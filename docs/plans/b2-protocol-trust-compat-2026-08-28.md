@@ -427,6 +427,11 @@ half stands on those two tests.
 - Gates at `aeee37e8`, from `Server/`: four build-tag variants, `go vet`,
   `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
   — all exit 0, run before each of the five commits.
+- Codex review on #1440 (P2): `CanJoinVoice`'s DM branch returned before the
+  archive flag, while the old `voiceJoinPrecheck` refused every archived
+  channel and the admin PATCH accepts `archived` for a DM. Fixed in
+  `fdd2a3ff` (archive checked after membership and block for both kinds,
+  pinned in the predicate table), same gate green; thread resolved.
 
 ## B2-6 — Safe audit coverage
 
