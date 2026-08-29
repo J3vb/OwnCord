@@ -121,9 +121,11 @@ func CanType(s Subject) error { return CanSendMessage(s) }
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
-// membership, so this can only ever narrow), a channel that has a room, no
-// archive, and for a DM membership plus no block. Applies at join, at token
-// refresh, and to the target of a moderator move.
+// membership, so this can only ever narrow), a channel that has a room, for
+// a DM membership plus no block, and no archive for either kind — the admin
+// PATCH accepts `archived` for any channel type, and an evicted participant
+// must not rejoin the archived room. Applies at join, at token refresh, to
+// the target of a moderator move, and in the stale-voice sweep.
 func CanJoinVoice(s Subject) error {
 	if !s.Has(ConnectVoice) {
 		return missing(ConnectVoice)
@@ -136,15 +138,14 @@ func CanJoinVoice(s Subject) error {
 		if s.DMBlocked {
 			return ErrBlocked
 		}
-		return nil
 	case "voice":
-		if s.Channel.Archived {
-			return ErrArchived
-		}
-		return nil
 	default:
 		return ErrNotVoiceChannel
 	}
+	if s.Channel.Archived {
+		return ErrArchived
+	}
+	return nil
 }
 
 // CanModerateVoice is the actor's authority in the TARGET's channel:

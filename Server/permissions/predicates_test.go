@@ -110,6 +110,11 @@ func TestCanJoinVoice(t *testing.T) {
 		{"dm participant with CONNECT joins", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true}, nil},
 		{"dm non-participant refused", Subject{RolePerms: Administrator, Channel: dm()}, ErrNotDMParticipant},
 		{"dm blocked refused", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, DMBlocked: true}, ErrBlocked},
+		// The admin PATCH accepts archived for any channel type, and the old
+		// voice_join gate refused every archived channel — an evicted
+		// participant must not rejoin an archived DM call (Codex P2, #1440).
+		{"archived dm call refused", Subject{RolePerms: ConnectVoice, Channel: ChannelRef{Type: "dm", Archived: true}, DMParticipant: true}, ErrArchived},
+		{"archived dm non-participant learns nothing", Subject{RolePerms: ConnectVoice, Channel: ChannelRef{Type: "dm", Archived: true}}, ErrNotDMParticipant},
 	})
 }
 
