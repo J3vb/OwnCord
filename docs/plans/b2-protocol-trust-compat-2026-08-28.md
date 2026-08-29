@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is in review 2026-08-29 (evidence in its section).
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -569,6 +569,85 @@ Runs in parallel with B2-1 and B2-6.
    one of two: a compile-and-compare job using a second Go SDK, or
    re-tagging the gate to B10 with the reason recorded in HP-2. Doing
    neither is not an option.
+
+**Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
+`2b2d58ab`; PR to `dev` (number recorded in the review-outcome note below).
+HP-2 questions 3 and 6 cite this block.
+
+- Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
+  links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
+  (item 3, plugin boundary), and the commit carrying this block (item 4, the
+  L-08 decision + register row).
+- Item 1 — `docs/trust-model.md`. Sections as planned: the short answer,
+  server-readable data and why, E2EE rules with their tests, transport per
+  `tls.mode` with desktop pinning and the browser rule, the C-09 contract
+  (eight MUST clauses and the regression list, stated as requirements — the
+  private report's mechanism is not reproduced), at rest, operator can/cannot,
+  multi-device sessions, what beta does not claim. Every claim carries a
+  `path:line` or a test name, verified by reading the line at `2b2d58ab`;
+  two claims are absences with no positive test and say so (server holds no
+  room key; text is not encrypted). Linked from `docs/security.md` (new
+  §Trust model), `docs/deployment.md` §TLS Setup, `docs/quick-start.md`
+  §Client Connection Notes, `docs/README.md` (both tables).
+  - **BPR-051 exit evidence** — a non-developer reads "The short answer" and
+    answers "who can read my messages?" correctly. Reader: **\_\_\_\_**.
+    Date: **\_\_\_\_**. Answer given: **\_\_\_\_**. (Owner fills in;
+    HP-2 question 3 quotes this line.)
+- Item 2 — `Server/api/absence_contract_test.go`
+  `TestAbsenceContract_NoFederationDirectoryOrListingRoutes`. Builds the
+  production router with uploads, voice and the GIF proxy on (the bare
+  `setupRouter` config mounts only 92 routes; the full one clears the 100-route
+  floor), `chi.Walk`s the tree including the mounted `/admin` and
+  `/api/v1/admin/plugins` subrouters, and fails on `(?i)federat|directory|discover|listing`.
+  Green on `2b2d58ab` (`go test -race ./api/`). Proven able to fail by
+  temporarily mounting `r.Get("/directory", healthHandler)` under `/api/v1`
+  in `router.go`:
+
+  ```
+  absence_contract_test.go:92: routes matching "(?i)federat|directory|discover|listing" must not exist (see docs/trust-model.md, "What OwnCord does not have"):
+        GET /api/v1/directory
+  --- FAIL: TestAbsenceContract_NoFederationDirectoryOrListingRoutes (0.02s)
+  ```
+
+  `router.go` restored before the commit (`git checkout`, tree clean). A grep
+  of non-test `Server/` for `federat` is empty; every `directory|discover|listing`
+  hit is a filesystem directory, a config field or a query-result noun. The
+  outbound-host table in `trust-model.md` §"Outbound connections the server
+  makes" came from a read of every `http.Client`, `net.Dial` and URL literal
+  in non-test server code (ten rows, each with trigger, purpose, off switch
+  and anchor) and is B6's capture checklist; no analytics, crash reporting or
+  phone-home exists.
+
+- Item 3 — `docs/architecture/plugins.md`, linked from
+  `docs/architecture/README.md`, `docs/architecture/server.md`,
+  `docs/README.md`. Finding worth stating on its own: **release binaries and
+  the Docker image are built without `-tags wazero`**
+  (`.github/workflows/release.yml:261`, `:268`; `Server/Dockerfile:13`), so
+  no shipped artifact can execute a plugin regardless of `plugins.enabled`;
+  the HP-2 question 6 configuration audit (fresh, upgraded, Docker,
+  standalone, source-with-flag) is the table in that document. The beta
+  release-notes paragraph is in the same file and is to be quoted verbatim.
+- Item 4 — **L-08 decision: re-tag the build gate to B10.** The two options
+  were a compile-and-compare job with a second Go SDK, or re-tagging with the
+  reason recorded for HP-2. Re-tagged, because: (a) "compare" cannot pass in
+  principle — TinyGo 0.40.1 embeds absolute host paths and has no `-trimpath`
+  (`Server/plugin/examples/hello/README.md:70-74`), so the only honest
+  check is compile-only; (b) that compile needs TinyGo 0.40.1, a Go 1.25.x
+  SDK beside the repo's Go 1.26, and Binaryen 129 on every PR
+  (`hello/README.md:37-44`); (c) the subsystem is compiled out of every
+  shipped artifact (item 3), so a per-PR job guards nothing a release
+  contains. B10 (qualify and publish the beta) runs the compile once against
+  the release candidate or closes on the provenance record already in the
+  README. The register row now says so
+  (`docs/plans/repo-health-issue-register-2026-08-23.md` L-08, phase
+  `B1/B10`); the "no API promise" half of its closure evidence is closed by
+  item 3. HP-2 cites this paragraph as the reason.
+- Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
+  (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
+  them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
+  (0 issues), `go test -race -count=1 ./api/`; the full server gate (four
+  build variants, `go vet`, `go test -race ./...`, `-tags deadlock ./ws/`,
+  `golangci-lint run`) ran before push.
 
 ## B2-8 — The B2-tagged findings
 
