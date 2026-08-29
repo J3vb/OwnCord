@@ -118,19 +118,14 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
-	if ch.Type == "dm" {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
-		}
-		// A blocked user must not be able to keep poking the blocker with
-		// typing indicators. Same gate as the other DM sinks; silently dropped
-		// here because typing is best-effort.
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return nil, nil //nolint:nilerr // best-effort: a blocked or unreadable DM emits nothing
-		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
-		return nil, nil // silent drop
+	// A typing indicator announces a post, so it answers to the post policy
+	// (permissions.CanType is CanSendMessage — S-01): a read-only member, an
+	// announcement reader without MANAGE_MESSAGES, an archived channel, a
+	// blocked or non-participant DM user all emit nothing. Silent, because
+	// typing is best-effort.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if subErr != nil || permissions.CanType(sub) != nil {
+		return nil, nil //nolint:nilerr // best-effort: a denial or a DM lookup failure emits nothing
 	}
 
 	// Per-user-per-channel rate limit. Built only now that the channel is
@@ -247,24 +242,18 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
-	switch {
-	case ch.Type == "dm":
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil || !ok {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-		}
-	case !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages):
+	// Session admission is permissions.CanAdmitSession — visibility, the same
+	// predicate behind ListVisibleChannels, the ready payload and reconnect
+	// replay — so a socket that still holds an id it can no longer see (or
+	// an archived channel, OC-0070) cannot resubscribe to the live topic or
+	// advance its read state. channel_focus and mark_read share this one
+	// service call, so the gate closes both at once.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if subErr != nil {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-	case ch.Archived:
-		// Archived channels are hidden from every other client surface
-		// (ListVisibleChannels, ready payload, reconnect replay, voice join —
-		// see permissions.Checker.VisibleChannelIDs and ws/voice_join.go).
-		// HasChannelPerm alone doesn't know about the archive flag, so without
-		// this a socket that still held the id could resubscribe to the live
-		// topic and advance its own read state on a channel reconnect replay
-		// then filters back out. channel_focus and mark_read share this one
-		// service call, so the guard closes both at once (OC-0070).
-		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	}
+	if err := permissions.CanAdmitSession(sub); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrForbidden, err)
 	}
 
 	// Mark channel as read. latestID == 0 (no undeleted messages) still

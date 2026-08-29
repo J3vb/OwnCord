@@ -271,33 +271,33 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		return
 	}
 	h.pubsub.Subscribe(c, ChannelTopic(newChID))
-	// The re-validation mirrors HandleChannelFocus's admission gate: DMs are
-	// participant-gated (the READ role bit is deliberately waived), non-DMs
-	// need READ_MESSAGES, and a deleted channel is a denial. A transient
-	// lookup error is NOT a denial — the recheck exists to catch a concrete
+	// The re-validation is permissions.CanAdmitSession — the same predicate
+	// as HandleChannelFocus's admission gate (S-12): DMs are participant-gated
+	// (the READ role bit is deliberately waived), non-DMs need READ_MESSAGES
+	// and no archive, and a deleted channel is a denial. A transient lookup
+	// error is NOT a denial (OC-0266) — the recheck exists to catch a concrete
 	// revoke in the Subscribe race window, the sweeps stay authoritative, and
 	// unwinding on error would turn any DB hiccup into a silently dead
-	// message stream with no error frame sent to the client.
+	// message stream with no error frame sent to the client; subjectFor and
+	// the DM lookup both report a failure instead of collapsing it.
 	ch, chErr := h.db.GetChannel(c.ctx, newChID)
 	if chErr != nil {
 		return
 	}
-	if ch != nil && ch.Type == "dm" {
-		if ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID); dmErr != nil || ok {
+	if ch != nil {
+		sub, subErr := h.subjectFor(c.ctx, c.userID, newChID)
+		if subErr != nil {
 			return
 		}
-	} else if ch != nil && !ch.Archived {
-		// hasPermChecked, not hasChannelAccess: ch is already in hand and known
-		// non-DM here, so the role/override bit is the whole answer (a second
-		// hasChannelAccess-internal GetChannel would only repeat the read
-		// above), and unlike hasChannelAccess it reports a lookup failure
-		// instead of collapsing it to a denial — required by the "transient
-		// lookup error is NOT a denial" contract documented above (OC-0266).
-		allowed, permErr := hasPermChecked(c.ctx, h.db, h.permChecker, h.perms, c.userID, newChID, permissions.ReadMessages)
-		if permErr != nil {
-			return
+		sub.Channel = channelRef(ch)
+		if ch.Type == "dm" {
+			ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID)
+			if dmErr != nil {
+				return
+			}
+			sub.DMParticipant = ok
 		}
-		if allowed {
+		if permissions.CanAdmitSession(sub) == nil {
 			return
 		}
 	}
@@ -331,23 +331,6 @@ func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, pe
 		return false
 	}
 	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, c.userID, channelID, perm)
-}
-
-// requireChannelAccess checks whether the client may act on the channel with the
-// given permission. If not, it sends a FORBIDDEN error to the client and returns
-// false. The permLabel should be the human-readable permission name (e.g.
-// "SEND_MESSAGES").
-//
-// Unlike hasChannelPerm it is channel-type aware (see hasChannelAccess), which
-// is what a channel id taken straight from a client frame requires: role bits
-// alone let any member through to a DM they are not a participant of.
-func (h *Hub) requireChannelAccess(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
-	if hasChannelAccess(ctx, h.db, h.permChecker, h.perms, c.userID, channelID, perm) {
-		return true
-	}
-	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)
-	c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing "+permLabel+" permission"))
-	return false
 }
 
 // broadcastExcludeLow sends a message at low priority to all clients in the

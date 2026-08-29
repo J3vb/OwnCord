@@ -96,6 +96,24 @@ func (s *PermissionService) HasChannelPermChecked(ctx context.Context, userID, c
 	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm), nil
 }
 
+// Subject resolves the user's role bits and both override layers for
+// channelID from the per-user cache, as a permissions.Subject for the
+// value-taking predicates (CanSendMessage and friends). Channel flags and DM
+// state are the caller's to fill in. A missing role row yields the zero
+// Subject (no bits — every predicate refuses it) with a nil error; a store
+// failure is returned so callers choose between failing closed and
+// reporting it.
+func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64) (permissions.Subject, error) {
+	cp, err := s.getOrPopulate(ctx, userID)
+	if err != nil {
+		return permissions.Subject{}, err
+	}
+	if cp == nil {
+		return permissions.Subject{}, nil
+	}
+	return permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}, nil
+}
+
 // RequireChannelAccess checks whether the user can access the channel with
 // the given permission. For DM channels it verifies participant membership.
 // For regular channels it uses cached role-based permission checks.

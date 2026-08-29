@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) on 2026-08-29 (evidence in their sections); B2-5 is next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 and B2-7 are next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -41,7 +41,7 @@ one to one and a half weeks with agents working steps in parallel.
 | **B2-2** | Protocol epoch and negotiation — **DONE 2026-08-29 (slim; absorbs B2-3, B2-4)**                                   | 1 day    | serialized, after B2-8 |
 | **B2-3** | Server-first updates through the signed manifest — folded into B2-2                                               | ½ day    | after B2-2             |
 | **B2-4** | Compatibility matrix — folded into B2-2                                                                           | ½ day    | after B2-2             |
-| **B2-5** | One permission predicate per security property                                                                    | 1–2 days | serialized             |
+| **B2-5** | One permission predicate per security property — **DONE 2026-08-29 (PR #1440)**                                   | 1–2 days | serialized             |
 | **B2-6** | Safe audit coverage                                                                                               | ½ day    | B2-1, B2-7             |
 | **B2-7** | Trust model, absence proofs, plugin boundary                                                                      | 1 day    | B2-1, B2-6             |
 | **B2-8** | The nine B2-tagged findings                                                                                       | 1 day    | before B2-2            |
@@ -339,6 +339,100 @@ half stands on those two tests.
    one. If residual calls remain with a reason, record them in HP-2 and leave
    the rule to B3 (roadmap B3 item 15).
 
+**Evidence, 2026-08-29** — branch `feat/b2-5-permission-predicates` from
+`dev` `9c9b8be6`; PR #1440 to `dev`. HP-2 question 5 cites this block.
+
+- Pre-squash SHAs, one commit per property: `00761523` (predicates +
+  `Checker` delegation), `94aba833` (send — S-01), `0271cbbe` (view /
+  session admission — S-12), `802101a0` (voice join), `aeee37e8` (voice
+  moderation — SEC-02 server half).
+- Predicates (`Server/permissions/predicates.go`), each pure over a
+  `Subject` (role bits, both override layers, channel flags, DM membership
+  and block state): `CanViewChannel`, `CanAdmitSession` (= view),
+  `CanSendMessage`, `CanType` (= send), `CanJoinVoice`, `CanModerateVoice`;
+  `Subject.Has` is the one value-taking bit predicate `Checker` and
+  `PermissionService` route through. Refusals are sentinels
+  (`ErrPermissionDenied` + bit name, `ErrArchived`, `ErrBlocked`,
+  `ErrNotDMParticipant`, `ErrNotVoiceChannel`) so each site keeps its own
+  status codes. Permission is checked before the archive flag everywhere, so
+  an unauthorized caller learns nothing from the error.
+- Parity tables (site vs predicate over the same fixture, both the
+  cached-service and bare-hub branch, every override layer):
+  `Server/service/predicate_parity_test.go` (`CanPost`, `HandleTyping`,
+  `HandleChannelFocus`) and `Server/ws/predicate_parity_internal_test.go`
+  (`channelCanSend`, `refreshChannelVisibilityCanSend`, `applySetChannelID`,
+  `channelReadAudience`, `RefreshChannelVisibility`, `channelSubject`,
+  `voiceJoinPrecheck`, `voiceStillAllowed`). Red before delegation: S-01 (19
+  typing rows) and SEC-02 (`TestVoiceMod_ChannelOverridesApply`, three deny
+  rows); every other site already agreed with its predicate.
+- Decision recorded for SEC-02's open question ("READ_MESSAGES or
+  CONNECT_VOICE?"): `CanModerateVoice` requires effective `READ_MESSAGES` +
+  `MUTE_MEMBERS` in the target's channel — a moderator acts only where they
+  can see. The base-bit `HasServerPerm` check stays as an early rejection
+  (never admits), which keeps FORBIDDEN ahead of the voice-state lookup and
+  means a channel allow cannot grant `MUTE_MEMBERS` to a base role lacking it.
+- Inventory, step 1 grep plus the hand-rolled sites, before → after:
+
+  | Site (before)                                                       | Property        | After                                         |
+  | ------------------------------------------------------------------- | --------------- | --------------------------------------------- |
+  | `permissions/checker.go` HasChannelPerm / Batch / VisibleChannelIDs | view (bit)      | `Subject.Has` / `CanViewChannel`              |
+  | `service/message_perms.go:93-100` checkSendPermission               | send            | `CanSendMessage`                              |
+  | `service/channel.go:132` HandleTyping (READ only — S-01)            | type            | `CanType`                                     |
+  | `service/channel.go:256` HandleChannelFocus                         | admit           | `CanAdmitSession`                             |
+  | `ws/serve_ready.go:149-157` channelCanSend                          | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:519-523` refreshChannelVisibilityCanSend       | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:265,283` channelReadAudience                   | view            | `CanViewChannel`                              |
+  | `ws/hub_broadcast.go:422-439` RefreshChannelVisibility              | view            | `CanViewChannel`                              |
+  | `ws/handlers.go:296` applySetChannelID (hasPermChecked)             | admit           | `CanAdmitSession`; helper deleted             |
+  | `ws/voice_join.go:105-151` voiceJoinPrecheck (requireChannelAccess) | join            | `CanJoinVoice`; helper deleted                |
+  | `ws/voice_join.go:594-612` handleVoiceTokenRefreshV2                | join            | `CanJoinVoice`                                |
+  | `ws/voice_moderation.go:416-433` move destination                   | join            | `CanJoinVoice`                                |
+  | `ws/hub_sweep.go:353` hasChannelPermChecked (EffectiveChannelPerms) | join (bit only) | `CanJoinVoice` (whole rule, error-aware)      |
+  | `ws/voice_moderation.go:64` voiceModTarget (HasServerPerm — SEC-02) | moderate        | `CanModerateVoice` + base-bit early rejection |
+  | `ws/deps.go` hasChannelAccess / hasChannelAccessLive                | join/admit glue | deleted (`channelSubject` + predicates)       |
+
+- Residue after migration (direct bit-helper calls outside
+  `Server/permissions`, non-test), each with its reason — so step 5's
+  condition is not met and the `authz-chokepoint` rule stays with B3 item
+  15, consistent with the 2026-08-18 measurement that dropped it (1 hit in
+  `api/`, a false positive; 30 widened, 87% legitimate):
+  - Server-scoped permissions with no channel — `HasServerPerm` in
+    `api/middleware.go:200`, `admin/middleware.go:109`, `service/emoji.go:95`,
+    `service/moderation.go:51`, `service/role.go:82`, and `HasAnyPerm`
+    (`AdminPerimeter`) in `admin/middleware.go:84`. These ARE the canonical
+    server-wide predicate; there is no channel to resolve a `Subject` for.
+  - `HasAdmin` as a fetch short-circuit (skip the override query for admins)
+    in `service/channel.go:59`, `service/message_perms.go:25`,
+    `service/permission.go:224`, `ws/serve.go:780`, `ws/serve_ready.go:169`,
+    `ws/voice_join.go:355`; as an authorization input in
+    `admin/handlers_channel_perms.go:95,325`, `admin/logstream.go:452`,
+    `api/upload_handler.go:404`, `service/role.go:104` (role hierarchy — the
+    measurement's "no `Outranks`" class).
+  - `& permissions.AllPerms` masks on admin input (`admin/handlers_channel_perms.go:131-358`,
+    `service/role.go:210,307`) — sanitisation, not a decision.
+  - `service/mentions.go:262-266,302-304` — the bulk @everyone reader walk
+    resolves the role layer per role and the user layer as a set difference;
+    the owner declined the mechanical `HasPerm` conversion on 2026-08-18
+    (memory `owncord-invariant-rule-measurement-2026-08-18`).
+  - `ws/voice_moderation.go:65` — the base-bit early rejection described
+    above.
+- Behaviour deltas beyond the three findings, all narrowing: the stale-voice
+  sweep re-runs the whole join rule (deleted/archived channel, lost DM
+  membership, new block evict too); the token refresh refuses a deleted
+  channel; the bare-hub `RefreshChannelVisibility` branch fails closed on a
+  lookup error like the service branch always did. Two fixtures needed
+  completing, assertions untouched: the deafen-race `VoiceDeps` gain a
+  `Checker`, and `TestHandleVoiceTokenRefresh_NilUser` seeds the channel it
+  refreshes.
+- Gates at `aeee37e8`, from `Server/`: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  — all exit 0, run before each of the five commits.
+- Codex review on #1440 (P2): `CanJoinVoice`'s DM branch returned before the
+  archive flag, while the old `voiceJoinPrecheck` refused every archived
+  channel and the admin PATCH accepts `archived` for a DM. Fixed in
+  `fdd2a3ff` (archive checked after membership and block for both kinds,
+  pinned in the predicate table), same gate green; thread resolved.
+
 ## B2-6 — Safe audit coverage
 
 1. Enumerate the security-sensitive mutations: credential and TOTP changes,
@@ -465,15 +559,15 @@ The seven local reports in `docs/security-findings/` (gitignored, never
 committed; the directory-to-row mapping lives in its local README) and
 where each goes:
 
-| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                        |
-| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
-| S-01       | **B2**                          | beside the report until B2-5 merges                                                      | B2-5                              |
-| SEC-02     | **B2** (server half)            | beside the report until B2-5 merges                                                      | B2-5; UI half in B5               |
-| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7 |
-| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                |
-| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                |
-| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                |
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                            |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
+| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440) — done                |
+| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440) — done; UI half in B5 |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7     |
+| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                    |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                    |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                    |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                    |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
 local until its fix lands, then lands publicly in the same PR. The two

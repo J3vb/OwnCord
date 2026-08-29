@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -178,125 +179,82 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
 }
 
-// hasPermChecked is hasPerm's error-preserving counterpart: it distinguishes
-// "the role/override lookup failed" (err != nil, verdict meaningless) from
-// "the lookup answered and the bit is absent" (false, nil error). hasPerm and
-// hasChannelAccess both collapse that distinction to a fail-closed false,
-// which is the correct posture for every gate that sends FORBIDDEN on denial
-// (requireChannelAccess, requirePerm, and friends) — do not route those
-// through this helper. It exists for a caller like applySetChannelID's
-// post-Subscribe revalidation (OC-0266), which documents that a transient
-// lookup error must NOT be treated as a denial: unwinding on a DB hiccup
-// would silently kill the channel's live message stream with no error frame
-// ever sent to the client.
-func hasPermChecked(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) (bool, error) {
+// subjectFor resolves userID's role bits and both override layers for
+// channelID — from the PermissionService cache when one is wired, else live
+// through the Checker — as a permissions.Subject for the value-taking
+// predicates (CanSendMessage, CanJoinVoice, ...). Channel flags and DM state
+// stay the caller's to fill in. A lookup failure is returned, not collapsed
+// (hasPerm and hasChannelAccess collapse it to a fail-closed false, the right
+// posture for every gate that sends FORBIDDEN on denial), so an error-aware
+// caller like applySetChannelID's post-Subscribe revalidation (OC-0266) can
+// tell a transient read failure from a denial; a missing role row is the
+// zero Subject, which every predicate refuses.
+func subjectFor(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {
 	if permSvc != nil {
-		return permSvc.HasChannelPermChecked(ctx, userID, channelID, perm)
+		return permSvc.Subject(ctx, userID, channelID)
 	}
 	if database == nil || perms == nil {
-		return false, nil
+		return permissions.Subject{}, nil
 	}
 	role, err := database.GetRoleForUser(ctx, userID)
 	if err != nil {
-		return false, err
+		return permissions.Subject{}, err
 	}
 	if role == nil {
-		return false, nil
+		return permissions.Subject{}, nil
 	}
-	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm), nil
+	return perms.Subject(ctx, role.Permissions, role.ID, userID, channelID)
 }
 
-// hasChannelAccess is the gate to use when the channel id comes from the client:
-// it is hasPerm plus the channel-type branch that role bits cannot express.
-//
-// A DM channel carries no channel_overrides rows, so a default Member's base
-// bits satisfy hasPerm for ANY dm channel id — including a conversation the
-// caller is not part of. permissions.Checker.RequireChannelAccess is the shared
-// definition of channel access (service.PermissionService.RequireChannelAccess
-// mirrors it for the REST/service paths) and supplies the IsDMParticipant
-// branch, so the DM membership rule keeps exactly one implementation. Group DMs
-// need no special case: dm_participants holds one row per participant and
-// IsDMParticipant is a lookup on (user_id, channel_id).
-//
-// The role bit is still required on top, which RequireChannelAccess waives for
-// DMs. Voice has always demanded CONNECT_VOICE and sweepStaleVoiceStates keeps
-// re-checking it per role for every live participant, so keeping it here means
-// this check can only ever narrow access — never hand someone a grant the old
-// role-only check refused, and never let the sweeper evict a client the join
-// gate admitted.
-//
-// Blocking is deliberately not consulted here: it is the message paths' rule
-// (service.requireDMNotBlocked), it is two-party only, and a blocked user is
-// still a participant, so it is orthogonal to the non-participant hole this
-// closes.
-//
-// With a PermissionService the role-bit gate is answered from its per-user
-// cache (the channel-type lookup and the DM membership check stay live —
-// dm_participants rows are membership, not permission, state and are never
-// cached). Both branches enforce the same rule: role bit required on top, DM
-// membership via the single shared IsDMParticipant definition.
-func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) bool {
-	if database == nil {
-		return false
-	}
-	if permSvc == nil {
-		return hasChannelAccessLive(ctx, database, perms, userID, channelID, perm)
-	}
-	if !permSvc.HasChannelPerm(ctx, userID, channelID, perm) {
-		return false
-	}
-	ch, err := database.GetChannel(ctx, channelID)
-	if err != nil {
-		// Fail closed: an unknown type would silently take the non-DM path.
-		slog.Error("ws: hasChannelAccess GetChannel failed, denying",
-			"user_id", userID, "channel_id", channelID, "err", err)
-		return false
-	}
-	// A missing channel row takes the non-DM branch, i.e. the role verdict
-	// above stands: there is no DM there to join, and callers keep reporting a
-	// deleted channel the way they always have.
-	if ch == nil || ch.Type != "dm" {
-		return true
-	}
-	// DM: for "dm" the service's RequireChannelAccess is exactly the
-	// IsDMParticipant membership rule (it waives the role check, which was
-	// already enforced above).
-	return permSvc.RequireChannelAccess(ctx, userID, ch.Type, channelID, perm) == nil
+// subjectFor is the hub-wired form of the package-level subjectFor.
+func (h *Hub) subjectFor(ctx context.Context, userID, channelID int64) (permissions.Subject, error) {
+	return subjectFor(ctx, h.db, h.permChecker, h.perms, userID, channelID)
 }
 
-// hasChannelAccessLive is the uncached hasChannelAccess path, kept verbatim for
-// hubs and deps constructed without a PermissionService (bare test fixtures).
-func hasChannelAccessLive(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
-	if database == nil || perms == nil {
-		return false
-	}
-	role, err := database.GetRoleForUser(ctx, userID)
-	if err != nil || role == nil {
-		return false
-	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
-		return false
-	}
-	ch, err := database.GetChannel(ctx, channelID)
+// channelSubject is subjectFor plus the channel's flags and, for a DM, the
+// membership and (withBlock) two-party block state — everything CanJoinVoice
+// and CanModerateVoice consult. Membership and blocks are always read live
+// (dm_participants rows are membership, not permission, state and are never
+// cached). An error is a lookup failure, never a denial; callers decide
+// whether that fails closed.
+func channelSubject(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
+	sub, err := subjectFor(ctx, database, perms, permSvc, userID, ch.ID)
 	if err != nil {
-		// Fail closed: an unknown type would silently take the non-DM path.
-		slog.Error("ws: hasChannelAccess GetChannel failed, denying",
-			"user_id", userID, "channel_id", channelID, "err", err)
-		return false
+		return permissions.Subject{}, err
 	}
-	// A missing channel row takes the non-DM branch, i.e. the role verdict
-	// above stands: there is no DM there to join, and callers keep reporting a
-	// deleted channel the way they always have.
-	if ch == nil || ch.Type != "dm" {
-		// For every non-DM type, RequireChannelAccess is defined as exactly the
-		// HasChannelPerm call already made above, so re-invoking it would only
-		// repeat the same override lookup. The role verdict is the answer.
-		return true
+	sub.Channel = channelRef(ch)
+	if ch.Type != "dm" || database == nil {
+		return sub, nil
 	}
-	// DM: the role bit above stays required on top; the membership rule keeps
-	// its single shared definition in RequireChannelAccess (IsDMParticipant),
-	// which waives the role check for DMs.
-	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, ch.Type, channelID, perm) == nil
+	ok, err := database.IsDMParticipant(ctx, userID, ch.ID)
+	if err != nil {
+		return permissions.Subject{}, err
+	}
+	sub.DMParticipant = ok
+	if ok && withBlock {
+		switch err := service.RequireDMNotBlocked(ctx, database, userID, ch.ID); {
+		case errors.Is(err, service.ErrBlocked):
+			sub.DMBlocked = true
+		case err != nil:
+			return permissions.Subject{}, err
+		}
+	}
+	return sub, nil
+}
+
+// joinDenial maps a CanJoinVoice refusal to the error frame the voice_join
+// gate has always sent for that reason.
+func joinDenial(err error) ClientError {
+	switch {
+	case errors.Is(err, permissions.ErrNotVoiceChannel):
+		return ClientError{Code: ErrCodeBadRequest, Message: "not a voice channel"}
+	case errors.Is(err, permissions.ErrArchived):
+		return ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}
+	case errors.Is(err, permissions.ErrBlocked):
+		return ClientError{Code: ErrCodeForbidden, Message: "cannot join voice: blocked"}
+	default:
+		return ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"}
+	}
 }
 
 // ── V2 handler type ─────────────────────────────────────────────────────────

@@ -38,6 +38,17 @@ func TestChannelCanSend(t *testing.T) {
 		if got := channelCanSend(c.role, c.o, c.ctype); got != c.want {
 			t.Errorf("%s: channelCanSend = %v, want %v", c.name, got, c.want)
 		}
+		// B2-5 parity: the affordance is the canonical send predicate.
+		var bits int64
+		if c.role != nil {
+			bits = c.role.Permissions
+		}
+		want := permissions.CanSendMessage(permissions.Subject{
+			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: c.ctype},
+		}) == nil
+		if want != c.want {
+			t.Errorf("%s: CanSendMessage = %v, channelCanSend table says %v", c.name, want, c.want)
+		}
 	}
 }
 

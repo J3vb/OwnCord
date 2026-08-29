@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -85,26 +86,36 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	}
 
-	// MUTE_MEMBERS authorizes moderating server voice channels, not a private
-	// DM call the actor happens not to be part of — voice_mod_kick and friends
-	// carry no channel id from the client, so without this a moderator could
-	// reach into any two users' DM call by targeting a user id alone. Refused
-	// with the exact same shape as "target not in voice" so the actor learns
-	// nothing about a DM call they are not in.
+	// The decision is permissions.CanModerateVoice over the actor's subject in
+	// the TARGET's channel: effective MUTE_MEMBERS there, so a role-layer or
+	// user-layer deny on that channel holds (SEC-02), READ_MESSAGES so a room
+	// hidden from the actor cannot be moderated, and for a DM call the actor's
+	// own membership — voice_mod_kick and friends carry no channel id from
+	// the client, so without that a moderator could reach into any two users'
+	// DM call by targeting a user id alone. The DM refusal keeps the exact
+	// shape of "target not in voice" so the actor learns nothing about a call
+	// they are not in. The base-bit check above is only an early rejection
+	// (it never admits): it keeps FORBIDDEN ahead of the voice-state lookup
+	// for actors with no MUTE_MEMBERS at all, which also means a channel
+	// allow cannot grant the bit to a role whose base lacks it.
 	ch, err := d.DB.GetChannel(ctx, state.ChannelID)
 	if err != nil {
 		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", state.ChannelID)
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read channel"}}
 	}
-	if ch != nil && ch.Type == "dm" {
-		participant, err := d.DB.IsDMParticipant(ctx, actorID, state.ChannelID)
-		if err != nil {
-			slog.Error("ws voiceModTarget IsDMParticipant", "err", err, "channel_id", state.ChannelID)
-			return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify DM membership"}}
-		}
-		if !participant {
-			return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
-		}
+	if ch == nil {
+		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+	}
+	sub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, actorID, ch, false)
+	if subErr != nil {
+		slog.Error("ws voiceModTarget channelSubject", "err", subErr, "channel_id", state.ChannelID)
+		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify channel access"}}
+	}
+	switch modErr := permissions.CanModerateVoice(sub); {
+	case errors.Is(modErr, permissions.ErrNotDMParticipant):
+		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+	case modErr != nil:
+		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing MUTE_MEMBERS permission"}}
 	}
 
 	return state, nil
@@ -416,16 +427,20 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if dest.Type != "voice" {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "destination is not a voice channel"}}
 	}
-	// The re-join this move hands off to (handleVoiceJoin) refuses an
-	// archived channel outright; check it here too, or the pre-flight commits
-	// the destructive half of the move for a re-join guaranteed to bounce.
-	if dest.Archived {
-		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}}
+	// The destination is gated on the TARGET's access with the same predicate
+	// the re-join this move hands off to (handleVoiceJoin) will apply —
+	// permissions.CanJoinVoice — so a move can neither place someone in a
+	// channel they could not join themselves nor commit the destructive half
+	// of the move for a re-join guaranteed to bounce (an archived channel).
+	targetSub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, c.TargetID(), dest, false)
+	if subErr != nil {
+		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID())
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
 	}
-	// The destination is gated on the TARGET's access, not the moderator's:
-	// a move must not become a way to place someone in a channel they could
-	// not join themselves.
-	if !hasChannelAccess(ctx, d.DB, d.Permissions, d.PermSvc, c.TargetID(), c.ToChannelID(), permissions.ConnectVoice) {
+	switch joinErr := permissions.CanJoinVoice(targetSub); {
+	case errors.Is(joinErr, permissions.ErrArchived):
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}}
+	case joinErr != nil:
 		return Result{Error: ClientError{
 			Code:    ErrCodeForbidden,
 			Message: "user cannot connect to that voice channel",
