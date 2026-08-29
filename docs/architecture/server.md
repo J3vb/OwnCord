@@ -9,6 +9,11 @@ LiveKit for voice, Wazero for plugins (build-tag gated), optional OpenTelemetry
 
 ## D2 — Package map
 
+Which of these packages may import `db`, and what every file above the domain
+layer does with it, is inventoried in
+[server-boundaries.md](server-boundaries.md) (B3-0) and enforced by the
+`db-import-boundary` rule in `Server/invariants/`.
+
 ```mermaid
 flowchart TB
     subgraph entry ["Process entry"]
