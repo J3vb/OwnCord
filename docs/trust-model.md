@@ -39,10 +39,12 @@ is right and this document has a bug — file it like any other.
   encrypted between the people in the call. The server passes the encrypted
   media along and never has the key, so an operator who only reads what the
   server stores or relays cannot listen in. An operator who **changes the
-  server** can try to slip a participant key of their own into a call; that
-  is caught only for people whose identity key your client has already
-  pinned and you have compared out of band (see "What is end-to-end
-  encrypted").
+  server** is a different matter: the server decides who is in a call, and
+  your client accepts any new participant's key the first time it sees it —
+  so a modified server can add a participant it controls and receive the
+  room key. Pinning catches a **known** person's key changing, not a new
+  person appearing. Today, E2EE media is not a defence against an operator
+  who modifies the server (see "What is end-to-end encrypted").
 
 If the operator is someone you trust with your words, OwnCord is built to keep
 everyone else out. If you do not trust the operator, do not type there.
@@ -270,7 +272,8 @@ Cannot, and the code is what stops them:
 
 - Read a voice, video or screen-share stream from what the server stores
   or relays (see "What is end-to-end encrypted"). The active attack — a
-  modified server inserting a key it controls — is in the next paragraph.
+  modified server adding a participant it controls — is in the next
+  paragraph, and it works.
 - Recover a password (bcrypt) or a live session token (hashed) from the
   database.
 - Impersonate a user's E2EE identity to a peer who has already pinned it — the
@@ -281,16 +284,20 @@ Cannot, and the code is what stops them:
 Can, with effort outside the code — and this is the honest boundary: an
 operator with shell access can edit the binary, the database or the
 configuration. No control in this document survives a hostile operator with
-root on the box. That includes E2EE media in one specific way: identity keys
-are trusted on first use, so a modified server can deliver a first-contact
-announce for a peer you have never pinned, carrying an identity key and an
-ephemeral key the operator holds; the client accepts and pins it
-(`Client/src/lib/livekitE2EE.ts:603-620`) and, if you are the key holder,
-wraps the room key to that ephemeral key (`:842-912`). E2EE therefore
-protects against an operator who reads (the server never holds the key) and
-against a modified server only for peers whose identity key was pinned
-before the attack **and** compared out of band. It is not a defence against
-a hostile operator on first contact.
+root on the box, **E2EE media included**. Call membership is
+server-controlled and unauthenticated: a modified server can add a member —
+an invented user id, or a real peer's first contact — with an identity key
+and an ephemeral key the operator holds, the client accepts and pins any
+first-sight identity (`Client/src/lib/livekitE2EE.ts:603-638`), and the key
+holder wraps the room key to it (`:842-912`). Pinning every legitimate peer
+and comparing keys out of band does not close this: pins detect a **known**
+peer's key changing, not an unknown member joining. What E2EE gives today is
+exact and narrower: the server never holds the room key, so an operator who
+**reads** — database, logs, relayed frames, backups — gets nothing, and a
+known peer's key cannot be swapped without the mismatch modal. A defence
+against a modified server needs authenticated membership or the client
+refusing unrecognised participants; neither exists in beta (see "What beta
+does not claim").
 
 ## Multi-device sessions
 
@@ -316,9 +323,10 @@ a hostile operator on first contact.
 - **No encrypted text.** If that changes it is a new protocol epoch, a new
   document, and a new trade-off against search, moderation and replay — not a
   toggle.
-- **No protection against a hostile operator.** E2EE media resists an
-  operator who reads; a modified server can insert its own key at a peer's
-  first contact unless that peer was pinned and verified out of band before.
+- **No protection against a hostile operator, E2EE media included.** E2EE
+  resists an operator who reads. A modified server controls call membership
+  and can add a participant it holds the keys for; pins do not cover a member
+  that was never a known peer. Authenticated membership is not in beta.
 - **No secure deletion.** Account deletion blanks message bodies and
   anonymises the name (`Server/db/account.go:116`, `:131`; test
   `TestDeleteAccount_AnonymisesUsername`), but backups taken before the
@@ -377,19 +385,20 @@ server **serves** — responses on `server.port` to clients it did not initiate 
 is not in the table; the capture filters it by direction. Anything else on
 the wire is a finding.
 
-| Host                                                                                                                       | When                                                                          | Why                                                              | Off switch                                                                                                                | Code                                                                                                                 |
-| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `api.github.com`                                                                                                           | on request to `/api/v1/client-update/…` or the admin update panel; cached 1 h | latest-release metadata for client and server updates            | none needed — never on a timer; `github.owner`/`github.repo` pick the repo                                                | `Server/updater/updater.go:22`, `:224-233`; `Server/api/client_update.go:34`; `Server/admin/update_handlers.go:24`   |
-| `github.com` (+ `*.githubusercontent.com` on redirect)                                                                     | admin clicks "update server"                                                  | download and verify the signed server release                    | do not click; URL is prefix-checked against the configured repo                                                           | `Server/updater/download.go:21`, `:265-273`; `Server/updater/assets.go:164-174`                                      |
-| `github.com/livekit/livekit/releases/download`                                                                             | startup, only if `voice.auto_download_livekit` and no `voice.livekit_binary`  | fetch the pinned, checksum-verified `livekit-server` binary      | `voice.auto_download_livekit: false` or set `voice.livekit_binary`                                                        | `Server/ws/livekit_download.go:31`, `:36`, `:272-300`; `Server/ws/livekit_process.go:230`                            |
-| `api.klipy.com`                                                                                                            | a user opens the GIF picker                                                   | GIF search/trending, proxied so the API key stays on the server  | leave `gif.api_key` empty (default) — endpoints answer 503                                                                | `Server/api/gif_handler.go:34`, `:56-62`; `Server/config/config.go:68-76`                                            |
-| participants' addresses — WebRTC media from the **LiveKit subprocess** the server supervises, UDP 50000–60000 and TCP 7881 | a call is in progress                                                         | encrypted media frames (E2EE); ICE/TURN                          | not running LiveKit (leave `voice.livekit_binary` unset and `voice.auto_download_livekit: false`) or hosting it elsewhere | `Server/ws/livekit_process.go:123-144` (`port_range_start`/`end`); ports in `docs/deployment.md` §Firewall and Ports |
-| LiveKit at `voice.livekit_url` (default `ws://localhost:7880`)                                                             | a user joins voice; health probe of the supervised process                    | media SFU signalling                                             | leave `voice.livekit_api_key`/`secret` empty — voice disabled                                                             | `Server/api/livekit_proxy.go:23-28`; `Server/ws/livekit_process.go:47-52`, `:361-366`                                |
-| hosts on `plugins.http_allowlist`                                                                                          | an installed plugin with the `http` capability calls out                      | plugin feature                                                   | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                          | `Server/plugin/host_http.go:66`, `:136-155`                                                                          |
-| `acme-v02.api.letsencrypt.org`                                                                                             | startup and renewal, only when `tls.mode: acme`                               | certificate issuance                                             | any other `tls.mode` (default `self_signed`)                                                                              | `Server/auth/tls.go:164-193`                                                                                         |
-| operator's OTLP collector (`telemetry.otlp_endpoint`)                                                                      | startup, only when `telemetry.exporter: otlp`                                 | traces and metrics to a collector the operator runs              | `telemetry.exporter: none` (default)                                                                                      | `Server/config/config.go:107-114`; `Server/main.go:373`                                                              |
-| `8.8.8.8:80` (UDP, **no packet is sent**)                                                                                  | startup banner                                                                | asks the OS which local address routes out, to print the LAN URL | none                                                                                                                      | `Server/main.go:1005-1012`                                                                                           |
-| `127.0.0.1:<port>/health`                                                                                                  | `healthcheck` subcommand (Docker `HEALTHCHECK`)                               | liveness probe of itself                                         | n/a — loopback                                                                                                            | `Server/main.go:748-757`                                                                                             |
+| Host                                                                                                                       | When                                                                                        | Why                                                              | Off switch                                                                                                                                               | Code                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `api.github.com`                                                                                                           | on request to `/api/v1/client-update/…` or the admin update panel; cached 1 h               | latest-release metadata for client and server updates            | none needed — never on a timer; `github.owner`/`github.repo` pick the repo                                                                               | `Server/updater/updater.go:22`, `:224-233`; `Server/api/client_update.go:34`; `Server/admin/update_handlers.go:24`   |
+| `github.com` (+ `*.githubusercontent.com` on redirect)                                                                     | admin clicks "update server"                                                                | download and verify the signed server release                    | do not click; URL is prefix-checked against the configured repo                                                                                          | `Server/updater/download.go:21`, `:265-273`; `Server/updater/assets.go:164-174`                                      |
+| `github.com/livekit/livekit/releases/download`                                                                             | startup, only if `voice.auto_download_livekit` and no `voice.livekit_binary`                | fetch the pinned, checksum-verified `livekit-server` binary      | `voice.auto_download_livekit: false` or set `voice.livekit_binary`                                                                                       | `Server/ws/livekit_download.go:31`, `:36`, `:272-300`; `Server/ws/livekit_process.go:230`                            |
+| `api.klipy.com`                                                                                                            | a user opens the GIF picker                                                                 | GIF search/trending, proxied so the API key stays on the server  | leave `gif.api_key` empty (default) — endpoints answer 503                                                                                               | `Server/api/gif_handler.go:34`, `:56-62`; `Server/config/config.go:68-76`                                            |
+| STUN and cloud-metadata endpoints — external-address discovery by the **LiveKit subprocess** the server supervises         | LiveKit start-up, because the generated config sets `use_external_ip: true` unconditionally | learn the public address to advertise in ICE candidates          | not running LiveKit (as below); setting `voice.node_ip` advertises that address but does not turn discovery off (`Server/ws/livekit_process.go:130-133`) | `Server/ws/livekit_process.go:130-133`; `Server/config/config.go:160`                                                |
+| participants' addresses — WebRTC media from the **LiveKit subprocess** the server supervises, UDP 50000–60000 and TCP 7881 | a call is in progress                                                                       | encrypted media frames (E2EE); ICE/TURN                          | not running LiveKit (leave `voice.livekit_binary` unset and `voice.auto_download_livekit: false`) or hosting it elsewhere                                | `Server/ws/livekit_process.go:123-144` (`port_range_start`/`end`); ports in `docs/deployment.md` §Firewall and Ports |
+| LiveKit at `voice.livekit_url` (default `ws://localhost:7880`)                                                             | a user joins voice; health probe of the supervised process                                  | media SFU signalling                                             | leave `voice.livekit_api_key`/`secret` empty — voice disabled                                                                                            | `Server/api/livekit_proxy.go:23-28`; `Server/ws/livekit_process.go:47-52`, `:361-366`                                |
+| hosts on `plugins.http_allowlist`                                                                                          | an installed plugin with the `http` capability calls out                                    | plugin feature                                                   | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                                                         | `Server/plugin/host_http.go:66`, `:136-155`                                                                          |
+| `acme-v02.api.letsencrypt.org`                                                                                             | startup and renewal, only when `tls.mode: acme`                                             | certificate issuance                                             | any other `tls.mode` (default `self_signed`)                                                                                                             | `Server/auth/tls.go:164-193`                                                                                         |
+| operator's OTLP collector (`telemetry.otlp_endpoint`)                                                                      | startup, only when `telemetry.exporter: otlp`                                               | traces and metrics to a collector the operator runs              | `telemetry.exporter: none` (default)                                                                                                                     | `Server/config/config.go:107-114`; `Server/main.go:373`                                                              |
+| `8.8.8.8:80` (UDP, **no packet is sent**)                                                                                  | startup banner                                                                              | asks the OS which local address routes out, to print the LAN URL | none                                                                                                                                                     | `Server/main.go:1005-1012`                                                                                           |
+| `127.0.0.1:<port>/health`                                                                                                  | `healthcheck` subcommand (Docker `HEALTHCHECK`)                                             | liveness probe of itself                                         | n/a — loopback                                                                                                                                           | `Server/main.go:748-757`                                                                                             |
 
 Not in the table because it does not exist: analytics, crash reporting,
 telemetry to the project, licence checks, a phone-home of any kind. The only

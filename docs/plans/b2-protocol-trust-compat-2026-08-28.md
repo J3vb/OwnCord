@@ -715,6 +715,19 @@ Runs in parallel with B2-1 and B2-6.
   TCP 7881, `livekit_process.go:123-144`), which would have made any voice
   call a false finding for B6; the row is added and the capture contract is
   scoped to traffic the server initiates.
+- Codex round 7 of `6adae00a`: one P1 and one P2, both accepted. P1 —
+  the round-3 wording still claimed E2EE holds against a modified server for
+  pinned, out-of-band-verified peers; it does not, because membership is
+  server-controlled and the client accepts any first-sight identity
+  (`livekitE2EE.ts:603-638`), so a modified server can add a member it holds
+  the keys for and the key holder wraps the room key to it (`:842-912`).
+  All four places now say E2EE resists an operator who reads and is not a
+  defence against one who modifies the server; authenticated membership or
+  refusing unrecognised participants is named as the missing control and
+  listed under what beta does not claim. P2 — the supervised LiveKit
+  process's generated config sets `use_external_ip: true` unconditionally
+  (`livekit_process.go:130-133`), so STUN/metadata discovery traffic is a
+  normal part of a capture; a row is added with its conditions.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
