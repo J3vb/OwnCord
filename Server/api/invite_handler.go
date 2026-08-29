@@ -102,8 +102,15 @@ func handleListInvites(svc *service.Services) http.HandlerFunc {
 // handleRevokeInvite processes DELETE /api/v1/invites/:code.
 func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "not authenticated",
+			})
+			return
+		}
 		code := chi.URLParam(r, "code")
-		if err := svc.Invites.RevokeInvite(r.Context(), code); err != nil {
+		if err := svc.Invites.RevokeInvite(r.Context(), user.ID, code); err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
