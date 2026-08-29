@@ -319,6 +319,10 @@ server {
 
 ## Backup Strategy
 
+The built-in backup covers the **database only**. Uploaded files live under
+`upload.storage_dir` and are not in it — back that directory up on the same
+schedule, or a restore comes back with every attachment missing.
+
 ### SQLite WAL Considerations
 
 The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the server is running -- use the backup endpoint instead.

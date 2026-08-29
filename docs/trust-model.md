@@ -236,7 +236,7 @@ Status: contract (this document, B2-7); implementation B7; tracked as C-09 in
 | -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Server database            | SQLite file in `server.data_dir`                                                                | **Not encrypted.** Plain `modernc.org/sqlite` driver, no cipher (`Server/db/db.go:17`, `:219`, DSN pragmas `:62-68`). Filesystem permissions and full-disk encryption are the operator's job                                                                            |
 | Server uploads             | plain files under `upload.storage_dir`                                                          | Same                                                                                                                                                                                                                                                                    |
-| Server backups             | plain database copies under `backup.dir`                                                        | Same — treat the backup directory as the database                                                                                                                                                                                                                       |
+| Server backups             | plain database copies under `backup.dir`                                                        | Same — treat the backup directory as the database. Uploads are **not** included; back up `upload.storage_dir` alongside it                                                                                                                                              |
 | Server secrets             | password hashes, token hashes, encrypted TOTP secrets                                           | See "What the server does not keep in the clear" above                                                                                                                                                                                                                  |
 | Desktop session + identity | OS keychain via the `keyring` crate: Windows Credential Manager, macOS Keychain, Secret Service | Every write is read back and verified (`Client/src-tauri/src/secret_store.rs:94`). If the keychain fails the round trip, a sealed file (DPAPI on Windows, ChaCha20-Poly1305 elsewhere) takes over until it works again — [credential-storage.md](credential-storage.md) |
 | Desktop certificate pins   | `certs.json` in the app data dir (`Client/src-tauri/src/constants.rs:2`)                        | Plain file; a user who can edit it can re-pin, which is the same user who can click "trust"                                                                                                                                                                             |
@@ -246,7 +246,11 @@ Status: contract (this document, B2-7); implementation B7; tracked as C-09 in
 
 Can, by design:
 
-- Read, search, export (via backup) and delete any text or file on the server.
+- Read, search and delete any text or file on the server; export the text
+  via the database backup. **Uploaded files are not in that backup** — it is
+  `VACUUM INTO` of the SQLite file only (`Server/admin/handlers_backup.go:76-84`,
+  `Server/db/admin_queries.go:404`); `upload.storage_dir` must be backed up
+  separately or a restore loses every attachment.
 - See who is online, who is in which voice channel, session devices and IPs
   (`sessions` table, `001_initial_schema.sql:37-46`).
 - Ban, force-logout (`Server/admin/api.go:114`), change roles, and change any
@@ -380,7 +384,12 @@ Not in the table because it does not exist: analytics, crash reporting,
 telemetry to the project, licence checks, a phone-home of any kind. The only
 `telemetry` package is OpenTelemetry instrumentation whose exporter defaults to
 `none`. The Docker image is distroless with no shell or `curl`
-(`Server/Dockerfile:30`), and no tracked script fetches an external host.
+(`Server/Dockerfile:30`), and no tracked script the **server runs** fetches
+an external host. One build-time exception, outside the server: the release
+workflow's AppImage step downloads `appimagetool` from GitHub
+(`Client/scripts/strip-appimage-bundled-libs.sh:25-26`, invoked by
+`.github/workflows/release.yml`). That runs on the CI runner when a release
+is cut, never on an operator's machine.
 
 Two of the GitHub paths (`updater.go`, `livekit_download.go`) use a plain
 `http.Client` against fixed, prefix-validated GitHub URLs; the Klipy proxy and

@@ -692,6 +692,18 @@ Runs in parallel with B2-1 and B2-6.
   broker must add and records that widening `ipAllowed` is a separate server
   change (plugin HTTP is off by default and the GIF proxy follows no
   redirects, so the server-side gap is bounded).
+- Codex round 5 of `7b450b70`: one P1 and one P2, both accepted. P1 —
+  "export (via backup) any text or file" implied uploads are in the backup;
+  `handleBackup` only runs `VACUUM INTO` on the SQLite file
+  (`handlers_backup.go:76-84`, `admin_queries.go:404`), so the can/cannot
+  list and the at-rest table now say uploads are excluded and
+  `upload.storage_dir` needs its own backup; `docs/deployment.md` §Backup
+  Strategy gained the same sentence, since that is where an operator would
+  otherwise be misled. P2 — "no tracked script fetches an external host"
+  was categorical; the release workflow's AppImage step downloads
+  `appimagetool` at build time (`Client/scripts/strip-appimage-bundled-libs.sh:25-26`);
+  the claim is now scoped to scripts the server runs, with that build-time
+  fetch listed.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
