@@ -446,6 +446,44 @@ half stands on those two tests.
    secret, or message body — a denylist over the recorded corpus. Fix any hit
    at the call site, never by loosening the list.
 
+**Evidence, 2026-08-29** — branch `feat/b2-6-audit-coverage` from `dev`
+`67fdd18d`; PR #TBD to `dev`. HP-2 cites this block.
+
+- Step 1 — the mutation inventory, crossed with the 43 non-test `Audit(` call
+  sites at `67fdd18d` (`WriteAudit`, `LogAudit`, `EnqueueAudit`). "Before" is
+  whether the mutation wrote an audit row at that SHA; "table" names the B2-6
+  test that now asserts it (`TestAuditCoverage_*` in `service`, `api` and
+  `admin`, each over a fake `db.AuditStore` from `Server/db/audittest`).
+
+  | Mutation                  | Handler                                                        | Action                                                   | Before | Table                                                          |
+  | ------------------------- | -------------------------------------------------------------- | -------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+  | Password change           | `service/user.go` `ChangePassword`                             | `password_change`                                        | yes    | service                                                        |
+  | Session revoke            | `service/user.go` `RevokeSession`                              | `session_revoke`                                         | yes    | service                                                        |
+  | TOTP enrol                | `api/totp_handler.go` confirm                                  | `totp_enabled`                                           | yes    | api                                                            |
+  | TOTP disable              | `api/totp_handler.go` disable                                  | `totp_disabled`                                          | yes    | api                                                            |
+  | Role assignment           | `service/moderation.go` `ChangeUserRole`                       | `role_change`                                            | yes    | service                                                        |
+  | Invite create             | `service/invite.go` `CreateInvite`                             | `invite_create`                                          | **no** | service — added (S-02)                                         |
+  | Invite revoke             | `service/invite.go` `RevokeInvite`                             | `invite_revoke`                                          | **no** | service — added (S-02); actor threaded from the handler        |
+  | Ban / unban               | `service/moderation.go` `BanUser` / `UnbanUser`                | `user_ban` / `user_unban`                                | yes    | service                                                        |
+  | Kick (sessions)           | `service/moderation.go` `ForceLogout`                          | `force_logout`                                           | yes    | service                                                        |
+  | Kick (voice)              | `ws/voice_moderation.go` `handleVoiceModKick`                  | `voice_mod_kick`                                         | yes    | existing `TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget` |
+  | Timeout                   | — no timeout mutation exists on the server                     | —                                                        | n/a    | —                                                              |
+  | Channel role overrides    | `admin/handlers_channel_perms.go` put / delete                 | `channel_perms_update` / `channel_perms_clear`           | yes    | admin                                                          |
+  | Channel user overrides    | `admin/handlers_channel_perms.go` put / delete (user layer)    | `channel_user_perms_update` / `channel_user_perms_clear` | yes    | admin                                                          |
+  | TLS / config change       | `admin/setup_handler.go` `setupApplyWizard`                    | `config_write` (with `server_setup`)                     | yes    | admin                                                          |
+  | Settings change           | `admin/handlers_settings.go` `handlePatchSettings`             | `setting_change`                                         | yes    | admin                                                          |
+  | API token create / revoke | `admin/handlers_tokens.go` (`token_cli.go` shares the actions) | `api_token_create` / `api_token_revoke`                  | yes    | admin                                                          |
+  | Plugin install            | `api/plugins_handler.go` `install`                             | `plugin_install`                                         | **no** | api — added                                                    |
+  | Plugin uninstall          | `api/plugins_handler.go` `uninstall`                           | `plugin_uninstall`                                       | **no** | api — added                                                    |
+  | Account deletion          | `api/auth_handler.go` delete account                           | `account_deleted`                                        | yes    | api                                                            |
+  | Message deletion          | `service/message_crud.go` `DeleteMessage`                      | `message_delete`                                         | yes    | service                                                        |
+  | Message purge             | `service/message_purge.go` `PurgeMessages`                     | `message_purge`                                          | yes    | service                                                        |
+
+  Call sites outside the security-sensitive list (channel CRUD, emoji,
+  profile, identity key, backups, login/logout/register, `ws_connect`, the
+  other three voice moderation actions) keep their existing rows and are not
+  in the table; the denylist in step 3 does not run over them.
+
 ## B2-7 — Trust model, absence proofs, plugin boundary (documents)
 
 Runs in parallel with B2-1 and B2-6.
