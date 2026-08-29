@@ -574,8 +574,13 @@ jobs:
         run: |
           WIN_HASH=$(sha256sum windows/chatserver.exe | awk '{print $1}')
           LINUX_HASH=$(sha256sum linux/chatserver-linux-amd64.tar.gz | awk '{print $1}')
-          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s","assets":[{"asset":"chatserver.exe","sha256":"%s"},{"asset":"chatserver-linux-amd64.tar.gz","sha256":"%s"}]}' \
-            "$VERSION" "$WIN_HASH" "$WIN_HASH" "$LINUX_HASH" > windows/server-update-manifest.json
+          # protocol_epoch is read from the schema, never typed here, so the
+          # manifest cannot drift from the constants the binaries were built with.
+          # The server's client-update endpoint withholds any release whose epoch
+          # is newer than its own (Server/api/client_update.go).
+          EPOCH=$(jq -e '.protocol_epoch' protocol/schema.json)
+          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s","assets":[{"asset":"chatserver.exe","sha256":"%s"},{"asset":"chatserver-linux-amd64.tar.gz","sha256":"%s"}],"protocol_epoch":%s}' \
+            "$VERSION" "$WIN_HASH" "$WIN_HASH" "$LINUX_HASH" "$EPOCH" > windows/server-update-manifest.json
 
       - name: Sign server update assets
         working-directory: Client

@@ -2583,7 +2583,12 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date, or no client build is published for `target`.
+Client is already up-to-date, no client build is published for `target`, or
+the newest release speaks a **newer protocol epoch than this server** (read
+from the release's signed server-update manifest, `protocol_epoch`; a manifest
+that fails signature verification is withheld the same way). The server
+upgrades first, then its clients are offered the matching release — see
+`docs/protocol.md`, Compatibility.
 
 ---
 

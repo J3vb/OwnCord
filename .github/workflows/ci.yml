@@ -193,6 +193,12 @@ jobs:
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
 
+      # release.yml writes protocol_epoch into the signed server-update
+      # manifest with exactly this command, and release.yml only runs at tag
+      # time — so the read is proven here, on every pull request.
+      - name: protocol_epoch is readable the way release.yml reads it
+        run: test "$(jq -e '.protocol_epoch' protocol/schema.json)" -ge 1
+
       # R-09 / RL-16. The release gate itself is only invoked for real at tag
       # time, which is the wrong place to find a bug in it — so its decision
       # logic is exercised here, on every pull request, against fixtures. Same

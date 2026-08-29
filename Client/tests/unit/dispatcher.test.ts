@@ -28,7 +28,8 @@ import {
   listCustomEmoji,
   resolveEmoji,
 } from "../../src/stores/emoji.store";
-import { uiStore } from "../../src/stores/ui.store";
+import { uiStore, setUpdateRequiredHost } from "../../src/stores/ui.store";
+import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
 import {
   clearReactionUsersCache,
   getCachedReactionUsers,
@@ -282,6 +283,52 @@ describe("WS Dispatcher", () => {
     // The refusal reason is only ever surfaced through ui.store — ConnectPage's
     // banner is its single reader.
     expect(uiStore.getState().transientError).toBe("Invalid token");
+  });
+
+  it("marks the server host as needing a client update when auth_error refuses this client's epoch as too old", () => {
+    cleanup();
+    setUpdateRequiredHost(null);
+    const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
+    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+
+    mock.dispatch("auth_error", {
+      message: "update the client",
+      code: "protocol_epoch_unsupported",
+      client_epoch: PROTOCOL_EPOCH,
+      server_epoch: PROTOCOL_EPOCH + 1,
+      min_epoch: PROTOCOL_EPOCH + 1,
+    });
+
+    expect(uiStore.getState().updateRequiredHost).toBe("chat.example:8443");
+    expect(uiStore.getState().transientError).toBe("update the client");
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    // The token is still valid — main.ts keeps the stored credential on this
+    // reason so the update relaunches straight into auto-login (Codex P2).
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
+  });
+
+  it("does not offer a client update when the SERVER is the older side, or on an ordinary auth_error", () => {
+    cleanup();
+    setUpdateRequiredHost(null);
+    const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
+    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+
+    mock.dispatch("auth_error", {
+      message: "update the server",
+      code: "protocol_epoch_unsupported",
+      client_epoch: PROTOCOL_EPOCH,
+      server_epoch: PROTOCOL_EPOCH - 1,
+      min_epoch: PROTOCOL_EPOCH - 1,
+    });
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+
+    // Server older than the client: still a protocol refusal, still a valid
+    // token — the credential must survive this one too.
+    expect(authStore.getState().logoutReason).toBe("protocol_epoch");
+
+    mock.dispatch("auth_error", { message: "Invalid token" });
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+    expect(authStore.getState().logoutReason).toBe("user");
   });
 
   it("wires ready to channels, members, and voice stores", () => {

@@ -71,6 +71,7 @@ function resetStores(): void {
     connectionStatus: "connected" as const,
     transientError: null,
     persistentError: null,
+    updateRequiredHost: null,
     collapsedCategories: new Set<string>(),
     sidebarMode: "channels" as const,
     activeDmUserId: null,

@@ -138,6 +138,7 @@ After the WebSocket connection is established, the client sends the first messag
 | `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                            |
 | `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                        |
 | `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
+| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                 |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -209,6 +210,54 @@ expired`, and `user not found`.
 
 After sending `auth_error`, the server closes the connection with close code
 **1008** (policy violation) and reason `authentication failed`.
+
+One refusal carries more than `message`. When the client's `epoch` is outside
+the range the server accepts, the payload is:
+
+```json
+{
+  "type": "auth_error",
+  "payload": {
+    "message": "this client speaks protocol epoch 0 but the server needs 2; update the client",
+    "code": "protocol_epoch_unsupported",
+    "client_epoch": 0,
+    "server_epoch": 2,
+    "min_epoch": 2
+  }
+}
+```
+
+`message` names which side to update; the numbers let a client decide for
+itself (`server_epoch > client_epoch` — the client is the older side). The
+close that follows is the same 1008.
+
+### Compatibility (protocol epoch)
+
+The protocol has one version number, the **epoch**, declared once as
+`protocol_epoch` in `protocol/schema.json` and generated into
+`ws.ProtocolEpoch` (server) and `PROTOCOL_EPOCH` (client). The client sends it
+in `auth`; the server accepts an `epoch` in `[min_epoch, server_epoch]` and
+refuses anything else with `protocol_epoch_unsupported`.
+
+- **Within an epoch, changes are additive.** New optional fields; new message
+  types the other side may ignore. Unknown server→client types are ignored by
+  the client; unknown client→server types get an `error` frame. The frozen
+  transcripts under `protocol/fixtures/epoch-1/` replay against the server for
+  as long as epoch 1 is accepted — a failing fixture means "bump the epoch",
+  not "fix the fixture".
+- **A breaking change is a new epoch.** Bump `protocol_epoch`, regenerate, and
+  set `minClientEpoch` (`Server/ws/messages.go`) to the new value: the server
+  accepts exactly one epoch by policy. Epoch 1 additionally accepts an absent
+  `epoch` (0), because clients up to v1.2.0-alpha.4 predate the field.
+- **The server upgrades first.** A release's signed server-update manifest
+  carries its `protocol_epoch`, and `GET /api/v1/client-update` never
+  advertises a release whose epoch is newer than the server's own — a client
+  that auto-updated onto it would be refused at the next handshake. Releases
+  that do not bump the epoch (fixes, additive features) reach clients whether
+  or not the server has been updated.
+- **A refused client can still update in place.** On
+  `protocol_epoch_unsupported` with a newer server, the desktop client shows
+  the regular update banner on the connect page.
 
 ### Step 4: ready Payload
 

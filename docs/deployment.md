@@ -99,6 +99,14 @@ docker compose up -d
 
 The named volume is preserved — no data loss.
 
+**Upgrade the server before the clients.** Desktop clients fetch updates from
+the server they connect to, and the server only offers releases whose protocol
+epoch it can speak itself (`docs/protocol.md`, Compatibility). A release that
+changes the wire protocol therefore reaches your users' clients only once the
+server runs it; releases that do not change the protocol reach them regardless.
+A client that is already too old for the server sees "update the client" on
+its connect screen, with the usual Update Now button.
+
 Pulling the image is the **only** upgrade path in Docker: the admin panel's
 in-place "Apply Update & Restart" is refused in container deployments (503
 `CONTAINER_DEPLOYMENT`), because the running binary is image content — a

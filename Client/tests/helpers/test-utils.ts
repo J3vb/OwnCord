@@ -72,6 +72,7 @@ const UI_INITIAL: UiState = {
   connectionStatus: "disconnected",
   transientError: null,
   persistentError: null,
+  updateRequiredHost: null,
   collapsedCategories: new Set(),
   sidebarMode: "channels",
   activeDmUserId: null,

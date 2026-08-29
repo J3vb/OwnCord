@@ -6,6 +6,10 @@
 
 package ws
 
+// ProtocolEpoch is the wire epoch this server speaks. The auth handshake
+// negotiates on it (serve_auth.go); see docs/protocol.md, Compatibility.
+const ProtocolEpoch = 1
+
 // Client → Server message types (received by handlers).
 const (
 	MsgTypeAuth              = "auth"

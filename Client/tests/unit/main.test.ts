@@ -81,6 +81,14 @@ vi.mock("@lib/profiles", () => ({
 // `api.getConfig().host` read (main.ts:776) after a login sets it via
 // `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
+// UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
+// calls checkForUpdate; stub the Tauri-backed updater so the test observes the
+// call instead of an invoke() into nothing.
+const mockCheckForUpdate = vi.fn();
+vi.mock("@lib/updater", () => ({
+  checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
+  downloadAndInstallUpdate: vi.fn(),
+}));
 const mockApiState = { host: "" };
 vi.mock("@lib/api", () => ({
   createApiClient: vi.fn(() => ({
@@ -151,6 +159,8 @@ vi.mock("@lib/dispatcher", async () => {
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { clearAuth } from "@stores/auth.store";
+import { deleteCredential } from "@lib/credentials";
+import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
@@ -377,5 +387,89 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // would go on to suppress the auto-login that a later, unrelated
     // clearAuth("server_shutdown") deliberately relies on.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+  });
+});
+
+describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
+  it("mounts the update notifier on the connect page so a refused client can update in place", async () => {
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    // The real dispatcher's auth_error handler records the host when the
+    // server says this client's epoch is too old (dispatcher.test.ts covers
+    // that); the dispatcher is stubbed here, so set what it would have set,
+    // then end the session the way auth_error does.
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost("server-a.example:8443");
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-a.example:8443");
+    // Consumed on mount: the next connect page must not re-check.
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("offers the update when the refusal lands on an already-mounted connect page (first login / startup auto-login)", async () => {
+    // No session, no overlay: the connect page rendered at startup is the
+    // one the refusal arrives on, and nothing re-renders it (Codex P1). The
+    // dispatcher is stubbed here; set what its auth_error handler sets.
+    mockCheckForUpdate.mockClear();
+    mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
+    setUpdateRequiredHost("server-c.example:8443");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockCheckForUpdate).toHaveBeenCalledWith("https://server-c.example:8443");
+    expect(uiStore.getState().updateRequiredHost).toBeNull();
+  });
+
+  it("keeps the stored credential on a protocol-epoch refusal, unlike an ordinary auth_error", async () => {
+    await loginAndReachAuthOk("server-d.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server D",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    vi.mocked(deleteCredential).mockClear();
+    // What the dispatcher does on protocol_epoch_unsupported (Codex P2).
+    clearAuth("protocol_epoch");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The token is still valid: the credential stays so the update can
+    // relaunch into auto-login. (The skip-auto-login flag is set on the same
+    // path, but the connect page consumes it on mount, so it cannot be read
+    // back here — the quick-switch test above covers that consumption.)
+    expect(deleteCredential).not.toHaveBeenCalled();
+
+    // Contrast: the same logout for an ordinary reason removes it.
+    await loginAndReachAuthOk("server-d.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server D",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    clearAuth("user");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deleteCredential).toHaveBeenCalledWith("server-d.example:8443");
   });
 });
