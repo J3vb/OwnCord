@@ -3,9 +3,9 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** B0 and B1 complete (HP-0 accepted 2026-08-25, HP-1 accepted
-2026-08-27); B2 in progress from
-[b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md);
+**Status:** B0, B1 and B2 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27, HP-2 accepted 2026-08-29 —
+[hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)); B3 is next;
 B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
 in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
 [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
@@ -1247,9 +1247,9 @@ in this order:
    `9c9b8be6`;
 5. B2-5 (PR #1440 = `67fdd18d`), B2-6 (PR #1441 = `2b2d58ab`), B2-7
    (PR #1443 = `88c7a824`) and B2-9 — **done 2026-08-29**;
-6. HP-2 — scorecard written 2026-08-29
-   ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)),
-   **awaiting the owner's signature**.
+6. HP-2 — **accepted 2026-08-29**
+   ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)); B2 is
+   closed and B3 opens as described below.
 
 Do not begin B3 domain extraction, client platform extraction, or browser work
 before HP-2 closes. When it does, B3 opens with the "First actionable slice"
