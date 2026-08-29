@@ -299,7 +299,7 @@ TO x_gone` for read faults, `RAISE(FAIL)` triggers for write faults), so no
   construction, three mutations stood in for RED: `401→500` in
   `totpChallengeSecret` (2 rows RED), `500→401` in `loginAuthenticate` (1 row
   RED), `503→401` in `AuthMiddleware` (1 test RED); tree restored.
-- **Coverage** (`go test -coverprofile ./api/`, statements, filtered to the two
+- **Coverage** (`go test -coverprofile=cover.out ./api/` from `Server/`, statements, filtered to the two
   files — B3-2 must not drop it):
 
   | File                  | Before (`d383d8c7`) | After B3-1          |
