@@ -1,5 +1,5 @@
 {
-  "nextId": 376,
+  "nextId": 379,
   "findings": [
     {
       "id": "OC-0001",
@@ -8484,6 +8484,57 @@
       "suggestedFix": "In the loop at Client/src/pages/MainPage.ts:808-829, leave the signature accumulation alone but skip the local user for relabeling: hoist `const selfId = getCurrentUserId();` and wrap both setLabel blocks in `if (uid !== selfId) { ... }` — VideoModeController is the sole writer of the self tiles' \"(You)\" / \"Your Screen\" labels.",
       "confidence": "high",
       "finder": "opus"
+    },
+    {
+      "id": "OC-0376",
+      "title": "Register commits the account and burns the invite, then answers 500 when the session insert fails",
+      "file": "Server/api/auth_handler.go",
+      "line": 201,
+      "severity": "low",
+      "why": "handleRegister hashes the password first so a hashing failure cannot burn an invite (the comment at line 153 states that intent), and CreateUserWithInvite consumes the invite and creates the user in one transaction. The session insert that follows is outside that transaction: when CreateSession fails the handler returns 500 \"failed to create session\", but the user row and the invite use are already committed. The caller sees a failed registration; retrying gets 400 \"invalid invite or credentials\" (username taken, invite exhausted) while a login with the same password succeeds. Same shape on the verify-totp path (OC-0378).",
+      "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_RegisterPolicyAndFailurePaths/session_insert_fails' ./api/ — the row installs a BEFORE INSERT ON sessions trigger, registers with a valid invite, and pins today's outcome: 500, user row present, invite use_count 1.",
+      "evidence": "Server/api/auth_handler.go:166  uid, err := database.CreateUserWithInvite(...)   // commits user + invite use\nServer/api/auth_handler.go:201  if _, err := database.CreateSession(...); err != nil {   // 500 after the commit\nServer/api/auth_handler.go:153  // Hash password before consuming the invite so that a hashing failure\n                                // does not burn a valid invite code.",
+      "suggestedFix": "Either answer 201 without a token when the session insert fails after the account commit (the account exists; the client logs in), or move the session insert into the CreateUserWithInvite transaction so registration is atomic. Belongs to the AuthService in B3-2/B3-9, not to the handler.",
+      "status": "open",
+      "found": "2026-08-29",
+      "hunt": "b3-1-auth-characterization-2026-08-29",
+      "lens": "characterization",
+      "confidence": "high",
+      "finder": "claude"
+    },
+    {
+      "id": "OC-0377",
+      "title": "verify-totp maps a database error while loading the challenged user to 401, indistinguishable from an expired challenge",
+      "file": "Server/api/totp_handler.go",
+      "line": 141,
+      "severity": "low",
+      "why": "totpChallengeSecret folds `err != nil` from GetUserByID into the same 401 \"invalid or expired two-factor challenge\" that a missing user or missing secret gets. A transient database fault during the second factor therefore reads as a bad challenge: the client drops the partial token and asks the user to log in again, and the attempt has already been recorded against the per-user totp_fail cap by the limiter.Allow call above it. Every sibling path in the slice maps a non-sentinel database error to 5xx (login 500, AuthMiddleware 503) precisely so an outage is not mistaken for a credential failure.",
+      "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_VerifyTOTPFailurePaths/user_lookup_fails' ./api/ — the row renames the users table after the challenge is issued and pins today's 401.",
+      "evidence": "Server/api/totp_handler.go:140  user, err := database.GetUserByID(r.Context(), challengeUserID)\nServer/api/totp_handler.go:141  if err != nil || user == nil || user.TOTPSecret == nil {\nServer/api/totp_handler.go:142      writeJSON(w, http.StatusUnauthorized, errorResponse{ ... \"invalid or expired two-factor challenge\" })\nServer/api/auth_handler.go:488-497  the login sibling: a non-nil error is a genuine DB failure -> 500 \"login temporarily unavailable\"",
+      "suggestedFix": "Split the condition: `err != nil` -> 500 INTERNAL_ERROR (\"two-factor verification temporarily unavailable\") without RegisterFailure and with the limiter reservation undone or not made; keep 401 for `user == nil || user.TOTPSecret == nil`. Fix in B3-9 after B3-2 lands, and flip the characterization row with it.",
+      "status": "open",
+      "found": "2026-08-29",
+      "hunt": "b3-1-auth-characterization-2026-08-29",
+      "lens": "characterization",
+      "confidence": "high",
+      "finder": "claude"
+    },
+    {
+      "id": "OC-0378",
+      "title": "verify-totp consumes the partial challenge before the session insert, so a store failure forces the user back to the password step",
+      "file": "Server/api/totp_handler.go",
+      "line": 107,
+      "severity": "low",
+      "why": "handleVerifyTOTP calls partialStore.Consume before issueSession. When CreateSession fails the handler answers 500 \"failed to create session\", but the challenge is already gone (and the code is marked used by VerifyTOTPCodeOnce), so the only way forward is a fresh POST /login with the password. A verified second factor is discarded because of a persistence hiccup that has nothing to do with the credential. Same shape as OC-0376 on the register path.",
+      "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_VerifyTOTPFailurePaths/session_insert_fails' ./api/ — the row installs a BEFORE INSERT ON sessions trigger, verifies a valid code, pins the 500, drops the trigger and pins that the same partial token is now refused with 401.",
+      "evidence": "Server/api/totp_handler.go:107  if _, ok := partialStore.Consume(partialToken); !ok {   // challenge gone here\nServer/api/totp_handler.go:115  token, err := issueSession(r.Context(), database, user.ID, challenge.Device, challenge.IP)   // fails after it",
+      "suggestedFix": "Keep the claim atomic and first: Consume the challenge before issuing the session (as today), then on CreateSession failure re-issue or restore the challenge for the same user/device/IP so the verified second factor is not discarded. The restore must also keep the accepted verification usable: VerifyTOTPCodeOnce has already recorded (user, code) in UsedTOTPCodeStore for 90 s, so an immediate retry with the authenticator's still-current code would be refused as a replay - either carry the verified state on the restored challenge (retry issues the session without a new code) or roll back that MarkUsed claim together with the challenge. Do NOT issue the session before Consume: two concurrent requests holding the same partial token can pass Lookup with different valid codes from the +/-1 step window (the used-code store keys on (user, code), not the token), both would create sessions, and the losing Consume would leave an unreturned bearer session in the database; if the order must change, the loser has to revoke the session it created. Belongs to the AuthService in B3-2/B3-9.",
+      "status": "open",
+      "found": "2026-08-29",
+      "hunt": "b3-1-auth-characterization-2026-08-29",
+      "lens": "characterization",
+      "confidence": "high",
+      "finder": "claude"
     }
   ]
 }

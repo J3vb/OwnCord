@@ -37,7 +37,7 @@ baseline is **truthful, reproducible, and sufficient to begin B1**.
 | Docker build + boot smoke             | unavailable                  | pass               | **pass**, 50.1 MB, boots `:8443`               | `ENV-02` closed                                                     |
 | Largest lazy chunk                    | —                            | budget in B7       | 1,998.25 kB min / 1,344.96 kB gzip             | measured                                                            |
 | Generated/doc drift                   | refresh in B0                | 0                  | **0** — `sqlc-verify`, `protocol-verify` green | CI                                                                  |
-| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 375 records**                 | re-verified 2026-08-29                                              |
+| Ledger path resolution                | —                            | 0 dead             | **0 dead paths / 378 records**                 | re-verified 2026-08-29                                              |
 | Desktop/browser/device matrix         | incomplete                   | 100% by B10        | **incomplete**                                 | B6–B8                                                               |
 | 250/100/25 capacity profile           | unproven                     | met by B6          | **unproven**                                   | `S-14`, B6                                                          |
 | Upgrade/rollback/restore              | unproven                     | green by B6        | **unproven**                                   | B6                                                                  |
@@ -68,22 +68,24 @@ Open ledger, re-verified 2026-08-29:
 | Status    | Count   |
 | --------- | ------- |
 | fixed     | 315     |
-| open      | **56**  |
+| open      | **59**  |
 | declined  | 3       |
 | duplicate | 1       |
-| **total** | **375** |
+| **total** | **378** |
 
-Of the 56 open records:
+Of the 59 open records:
 
-- **1 high, 12 medium, 43 low. Zero critical.** The high is `OC-0350`, an
+- **1 high, 12 medium, 46 low. Zero critical.** The high is `OC-0350`, an
   admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
-- Three hunts: 29 from `general-2026-08-22-b`, 26 from `general-2026-08-29`,
-  1 from `b2-1-fixture-capture-2026-08-28`.
-- **55 of the 56 resolve to a live `file:line`** — 0 dead paths across all 375
+- Four hunts: 29 from `general-2026-08-22-b`, 26 from `general-2026-08-29`,
+  3 from `b3-1-auth-characterization-2026-08-29` (defects the auth
+  characterization rows pin as-is, assigned to B3-9), 1 from
+  `b2-1-fixture-capture-2026-08-28`.
+- **58 of the 59 resolve to a live `file:line`** — 0 dead paths across all 378
   records, re-checked 2026-08-29. `OC-0323` is the exception: its line drifted
   past end of file when B2 work shortened `Server/service/channel.go`, so it
   needs re-pointing before it is fixed.
-- 33 sit under `Client/`, 23 under `Server/`.
+- 33 sit under `Client/`, 26 under `Server/`.
 - **None of the 2026-08-22 records is assigned to B1**; their register phases
   span B2–B10. The 2026-08-29 records are not yet phased in the register.
 

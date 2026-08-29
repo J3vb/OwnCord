@@ -77,10 +77,10 @@ together as if each row were a unique defect:
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     315 |
-| Open      |      56 |
+| Open      |      59 |
 | Declined  |       3 |
 | Duplicate |       1 |
-| **Total** | **375** |
+| **Total** | **378** |
 
 The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt, nine of
 which have since been fixed; `OC-0349`–`OC-0375` are recorded in the ledger and
