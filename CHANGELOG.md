@@ -58,6 +58,12 @@ protocol now carries a version number.
   reaches clients once the server runs it. Releases that do not change the
   protocol are offered as before.
 
+### Admin panel
+
+- Creating or revoking an invite, and installing or uninstalling a plugin, now
+  show up in the audit log. Invite entries name the invite by id, never by
+  code.
+
 ### Repository
 
 - `protocol/schema.json` declares `protocol_epoch`; `npm run generate` emits it

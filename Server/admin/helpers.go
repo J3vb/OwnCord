@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -58,7 +59,15 @@ func queryInt(r *http.Request, key string, defaultVal, minVal, maxVal int) int {
 // context by adminAuthMiddleware. Returns 0 if called outside that middleware
 // (should not happen in production).
 func actorFromContext(r *http.Request) int64 {
-	user, ok := r.Context().Value(adminUserKey).(*db.User)
+	return ActorIDFromContext(r.Context())
+}
+
+// ActorIDFromContext returns the admin principal's user ID that
+// RequireAdminAuth stored in ctx, or 0 outside that middleware. Exported for
+// handlers mounted behind RequireAdminAuth from other packages (the plugin
+// admin surface in api) so their audit rows name the real actor.
+func ActorIDFromContext(ctx context.Context) int64 {
+	user, ok := ctx.Value(adminUserKey).(*db.User)
 	if !ok || user == nil {
 		return 0
 	}
