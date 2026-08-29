@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 and B2-7 are next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -447,7 +447,7 @@ half stands on those two tests.
    at the call site, never by loosening the list.
 
 **Evidence, 2026-08-29** — branch `feat/b2-6-audit-coverage` from `dev`
-`67fdd18d`; PR #TBD to `dev`. HP-2 cites this block.
+`67fdd18d`; PR #1441 to `dev`. HP-2 cites this block.
 
 - Step 1 — the mutation inventory, crossed with the 43 non-test `Audit(` call
   sites at `67fdd18d` (`WriteAudit`, `LogAudit`, `EnqueueAudit`). "Before" is
@@ -483,6 +483,40 @@ half stands on those two tests.
   profile, identity key, backups, login/logout/register, `ws_connect`, the
   other three voice moderation actions) keep their existing rows and are not
   in the table; the denylist in step 3 does not run over them.
+
+- Pre-squash SHAs, one commit per step: `ea914e66` (step 1, the table
+  above), `a06499f2` (step 2, tables + the four audit calls), `6193a709`
+  (step 3, denylist + its self-test). `474ec74c` and `cbbf41c1` are the
+  register/CHANGELOG/security.md edits, committed from outside the session
+  while the step-2 gate ran; content unchanged, kept as-is.
+- Step 2 — fixture: `Server/db/audittest` installs a `db.AuditWriter` over a
+  recording `AuditStore` via `SetAuditWriter`, so every `WriteAudit` through
+  the test's `*db.DB` lands in memory regardless of package. Tables:
+  `TestAuditCoverage_ServiceMutations` (10 rows), `TestAuditCoverage_APIMutations`
+  (3), `TestAuditCoverage_PluginLifecycle` (2, package-internal fixtures),
+  `TestAuditCoverage_AdminMutations` (8). Red at `ea914e66` + tests on exactly
+  the four rows the table predicts — `invite_create`, `invite_revoke`,
+  `plugin_install`, `plugin_uninstall` (each `no "<action>" audit entry
+recorded; recorded actions: []`); every other row green before any
+  production change. Green after the four calls. `RevokeInvite` gained the
+  actor parameter (threaded from `handleRevokeInvite`); the plugin handler
+  gained a `db.Auditor` and `admin.ActorIDFromContext` was exported so its
+  rows name the `RequireAdminAuth` principal. S-02's failure half:
+  `TestAuditCoverage_InviteRevokeFailureEmitsNothing`.
+- Step 3 — `audittest.AssertSafeDetails` runs over the union corpus each
+  table recorded: shape denylist (bcrypt/argon2 hashes, `password=` /
+  `token=` / `secret=` / recovery-code key-value leaks, `otpauth://`,
+  `Bearer `) plus every fixture secret the rows return (raw session and API
+  tokens and their hashes, passwords, TOTP secrets and codes, invite codes,
+  message bodies, the setup password). `TestAssertSafeDetails_Bites` proves
+  each class rejects and ordinary details pass. Zero hits on the corpus at
+  `6193a709`; no call site changed.
+- Gates from `Server/` before each commit: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  (one `contextcheck` round: hoisted `ctx` in the tables, inlined),
+  `sqlc generate` and `genprotocol` drift — all exit 0. Docs commits:
+  `npm run check:docs`, `npm run check:hygiene`.
+- Closes S-02 (register: resolved/superseded). Ledger untouched.
 
 ## B2-7 — Trust model, absence proofs, plugin boundary (documents)
 
