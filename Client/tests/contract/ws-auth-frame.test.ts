@@ -1,10 +1,10 @@
 // CONTRACT TEST. Pins the exact key set of the `auth` frame that
 // Client/src/lib/ws.ts sends as the first message after the WebSocket opens
 // (ws.ts:441-453) -- the client side of the same wire contract a sibling Go
-// test freezes for the server. B2-2 adds a protocol-epoch field to this
-// frame; that change MUST fail the assertions below until B2-2 deliberately
-// extends this test's key sets. Extend this file, do not replace or delete
-// it.
+// test freezes for the server. B2-2 added the `epoch` field (the wire epoch
+// this client speaks, PROTOCOL_EPOCH from protocolTypes.ts); the key sets
+// below include it deliberately. Any further field MUST fail here until it is
+// added on purpose. Extend this file, do not replace or delete it.
 //
 // Assertions compare exact key sets (sorted Object.keys -- key order has no
 // wire meaning), never toHaveProperty, so an unexpected added key fails just
@@ -25,6 +25,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "../unit/helpers/ws-mocks";
 import { createWsClient, setActiveChannelProvider } from "../../src/lib/ws";
+import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
 
 /** Parses the most recently sent `auth` frame (envelope + payload) from ws_send. */
 function getAuthFrame(): { type: string; payload: Record<string, unknown> } {
@@ -63,7 +64,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     vi.useRealTimers();
   });
 
-  it("fresh connect: envelope keys are exactly [type, payload, id], payload keys exactly [token, last_seq]", async () => {
+  it("fresh connect: envelope keys are exactly [type, payload, id], payload keys exactly [token, last_seq, epoch]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -76,12 +77,14 @@ describe("contract: auth frame key set (epoch 1)", () => {
     // the two the auth message literal at ws.ts:446-453 has on its own.
     expect(Object.keys(frame).sort()).toEqual(["id", "payload", "type"]);
     expect(frame.type).toBe("auth");
-    expect(Object.keys(frame.payload).sort()).toEqual(["last_seq", "token"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token"]);
     expect(frame.payload.token).toBe("t");
     expect(frame.payload.last_seq).toBe(0);
+    expect(frame.payload.epoch).toBe(PROTOCOL_EPOCH);
+    expect(PROTOCOL_EPOCH).toBe(1);
   });
 
-  it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id]", async () => {
+  it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id, epoch]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -107,12 +110,17 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload).sort()).toEqual(["active_channel_id", "last_seq", "token"]);
+    expect(Object.keys(frame.payload).sort()).toEqual([
+      "active_channel_id",
+      "epoch",
+      "last_seq",
+      "token",
+    ]);
     expect(frame.payload.last_seq).toBe(7);
     expect(frame.payload.active_channel_id).toBe(42);
   });
 
-  it("resume without a provider registered: payload keys stay exactly [token, last_seq]", async () => {
+  it("resume without a provider registered: payload keys stay exactly [token, last_seq, epoch]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -137,7 +145,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload).sort()).toEqual(["last_seq", "token"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token"]);
     expect(frame.payload.last_seq).toBe(3);
   });
 });

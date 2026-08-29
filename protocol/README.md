@@ -17,6 +17,11 @@ Two files are generated from it and must never be hand-edited:
 
 ## Changing the protocol
 
+`schema.json` also declares `protocol_epoch`, the one version number the auth
+handshake negotiates on. Additive changes stay within an epoch; a breaking
+change bumps it. The rules, and what a bump obliges, are in `docs/protocol.md`
+under _Compatibility_.
+
 Edit `schema.json`, then regenerate both consumers with one command from the
 repository root:
 

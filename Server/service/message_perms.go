@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -69,36 +70,63 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 	return s.checkSendPermission(ctx, userID, ch)
 }
 
-// checkSendPermission validates send permission for ch. Announcement channels
-// are readable by anyone with READ_MESSAGES but only postable by users with
-// MANAGE_MESSAGES (posting is restricted to moderators/admins); all other
-// non-DM channels require SEND_MESSAGES. Also enforces requireChannelWritable,
-// so every caller — SendMessage, EditMessage, CanPost — refuses an archived
-// channel without re-implementing that check itself.
+// checkSendPermission is permissions.CanSendMessage over the resolved subject:
+// READ|SEND in the channel, MANAGE_MESSAGES on top for announcement channels,
+// never into an archive; DM membership and no block. Every caller —
+// SendMessage, EditMessage, CanPost, and typing via ChannelService — asks that
+// one predicate, so none can drift (S-01, S-12).
 func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
-	isDM := ch.Type == "dm"
-	if isDM {
-		ok, err := s.st.IsDMParticipant(ctx, userID, ch.ID)
-		if err != nil {
-			return fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, err)
-		}
-		if !ok {
-			return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
-		}
-		return requireDMNotBlocked(ctx, s.st, userID, ch.ID)
-	}
-	if err := requireChannelWritable(ch); err != nil {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
 		return err
 	}
-	if !s.perms.HasChannelPerm(ctx, userID, ch.ID, permissions.ReadMessages|permissions.SendMessages) {
-		return fmt.Errorf("%w: missing SEND_MESSAGES permission", ErrForbidden)
+	return denial(permissions.CanSendMessage(sub))
+}
+
+// channelSubject resolves what the channel predicates need for userID in ch:
+// role bits and both override layers from the permission cache (a lookup
+// failure or a missing role yields no bits — fail closed, as HasChannelPerm
+// always has), the channel's flags, and for a DM its membership and, when
+// withBlock is set, the two-party block state. The only error is a DM lookup
+// failure, wrapped as ErrInternal; callers keep their own posture toward it
+// (SendMessage reports it, typing drops silently).
+func channelSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
+	sub, err := perms.Subject(ctx, userID, ch.ID)
+	if err != nil {
+		sub = permissions.Subject{}
 	}
-	// Announcement channels: posting is restricted to users who can manage
-	// messages, even though everyone with READ_MESSAGES can view them.
-	if ch.Type == "announcement" && !s.perms.HasChannelPerm(ctx, userID, ch.ID, permissions.ManageMessages) {
-		return fmt.Errorf("%w: announcement channels require MANAGE_MESSAGES to post", ErrForbidden)
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+	if ch.Type != "dm" {
+		return sub, nil
 	}
-	return nil
+	ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)
+	if dmErr != nil {
+		return sub, fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, dmErr)
+	}
+	sub.DMParticipant = ok
+	if ok && withBlock {
+		switch blkErr := requireDMNotBlocked(ctx, st, userID, ch.ID); {
+		case errors.Is(blkErr, ErrBlocked):
+			sub.DMBlocked = true
+		case blkErr != nil:
+			return sub, blkErr
+		}
+	}
+	return sub, nil
+}
+
+// denial maps a predicate verdict onto the service's error kinds: a block is
+// ErrBlocked (its own client-visible code), every other refusal ErrForbidden
+// carrying the predicate's reason.
+func denial(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, permissions.ErrBlocked):
+		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+	default:
+		return fmt.Errorf("%w: %v", ErrForbidden, err)
+	}
 }
 
 // requireChannelWritable refuses a write against an archived non-DM channel.

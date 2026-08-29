@@ -282,6 +282,15 @@ export interface AuthOkPayload {
 
 export interface AuthErrorPayload {
   readonly message: string;
+  /**
+   * Set only when the server refused this client's protocol epoch
+   * (`"protocol_epoch_unsupported"`); the epochs say which side is older.
+   * Absent on every other refusal.
+   */
+  readonly code?: "protocol_epoch_unsupported";
+  readonly client_epoch?: number;
+  readonly server_epoch?: number;
+  readonly min_epoch?: number;
 }
 
 export interface ReadyPayload {
@@ -631,6 +640,8 @@ export interface ErrorPayload {
 export interface AuthPayload {
   readonly token: string;
   readonly last_seq?: number;
+  /** The wire epoch this client speaks — always `PROTOCOL_EPOCH`. */
+  readonly epoch: number;
   /**
    * The channel this client had open when it disconnected, sent only on a
    * resume (`last_seq > 0`).

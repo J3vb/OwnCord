@@ -21,7 +21,12 @@ const log = createLogger("auth.store");
  *  server-initiated kick whose token is still valid — the logout wiring keeps
  *  the saved credential in that case so auto-login works when the server
  *  comes back. */
-export type LogoutReason = "user" | "server_shutdown";
+/**
+ * Why the session ended. "protocol_epoch": the server refused this client's
+ * wire epoch — the token is still valid, so main.ts keeps the stored
+ * credential and the update it offers relaunches into auto-login.
+ */
+export type LogoutReason = "user" | "server_shutdown" | "protocol_epoch";
 
 export interface AuthState {
   readonly token: string | null;

@@ -36,6 +36,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 var knownUndocumentedConstants = map[string]string{}
@@ -50,6 +52,7 @@ type protocolSchemaEntry struct {
 
 type protocolSchema struct {
 	Version        int                   `json:"version"`
+	ProtocolEpoch  int                   `json:"protocol_epoch"`
 	ClientToServer []protocolSchemaEntry `json:"client_to_server"`
 	ServerToClient []protocolSchemaEntry `json:"server_to_client"`
 }
@@ -221,5 +224,20 @@ func TestProtocolSchema_NoUndocumentedGoConstants(t *testing.T) {
 		if _, nowDocumented := documented[name]; nowDocumented {
 			t.Errorf("knownUndocumentedConstants lists %q but it is now in protocol/schema.json — remove it from the exception list", name)
 		}
+	}
+}
+
+// TestProtocolEpochMatchesSchema pins the generated ws.ProtocolEpoch to the
+// protocol_epoch the schema declares. The epoch is the one number the auth
+// handshake negotiates on (serve_auth.go); a stale regeneration here would
+// let server and client disagree about which epoch they speak.
+func TestProtocolEpochMatchesSchema(t *testing.T) {
+	schema := loadProtocolSchema(t)
+	if schema.ProtocolEpoch < 1 {
+		t.Fatalf("schema protocol_epoch = %d, want >= 1", schema.ProtocolEpoch)
+	}
+	if ws.ProtocolEpoch != schema.ProtocolEpoch {
+		t.Fatalf("ws.ProtocolEpoch = %d, schema protocol_epoch = %d — run `make protocol-generate`",
+			ws.ProtocolEpoch, schema.ProtocolEpoch)
 	}
 }

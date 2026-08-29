@@ -12,7 +12,7 @@ import { createApiClient } from "@lib/api";
 import { createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { setTransientError } from "@stores/ui.store";
+import { setTransientError, uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
@@ -20,6 +20,8 @@ import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
 import { createNavigationGuard } from "@lib/navigation-guard";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
+import { createUpdateNotifier } from "@components/UpdateNotifier";
+import type { MountableComponent } from "@lib/safe-render";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
@@ -626,6 +628,27 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     safeMount(connectPage, appEl!);
 
+    // A server refused this client's protocol epoch as too old: offer the
+    // update on the connect page itself. The main page's notifier never
+    // mounts on a refusal, so without this the user would have to fetch the
+    // installer by hand. Subscribed, not read once: on a first login or a
+    // startup auto-login this page is already mounted when the refusal
+    // arrives and nothing re-renders it (no overlay exists before auth_ok, so
+    // the isAuthenticated subscriber below does not navigate).
+    let updateNotifier: MountableComponent | null = null;
+    const offerUpdate = (host: string | null): void => {
+      if (!host) return;
+      setUpdateRequiredHost(null);
+      // A later refusal (another server tried from this same page) replaces
+      // the banner rather than being ignored.
+      updateNotifier?.destroy?.();
+      const notifier = createUpdateNotifier({ serverUrl: `https://${host}` });
+      notifier.mount(appEl!);
+      updateNotifier = notifier;
+    };
+    const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
+    offerUpdate(uiStore.getState().updateRequiredHost);
+
     // Periodic health check — re-run every 15s so offline servers update when they come back
     const healthCheckInterval = setInterval(() => {
       runHealthChecks(connectPage, getProfileList());
@@ -635,6 +658,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     currentPage = {
       destroy() {
         clearInterval(healthCheckInterval);
+        unsubUpdateRequired();
+        updateNotifier?.destroy?.();
         connectPage.destroy?.();
       },
     };
@@ -805,12 +830,17 @@ authStore.subscribeSelector(
       // kicked us by shutting down: the token is still valid, and deleting
       // the credential would break auto-login every time the server restarts.
       const host = api.getConfig().host;
-      if (host && authStore.getState().logoutReason !== "server_shutdown") {
-        void deleteCredential(host);
-        // Same condition on purpose: whenever the credential is being removed,
-        // the connect page must not turn around and auto-login with it. A
-        // server_shutdown keeps the credential precisely so auto-login still
-        // works on restart, so it deliberately does not set this.
+      const reason = authStore.getState().logoutReason;
+      if (host && reason !== "server_shutdown") {
+        // A protocol-epoch refusal keeps the credential too: the token is
+        // still valid, and the update the connect page offers relaunches
+        // straight into auto-login with it (sessionStorage — and so the
+        // skip flag below — does not survive that relaunch).
+        if (reason !== "protocol_epoch") void deleteCredential(host);
+        // Whenever this session must not turn around and auto-login with the
+        // credential (removed, or just refused), say so. A server_shutdown
+        // keeps the credential precisely so auto-login still works on
+        // restart, so it deliberately does not set this.
         sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
       router.navigate("connect");

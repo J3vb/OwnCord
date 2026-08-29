@@ -4,6 +4,7 @@
 
 import type { ServerMessage, ClientMessage } from "./types";
 import { createLogger } from "./logger";
+import { PROTOCOL_EPOCH } from "./protocolTypes";
 
 const log = createLogger("ws");
 
@@ -448,6 +449,7 @@ export function createWsClient() {
           payload: {
             token: config.token,
             last_seq: lastSeq,
+            epoch: PROTOCOL_EPOCH,
             ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
           },
         });

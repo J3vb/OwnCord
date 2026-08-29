@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28 (evidence in their sections); B2-2 is next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 and B2-7 are next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -38,10 +38,10 @@ one to one and a half weeks with agents working steps in parallel.
 | -------- | ----------------------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
 | **B2-0** | **Done 2026-08-28.** Alpha.4 verified; `dev` synced (#1432); `environment: release`; ENV-03; `dev` `strict: true` | hours    | —                      |
 | **B2-1** | Capture the epoch-1 fixtures; retire `voice_speakers` and `member_leave`                                          | 1 day    | B2-6, B2-7             |
-| **B2-2** | Protocol epoch and negotiation                                                                                    | 1 day    | serialized, after B2-8 |
-| **B2-3** | Server-first updates through the signed manifest                                                                  | ½ day    | after B2-2             |
-| **B2-4** | Compatibility matrix                                                                                              | ½ day    | after B2-2             |
-| **B2-5** | One permission predicate per security property                                                                    | 1–2 days | serialized             |
+| **B2-2** | Protocol epoch and negotiation — **DONE 2026-08-29 (slim; absorbs B2-3, B2-4)**                                   | 1 day    | serialized, after B2-8 |
+| **B2-3** | Server-first updates through the signed manifest — folded into B2-2                                               | ½ day    | after B2-2             |
+| **B2-4** | Compatibility matrix — folded into B2-2                                                                           | ½ day    | after B2-2             |
+| **B2-5** | One permission predicate per security property — **DONE 2026-08-29 (PR #1440)**                                   | 1–2 days | serialized             |
 | **B2-6** | Safe audit coverage                                                                                               | ½ day    | B2-1, B2-7             |
 | **B2-7** | Trust model, absence proofs, plugin boundary                                                                      | 1 day    | B2-1, B2-6             |
 | **B2-8** | The nine B2-tagged findings                                                                                       | 1 day    | before B2-2            |
@@ -234,93 +234,84 @@ runs the new test under `go test ./...`), `npm run check:client`.
 
 ## B2-2 — Protocol epoch and negotiation
 
-Design fixed 2026-08-28; the numbers and names below are the contract.
+**Owner decision 2026-08-29: shipped slim.** The one-epoch policy below
+replaces the three-wide window (N-2..N), the `server-info` endpoint, the
+obligations table and the per-epoch fixture matrix that this section
+specified on 2026-08-28. Reason: OwnCord is alpha with one maintainer; a
+window is a standing promise that every future protocol change must keep two
+older transcripts replaying, and nothing today needs it. Each dropped piece is
+one constant or one handler away if it is ever wanted; the owner's earlier
+"execute B2 as written" decision is knowingly walked back for this step only.
 
-1. **One number, generated.** `protocol/schema.json` gains
-   `"protocol_epoch": 1` beside `"version": 1` (schema format stays 1).
-   `Server/cmd/genprotocol/main.go` reads it (`ProtocolEpoch int` on the schema
-   struct at lines 34–37) and emits `const ProtocolEpoch = 1` into
-   `Server/ws/message_types.go` and `export const PROTOCOL_EPOCH = 1` into
-   `Client/src/lib/protocolTypes.ts`. Follow the `protocol-change` skill; the
-   drift gate covers both outputs. Own commit.
-2. **Handshake, server.** In `Server/ws/serve_auth.go` the auth payload gains
-   `` Epoch int `json:"epoch"` `` and `` ClientVersion string `json:"client_version"` ``.
-   Rule, with N = `ProtocolEpoch`: absent → 0; accept when
-   `max(0, N-2) ≤ epoch ≤ N`; otherwise `buildAuthError`
-   (`Server/ws/messages.go:368`) with `code: "protocol_epoch_unsupported"`,
-   `server_epoch`, `min_epoch`, `update_url` (the server's own
-   `/api/v1/client-update` origin), then close with code **4426**. A client
-   newer than the server gets the same frame. `ready`
-   (`Server/ws/serve_ready.go:361`) gains `protocol_epoch`. Table test over
-   epoch ∈ {absent, N-3, N-2, N-1, N, N+1} in `Server/ws`.
-3. **Handshake, client.** `Client/src/lib/ws.ts:447` sends `epoch:
-PROTOCOL_EPOCH` and `client_version` (from the app metadata the settings
-   Logs tab already reads). `AuthPayload`/`AuthErrorPayload` in
-   `Client/src/lib/types.ts` gain the fields. On
-   `code === "protocol_epoch_unsupported"` the dispatcher
-   (`Client/src/lib/dispatcher.ts:293`) shows one plain line naming
-   `server_epoch` and whether the client or the server is the older one; the
-   existing non-recoverable path (`ws.ts:306`) already stops reconnecting —
-   add the unit test that proves no reconnect timer is armed after the frame.
-   Extend `Client/tests/contract/ws-auth-frame.test.ts` from B2-1.
-4. **`GET /api/v1/server-info`.** New unauthenticated handler beside
-   `Server/api/client_update.go`, returning
-   `{ "version", "protocol_epoch", "min_client_epoch" }`, rate-limited the way
-   `client-update` is (`Server/api/constants.go:67`). Handler test; row in
-   `docs/api.md`. B6 adds the browser-hosting flag here; B8 reads it.
-5. **`docs/protocol.md` § Compatibility** (new section) and a pointer in
-   `protocol/README.md`: within an epoch changes are additive (new optional
-   fields; new message types the other side may ignore — unknown server→client
-   types are ignored, unknown client→server types get an `error` frame; both
-   pinned by tests); a breaking change is a new epoch; the epoch-1 fixtures
-   replay against the server for as long as epoch 1 is in the window, and a
-   failing fixture means "bump the epoch", not "fix the fixture". An
-   **obligations table** with dates, first row: the headerless E2EE key-offer
-   blob (`docs/protocol.md` ~line 1235 today says "scheduled for removal in the
-   next release") stays parseable until epoch 0 leaves the window, i.e. until
-   N = 3. It is client↔client through a relay, so the server's epoch cannot
-   police it; a written date does.
-6. **Scope of "negotiation".** Epoch only. No capability flags at beta; a
-   client either speaks the epoch or it does not. The roadmap's "protocol
-   changelog" is the obligations table above plus the `CHANGELOG.md` entry
-   that ships the epoch.
+What shipped (branch `feat/b2-2-protocol-epoch` from `dev` `e6c6bf12`,
+pre-squash SHAs for HP-2):
 
-Four commits (schema+generator; server; client; server-info+docs). Record the
-pre-squash SHAs in HP-2 — the fixture commit from B2-1 and the negotiation
-commits must be reviewable apart.
+1. **One number, generated** — `2ac9b5ba`. `protocol/schema.json` gains
+   `"protocol_epoch": 1`; `genprotocol` validates it (>= 1) and emits
+   `const ProtocolEpoch = 1` and `export const PROTOCOL_EPOCH = 1;`.
+   `TestProtocolEpochMatchesSchema` pins the Go constant to the schema.
+2. **Handshake, server** — `77051648`. `auth` gains `epoch` (absent = 0).
+   Rule: accept `minClientEpoch <= epoch <= ProtocolEpoch`, with
+   `minClientEpoch = 0` for epoch 1 only (alpha.4 clients send no epoch).
+   Otherwise `auth_error` with `code: "protocol_epoch_unsupported"`,
+   `client_epoch`, `server_epoch`, `min_epoch`, a message naming which side
+   to update, then the same 1008 close as every handshake failure — **no
+   4426**, nothing reads close codes. `ready` is unchanged (fixtures
+   untouched). `TestAuth_ProtocolEpoch` drives absent/0/N/N+1/-1 over a real
+   socket; `TestEpoch1Fixtures` still passes unmodified, which is the
+   "old client still works" check B2-1 left open — answered as: the epoch-1
+   transcript replays verbatim, no additive tolerance needed because the
+   accepted frames did not change.
+3. **Handshake, client** — `41ef091d`. `ws.ts` sends `epoch: PROTOCOL_EPOCH`
+   (`ws-auth-frame.test.ts` extended on purpose). On the refusal with a newer
+   server, the dispatcher records the host in `ui.store.updateRequiredHost`
+   and `main.ts` mounts `UpdateNotifier` on the connect page, so the refused
+   client gets the same Update Now banner it would have had on the main page.
+   No `client_version` field: nothing reads it.
+4. **Server-first updates (was B2-3)** — `899c956f`. The signed
+   server-update manifest gains `protocol_epoch`, written by `release.yml`
+   from `jq .protocol_epoch protocol/schema.json`.
+   `Updater.ReleaseProtocolEpoch` verifies the manifest through the existing
+   minisign path and reads it; `GET /api/v1/client-update` answers 204 when
+   the release's epoch is newer than `ws.ProtocolEpoch` or the manifest does
+   not verify. Releases without a manifest are epoch 0 (advertised as
+   before), so the existing updater-contract tests did not move. Dropped
+   from the B2-3 spec: the "fall back to the newest compatible release"
+   search — the endpoint only knows the latest release, and a held-back
+   release simply waits for the server to upgrade.
+   Docs: `docs/protocol.md` § Compatibility (protocol epoch), `docs/api.md`,
+   `docs/deployment.md` § Upgrading, `protocol/README.md`, `CHANGELOG.md`
+   Unreleased.
+
+Answers to B2-1's open questions: the captured wire is **epoch 1**; "absent
+`epoch`" is the number 0 and is accepted by epoch-1 servers only.
+
+Not shipped, and why:
+
+| Spec item                          | Status  | Reason                                                                                      |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| Window `max(0, N-2) <= epoch <= N` | dropped | One epoch by policy; `minClientEpoch` is the knob (`Server/ws/messages.go`)                 |
+| Close code 4426                    | dropped | Payload `code` is what the client reads; 1008 keeps auth-failure uniform                    |
+| `ready.protocol_epoch`             | dropped | Nothing consumes it; would regenerate every fixture carrying `ready`                        |
+| `client_version` in `auth`         | dropped | Diagnostics only; add with the first reader                                                 |
+| `GET /api/v1/server-info`          | dropped | B6/B8 add it when they need it; the refusal frame already carries `server_epoch`            |
+| Obligations table (E2EE blob date) | dropped | Only meaningful with a window; the blob note in `docs/protocol.md` stands as written        |
+| B2-4 compatibility matrix          | folded  | `TestAuth_ProtocolEpoch` is the accept/reject table; fixtures replay for the accepted epoch |
+| B2-3 newest-compatible fallback    | dropped | See item 4                                                                                  |
 
 ## B2-3 — Server-first updates
 
-1. `releaseManifest` (`Server/updater/verify.go:29`) gains
-   `` ProtocolEpoch int `json:"protocol_epoch,omitempty"` `` and
-   `` ClientVersion string `json:"client_version,omitempty"` ``. A missing field
-   is epoch 0.
-2. `.github/workflows/release.yml`, step "Generate server update manifest"
-   (~line 568): write both fields, reading the epoch from
-   `jq .protocol_epoch protocol/schema.json` so the workflow cannot drift from
-   the generated constant.
-3. `Server/api/client_update.go`: before advertising a release, fetch and
-   verify its manifest through the updater's existing signature path and
-   require `manifest.ProtocolEpoch <= ws.ProtocolEpoch`; otherwise fall back
-   to the newest compatible release; otherwise 204. Tests: newer-epoch
-   candidate skipped → older compatible advertised → none → 204; unsigned or
-   tampered manifest → candidate ignored.
-4. Docs: `docs/api.md` client-update section (the filter and the manifest
-   fields); one paragraph "the server upgrades first" in `docs/deployment.md`;
-   and the next tag line, `v1.2.0-beta.1`, recorded as the heading
-   `CHANGELOG.md`'s next entry will use and in one sentence in
-   `docs/contributing.md` (no release-procedure document exists today; do
-   not create one for this).
+Folded into B2-2 item 4 (`899c956f`). The `v1.2.0-beta.1` tag-line note for
+`CHANGELOG.md`/`docs/contributing.md` was not written: the changelog entry is
+under `## Unreleased` and takes the tag when one is cut.
 
 ## B2-4 — Compatibility matrix
 
-Extend `Server/ws/protocol_epoch1_contract_test.go` from B2-1 into the matrix:
-for each client epoch in {absent, N-3, N-2, N-1, N, N+1} connect and, for
-accepted epochs, replay every epoch-1 fixture; for rejected ones, assert the
-`protocol_epoch_unsupported` frame and close code 4426. It runs under
-`go test ./...`, inside the required `Server Build & Test` check — **no new CI
-job and no pin-script change.** Exit evidence for BPR-032 and BG-07's server
-half.
+Folded into B2-2 item 2. With one accepted epoch there is no matrix: the
+table test covers absent/0/N/N+1/-1 on a real socket, and the epoch-1
+fixtures replay for the accepted epoch under the required
+`Server Build & Test` check. Exit evidence for BPR-032 and BG-07's server
+half stands on those two tests.
 
 ## B2-5 — One permission predicate per security property
 
@@ -347,6 +338,100 @@ half.
    `authz-chokepoint` rule to `Server/invariants` that fails on the first new
    one. If residual calls remain with a reason, record them in HP-2 and leave
    the rule to B3 (roadmap B3 item 15).
+
+**Evidence, 2026-08-29** — branch `feat/b2-5-permission-predicates` from
+`dev` `9c9b8be6`; PR #1440 to `dev`. HP-2 question 5 cites this block.
+
+- Pre-squash SHAs, one commit per property: `00761523` (predicates +
+  `Checker` delegation), `94aba833` (send — S-01), `0271cbbe` (view /
+  session admission — S-12), `802101a0` (voice join), `aeee37e8` (voice
+  moderation — SEC-02 server half).
+- Predicates (`Server/permissions/predicates.go`), each pure over a
+  `Subject` (role bits, both override layers, channel flags, DM membership
+  and block state): `CanViewChannel`, `CanAdmitSession` (= view),
+  `CanSendMessage`, `CanType` (= send), `CanJoinVoice`, `CanModerateVoice`;
+  `Subject.Has` is the one value-taking bit predicate `Checker` and
+  `PermissionService` route through. Refusals are sentinels
+  (`ErrPermissionDenied` + bit name, `ErrArchived`, `ErrBlocked`,
+  `ErrNotDMParticipant`, `ErrNotVoiceChannel`) so each site keeps its own
+  status codes. Permission is checked before the archive flag everywhere, so
+  an unauthorized caller learns nothing from the error.
+- Parity tables (site vs predicate over the same fixture, both the
+  cached-service and bare-hub branch, every override layer):
+  `Server/service/predicate_parity_test.go` (`CanPost`, `HandleTyping`,
+  `HandleChannelFocus`) and `Server/ws/predicate_parity_internal_test.go`
+  (`channelCanSend`, `refreshChannelVisibilityCanSend`, `applySetChannelID`,
+  `channelReadAudience`, `RefreshChannelVisibility`, `channelSubject`,
+  `voiceJoinPrecheck`, `voiceStillAllowed`). Red before delegation: S-01 (19
+  typing rows) and SEC-02 (`TestVoiceMod_ChannelOverridesApply`, three deny
+  rows); every other site already agreed with its predicate.
+- Decision recorded for SEC-02's open question ("READ_MESSAGES or
+  CONNECT_VOICE?"): `CanModerateVoice` requires effective `READ_MESSAGES` +
+  `MUTE_MEMBERS` in the target's channel — a moderator acts only where they
+  can see. The base-bit `HasServerPerm` check stays as an early rejection
+  (never admits), which keeps FORBIDDEN ahead of the voice-state lookup and
+  means a channel allow cannot grant `MUTE_MEMBERS` to a base role lacking it.
+- Inventory, step 1 grep plus the hand-rolled sites, before → after:
+
+  | Site (before)                                                       | Property        | After                                         |
+  | ------------------------------------------------------------------- | --------------- | --------------------------------------------- |
+  | `permissions/checker.go` HasChannelPerm / Batch / VisibleChannelIDs | view (bit)      | `Subject.Has` / `CanViewChannel`              |
+  | `service/message_perms.go:93-100` checkSendPermission               | send            | `CanSendMessage`                              |
+  | `service/channel.go:132` HandleTyping (READ only — S-01)            | type            | `CanType`                                     |
+  | `service/channel.go:256` HandleChannelFocus                         | admit           | `CanAdmitSession`                             |
+  | `ws/serve_ready.go:149-157` channelCanSend                          | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:519-523` refreshChannelVisibilityCanSend       | send            | `CanSendMessage`                              |
+  | `ws/hub_broadcast.go:265,283` channelReadAudience                   | view            | `CanViewChannel`                              |
+  | `ws/hub_broadcast.go:422-439` RefreshChannelVisibility              | view            | `CanViewChannel`                              |
+  | `ws/handlers.go:296` applySetChannelID (hasPermChecked)             | admit           | `CanAdmitSession`; helper deleted             |
+  | `ws/voice_join.go:105-151` voiceJoinPrecheck (requireChannelAccess) | join            | `CanJoinVoice`; helper deleted                |
+  | `ws/voice_join.go:594-612` handleVoiceTokenRefreshV2                | join            | `CanJoinVoice`                                |
+  | `ws/voice_moderation.go:416-433` move destination                   | join            | `CanJoinVoice`                                |
+  | `ws/hub_sweep.go:353` hasChannelPermChecked (EffectiveChannelPerms) | join (bit only) | `CanJoinVoice` (whole rule, error-aware)      |
+  | `ws/voice_moderation.go:64` voiceModTarget (HasServerPerm — SEC-02) | moderate        | `CanModerateVoice` + base-bit early rejection |
+  | `ws/deps.go` hasChannelAccess / hasChannelAccessLive                | join/admit glue | deleted (`channelSubject` + predicates)       |
+
+- Residue after migration (direct bit-helper calls outside
+  `Server/permissions`, non-test), each with its reason — so step 5's
+  condition is not met and the `authz-chokepoint` rule stays with B3 item
+  15, consistent with the 2026-08-18 measurement that dropped it (1 hit in
+  `api/`, a false positive; 30 widened, 87% legitimate):
+  - Server-scoped permissions with no channel — `HasServerPerm` in
+    `api/middleware.go:200`, `admin/middleware.go:109`, `service/emoji.go:95`,
+    `service/moderation.go:51`, `service/role.go:82`, and `HasAnyPerm`
+    (`AdminPerimeter`) in `admin/middleware.go:84`. These ARE the canonical
+    server-wide predicate; there is no channel to resolve a `Subject` for.
+  - `HasAdmin` as a fetch short-circuit (skip the override query for admins)
+    in `service/channel.go:59`, `service/message_perms.go:25`,
+    `service/permission.go:224`, `ws/serve.go:780`, `ws/serve_ready.go:169`,
+    `ws/voice_join.go:355`; as an authorization input in
+    `admin/handlers_channel_perms.go:95,325`, `admin/logstream.go:452`,
+    `api/upload_handler.go:404`, `service/role.go:104` (role hierarchy — the
+    measurement's "no `Outranks`" class).
+  - `& permissions.AllPerms` masks on admin input (`admin/handlers_channel_perms.go:131-358`,
+    `service/role.go:210,307`) — sanitisation, not a decision.
+  - `service/mentions.go:262-266,302-304` — the bulk @everyone reader walk
+    resolves the role layer per role and the user layer as a set difference;
+    the owner declined the mechanical `HasPerm` conversion on 2026-08-18
+    (memory `owncord-invariant-rule-measurement-2026-08-18`).
+  - `ws/voice_moderation.go:65` — the base-bit early rejection described
+    above.
+- Behaviour deltas beyond the three findings, all narrowing: the stale-voice
+  sweep re-runs the whole join rule (deleted/archived channel, lost DM
+  membership, new block evict too); the token refresh refuses a deleted
+  channel; the bare-hub `RefreshChannelVisibility` branch fails closed on a
+  lookup error like the service branch always did. Two fixtures needed
+  completing, assertions untouched: the deafen-race `VoiceDeps` gain a
+  `Checker`, and `TestHandleVoiceTokenRefresh_NilUser` seeds the channel it
+  refreshes.
+- Gates at `aeee37e8`, from `Server/`: four build-tag variants, `go vet`,
+  `go test -race ./...`, `go test -tags deadlock ./ws/`, `golangci-lint run`
+  — all exit 0, run before each of the five commits.
+- Codex review on #1440 (P2): `CanJoinVoice`'s DM branch returned before the
+  archive flag, while the old `voiceJoinPrecheck` refused every archived
+  channel and the admin PATCH accepts `archived` for a DM. Fixed in
+  `fdd2a3ff` (archive checked after membership and block for both kinds,
+  pinned in the predicate table), same gate green; thread resolved.
 
 ## B2-6 — Safe audit coverage
 
@@ -474,15 +559,15 @@ The seven local reports in `docs/security-findings/` (gitignored, never
 committed; the directory-to-row mapping lives in its local README) and
 where each goes:
 
-| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                        |
-| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------- |
-| S-01       | **B2**                          | beside the report until B2-5 merges                                                      | B2-5                              |
-| SEC-02     | **B2** (server half)            | beside the report until B2-5 merges                                                      | B2-5; UI half in B5               |
-| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7 |
-| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                |
-| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                |
-| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                |
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                            |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
+| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440) — done                |
+| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440) — done; UI half in B5 |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7     |
+| SEC-03     | B2 if small, else **B5**        | beside the report                                                                        | B2-9 or B5 item 11                    |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                    |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                    |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                    |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
 local until its fix lands, then lands publicly in the same PR. The two

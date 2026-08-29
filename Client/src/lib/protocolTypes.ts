@@ -7,6 +7,10 @@
 // Usage:  import { MessageType } from "@lib/protocolTypes";
 //         ws.send({ type: MessageType.CHAT_SEND, payload: { ... } });
 
+// The wire epoch this client speaks; sent in the auth frame and checked by
+// the server. See docs/protocol.md, Compatibility.
+export const PROTOCOL_EPOCH = 1;
+
 // ---------------------------------------------------------------------------
 // Server → Client message types
 // ---------------------------------------------------------------------------
