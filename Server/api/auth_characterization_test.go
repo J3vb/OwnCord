@@ -222,6 +222,30 @@ func totpCode(t *testing.T, secret string) string {
 	return code
 }
 
+// wrongTOTPCode returns a six-digit code the verifier rejects for secret:
+// it differs from the codes of the previous, current and next 30-second
+// steps, which are the three VerifyTOTPCode accepts. A constant such as
+// "000000" collides with one of them once in ~333k runs.
+func wrongTOTPCode(t *testing.T, secret string) string {
+	t.Helper()
+	now := time.Now().UTC()
+	valid := map[string]bool{}
+	for _, d := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
+		code, err := auth.GenerateTOTPCode(secret, now.Add(d))
+		if err != nil {
+			t.Fatalf("GenerateTOTPCode: %v", err)
+		}
+		valid[code] = true
+	}
+	for i := range 4 {
+		if code := fmt.Sprintf("%06d", i); !valid[code] {
+			return code
+		}
+	}
+	t.Fatal("unreachable: four candidates, at most three valid codes")
+	return ""
+}
+
 // ─── Enumeration defence ─────────────────────────────────────────────────────
 
 // Every credential rejection on /login is the same 401 — status, body,
@@ -805,7 +829,7 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 			// totp_fail counter (10) keeps counting across challenges.
 			for range 5 {
 				attempt++
-				rr := verify(t, router, pt, "000000", fmt.Sprintf("203.0.113.%d", attempt))
+				rr := verify(t, router, pt, wrongTOTPCode(t, secret), fmt.Sprintf("203.0.113.%d", attempt))
 				wantErr(t, rr, http.StatusUnauthorized, "UNAUTHORIZED", "invalid two-factor code")
 			}
 		}

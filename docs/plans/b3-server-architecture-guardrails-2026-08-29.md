@@ -43,7 +43,7 @@ surface to it.
 | **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                | 3–4 days | B3-0..B3-2             |
 | **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                     | 1–2 days | B3-0..B3-2             |
 | **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                              | spread   | after HP-3, per-family |
-| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 (test-first, `bughunt-fix` shape)                                                | 1 day    | any                    |
+| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape)             | 1 day    | any                    |
 
 Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
 and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
@@ -599,8 +599,15 @@ direct database use above the domain layer is justified or removed".
 Roadmap rule 2. `bughunt-fix` on OC-0345 (owner middleware role re-read →
 reuse the authenticated context; unavailable stays 503, not 403) and OC-0346
 (recovery middleware ordered after tracing so the panic log carries the
-trace id). OC-0323 rides B3-8's message/read-state family. Any of the three
-that cannot land in B3 is re-tagged in HP-3's scorecard with the reason.
+trace id). OC-0323 rides B3-8's message/read-state family. B3-1 added three
+more, all in the auth slice and all pinned as-is by its characterization
+rows: OC-0376 (register commits the account and burns the invite, then 500s
+when the session insert fails), OC-0377 (verify-totp maps a database error to
+401), OC-0378 (verify-totp consumes the challenge before the session insert).
+They are fixed here, after B3-2 has moved the orchestration into
+`service.AuthService` — each fix flips its `// known:` row in the same commit.
+Any of the six that cannot land in B3 is re-tagged in HP-3's scorecard with
+the reason.
 
 ## Exit gate
 
