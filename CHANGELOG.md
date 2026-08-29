@@ -39,6 +39,30 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
+## Unreleased
+
+User-visible: one change to how updates roll out. Not user-visible: the
+protocol now carries a version number.
+
+### Login & connection
+
+- The client and server now agree on a protocol version ("epoch") when
+  connecting. This release is epoch 1; clients from v1.2.0-alpha.4 and earlier
+  still connect.
+- A client too old for its server is told "update the client" on the connect
+  screen, with the usual Update Now button — instead of failing in confusing
+  ways.
+- **Upgrade the server before the clients.** The server only offers client
+  releases that speak its own protocol epoch, so a protocol-changing release
+  reaches clients once the server runs it. Releases that do not change the
+  protocol are offered as before.
+
+### Repository
+
+- `protocol/schema.json` declares `protocol_epoch`; `npm run generate` emits it
+  as `ws.ProtocolEpoch` and `PROTOCOL_EPOCH`. Rules for bumping it:
+  `docs/protocol.md`, Compatibility.
+
 ## v1.2.0-alpha.4
 
 **62 bug fixes**, all user-visible, plus repository work that changes nothing an
