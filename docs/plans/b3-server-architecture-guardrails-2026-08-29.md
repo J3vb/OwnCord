@@ -4,8 +4,9 @@
 **Base commit:** `bf7b886d` (`dev`, post-PR #1445); HP-2 accepted 2026-08-29
 ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — claims
 verified at `bf7b886d`  
-**Status:** drafted — entry gate 2 of 3 met at draft time (see below); no step
-started. Update this line, not only the step table, when a step lands.
+**Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
+B3-0 in review 2026-08-29 (evidence in its section; closes entry-gate item 3).
+Update this line, not only the step table, when a step lands.
 
 Primary inputs:
 
@@ -36,14 +37,14 @@ surface to it.
 | **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral               | 2–3 days | B3-6, B3-7             |
 | **HP-3** | First vertical-slice review — scorecard                                                               | —        | —                      |
 | **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                   | 1–2 days | B3-4                   |
-| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                      | 1 day    | B3-3                   |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                      | 1 day    | after B3-3             |
 | **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites       | 2–3 days | after B3-3/B3-4        |
 | **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules   | 3–4 days | B3-0..B3-2             |
 | **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                        | 1–2 days | B3-0..B3-2             |
 | **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family | spread   | after HP-3, per-family |
 | **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 (test-first, `bughunt-fix` shape)                   | 1 day    | any                    |
 
-Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 + B3-4 → B3-5 → B3-8. B3-6, B3-7
+Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
 and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
 and baseline measurement may run while the first vertical slice is prepared)
 provided they do not touch `Server/api/auth_handler.go`, `Server/auth/` or
@@ -64,21 +65,21 @@ migration, predicate or hub lifecycle ownership.
 Every claim the roadmap's B3 section and the supplement rest on, re-tested
 against `bf7b886d`. Commands are the ones B3-0 automates.
 
-| Claim                                                                        | Verdict                   | What it means for the work                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 44 production files in `ws`/`admin`/`api` import `db` (17/16/11)             | **Confirmed, 45**         | `ws` 17, `admin` 16, `api` **12** (`grep -l '"github.com/J3vb/OwnCord/Server/db"'` over non-test files). `service` imports it from 16 of 18 files — expected, it is the layer that should. `auth` from 2 of 10. B3-0 lists every file, not the count.                                                                                                                                                                                   |
-| `main.go` exceeds 1,000 lines and owns twelve responsibilities               | **Confirmed**             | 1,019 lines. B3-3 moves the wiring into `internal/app/`; `main.go` stays the `go build .` entry.                                                                                                                                                                                                                                                                                                                                        |
-| `hub_broadcast.go`, `serve.go`, `hub.go` are the coordination hotspots       | **Confirmed**             | 1,032 / 990 / 819 lines; `router.go` 721, `voice_join.go` 680. `ws` is 45 production files, 12,738 lines. B3-5 splits inside the package — the supplement's rule ("keep `ws` one package while its lock invariants need shared private state") stands.                                                                                                                                                                                  |
-| Hub wiring uses post-construction setters (S-11)                             | **Confirmed, 7**          | `SetEventPersister`, `SetEventStore`, `SetPluginRegistry`, `SetPluginEventSink` (`hub_events.go`), `SetLiveKit`, `SetLiveKitProcess` (`hub_livekit.go`), `SetPendingVoiceModFlags` (`voice_moderation.go:599`). B3-4 decides for each: required (constructor option, validated) or genuinely replaceable (setter stays).                                                                                                                |
-| Auth routes consume raw database ownership (S-10)                            | **Confirmed**             | `api/auth_handler.go` (786 lines) takes `*db.DB` in `MountAuthRoutes`, `handleRegister`, `handleLogin`, `loginAuthenticate`, `handleLogout`, `handleDeleteAccount`, `issueSession`, `isRequire2FAEnabled`, `isRegistrationOpen`, `getBooleanSetting`; 26 `db.` references. `totp_handler.go` 475 lines, same shape. No `service/auth.go` exists.                                                                                        |
-| A useful service seam exists but does not own all use cases                  | **Confirmed**             | `Server/service/` has 18 production files (block, channel, dm, emoji, invite, mentions, message\*, moderation, permission, role, user). Nothing for auth, sessions, TOTP, uploads, settings, audit or plugins.                                                                                                                                                                                                                          |
-| Coverage is 74.6% with no floor (S-06)                                       | **Confirmed**             | `ci.yml:73` runs `go test -race -coverprofile=coverage.out -cover` and uploads the profile (`:91-96`); nothing reads it. B0 measured 74.6% (`b0-baseline-2026-08-25.md:46`). B3-6 adds the floor at exactly that number.                                                                                                                                                                                                                |
-| Tier 3 (hub simulation, fault transport, model tests) is designed, not built | **Confirmed**             | `bug-detection-improvements.md` §Tier 3; `make fuzz` (Tier 1a) exists (`Server/Makefile:5`). No `ws` simulation test, no fault-injecting transport, no `fc.commands` model test in `Client/tests/unit/*.property.test.ts`. B3-6 builds 3b and 3c; 3a is a client test file and is included (it touches no client structure — B7's rule is about `src/`).                                                                                |
-| `Server/invariants` has rules to extend                                      | **Confirmed, one rule**   | `Rules = []Rule{syncutilLocks}` (`invariants.go:64`). The `seq-enqueue-paired` rule the 2026-08-18 measurement recorded as "adopted narrowed" was never merged under that name — `git log -S seq-enqueue-paired` is empty at `bf7b886d` — so B3-6 item 7 adds `authz-chokepoint` as the registry's second rule and does not build on a sibling that does not exist. `authz-chokepoint` gets HP-2 question 5's residue as its allowlist. |
-| The seed tool has no alpha-shaped profile (workstream 12)                    | **Confirmed**             | `Server/cmd/seed/main.go` (372 lines) takes `-db` and `-confirm-dev` only. No snapshot exists anywhere in the tree. B3-7 builds both.                                                                                                                                                                                                                                                                                                   |
-| Docker smoke never runs on `dev` (workstream 16)                             | **Confirmed**             | `Server Docker Build (verify)` skips on every `dev` PR (HP-2 gate run; #1444, #1445 both `skipping`). B3-6 adds a `schedule:` trigger to `ci.yml` scoped to that job.                                                                                                                                                                                                                                                                   |
-| Permission rules are mirrored (workstream 7)                                 | **Refuted, done in B2-5** | Six predicates in `Server/permissions/predicates.go`, parity tables in `service/` and `ws/`; residue classified in HP-2 question 5. Workstream 7 reduces to the `authz-chokepoint` rule (workstream 15) and to keeping the residue table current when B3-8 moves families.                                                                                                                                                              |
-| Register rows OC-0323, OC-0345, OC-0346 are open                             | **Confirmed**             | All three `open`, low, in `.superpowers/findings-ledger.json`; B3/B5, B3/B4, B3/B6 tags. Roadmap rule 2: B3 cannot exit with any of them open unless re-tagged with a written reason in HP-3.                                                                                                                                                                                                                                           |
+| Claim                                                                        | Verdict                   | What it means for the work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 44 production files in `ws`/`admin`/`api` import `db` (17/16/11)             | **Confirmed, 45**         | `ws` 17, `admin` 16, `api` **12** (`grep -l '"github.com/J3vb/OwnCord/Server/db"'` over non-test files). `service` imports it from 16 of 18 files — expected, it is the layer that should. `auth` from 2 of 10. B3-0 lists every file, not the count.                                                                                                                                                                                                                                                                                               |
+| `main.go` exceeds 1,000 lines and owns twelve responsibilities               | **Confirmed**             | 1,019 lines. B3-3 moves the wiring into `internal/app/`; `main.go` stays the `go build .` entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `hub_broadcast.go`, `serve.go`, `hub.go` are the coordination hotspots       | **Confirmed**             | 1,032 / 990 / 819 lines; `router.go` 721, `voice_join.go` 680. `ws` is 45 production files, 12,738 lines. B3-5 splits inside the package — the supplement's rule ("keep `ws` one package while its lock invariants need shared private state") stands.                                                                                                                                                                                                                                                                                              |
+| Hub wiring uses post-construction setters (S-11)                             | **Confirmed, 7**          | `SetEventPersister`, `SetEventStore`, `SetPluginRegistry`, `SetPluginEventSink` (`hub_events.go`), `SetLiveKit`, `SetLiveKitProcess` (`hub_livekit.go`), `SetPendingVoiceModFlags` (`voice_moderation.go:599`). Called from two places: `api/router.go` (`NewHub` at `:106`, plugin and LiveKit setters `:325-360`) and `main.go:453-454` (persister, event store) — so construction has two owners today, which is why B3-4 follows B3-3. B3-4 decides for each: required (constructor option, validated) or genuinely replaceable (setter stays). |
+| Auth routes consume raw database ownership (S-10)                            | **Confirmed**             | `api/auth_handler.go` (786 lines) takes `*db.DB` in `MountAuthRoutes`, `handleRegister`, `handleLogin`, `loginAuthenticate`, `handleLogout`, `handleDeleteAccount`, `issueSession`, `isRequire2FAEnabled`, `isRegistrationOpen`, `getBooleanSetting`; 26 `db.` references. `totp_handler.go` 475 lines, same shape. No `service/auth.go` exists.                                                                                                                                                                                                    |
+| A useful service seam exists but does not own all use cases                  | **Confirmed**             | `Server/service/` has 18 production files (block, channel, dm, emoji, invite, mentions, message\*, moderation, permission, role, user). Nothing for auth, sessions, TOTP, uploads, settings, audit or plugins.                                                                                                                                                                                                                                                                                                                                      |
+| Coverage is 74.6% with no floor (S-06)                                       | **Confirmed**             | `ci.yml:73` runs `go test -race -coverprofile=coverage.out -cover` and uploads the profile (`:91-96`); nothing reads it. B0 measured 74.6% (`b0-baseline-2026-08-25.md:46`). B3-6 adds the floor at exactly that number.                                                                                                                                                                                                                                                                                                                            |
+| Tier 3 (hub simulation, fault transport, model tests) is designed, not built | **Confirmed**             | `bug-detection-improvements.md` §Tier 3; `make fuzz` (Tier 1a) exists (`Server/Makefile:5`). No `ws` simulation test, no fault-injecting transport, no `fc.commands` model test in `Client/tests/unit/*.property.test.ts`. B3-6 builds 3b and 3c; 3a is a client test file and is included (it touches no client structure — B7's rule is about `src/`).                                                                                                                                                                                            |
+| `Server/invariants` has rules to extend                                      | **Confirmed, one rule**   | `Rules = []Rule{syncutilLocks}` (`invariants.go:64`). The `seq-enqueue-paired` rule the 2026-08-18 measurement recorded as "adopted narrowed" was never merged under that name — `git log -S seq-enqueue-paired` is empty at `bf7b886d` — so B3-6 item 7 adds `authz-chokepoint` as the registry's second rule and does not build on a sibling that does not exist. `authz-chokepoint` gets HP-2 question 5's residue as its allowlist.                                                                                                             |
+| The seed tool has no alpha-shaped profile (workstream 12)                    | **Confirmed**             | `Server/cmd/seed/main.go` (372 lines) takes `-db` and `-confirm-dev` only. No snapshot exists anywhere in the tree. B3-7 builds both.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Docker smoke never runs on `dev` (workstream 16)                             | **Confirmed**             | `Server Docker Build (verify)` skips on every `dev` PR (HP-2 gate run; #1444, #1445 both `skipping`). B3-6 adds a `schedule:` trigger to `ci.yml` scoped to that job.                                                                                                                                                                                                                                                                                                                                                                               |
+| Permission rules are mirrored (workstream 7)                                 | **Refuted, done in B2-5** | Six predicates in `Server/permissions/predicates.go`, parity tables in `service/` and `ws/`; residue classified in HP-2 question 5. Workstream 7 reduces to the `authz-chokepoint` rule (workstream 15) and to keeping the residue table current when B3-8 moves families.                                                                                                                                                                                                                                                                          |
+| Register rows OC-0323, OC-0345, OC-0346 are open                             | **Confirmed**             | All three `open`, low, in `.superpowers/findings-ledger.json`; B3/B5, B3/B4, B3/B6 tags. Roadmap rule 2: B3 cannot exit with any of them open unless re-tagged with a written reason in HP-3.                                                                                                                                                                                                                                                                                                                                                       |
 
 Net effect: workstream 7 is already done; the inventory (entry-gate item 3)
 is the first real work; the auth slice is exactly the size S-10 says; `api`
@@ -135,6 +136,63 @@ requires.
 Exit: every `db` importer has a disposition; the rule is green on HEAD and
 red on a synthetic violation; the graph table exists for the three auth
 files. One PR.
+
+**Evidence, 2026-08-29** — branch `feat/b3-0-boundary-inventory` from `dev`
+`ad4defc2`; PR to `dev` recorded below. Closes entry-gate item 3.
+
+- **Inventory:** `docs/architecture/server-boundaries.md`, linked from
+  `docs/architecture/server.md` §D2 and `docs/architecture/README.md`. The
+  table is generated by `Server/cmd/dbinventory` (syntactic, `go/ast`; no
+  `x/tools` dependency added) and the rows live as `DBImportAllow` in
+  `Server/invariants/db_import_boundary.go`, so the document and the gate
+  cannot drift: the tool prints each row's disposition from the map and exits
+  1 on an unlisted importer or a stale row. Measured: **51 files** import
+  `db` outside `db/` and `service/` (ws 17, admin 16, api 12, auth 2, root 2,
+  cmd/seed 1, plugin 1) — the supplement's 44 counted three packages, and
+  `api` is 12, not 11. **14 are type-only** (they use `db.User`-style shapes
+  and never persist) — a distinction the `git grep` count could not make.
+  Dispositions: **move 28** (auth 9, channel 6, settings-ops 4, voice 3,
+  upload 2, user 2, role 1, connection 1), **adapter 17**, **boundary 6**,
+  remove 0. The regex the plan sketched over-counted: `db.` in comments
+  matched, and `*db.DB` method calls (`database.GetUserByID`) do not contain
+  `db.` at all — the AST walk resolves `*db.DB` receivers (params, fields,
+  `db.Open*` assignments) instead.
+- **Rule:** `db-import-boundary`, the registry's second rule. Unit RED:
+  `TestDBImportBoundary` "unlisted api file importing db is flagged" and the
+  aliased-import case. Real-tree RED, B2-7 style — a probe `api/zz_probe.go`
+  importing `db`:
+
+  ```
+  --- FAIL: TestServerInvariants (0.04s)
+      invariants_test.go:20: api/zz_probe.go:3: [db-import-boundary] imports Server/db above the domain layer without an inventory row; route the call through a service (see docs/architecture/server-boundaries.md), or add a DBImportAllow entry with a disposition and reason
+  ```
+
+  Probe deleted (`git status` clean), `go test ./invariants/` green.
+  `TestDBImportAllowIsLive` is the other direction: every row must name a
+  file that exists and still imports `db`, carry a reason, and pair `move`
+  with a family — so the list can only shrink honestly.
+
+- **Hub lifecycle:** seven setters with declaration and call site — `NewHub`
+  is called in `api/router.go:106`, four setters from the router and two
+  from `main.go:453-454`; four are required before `Run` (LiveKit signer,
+  persister, event store — and `SetLiveKit` fails voice silently when
+  absent), three are genuinely optional. Five `syncutil` locks listed with
+  what each guards; **the lock order is not written down anywhere** — only
+  the `-tags deadlock` pass proves it — so B3-5 records it in `hub.go` before
+  its first move. The `run()` start order and its twelve-entry defer stack
+  are tabulated with the three ordering facts B3-3's composite close must
+  keep (audit writer after `database.Close`, persistence before it,
+  `GracefulStop` on early return).
+- **Auth before-graph:** `api/auth_handler.go` imports `auth`, `db`,
+  `permissions`, `service` and calls 8 distinct `*db.DB` methods;
+  `totp_handler.go` imports `auth`, `db` and calls 3; `auth/` itself is a
+  leaf (types only). Eleven methods is the upper bound of B3-2's interface.
+- Phase 1 item 5 (client baselines) recorded as B7 entry work, not done here.
+- Gates before commit: `check:docs`, `check:hygiene`; from `Server/` the four
+  build-tag variants, `go vet`, `go test -race ./...`, `go test -tags deadlock
+./ws/`, `golangci-lint run` (the tool's first version tripped `cyclop` at
+  30 and the deprecated `parser.ParseDir` — split into helpers, `os.ReadDir`
+  - `ParseFile`).
 
 ## B3-1 — Auth characterization tests
 
@@ -234,8 +292,11 @@ Roadmap workstream 8; supplement Phase 3 item 1. After HP-3.
 
 1. `Server/internal/app/` owns: config and data-directory preparation,
    database open/migrate, telemetry, plugin registry, event persistence,
-   audit writer, maintenance workers, HTTP server construction, health,
-   replay seeding, and **one composite close** — `App.Close(ctx)` that stops
+   audit writer, maintenance workers, **hub construction** (moved out of
+   `api.NewRouter`, `router.go:106`, together with the plugin and LiveKit
+   setters at `:325-360`; `NewRouter` gains a `*ws.Hub` parameter and stops
+   returning one), HTTP server construction, health, replay seeding, and
+   **one composite close** — `App.Close(ctx)` that stops
    in the reverse of start order and reports the first error without skipping
    later closes. `main.go` becomes `cfg := …; app, err := app.New(cfg); err =
 app.Run(ctx)`.
@@ -258,9 +319,14 @@ Exit: `main.go` under 150 lines; the failure-injection test green under
 
 ## B3-4 — Hub constructor options (S-11)
 
-Roadmap workstream 6; supplement Phase 3 item 2. Parallel with B3-3 (touches
-`ws/hub*.go` and the one construction site, not `main.go`'s other blocks —
-coordinate the construction-site line).
+Roadmap workstream 6; supplement Phase 3 item 2. **After B3-3, not
+parallel with it:** at `bf7b886d` the production `ws.NewHub` call is inside
+`api.NewRouter` (`Server/api/router.go:106`), which also wires
+`SetPluginRegistry`/`SetPluginEventSink` (`:325-328`) and
+`SetLiveKit`/`SetLiveKitProcess` (`:342-360`), while `main.go:453-454` sets
+the event persister and store after the router returns. Two construction
+boundaries means two owners; B3-3 collapses them first (below), then B3-4
+has one call site to change.
 
 1. From B3-0's setter table: each of the seven becomes either a field of
    `HubOptions` validated in `NewHub` (required → construction fails without
@@ -268,8 +334,10 @@ coordinate the construction-site line).
    is replaceable at runtime (`SetPendingVoiceModFlags` is the likely
    survivor; `SetLiveKitProcess` depends on whether the supervised process can
    restart).
-2. `NewHub` returns `(*Hub, error)`; the single call site (`main.go`, or
-   `internal/app/` once B3-3 lands) passes everything it used to set. Tests
+2. `NewHub` returns `(*Hub, error)`; the single call site — `internal/app/`
+   after B3-3, which passes the built `*ws.Hub` into `api.NewRouter` instead
+   of having the router construct it — passes everything the seven setters
+   used to set. Tests
    that build a `Hub` use a `testHubOptions()` helper so 170+ test files do
    not each grow a struct literal.
 3. RED first: a test that constructs a `Hub` without a required collaborator
@@ -355,10 +423,23 @@ each item is its own PR so none blocks another. Nothing here edits
    `permissions.HasPerm` call in `api/`. B3-8 shrinks the allowlist as
    families move.
 8. **Docker smoke nightly on `dev` (workstream 16).** `ci.yml` gains
-   `schedule: [{cron: "0 3 * * *"}]` and the `Server Docker Build (verify)`
-   job's condition becomes `github.ref == 'refs/heads/main' ||
-github.event_name == 'schedule'`; `concurrency` and `timeout-minutes`
-   already present (B1-7's guard check enforces both).
+   `schedule: [{cron: "0 3 * * *"}]`. The `Server Docker Build (verify)`
+   job's condition (`ci.yml:520`, today
+   `github.ref_name == 'main' || github.base_ref == 'main'`) **keeps both
+   existing terms** — a PR to `main` runs on the synthetic
+   `refs/pull/<n>/merge` ref and is matched by `base_ref`, not `ref_name` —
+   and adds `|| github.event_name == 'schedule'`. A scheduled run executes
+   the workflow file from the default branch (`main`) and the job's
+   `actions/checkout` has no `ref`, so it would smoke `main`; the checkout
+   step gains `ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}`
+   (empty = the event's own ref, unchanged for pushes and PRs). The nightly
+   therefore builds `dev`'s `Server/` from a workflow definition taken from
+   `main` — acceptable while the job's steps are identical on both branches,
+   and the reason the job is not moved to its own workflow file.
+   `concurrency` and `timeout-minutes` are already present (B1-7's guard
+   check enforces both). Proof before enabling the schedule: a
+   `workflow_dispatch` run with the same `ref` expression and a
+   `git rev-parse HEAD` step showing `dev`'s SHA.
 9. **Machine-readable contract drift (workstream 10).** `check:server`
    already diffs the two generators; this adds `docs/api.md` route-table
    generation from the mounted router (the absence test's walker, printed as
@@ -374,11 +455,20 @@ baseline) in this section's evidence block.
 
 Roadmap workstream 12. Beside the slice.
 
-1. `Server/cmd/seed -profile alpha` — deterministic (fixed seed, fixed clock):
-   member count, channel count, message volume, attachment count, role and
-   override distribution, DM share and voice-session history matching the
-   documented alpha shape (numbers from the load-baseline workflow's
-   parameters, `load-baseline.yml`, so the two agree). `-confirm-dev` stays
+1. `Server/cmd/seed -profile alpha` — deterministic (fixed seed, fixed
+   clock). `load-baseline.yml` defines only `users` (default 100) and one
+   channel, so it cannot be the source of the shape; the profile is defined
+   here and lives as constants in `Server/cmd/seed/profile_alpha.go`, and
+   `load-baseline.yml`'s `users` default is the one value the two share:
+   **100 users** (4 roles: owner, admin, moderator, member — 1/2/5/92), **12
+   channels** (10 text, 2 voice; 3 with role overrides, 2 with user
+   overrides, 1 archived), **20,000 messages** over 30 simulated days with a
+   diurnal curve, **300 attachments** (image/audio/video/other 60/10/10/20 %,
+   sizes 10 KB–5 MB), **15 % of messages in DMs** across 40 DM pairs,
+   **200 voice sessions** (1–45 min, 2–6 participants), **500 reactions**,
+   **30 invites** (10 revoked), **1 plugin row** (disabled). A number that
+   B3-7 finds unrepresentative is changed in `profile_alpha.go` with the
+   reason in its evidence block — never silently. `-confirm-dev` stays
    mandatory.
 2. One anonymised `v1.2.0-alpha.4` snapshot at `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite`
    (Git LFS if over 5 MB; the path documented in `docs/deployment.md`

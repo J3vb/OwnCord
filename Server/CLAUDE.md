@@ -11,7 +11,9 @@ prometheus.
 - `db/` hand-written query wrappers; `db/dbgen/` is generated (see `db-change`)
 - `cmd/` executable tooling, one `package main` per subdirectory —
   `cmd/genprotocol/` regenerates the protocol constants from `protocol/schema.json`,
-  `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`).
+  `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`),
+  `cmd/dbinventory/` prints the `db`-importer table for
+  `docs/architecture/server-boundaries.md` (exits 1 on an unlisted importer).
   `scripts/` holds shell/JS tooling only; no Go entry point lives there
 - `admin/` web admin panel · `updater/` self-update + signature verification ·
   `plugin/` WASM plugin runtime (`-tags wazero`) · `telemetry/` OTel (`-tags otel`)
@@ -34,3 +36,7 @@ prometheus.
 - Prefer the standard library. `syncutil` exists so lock usage is uniform and
   detectable; do not hand-roll around it. `Server/invariants/` enforces this
   at `go test` time; exceptions are greppable via `grep -rn "invariant:allow" Server/`.
+- Only `db/` and `service/` import `db` freely. Any other production file that
+  imports it needs a row in `invariants/db_import_boundary.go` (`DBImportAllow`)
+  with a disposition and reason — the B3 inventory, which only shrinks. New
+  persistence goes behind a service, not into a handler.

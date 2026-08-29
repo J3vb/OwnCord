@@ -61,7 +61,7 @@ func (r Rule) inScope(dir string) bool {
 }
 
 // Rules is the registry every gate runs.
-var Rules = []Rule{syncutilLocks}
+var Rules = []Rule{syncutilLocks, dbImportBoundary}
 
 // allowPrefix introduces a line-scoped suppression:
 //
