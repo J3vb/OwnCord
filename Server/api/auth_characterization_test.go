@@ -224,25 +224,27 @@ func totpCode(t *testing.T, secret string) string {
 
 // wrongTOTPCode returns a six-digit code the verifier rejects for secret:
 // it differs from the codes of the previous, current and next 30-second
-// steps, which are the three VerifyTOTPCode accepts. A constant such as
-// "000000" collides with one of them once in ~333k runs.
+// steps, which are the three VerifyTOTPCode accepts, and from the step after
+// that — the verifier samples the clock later than this helper, so a request
+// that crosses a step boundary in between is checked against {0,+1,+2}. A
+// constant such as "000000" collides with one of them once in ~333k runs.
 func wrongTOTPCode(t *testing.T, secret string) string {
 	t.Helper()
 	now := time.Now().UTC()
 	valid := map[string]bool{}
-	for _, d := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
+	for _, d := range []time.Duration{-30 * time.Second, 0, 30 * time.Second, 60 * time.Second} {
 		code, err := auth.GenerateTOTPCode(secret, now.Add(d))
 		if err != nil {
 			t.Fatalf("GenerateTOTPCode: %v", err)
 		}
 		valid[code] = true
 	}
-	for i := range 4 {
+	for i := range 5 {
 		if code := fmt.Sprintf("%06d", i); !valid[code] {
 			return code
 		}
 	}
-	t.Fatal("unreachable: four candidates, at most three valid codes")
+	t.Fatal("unreachable: five candidates, at most four valid codes")
 	return ""
 }
 

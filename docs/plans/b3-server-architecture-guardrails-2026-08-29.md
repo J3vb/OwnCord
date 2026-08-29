@@ -31,19 +31,19 @@ surface to it.
 
 ## Steps at a glance
 
-| Step     | What                                                                                                                               | Size     | Parallel with          |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------- |
-| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7             |
-| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths                                   | 1 day    | B3-6, B3-7             |
-| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7             |
-| **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                      |
-| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                   |
-| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                   | 1 day    | after B3-3             |
-| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                    | 2–3 days | after B3-3/B3-4        |
-| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                | 3–4 days | B3-0..B3-2             |
-| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                     | 1–2 days | B3-0..B3-2             |
-| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                              | spread   | after HP-3, per-family |
-| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape)             | 1 day    | any                    |
+| Step     | What                                                                                                                               | Size     | Parallel with                                                    |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
+| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7                                                       |
+| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths                                   | 1 day    | B3-6, B3-7                                                       |
+| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7                                                       |
+| **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                                                                |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                                                             |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                   | 1 day    | after B3-3                                                       |
+| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                    | 2–3 days | after B3-3/B3-4                                                  |
+| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                | 3–4 days | B3-0..B3-2                                                       |
+| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                     | 1–2 days | B3-0..B3-2                                                       |
+| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                              | spread   | after HP-3, per-family                                           |
+| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape)             | 1 day    | OC-0345/0346: any; OC-0323: with B3-8; OC-0376..0378: after B3-2 |
 
 Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
 and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
