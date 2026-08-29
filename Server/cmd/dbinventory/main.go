@@ -35,9 +35,14 @@ import (
 
 const dbImportPath = "github.com/J3vb/OwnCord/Server/db"
 
-// skipDirs are never inventoried: db and service are the layers that may
-// import db; dbgen is generated; testdata holds fixtures, not code.
-var skipDirs = map[string]bool{"db": true, "service": true, "dbgen": true, "testdata": true, "node_modules": true}
+// layerDirs are the top-level packages that may import db freely and are
+// therefore not inventoried. Matched on the root-relative path, so a nested
+// directory that happens to share a name (api/service/) is still inventoried
+// — the same rule db-import-boundary applies.
+var layerDirs = map[string]bool{"db": true, "service": true}
+
+// skipNames are never code at any depth: fixtures and vendored JS.
+var skipNames = map[string]bool{"testdata": true, "node_modules": true}
 
 type kind int
 
@@ -118,7 +123,14 @@ func productionFiles(root string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p != root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".")) {
+			if p == root {
+				return nil
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			if layerDirs[filepath.ToSlash(rel)] || skipNames[d.Name()] || strings.HasPrefix(d.Name(), ".") {
 				return fs.SkipDir
 			}
 			return nil
