@@ -683,6 +683,15 @@ Runs in parallel with B2-1 and B2-6.
   from the manifest or config; `platformInit` sizes the shared runtime from
   `plugins.max_memory_mb` alone (`sandbox_wazero.go:83-102`) and the
   manifest value is validated, never applied; the row now says so.
+- Codex round 4 of `2ade0bdb`: two P2, both accepted. The transport
+  introduction was still categorical ("everything ... is TLS"); it now
+  excludes `tls.mode: off`. The C-09 contract presented the server's
+  `ipAllowed` as the complete deny-set; it rejects loopback, private,
+  link-local, unspecified, multicast and CGN only (`host_http.go:224-249`),
+  so the clause now names the documentation and benchmarking ranges the
+  broker must add and records that widening `ipAllowed` is a separate server
+  change (plugin HTTP is off by default and the GIF proxy follows no
+  redirects, so the server-side gap is bounded).
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`

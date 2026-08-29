@@ -137,8 +137,10 @@ new identity.
 
 ## Transport
 
-Everything between client and server is TLS. Which certificate, and how the
-client decides to trust it:
+In every `tls.mode` except `off`, everything between client and server is
+TLS; `off` served directly is plaintext, and is only safe behind a
+TLS-terminating reverse proxy the operator controls (its row below). Which
+certificate, and how the client decides to trust it:
 
 | Server `tls.mode` (`Server/config/config.go:255-262`, semantics `Server/auth/tls.go:87-117`) | Certificate                                                                                                                                                                                                                                                                                                           | Desktop client                                                                                                                                                                                                             | Browser client (B8, does not exist yet)                                     |
 | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -197,9 +199,14 @@ The broker MUST:
 3. **Resolve, then classify every answer** — all A and AAAA records,
    normalised (IPv4-mapped IPv6 included). Reject if **any** address is
    loopback, private, link-local, unspecified, multicast, carrier-grade NAT,
-   documentation, benchmarking, or otherwise non-global. The server already
-   has this exact list at `Server/plugin/host_http.go:224-249`; the broker
-   mirrors it.
+   documentation, benchmarking, or otherwise non-global. The server's
+   `ipAllowed` (`Server/plugin/host_http.go:224-249`) is the starting point,
+   not the whole list: it rejects loopback, private, link-local, unspecified,
+   multicast and carrier-grade NAT, and **does not** reject the documentation
+   ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
+   `2001:db8::/32`), the benchmarking range (`198.18.0.0/15`) or the other
+   reserved non-global blocks. The broker adds those; extending `ipAllowed`
+   to match is a separate server change.
 4. **Connect only to the validated addresses**, keeping the hostname for SNI
    and certificate checks. No second unconstrained lookup after validation
    (`host_http.go:182-216` is the server-side shape).
