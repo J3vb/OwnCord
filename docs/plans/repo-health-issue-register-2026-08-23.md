@@ -77,10 +77,10 @@ together as if each row were a unique defect:
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     315 |
-| Open      |      30 |
+| Open      |      56 |
 | Declined  |       3 |
 | Duplicate |       1 |
-| **Total** | **349** |
+| **Total** | **375** |
 
 All 38 open records are listed below. Closing a planning row does not close an
 `OC-*` record: the implementation, regression test, focused verification, full
