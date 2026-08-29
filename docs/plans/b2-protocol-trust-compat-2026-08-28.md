@@ -745,6 +745,13 @@ Runs in parallel with B2-1 and B2-6.
   inventory listed LiveKit only via `/livekit/*`; local servers use
   `direct_url` (`livekitSession.ts:711-738`) and media always goes straight
   to the SFU's ICE endpoints (TCP 7881 / UDP 50000–60000); both listed.
+- Codex round 10 of `cdd793ab`: four P2, all accepted. Capture contract:
+  DNS to the configured resolver is now named and filtered by destination;
+  the LiveKit download row lists the GitHub asset hosts reached on redirect
+  (`http.DefaultClient`, `livekit_download.go:271-300`). plugins.md: the
+  100 ms CPU value is the final default, not a floor
+  (`sandbox_wazero.go:317-323`); `wasi_snapshot_preview1` is instantiated
+  (`:105`), so "no host imports" is scoped to the OwnCord-specific ones.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
