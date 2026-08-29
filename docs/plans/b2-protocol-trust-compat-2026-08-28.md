@@ -517,6 +517,14 @@ recorded; recorded actions: []`); every other row green before any
   `sqlc generate` and `genprotocol` drift — all exit 0. Docs commits:
   `npm run check:docs`, `npm run check:hygiene`.
 - Closes S-02 (register: resolved/superseded). Ledger untouched.
+- Codex review on #1441, two P2s, both fixed test-first in `aadd911b`, same
+  gate green: `CreateInvite` read the invite back on the request context, so
+  a cancel after the committed insert failed the call and skipped
+  `invite_create` — read-back and audit now run on `context.WithoutCancel`
+  (`TestCreateInvite_AuditSurvivesCanceledLookup`); and
+  `Registry.UninstallPlugin` is idempotent on an unknown id, so the handler
+  audited uninstalls that never happened — it now checks the row first and
+  answers 404 with no audit (`TestPluginsHandlerUninstallUnknownID`).
 
 ## B2-7 — Trust model, absence proofs, plugin boundary (documents)
 
