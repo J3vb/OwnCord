@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is in review 2026-08-29 (evidence in its section).
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done and the HP-2 scorecard written 2026-08-29, in review — **HP-2 awaits the owner's signature** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)).
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -42,11 +42,11 @@ one to one and a half weeks with agents working steps in parallel.
 | **B2-3** | Server-first updates through the signed manifest — folded into B2-2                                               | ½ day    | after B2-2             |
 | **B2-4** | Compatibility matrix — folded into B2-2                                                                           | ½ day    | after B2-2             |
 | **B2-5** | One permission predicate per security property — **DONE 2026-08-29 (PR #1440)**                                   | 1–2 days | serialized             |
-| **B2-6** | Safe audit coverage                                                                                               | ½ day    | B2-1, B2-7             |
-| **B2-7** | Trust model, absence proofs, plugin boundary                                                                      | 1 day    | B2-1, B2-6             |
-| **B2-8** | The nine B2-tagged findings                                                                                       | 1 day    | before B2-2            |
-| **B2-9** | Security owners and acceptance tests                                                                              | spread   | —                      |
-| **HP-2** | Protocol and threat-model sign-off                                                                                | —        | —                      |
+| **B2-6** | Safe audit coverage — **DONE 2026-08-29 (PR #1441)**                                                              | ½ day    | B2-1, B2-7             |
+| **B2-7** | Trust model, absence proofs, plugin boundary — **DONE 2026-08-29 (PR #1443)**                                     | 1 day    | B2-1, B2-6             |
+| **B2-8** | The nine B2-tagged findings — **DONE 2026-08-28 (PR #1436)**                                                      | 1 day    | before B2-2            |
+| **B2-9** | Security owners and acceptance tests — **DONE 2026-08-29** (SEC-03 → B5; table closed)                            | spread   | —                      |
+| **HP-2** | Protocol and threat-model sign-off — **scorecard written 2026-08-29, awaiting signature**                         | —        | —                      |
 
 Order: B2-0, B2-1, B2-8, then B2-2 → B2-3 → B2-4; B2-5 is serialized on its
 own; B2-6, B2-7 and B2-9 run in parallel where the table allows.
@@ -917,6 +917,29 @@ answer with commands, not assertions:
 
 The owner signs. Acceptance authorises B3 and claims nothing about beta
 readiness.
+
+**Evidence, 2026-08-29** — the scorecard is
+[hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md), measured at
+`83a535c3` on `feat/b2-9-hp2` (same PR as B2-9).
+
+- All seven questions answered with commands and their output; the B2 exit
+  gate walked, nine conditions, all met (condition 1 at the slim one-epoch
+  scope, condition 4 with one gap recorded). Every pre-squash SHA the
+  questions cite was resolved on the fetched PR refs.
+- Question 4 added three adversarial tests (`a51e2e89`,
+  `Client/tests/unit/livekit-e2ee.test.ts`): the modified-server unknown
+  member at first contact (a known gap — pinned as today's behaviour, its RED
+  against the desired rule recorded in the scorecard), the second device
+  overwriting the one-per-account pin, and the holder side of OC-0316
+  (resumed peer re-keyed with the rotated key). The last two were proven able
+  to fail by temporary code mutation, restored with `git checkout`.
+- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 117
+  `path:line` anchors in `trust-model.md`, 0 unresolvable at HEAD.
+- Pre-squash SHAs: `a51e2e89` (Q4 tests), the commit carrying this block
+  (scorecard, this block, plan index, roadmap slice); B2-9's are in its block.
+- **Owner lines, left blank on purpose:** the BPR-051 reader line in the B2-7
+  block (Question 3 quotes it), the owner-review date in Question 3, and the
+  decision and signature lines at the top and bottom of the scorecard.
 
 ## Exit gate
 

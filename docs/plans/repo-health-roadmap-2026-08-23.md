@@ -1245,8 +1245,11 @@ in this order:
 4. B2-2 — protocol epoch and negotiation, with B2-3 and B2-4 folded in
    (one accepted epoch, so no matrix) — **done 2026-08-29**, PR #1438 =
    `9c9b8be6`;
-5. B2-5 — serialized, **next**; B2-6, B2-7 and B2-9 in parallel where the
-   plan allows; then HP-2.
+5. B2-5 (PR #1440 = `67fdd18d`), B2-6 (PR #1441 = `2b2d58ab`), B2-7
+   (PR #1443 = `88c7a824`) and B2-9 — **done 2026-08-29**;
+6. HP-2 — scorecard written 2026-08-29
+   ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)),
+   **awaiting the owner's signature**.
 
 Do not begin B3 domain extraction, client platform extraction, or browser work
 before HP-2 closes. When it does, B3 opens with the "First actionable slice"
