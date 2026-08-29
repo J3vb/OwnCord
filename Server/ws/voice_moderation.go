@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -416,16 +417,20 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if dest.Type != "voice" {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "destination is not a voice channel"}}
 	}
-	// The re-join this move hands off to (handleVoiceJoin) refuses an
-	// archived channel outright; check it here too, or the pre-flight commits
-	// the destructive half of the move for a re-join guaranteed to bounce.
-	if dest.Archived {
-		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}}
+	// The destination is gated on the TARGET's access with the same predicate
+	// the re-join this move hands off to (handleVoiceJoin) will apply —
+	// permissions.CanJoinVoice — so a move can neither place someone in a
+	// channel they could not join themselves nor commit the destructive half
+	// of the move for a re-join guaranteed to bounce (an archived channel).
+	targetSub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, c.TargetID(), dest, false)
+	if subErr != nil {
+		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID())
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
 	}
-	// The destination is gated on the TARGET's access, not the moderator's:
-	// a move must not become a way to place someone in a channel they could
-	// not join themselves.
-	if !hasChannelAccess(ctx, d.DB, d.Permissions, d.PermSvc, c.TargetID(), c.ToChannelID(), permissions.ConnectVoice) {
+	switch joinErr := permissions.CanJoinVoice(targetSub); {
+	case errors.Is(joinErr, permissions.ErrArchived):
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}}
+	case joinErr != nil:
 		return Result{Error: ClientError{
 			Code:    ErrCodeForbidden,
 			Message: "user cannot connect to that voice channel",

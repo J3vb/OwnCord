@@ -333,23 +333,6 @@ func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, pe
 	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, c.userID, channelID, perm)
 }
 
-// requireChannelAccess checks whether the client may act on the channel with the
-// given permission. If not, it sends a FORBIDDEN error to the client and returns
-// false. The permLabel should be the human-readable permission name (e.g.
-// "SEND_MESSAGES").
-//
-// Unlike hasChannelPerm it is channel-type aware (see hasChannelAccess), which
-// is what a channel id taken straight from a client frame requires: role bits
-// alone let any member through to a DM they are not a participant of.
-func (h *Hub) requireChannelAccess(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
-	if hasChannelAccess(ctx, h.db, h.permChecker, h.perms, c.userID, channelID, perm) {
-		return true
-	}
-	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)
-	c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing "+permLabel+" permission"))
-	return false
-}
-
 // broadcastExcludeLow sends a message at low priority to all clients in the
 // sender's channel EXCEPT the sender. Messages sent via this function are NOT
 // stored in the replay ring buffer — they are ephemeral. This is correct for

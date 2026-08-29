@@ -182,10 +182,10 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if chID == 0 {
 			continue
 		}
-		allowed, err := h.hasChannelPermChecked(ctx, c.userID, chID, permissions.ConnectVoice)
+		allowed, err := h.voiceStillAllowed(ctx, c.userID, chID)
 		if err != nil {
 			// A transient read failure (I/O error, lock contention, a
-			// maintenance window) is not a revocation — hasChannelPerm and
+			// maintenance window) is not a revocation — hasChannelAccess and
 			// permissions.Checker.HasChannelPerm both collapse any DB error
 			// to "denied", which would otherwise evict every in-voice
 			// participant on one bad read. Skip this client this tick; the
@@ -317,40 +317,29 @@ func (h *Hub) sweepStaleVoiceStates() {
 // tests use this hook to reproduce it deterministically.
 var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 
-// hasChannelPermChecked is hasChannelPerm's error-aware counterpart: it
-// distinguishes a genuine permission denial (role missing, or the effective
-// permission bits don't include perm) from a DB read failure, by inlining the
-// same resolution hasChannelPerm/permissions.Checker.HasChannelPerm perform —
-// both of which collapse any error into "denied", indistinguishable from a
-// real revocation. sweepStaleVoiceStates needs that distinction: unlike a
-// handler answering one client's request, it evicts a live voice session on
-// "denied", so a transient read failure must not be treated as a revocation.
-func (h *Hub) hasChannelPermChecked(ctx context.Context, userID, channelID int64, perm int64) (allowed bool, err error) {
-	role, err := h.db.GetRoleForUser(ctx, userID)
+// voiceStillAllowed is the sweep's error-aware re-run of the join gate: it
+// distinguishes a genuine refusal (permissions.CanJoinVoice over the live
+// subject — the bit revoked, the channel archived or deleted, DM membership
+// or block state changed) from a DB read failure. sweepStaleVoiceStates
+// needs that distinction: unlike a handler answering one client's request,
+// it evicts a live voice session on "denied", so a transient read failure
+// must not be treated as a revocation. Deliberately read live, never through
+// the cached PermissionService: this is the last-line backstop, and staying
+// authoritative for a change that somehow bypassed the invalidation hooks is
+// worth the handful of reads a minute it costs for the clients in voice.
+func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (allowed bool, err error) {
+	ch, err := h.db.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err
 	}
-	if role == nil {
-		// No role row is a genuine deny, not an error — mirrors
-		// hasChannelPerm's role == nil case.
+	if ch == nil {
 		return false, nil
 	}
-	if permissions.HasAdmin(role.Permissions) {
-		return true, nil
-	}
-	allow, deny, err := h.db.GetChannelPermissions(ctx, channelID, role.ID)
+	sub, err := channelSubject(ctx, h.db, h.permChecker, nil, userID, ch, true)
 	if err != nil {
 		return false, err
 	}
-	o := permissions.ChannelOverride{Allow: allow, Deny: deny}
-	if userID != 0 {
-		uAllow, uDeny, uErr := h.db.GetUserChannelPermissions(ctx, channelID, userID)
-		if uErr != nil {
-			return false, uErr
-		}
-		o.UserAllow, o.UserDeny = uAllow, uDeny
-	}
-	return permissions.EffectiveChannelPerms(role.Permissions, o)&perm == perm, nil
+	return permissions.CanJoinVoice(sub) == nil, nil
 }
 
 // cleanupVoiceRaceClearHook, when non-nil, runs immediately before

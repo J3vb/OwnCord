@@ -10,7 +10,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // Voice join/leave rate limits. voice_join and voice_leave each fan out a
@@ -99,13 +98,6 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
-	// channel_id is attacker-controlled, so the gate must be channel-TYPE aware:
-	// a role-only check passes for any DM channel id (DMs have no overrides), and
-	// the token minted below carries RoomJoin+CanSubscribe for that DM's room.
-	if !h.requireChannelAccess(ctx, c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
-		return 0, nil, false
-	}
-
 	// Validate the target channel exists before any state changes (leaving
 	// the current voice channel, persisting join, etc.).
 	ch, err := h.db.GetChannel(ctx, channelID)
@@ -114,39 +106,30 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
-	// channel_id is attacker-controlled and requireChannelAccess above only
-	// gates CONNECT_VOICE, which says nothing about channel type — a text or
-	// announcement channel would otherwise accept a join, persist a
-	// voice_states row, mint a LiveKit room and broadcast voice_state for a
-	// channel the UI can never render or moderate. 'dm' stays allowed: DM and
-	// group voice calls join through this same handler.
-	if ch.Type != "voice" && ch.Type != "dm" {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "not a voice channel"))
+	// channel_id is attacker-controlled, so the gate is
+	// permissions.CanJoinVoice over the channel-TYPE-aware subject: the
+	// CONNECT_VOICE bit (a role-only check passes for any DM id — DMs have no
+	// overrides — and the token minted below carries RoomJoin+CanSubscribe
+	// for that room), a channel that has a room (a text channel would
+	// otherwise persist a voice_states row and mint a LiveKit room the UI can
+	// never render or moderate; DM and group calls join through this same
+	// handler), no archive (a caller still holding the id of a channel nobody
+	// can see must not join its room; the archive transition also evicts
+	// whoever is inside), and for a DM membership plus no block (blocking
+	// never touches dm_participants, so membership alone would let a blocked
+	// user into the blocker's call — same rule as every other DM sink,
+	// service.requireDMNotBlocked, group DMs exempt). The same predicate
+	// gates the token refresh and a moderator move's destination.
+	sub, subErr := channelSubject(ctx, h.db, h.permChecker, h.perms, c.userID, ch, true)
+	if subErr != nil {
+		slog.Error("ws voice_join: permission lookup failed, denying", "user_id", c.userID, "channel_id", channelID, "err", subErr)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "permission check failed"))
 		return 0, nil, false
 	}
-
-	// A blocked user is still a DM participant — blocking never touches
-	// dm_participants (service/block.go), so the CONNECT_VOICE + IsDMParticipant
-	// gate above passes them straight through into the blocker's DM voice room.
-	// Every other 1:1-DM interaction sink (send, edit, react, pin, typing,
-	// call_ring) already routes through this same check
-	// (service.requireDMNotBlocked); voice was the one gap. Group DMs are
-	// exempt inside it, matching every other sink. h.db satisfies
-	// service.Store directly, so no MessageService wiring is needed here.
-	if ch.Type == "dm" {
-		if err := service.RequireDMNotBlocked(ctx, h.db, c.userID, channelID); err != nil {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot join voice: blocked"))
-			return 0, nil, false
-		}
-	}
-
-	// Archived channels are hidden from every client and their voice states are
-	// dropped from `ready`, but `archived` was consulted only by the visibility
-	// predicate — so a caller still holding the id could join the room of a
-	// channel nobody can see or moderate. Refuse the join outright; the sibling
-	// archive transition also evicts whoever is already inside.
-	if ch.Archived {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel is archived"))
+	if joinErr := permissions.CanJoinVoice(sub); joinErr != nil {
+		slog.Warn("ws voice_join refused", "user_id", c.userID, "channel_id", channelID, "reason", joinErr)
+		refusal := joinDenial(joinErr)
+		c.sendMsg(buildErrorMsg(refusal.Code, refusal.Message))
 		return 0, nil, false
 	}
 
@@ -581,34 +564,32 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice not configured"}}
 	}
 
-	// Re-check CONNECT_VOICE where the credential is minted. The channel comes
-	// from the client's own session state, and voice_join (voice_join.go:61) was
-	// the only place this bit was ever checked — so a user whose CONNECT_VOICE
-	// was revoked mid-session kept minting fresh SFU room-join grants. Refusing
+	// Re-run the join gate (permissions.CanJoinVoice, exactly as voice_join
+	// applies it) where the credential is minted. The channel comes from the
+	// client's own session state, and voice_join used to be the only place
+	// the bit was checked — so a user whose CONNECT_VOICE was revoked
+	// mid-session kept minting fresh SFU room-join grants, and a block imposed
+	// mid-session (OC-0018) kept re-issuing one for the blocker's DM. Refusing
 	// alone would leave the live session in place, so the refusal also evicts:
 	// LeaveVoice runs handleVoiceLeave, which clears the client's voice state,
-	// deletes the voice_states row and removes the LiveKit participant.
-	// Channel-type aware, like the voice_join gate: this mints the same
-	// RoomJoin+CanSubscribe credential, so a role-only check here would keep
-	// re-issuing one for a DM the user is not a participant of.
-	if !hasChannelAccess(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.ConnectVoice) {
+	// deletes the voice_states row and removes the LiveKit participant. Fails
+	// closed: a deleted channel or a lookup failure is a refusal too.
+	ch, chErr := d.DB.GetChannel(ctx, channelID)
+	if chErr != nil || ch == nil {
 		return Result{
 			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
 			LeaveVoice: true,
 		}
 	}
-
-	// Same block gate as voice_join (voice_join.go, OC-0018): a block imposed
-	// mid-session must not let the refresh keep minting a fresh SFU credential
-	// for a DM the other participant has since blocked. RequireDMNotBlocked is
-	// a safe no-op for a non-DM channelID (no dm_participants row to match), so
-	// this needs no channel-type fetch of its own. d.DB satisfies service.Store
-	// directly.
-	if err := service.RequireDMNotBlocked(ctx, d.DB, userID, channelID); err != nil {
+	sub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, userID, ch, true)
+	if subErr != nil {
 		return Result{
-			Error:      ClientError{Code: ErrCodeForbidden, Message: "cannot refresh voice token: blocked"},
+			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
 			LeaveVoice: true,
 		}
+	}
+	if joinErr := permissions.CanJoinVoice(sub); joinErr != nil {
+		return Result{Error: joinDenial(joinErr), LeaveVoice: true}
 	}
 
 	// With a PermissionService these three are cache hits after the gate above
