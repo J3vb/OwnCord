@@ -258,6 +258,74 @@ root on the box, except E2EE media, which never gave the box a key.
   certificates.
 - **No stable plugin API** — [architecture/plugins.md](architecture/plugins.md).
 
+## What OwnCord does not have
+
+Stated so the absence is a promise, not an accident (BPR-040, BPR-082,
+BPR-083):
+
+- **No federation and no cross-server messaging.** Servers never talk to each
+  other. There is no protocol for it and no route that would carry it.
+- **No directory, discovery or public listing.** Nobody can find your server
+  unless you give them the address or an invite link.
+- **No global identity.** An account is a row in one server's database
+  (`users`, `Server/migrations/001_initial_schema.sql`). The same username on
+  two servers is two unrelated people; nothing links them, and a ban, a role or
+  a friend on one means nothing on the other. Even the voice E2EE identity is
+  pinned per host (`Client/src/lib/identity.ts:11-12`, key `{host}:{userId}`).
+- **No required external service.** A server on a LAN with no internet works.
+  Every outbound connection it can make is in the next table, each with its off
+  switch.
+
+The proof is a test, not a grep:
+`TestAbsenceContract_NoFederationDirectoryOrListingRoutes`
+(`Server/api/absence_contract_test.go`) builds the production router with every
+optional route family on, walks the whole mounted tree (admin and plugin
+subrouters included) and fails on any route whose path matches
+`federat|directory|discover|listing`. It also fails if the walk sees fewer
+routes than the real tree has, so it cannot pass by walking nothing. Mounting a
+`/directory` route makes it red; that run is recorded in the B2-7 evidence
+block. A route that legitimately needs one of those words must update this
+section first.
+
+## Outbound connections the server makes
+
+For B6's network capture: everything the server can reach out to, from a read
+of every `http.Client`, `net.Dial` and URL literal in non-test server code.
+Anything on the wire not in this table is a finding.
+
+| Host                                                           | When                                                                          | Why                                                              | Off switch                                                                       | Code                                                                                                               |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `api.github.com`                                               | on request to `/api/v1/client-update/…` or the admin update panel; cached 1 h | latest-release metadata for client and server updates            | none needed — never on a timer; `github.owner`/`github.repo` pick the repo       | `Server/updater/updater.go:22`, `:224-233`; `Server/api/client_update.go:34`; `Server/admin/update_handlers.go:24` |
+| `github.com` (+ `*.githubusercontent.com` on redirect)         | admin clicks "update server"                                                  | download and verify the signed server release                    | do not click; URL is prefix-checked against the configured repo                  | `Server/updater/download.go:21`, `:265-273`; `Server/updater/assets.go:164-174`                                    |
+| `github.com/livekit/livekit/releases/download`                 | startup, only if `voice.auto_download_livekit` and no `voice.livekit_binary`  | fetch the pinned, checksum-verified `livekit-server` binary      | `voice.auto_download_livekit: false` or set `voice.livekit_binary`               | `Server/ws/livekit_download.go:31`, `:36`, `:272-300`; `Server/ws/livekit_process.go:230`                          |
+| `api.klipy.com`                                                | a user opens the GIF picker                                                   | GIF search/trending, proxied so the API key stays on the server  | leave `gif.api_key` empty (default) — endpoints answer 503                       | `Server/api/gif_handler.go:34`, `:56-62`; `Server/config/config.go:68-76`                                          |
+| LiveKit at `voice.livekit_url` (default `ws://localhost:7880`) | a user joins voice; health probe of the supervised process                    | media SFU signalling                                             | leave `voice.livekit_api_key`/`secret` empty — voice disabled                    | `Server/api/livekit_proxy.go:23-28`; `Server/ws/livekit_process.go:47-52`, `:361-366`                              |
+| hosts on `plugins.http_allowlist`                              | an installed plugin with the `http` capability calls out                      | plugin feature                                                   | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`) | `Server/plugin/host_http.go:66`, `:136-155`                                                                        |
+| `acme-v02.api.letsencrypt.org`                                 | startup and renewal, only when `tls.mode: acme`                               | certificate issuance                                             | any other `tls.mode` (default `self_signed`)                                     | `Server/auth/tls.go:164-193`                                                                                       |
+| operator's OTLP collector (`telemetry.otlp_endpoint`)          | startup, only when `telemetry.exporter: otlp`                                 | traces and metrics to a collector the operator runs              | `telemetry.exporter: none` (default)                                             | `Server/config/config.go:107-114`; `Server/main.go:373`                                                            |
+| `8.8.8.8:80` (UDP, **no packet is sent**)                      | startup banner                                                                | asks the OS which local address routes out, to print the LAN URL | none                                                                             | `Server/main.go:1005-1012`                                                                                         |
+| `127.0.0.1:<port>/health`                                      | `healthcheck` subcommand (Docker `HEALTHCHECK`)                               | liveness probe of itself                                         | n/a — loopback                                                                   | `Server/main.go:748-757`                                                                                           |
+
+Not in the table because it does not exist: analytics, crash reporting,
+telemetry to the project, licence checks, a phone-home of any kind. The only
+`telemetry` package is OpenTelemetry instrumentation whose exporter defaults to
+`none`. The Docker image is distroless with no shell or `curl`
+(`Server/Dockerfile:30`), and no tracked script fetches an external host.
+
+Two of the GitHub paths (`updater.go`, `livekit_download.go`) use a plain
+`http.Client` against fixed, prefix-validated GitHub URLs; the Klipy proxy and
+plugin HTTP go through the guarded dialer that refuses private and loopback
+answers (`Server/plugin/host_http.go:182-249`; tests
+`TestGuardedDial_FallsBackAcrossVettedIPs`,
+`TestGuardedDial_PrivateRecordRefusesBeforeAnyDial`).
+
+The **desktop client** reaches, on its own: the server; LiveKit through the
+server's `/livekit/*` proxy; `www.youtube.com` and `img.youtube.com` for video
+embeds (`Client/src/components/message-list/media.ts:173-174`, `:210`, `:229`);
+the Klipy CDN for GIF media; GitHub for its own updates via the server's
+`client-update` endpoint; and any URL a user posted, for link previews — the
+C-09 contract above governs that last one.
+
 ## How this document is kept true
 
 - HP-2 question 3 requires every claim above to trace to a test or a code
