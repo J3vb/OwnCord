@@ -857,7 +857,8 @@ New draft), not by CLI with the report text; their IDs are recorded in
 PR bodies never name the mechanism (`docs/security.md`).
 
 **Evidence, 2026-08-29** — branch `feat/b2-9-hp2` from `dev` `88c7a824`;
-PR to `dev` recorded below. HP-2 cites this block for exit-gate condition 7.
+PR #1444 to `dev`, squash-merged 2026-08-29 as `2bfc5e30`. HP-2 cites this
+block for exit-gate condition 7.
 
 - **SEC-03 verdict: B5, not B2.** Sized against the code the local report
   cites at `88c7a824` before deciding. What the register's closure line
@@ -920,7 +921,8 @@ readiness.
 
 **Evidence, 2026-08-29** — the scorecard is
 [hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md), measured at
-`83a535c3` on `feat/b2-9-hp2` (same PR as B2-9).
+`83a535c3` on `feat/b2-9-hp2` (same PR as B2-9: #1444, squash-merged
+2026-08-29 as `2bfc5e30`).
 
 - All seven questions answered with commands and their output; the B2 exit
   gate walked, nine conditions, all met (condition 1 at the slim one-epoch
@@ -933,8 +935,15 @@ readiness.
   overwriting the one-per-account pin, and the holder side of OC-0316
   (resumed peer re-keyed with the rotated key). The last two were proven able
   to fail by temporary code mutation, restored with `git checkout`.
-- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 117
+- `docs/plans/hp-2-trust-model-anchors.py` is the Question 3 check: 119
   `path:line` anchors in `trust-model.md`, 0 unresolvable at HEAD.
+- Codex review of `f3d6103d` (P2, accepted): the checker's extension
+  allowlist skipped the `.sh` anchor — and, found on the read-back, the
+  extensionless `Server/Dockerfile:13`. The allowlist is gone (any path with
+  a `/`, or a basename with an alphabetic extension); 117 → 119 checked, 0
+  unresolvable. #1444 was merged before the fix was pushed, so it lands in
+  a follow-up PR to `dev` (cherry-pick of `ed49426c`); no re-review
+  requested.
 - Pre-squash SHAs: `a51e2e89` (Q4 tests), the commit carrying this block
   (scorecard, this block, plan index, roadmap slice); B2-9's are in its block.
 - **Owner lines, left blank on purpose:** the BPR-051 reader line in the B2-7

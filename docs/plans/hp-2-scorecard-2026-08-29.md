@@ -147,7 +147,7 @@ one constant away (`minClientEpoch`) if a future epoch bump needs them.
 
 ## Question 3 — are the trust claims true?
 
-`docs/trust-model.md` carries **117** `path:line` anchors and names **20**
+`docs/trust-model.md` carries **119** `path:line` anchors and names **20**
 distinct Go tests plus the vitest cases in its E2EE table. The mechanical half
 of the question is whether every anchor still resolves on the measured tree:
 
@@ -156,11 +156,13 @@ python docs/plans/hp-2-trust-model-anchors.py
 ```
 
 ```
-117 path:line anchors checked (24 short-form resolved by unique basename), 0 unresolvable
+119 path:line anchors checked (24 short-form resolved by unique basename), 0 unresolvable
 ```
 
 (The 24 short forms are the document's `file.go:NN` after a full path in the
-same sentence; each resolves to exactly one tracked file.) Line-range drift
+same sentence; each resolves to exactly one tracked file. The checker has no
+extension allowlist — Codex on #1444 caught the first version skipping the
+`.sh` anchor, and `Server/Dockerfile:13` with it; 117 became 119.) Line-range drift
 after a future edit is not caught by this check — it proves the file and the
 line exist, not that the line still says what the sentence claims; the 11
 Codex rounds on #1443 were the line-by-line read, every finding accepted and
