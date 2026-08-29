@@ -728,6 +728,17 @@ Runs in parallel with B2-1 and B2-6.
   process's generated config sets `use_external_ip: true` unconditionally
   (`livekit_process.go:130-133`), so STUN/metadata discovery traffic is a
   normal part of a capture; a row is added with its conditions.
+- Codex round 8 of `20515e7f`: three P2, all accepted. The LiveKit
+  signalling row's "leave credentials empty — voice disabled" is not an off
+  switch: `applyVoiceDefaults` generates random credentials and defaults the
+  URL to loopback (`config.go:645-662`); the row now says no switch exists
+  and names `voice.enabled` as the server change that would be one. The
+  pinning bullet claimed rejection "before any application byte"; the
+  WebSocket upgrade request (no credential) reaches the peer before
+  `tofu::evaluate` (`ws_proxy.rs:148-178`), so the claim is scoped to the
+  auth frame and payloads. The identity keychain account is
+  `identity:{userId}@{host}` (`identity.ts:221-222`, `credentials.rs:214-220`),
+  not the legacy `identity:{host}`; corrected.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
