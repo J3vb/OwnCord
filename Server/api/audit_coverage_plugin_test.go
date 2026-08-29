@@ -73,4 +73,10 @@ func TestAuditCoverage_PluginLifecycle(t *testing.T) {
 			corpus = append(corpus, rec.Entries()...)
 		})
 	}
+	t.Run("detail denylist", func(t *testing.T) {
+		if len(corpus) == 0 {
+			t.Fatal("no audit entries recorded")
+		}
+		audittest.AssertSafeDetails(t, corpus)
+	})
 }

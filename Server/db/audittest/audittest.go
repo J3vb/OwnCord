@@ -7,6 +7,8 @@ package audittest
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,5 +73,40 @@ func (r *Recorder) Wait(t testing.TB, action string) db.AuditEntry {
 			return db.AuditEntry{}
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// detailDenylist is the shape half of the B2-6 denylist: patterns that a
+// safe detail string never contains regardless of the fixture's values.
+var detailDenylist = []*regexp.Regexp{
+	regexp.MustCompile(`\$2[aby]\$\d\d\$`), // bcrypt hash
+	regexp.MustCompile(`\$argon2`),         // argon2 hash
+	// key=value / key: value leaks of a credential field.
+	regexp.MustCompile(`(?i)\b(password|passwd|token|secret|recovery[_ ]?codes?|totp)\s*[:=]\s*\S`),
+	regexp.MustCompile(`(?i)^otpauth://`),
+	regexp.MustCompile(`(?i)\bBearer\s+\S`),
+}
+
+// AssertSafeDetails fails the test if any recorded detail matches the shape
+// denylist or contains one of the fixture's known secrets — the raw tokens,
+// passwords and hashes, TOTP secrets, invite codes and message bodies the
+// calling table used. Fix a hit at the audit call site, never by widening
+// this list's exceptions.
+func AssertSafeDetails(t testing.TB, entries []db.AuditEntry, secrets ...string) {
+	t.Helper()
+	for _, e := range entries {
+		for _, re := range detailDenylist {
+			if re.MatchString(e.Detail) {
+				t.Errorf("audit %q detail matches denylist %q: %q", e.Action, re, e.Detail)
+			}
+		}
+		for _, s := range secrets {
+			if s == "" {
+				continue
+			}
+			if strings.Contains(e.Detail, s) {
+				t.Errorf("audit %q detail carries a fixture secret: %q", e.Action, e.Detail)
+			}
+		}
 	}
 }

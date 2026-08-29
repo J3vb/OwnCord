@@ -95,4 +95,10 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			secrets = append(secrets, s...)
 		})
 	}
+	t.Run("detail denylist", func(t *testing.T) {
+		if len(corpus) == 0 {
+			t.Fatal("no audit entries recorded")
+		}
+		audittest.AssertSafeDetails(t, corpus, secrets...)
+	})
 }
