@@ -7,8 +7,12 @@
 2026-08-27); B2 in progress from
 [b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md);
 B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
-in B3–B10 and the "Phase execution pattern" section. [README.md](README.md) is
-the status authority when this header and a README row disagree.  
+in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
+[developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
+is the implementation supplement for the B3, B7 and B9 structural workstreams
+(see the `_(added 2026-08-29)_` lines); it is not a phase and adds no gate.
+[README.md](README.md) is the status authority when this header and a README
+row disagree.  
 **Planning model:** quality-gated, with no calendar deadline
 
 Primary inputs:
@@ -484,6 +488,16 @@ for every later requirement.
     shape. The rule was dropped once for lack of evidence; B2-5 produces it.
 16. _(added 2026-08-28)_ Run the Docker smoke nightly on `dev`. The CI job is
     `main`-gated, so `dev` never proves the image.
+17. _(added 2026-08-29)_ Workstreams 4–9 execute from
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phases 1–3 and its "First actionable slice": the database-call and
+    lifecycle inventory first (Phase 1 is this phase's entry-gate item 3),
+    then the authentication route→service→storage slice (`S-10`) as the HP-3
+    subject, then `internal/app/` lifecycle extraction and the in-package `ws`
+    split. Keep `ws` one package while its lock invariants need shared private
+    state; keep `main.go` the `go build .` entry. That plan's Phase 8
+    exact-SHA matrix is the evidence checklist for every structural change
+    here. Its Phase 7 change map lands its server rows in B3.
 
 ### Hold point HP-3 — First vertical-slice review
 
@@ -840,6 +854,16 @@ without regressing the current application.
     defines no new contract.
 15. _(added 2026-08-28)_ Re-run Stryker (C-16) before workstream 6 decomposes
     modules, so the mutation baseline is honest.
+16. _(added 2026-08-29)_ Workstreams 1–3, 6 and 7 execute from
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phases 4–6: `platform/contracts` + `platform/desktop` first (the 20 native
+    import sites move one responsibility at a time, contract tests before
+    any browser adapter), then hotspot decomposition (`dispatcher.ts`,
+    `livekitSession.ts`, `livekitE2EE.ts`, messaging, settings), with unit
+    tests colocated as `src/**/*.test.ts` only for modules being extracted.
+    `lib/` and `stores/` are transitional — shrink them, never bulk-move.
+    Do not create `Client/src/platform/` before this phase's entry gate is
+    met. The plan's Phase 7 change map lands its client rows here.
 
 ### Hold point HP-7 — Desktop parity before browser behavior
 
@@ -1011,6 +1035,11 @@ the client experience for BPR-060 through BPR-063 and BPR-070 through BPR-073.
    state, notification limitations, update state, and degraded media.
 10. Run privacy, moderation, deletion, retention, block, session, and
     compatibility journeys across every client surface.
+11. _(added 2026-08-29)_ Workstream 7's `app.css` split follows
+    [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md),
+    Phase 5 item 6: move source sections into owned files with selectors and
+    built output preserved. Visual changes are separate changes with visual
+    and accessibility evidence, never mixed into the source split.
 
 ### Hold point HP-9 — Feature freeze and accessibility acceptance
 
@@ -1199,21 +1228,29 @@ to this plan.
 
 ## Current implementation slice
 
-_Updated 2026-08-28._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
+_Updated 2026-08-29._ B0 and B1 are complete (HP-0 accepted 2026-08-25, HP-1
 accepted 2026-08-27). The active slice is B2, executed from
 [b2-protocol-trust-compat-2026-08-28.md](b2-protocol-trust-compat-2026-08-28.md)
 in this order:
 
 1. B2-0 — alpha.4 verified, `dev` synced with `main`, release hygiene, `dev`
-   set to `strict: true`;
-2. B2-1 — epoch-1 fixtures captured **before** any protocol change;
+   set to `strict: true` — **done 2026-08-28**;
+2. B2-1 — epoch-1 fixtures captured **before** any protocol change — **done
+   2026-08-28**;
 3. B2-8 — the B2-tagged findings, because they touch the same replay/resume
-   files as B2-2;
-4. B2-2 → B2-3 → B2-4, serialized;
-5. B2-6, B2-7 and B2-9 in parallel where the plan allows; B2-5 is serialized.
+   files as B2-2 — **done 2026-08-28**;
+4. B2-2 — protocol epoch and negotiation, with B2-3 and B2-4 folded in
+   (one accepted epoch, so no matrix) — **done 2026-08-29**, PR #1438 =
+   `9c9b8be6`;
+5. B2-5 — serialized, **next**; B2-6, B2-7 and B2-9 in parallel where the
+   plan allows; then HP-2.
 
 Do not begin B3 domain extraction, client platform extraction, or browser work
-before HP-2 closes.
+before HP-2 closes. When it does, B3 opens with the "First actionable slice"
+of
+[developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md):
+inventory, before-state graph, auth characterization tests, the auth vertical
+slice, HP-3. Nothing from that plan touches the client before B7.
 
 The original 2026-08-23 slice (B0 only, then B1 as isolated changes) was
 executed as written; see
