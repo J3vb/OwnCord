@@ -571,8 +571,7 @@ Runs in parallel with B2-1 and B2-6.
    neither is not an option.
 
 **Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
-`2b2d58ab`; PR to `dev` (number recorded in the review-outcome note below).
-HP-2 questions 3 and 6 cite this block.
+`2b2d58ab`; PR #1443 to `dev`. HP-2 questions 3 and 6 cite this block.
 
 - Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
   links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
@@ -642,6 +641,25 @@ HP-2 questions 3 and 6 cite this block.
   (`docs/plans/repo-health-issue-register-2026-08-23.md` L-08, phase
   `B1/B10`); the "no API promise" half of its closure evidence is closed by
   item 3. HP-2 cites this paragraph as the reason.
+- Codex review of `56f23a36` (2026-08-29): two P1 and three P2, all
+  verified against the code and all accepted, fixed in one follow-up commit.
+  P1 — the short answer said "nobody in between because TLS"; it now states
+  the desktop's first-connection TOFU window and the out-of-band fingerprint
+  check that closes it. P1 — the identity-pin paragraph implied the pin
+  catches a substituted key at first contact; it now scopes TOFU to changes
+  after the first pin (`livekitE2EE.ts:611-620`) and points at the
+  verification surface. P2 — 2FA secrets: pre-encryption databases can still
+  hold plaintext (`totp_encrypt.go:109-117`), now disclosed with the
+  re-enrol remedy. P2 — the absence test pinned route vocabulary only; two
+  sibling tests now cover the WebSocket wire types in `protocol/schema.json`
+  and every `koanf` key of `config.Config` (allowlist: `plugins.directory`,
+  whose continued existence the test asserts so the walker is proven to see
+  a matching key), and the document states the bound — vocabulary at three
+  boundaries, network by the host table, semantics by review. RED for the
+  wire-type test: a temporary `directory_list` entry in the schema →
+  `WebSocket message types matching ... must not exist: directory_list`.
+  P2 — plugins.md said unknown config keys are rejected; `config.go:520`
+  warns and ignores them, which still leaves plugins off; corrected.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`

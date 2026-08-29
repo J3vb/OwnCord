@@ -22,7 +22,14 @@ is right and this document has a bug — file it like any other.
 - **Moderators** can read and delete messages in the channels their role
   allows.
 - **Nobody in between** — not your network, not a reverse proxy the operator
-  did not set up — because the connection is TLS.
+  did not set up — because the connection is TLS, **with one window**: on the
+  desktop's very first connection to a server with the default self-signed
+  certificate, the app shows the certificate fingerprint and asks you to trust
+  it. It cannot know whether that fingerprint is the server's or an attacker's
+  on the path. Compare it with the fingerprint the operator gives you another
+  way (chat elsewhere, a call) before clicking; every later connection is then
+  checked against that pin. A server with a certificate from a public CA has
+  no such window.
 - **Voice, video and screen share are different**: they are end-to-end
   encrypted between the people in the call. The server passes the encrypted
   media along and never has the key. The operator cannot listen in.
@@ -56,7 +63,12 @@ What the server does **not** keep in the clear:
   name is historical; `018_api_tokens.sql:9` says what it holds). Test:
   `Server/auth/session_test.go`, `Server/auth/resolve_test.go`.
 - **2FA secrets** — encrypted with a server-local AES-256 key
-  (`Server/api/router.go:47`, `Server/auth/totp_encrypt.go`).
+  (`Server/api/router.go:47`; enrolment encrypts at
+  `Server/api/totp_handler.go:323`). **Exception:** a database from before
+  that encryption landed may still hold plaintext secrets; nothing rewrites
+  them in place. The server returns such a value as-is and logs a warning on
+  every read (`Server/auth/totp_encrypt.go:109-117`). Disabling and
+  re-enabling 2FA on that account stores it encrypted.
 - **Message bodies in logs** — no `slog` call in server code logs `content`;
   `Server/db/logvalue.go:14`, `:26` and `Server/config/logvalue.go:57` redact
   hashes and secrets from every log line. Tests:
@@ -100,9 +112,18 @@ when, for how long, and who is muted or deafened. Those are server state.
 
 The identity-key store is the trust root. On the desktop it lives beside the
 session token in the OS keychain (`docs/credential-storage.md`, account
-`identity:{host}`). A malicious operator can serve a wrong public key; the pin
-and the mismatch modal are what catch it, which is why a "Trust new key"
-click should be rare and deliberate.
+`identity:{host}`). Its protection is **trust on first use**, and that is the
+limit: the first time your client meets a peer it has no pin, so it accepts
+the public key the server delivers, checks that the announce is signed by
+that key, and pins it (`Client/src/lib/livekitE2EE.ts:611-620`). A malicious
+operator who substitutes a key at that first contact is not detected by the
+pin. What the pin catches is any **later** change to a peer you have already
+pinned — that is when the mismatch modal blocks, and why a "Trust new key"
+click should be rare and deliberate. To close the first-contact window,
+compare identity-key fingerprints out of band (the verification surface in
+[architecture/ux/voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md) §7
+shows them); the same limit applies to a peer's second device, which is a
+new identity.
 
 ## Transport
 
@@ -276,16 +297,28 @@ BPR-083):
   Every outbound connection it can make is in the next table, each with its off
   switch.
 
-The proof is a test, not a grep:
-`TestAbsenceContract_NoFederationDirectoryOrListingRoutes`
-(`Server/api/absence_contract_test.go`) builds the production router with every
-optional route family on, walks the whole mounted tree (admin and plugin
-subrouters included) and fails on any route whose path matches
-`federat|directory|discover|listing`. It also fails if the walk sees fewer
-routes than the real tree has, so it cannot pass by walking nothing. Mounting a
-`/directory` route makes it red; that run is recorded in the B2-7 evidence
-block. A route that legitimately needs one of those words must update this
-section first.
+The proof is three tests in `Server/api/absence_contract_test.go`, one per
+boundary a new feature has to cross, each failing on the pattern
+`federat|directory|discover|listing` and each with a floor on how much it
+inspected so it cannot pass by looking at nothing:
+
+- `TestAbsenceContract_NoFederationDirectoryOrListingRoutes` — builds the
+  production router with every optional route family on and walks the whole
+  mounted tree, admin and plugin subrouters included. Mounting a `/directory`
+  route makes it red; that run is in the B2-7 evidence block.
+- `TestAbsenceContract_NoFederationDirectoryOrListingWireTypes` — every
+  WebSocket message type in `protocol/schema.json`, both directions.
+- `TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys` — every
+  `koanf` key of `config.Config`, with one allowlisted on-disk path
+  (`plugins.directory`).
+
+What they prove is bounded and stated: they pin **vocabulary at the three
+boundaries**, not semantics. A feature smuggled in under a neutral name would
+pass them. The network boundary is covered differently — by the outbound-host
+table below, which B6 checks against a packet capture — and the review rule is
+the last line of defence: a route, message type or config key that
+legitimately needs one of those words, or any feature that makes the server
+talk to another server, must update this section and that table first.
 
 ## Outbound connections the server makes
 

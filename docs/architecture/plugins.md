@@ -22,13 +22,13 @@ what never will.
 Configuration audit for HP-2 question 6 — is WASM off in every shape a server
 can take?
 
-| Shape                      | Verdict | Why                                                                                                                                                                                                 |
-| -------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fresh install              | off     | default `false` (`config.go:352`); the generated `config.yaml` has the block commented out (`:452-457`)                                                                                             |
-| Upgraded install           | off     | an older `config.yaml` has no `plugins` key; koanf loads defaults first, so the absent key reads as `false`. Unknown keys are rejected, not silently ignored (`Server/config/unknown_keys_test.go`) |
-| Docker                     | off     | image built without the tag (`Dockerfile:13`); `OWNCORD_PLUGINS_ENABLED=true` (`config.go:525-526` env provider) would flip the flag but the binary still cannot execute a module                   |
-| Standalone release binary  | off     | same — no tag (`release.yml:261`, `:268`)                                                                                                                                                           |
-| Source build with the flag | **on**  | only `go build -tags wazero` **and** `plugins.enabled: true` together run WASM. This is the developer path and the only one                                                                         |
+| Shape                      | Verdict | Why                                                                                                                                                                                                                                       |
+| -------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fresh install              | off     | default `false` (`config.go:352`); the generated `config.yaml` has the block commented out (`:452-457`)                                                                                                                                   |
+| Upgraded install           | off     | an older `config.yaml` has no `plugins` key; koanf loads defaults first, so the absent key reads as `false`. A misspelled key is warned about and ignored (`Server/config/config.go:520`), which also leaves the default `false` in force |
+| Docker                     | off     | image built without the tag (`Dockerfile:13`); `OWNCORD_PLUGINS_ENABLED=true` (`config.go:525-526` env provider) would flip the flag but the binary still cannot execute a module                                                         |
+| Standalone release binary  | off     | same — no tag (`release.yml:261`, `:268`)                                                                                                                                                                                                 |
+| Source build with the flag | **on**  | only `go build -tags wazero` **and** `plugins.enabled: true` together run WASM. This is the developer path and the only one                                                                                                               |
 
 ## No API promise
 
