@@ -118,19 +118,14 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
-	if ch.Type == "dm" {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
-		if dmErr != nil || !ok {
-			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
-		}
-		// A blocked user must not be able to keep poking the blocker with
-		// typing indicators. Same gate as the other DM sinks; silently dropped
-		// here because typing is best-effort.
-		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return nil, nil //nolint:nilerr // best-effort: a blocked or unreadable DM emits nothing
-		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
-		return nil, nil // silent drop
+	// A typing indicator announces a post, so it answers to the post policy
+	// (permissions.CanType is CanSendMessage — S-01): a read-only member, an
+	// announcement reader without MANAGE_MESSAGES, an archived channel, a
+	// blocked or non-participant DM user all emit nothing. Silent, because
+	// typing is best-effort.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if subErr != nil || permissions.CanType(sub) != nil {
+		return nil, nil //nolint:nilerr // best-effort: a denial or a DM lookup failure emits nothing
 	}
 
 	// Per-user-per-channel rate limit. Built only now that the channel is

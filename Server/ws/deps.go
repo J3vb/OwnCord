@@ -206,6 +206,35 @@ func hasPermChecked(ctx context.Context, database *db.DB, perms *permissions.Che
 	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm), nil
 }
 
+// subjectFor resolves userID's role bits and both override layers for
+// channelID — from the PermissionService cache when one is wired, else live
+// through the Checker — as a permissions.Subject for the value-taking
+// predicates (CanSendMessage, CanJoinVoice, ...). Channel flags and DM state
+// stay the caller's to fill in. A lookup failure is returned, not collapsed,
+// so error-aware callers can tell it from a denial; a missing role row is the
+// zero Subject, which every predicate refuses.
+func subjectFor(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {
+	if permSvc != nil {
+		return permSvc.Subject(ctx, userID, channelID)
+	}
+	if database == nil || perms == nil {
+		return permissions.Subject{}, nil
+	}
+	role, err := database.GetRoleForUser(ctx, userID)
+	if err != nil {
+		return permissions.Subject{}, err
+	}
+	if role == nil {
+		return permissions.Subject{}, nil
+	}
+	return perms.Subject(ctx, role.Permissions, role.ID, userID, channelID)
+}
+
+// subjectFor is the hub-wired form of the package-level subjectFor.
+func (h *Hub) subjectFor(ctx context.Context, userID, channelID int64) (permissions.Subject, error) {
+	return subjectFor(ctx, h.db, h.permChecker, h.perms, userID, channelID)
+}
+
 // hasChannelAccess is the gate to use when the channel id comes from the client:
 // it is hasPerm plus the channel-type branch that role bits cannot express.
 //

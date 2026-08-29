@@ -475,7 +475,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			// Addressed per client so it can carry this recipient's own
 			// can_send verdict — the whole point of this fan-out is that a
 			// permission change just made those verdicts diverge.
-			live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityCanSend(ctx, ch, c.user.ID, c.user.RoleID)))
+			live.sendMsg(buildChannelCreateFor(ch, h.refreshChannelVisibilityCanSend(ctx, ch, c.user.ID)))
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
@@ -496,33 +496,22 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	h.bumpVisibilityWatermark()
 }
 
-// refreshChannelVisibilityCanSend mirrors channelCanSend (serve_ready.go) — the value the ready
-// payload ships per channel — but expressed as per-user permission checks
-// so it works in both the service and bare-hub branches without needing a
-// resolved *db.Role. HasChannelPerm already bypasses for admins and fails
-// closed on a lookup error, matching channelCanSend's own admin shortcut.
+// refreshChannelVisibilityCanSend is the can_send verdict the ready payload
+// ships per channel (channelCanSend), recomputed for one live user from their
+// CURRENT role: permissions.CanSendMessage over the subject subjectFor
+// resolves in either the service or the bare-hub branch, failing closed on a
+// lookup error (S-12).
 //
 // Without this, can_send is only ever computed at connect time, so a role
 // edit or override edit leaves every connected client's composer stuck on
 // its stale connect-time verdict until the socket is rebuilt.
-func (h *Hub) refreshChannelVisibilityCanSend(ctx context.Context, ch *db.Channel, userID, roleID int64) bool {
-	has := func(perm int64) bool {
-		if h.perms != nil {
-			return h.perms.HasChannelPerm(ctx, userID, ch.ID, perm)
-		}
-		role, err := h.db.GetRoleByID(ctx, roleID)
-		if err != nil || role == nil {
-			return false
-		}
-		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, perm)
-	}
-	if !has(permissions.ReadMessages) || !has(permissions.SendMessages) {
+func (h *Hub) refreshChannelVisibilityCanSend(ctx context.Context, ch *db.Channel, userID int64) bool {
+	sub, err := h.subjectFor(ctx, userID, ch.ID)
+	if err != nil {
 		return false
 	}
-	if ch.Type == "announcement" {
-		return has(permissions.ManageMessages)
-	}
-	return true
+	sub.Channel = channelRef(ch)
+	return permissions.CanSendMessage(sub) == nil
 }
 
 // RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every

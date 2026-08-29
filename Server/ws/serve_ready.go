@@ -125,38 +125,35 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
 	out := make(map[int64]permissions.ChannelOverride, len(overrides))
 	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{
-			Allow:     o.Allow,
-			Deny:      o.Deny,
-			UserAllow: o.UserAllow,
-			UserDeny:  o.UserDeny,
-		}
+		out[id] = permOverride(o)
 	}
 	return out
 }
 
 // channelCanSend reports whether a user with the given role and per-channel
-// override may post in a channel of chanType. It mirrors the non-DM branch of
-// MessageService.checkSendPermission so the client can pre-disable the composer
-// without a round-trip; the server still enforces the rule authoritatively.
+// override may post in a channel of chanType — the ready payload's can_send
+// affordance, so the client can pre-disable the composer without a
+// round-trip. It is permissions.CanSendMessage, the same predicate the send
+// path enforces, so the affordance cannot drift from the rule (S-12).
 func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 	if role == nil {
 		return false
 	}
-	if permissions.HasAdmin(role.Permissions) {
-		return true
-	}
-	eff := permissions.EffectiveChannelPerms(role.Permissions, permissions.ChannelOverride{
-		Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny,
-	})
-	need := permissions.ReadMessages | permissions.SendMessages
-	if eff&need != need {
-		return false
-	}
-	if chanType == "announcement" {
-		return eff&permissions.ManageMessages == permissions.ManageMessages
-	}
-	return true
+	return permissions.CanSendMessage(permissions.Subject{
+		RolePerms: role.Permissions,
+		Override:  permOverride(o),
+		Channel:   permissions.ChannelRef{Type: chanType},
+	}) == nil
+}
+
+// channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
+func channelRef(ch *db.Channel) permissions.ChannelRef {
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+}
+
+// permOverride maps one db override (both layers) to the checker's type.
+func permOverride(o db.ChannelOverride) permissions.ChannelOverride {
+	return permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny}
 }
 
 // readyVisibleChannels resolves the channels the user may see for the ready
