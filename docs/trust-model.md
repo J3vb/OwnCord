@@ -37,7 +37,12 @@ is right and this document has a bug — file it like any other.
   on the wire at all (see "Transport").
 - **Voice, video and screen share are different**: they are end-to-end
   encrypted between the people in the call. The server passes the encrypted
-  media along and never has the key. The operator cannot listen in.
+  media along and never has the key, so an operator who only reads what the
+  server stores or relays cannot listen in. An operator who **changes the
+  server** can try to slip a participant key of their own into a call; that
+  is caught only for people whose identity key your client has already
+  pinned and you have compared out of band (see "What is end-to-end
+  encrypted").
 
 If the operator is someone you trust with your words, OwnCord is built to keep
 everyone else out. If you do not trust the operator, do not type there.
@@ -247,8 +252,9 @@ Can, by design:
 
 Cannot, and the code is what stops them:
 
-- Listen to a voice, video or screen-share stream (see "What is end-to-end
-  encrypted").
+- Read a voice, video or screen-share stream from what the server stores
+  or relays (see "What is end-to-end encrypted"). The active attack — a
+  modified server inserting a key it controls — is in the next paragraph.
 - Recover a password (bcrypt) or a live session token (hashed) from the
   database.
 - Impersonate a user's E2EE identity to a peer who has already pinned it — the
@@ -259,7 +265,16 @@ Cannot, and the code is what stops them:
 Can, with effort outside the code — and this is the honest boundary: an
 operator with shell access can edit the binary, the database or the
 configuration. No control in this document survives a hostile operator with
-root on the box, except E2EE media, which never gave the box a key.
+root on the box. That includes E2EE media in one specific way: identity keys
+are trusted on first use, so a modified server can deliver a first-contact
+announce for a peer you have never pinned, carrying an identity key and an
+ephemeral key the operator holds; the client accepts and pins it
+(`Client/src/lib/livekitE2EE.ts:603-620`) and, if you are the key holder,
+wraps the room key to that ephemeral key (`:842-912`). E2EE therefore
+protects against an operator who reads (the server never holds the key) and
+against a modified server only for peers whose identity key was pinned
+before the attack **and** compared out of band. It is not a defence against
+a hostile operator on first contact.
 
 ## Multi-device sessions
 
@@ -283,7 +298,9 @@ root on the box, except E2EE media, which never gave the box a key.
 - **No encrypted text.** If that changes it is a new protocol epoch, a new
   document, and a new trade-off against search, moderation and replay — not a
   toggle.
-- **No protection against a hostile operator** beyond what E2EE media gives.
+- **No protection against a hostile operator.** E2EE media resists an
+  operator who reads; a modified server can insert its own key at a peer's
+  first contact unless that peer was pinned and verified out of band before.
 - **No secure deletion.** Account deletion blanks message bodies and
   anonymises the name (`Server/db/account.go:116`, `:131`; test
   `TestDeleteAccount_AnonymisesUsername`), but backups taken before the

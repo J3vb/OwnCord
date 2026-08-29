@@ -671,6 +671,18 @@ Runs in parallel with B2-1 and B2-6.
   directly is plaintext HTTP (`Server/auth/tls.go:94-95`,
   `Server/main.go:636-639`) and nothing enforces the proxy; the transport
   table row now states that in full.
+- Codex round 3 of `9e0593c0`: one P1 and one P2, both verified and
+  accepted. P1 — the document claimed E2EE media survives a hostile operator
+  with root; it does not on first contact: a modified server can deliver an
+  unpinned peer's first announce with keys the operator holds, the client
+  pins it (`livekitE2EE.ts:603-620`) and the key holder wraps the room key
+  to it (`:842-912`). The short answer, the operator can/cannot list, the
+  hostile-root paragraph and "What beta does not claim" now scope E2EE to a
+  reading operator, and to a modified server only for peers pinned and
+  compared out of band beforehand. P2 — plugins.md said the memory cap came
+  from the manifest or config; `platformInit` sizes the shared runtime from
+  `plugins.max_memory_mb` alone (`sandbox_wazero.go:83-102`) and the
+  manifest value is validated, never applied; the row now says so.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
