@@ -23,13 +23,18 @@ is right and this document has a bug — file it like any other.
   allows.
 - **Nobody in between** — not your network, not a reverse proxy the operator
   did not set up — because the connection is TLS, **with one window**: on the
-  desktop's very first connection to a server with the default self-signed
-  certificate, the app shows the certificate fingerprint and asks you to trust
-  it. It cannot know whether that fingerprint is the server's or an attacker's
-  on the path. Compare it with the fingerprint the operator gives you another
-  way (chat elsewhere, a call) before clicking; every later connection is then
-  checked against that pin. A server with a certificate from a public CA has
-  no such window.
+  desktop's very first connection to a server, the app shows the certificate
+  fingerprint and asks you to trust it. It does this for **every** kind of
+  certificate — self-signed or from a public CA — because the desktop pins
+  the fingerprint it sees rather than checking the certificate against the
+  public CA list (`Client/src-tauri/src/ws_proxy.rs:140-147`,
+  `Client/src-tauri/src/tofu.rs:72-111`). It cannot know whether that
+  fingerprint is the server's or an attacker's on the path. Compare it with
+  the fingerprint the operator gives you another way (chat elsewhere, a call)
+  before clicking; every later connection is then checked against that pin.
+  A public-CA certificate closes this window only for a browser, which trusts
+  its own CA list, and a server run with TLS switched off has no protection
+  on the wire at all (see "Transport").
 - **Voice, video and screen share are different**: they are end-to-end
   encrypted between the people in the call. The server passes the encrypted
   media along and never has the key. The operator cannot listen in.
@@ -130,12 +135,12 @@ new identity.
 Everything between client and server is TLS. Which certificate, and how the
 client decides to trust it:
 
-| Server `tls.mode` (`Server/config/config.go:255-262`, semantics `Server/auth/tls.go:87-117`) | Certificate                                                    | Desktop client                                                                                                                                                                                                             | Browser client (B8, does not exist yet)                                     |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `self_signed` (default, `config.go:316`)                                                     | generated on first run                                         | **TOFU pinning.** First connect shows the fingerprint and asks; the pin is stored (`Client/src-tauri/src/ws_proxy.rs:379-425`, only writer) and every later connection must match (`Client/src-tauri/src/tofu.rs:132-166`) | Must use a publicly trusted or locally installed CA certificate; no pinning |
-| `acme`                                                                                       | Let's Encrypt via `autocert` (`Server/auth/tls.go:164-193`)    | Pinned the same way                                                                                                                                                                                                        | Trusted by the browser's CA store                                           |
-| `manual`                                                                                     | operator-supplied files                                        | Pinned the same way                                                                                                                                                                                                        | Trusted if the CA is                                                        |
-| `off`                                                                                        | none — only behind a TLS-terminating reverse proxy you control | Pins the proxy's certificate                                                                                                                                                                                               | Trusted if the proxy's CA is                                                |
+| Server `tls.mode` (`Server/config/config.go:255-262`, semantics `Server/auth/tls.go:87-117`) | Certificate                                                                                                                                                                                                                                                                                                           | Desktop client                                                                                                                                                                                                             | Browser client (B8, does not exist yet)                                     |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `self_signed` (default, `config.go:316`)                                                     | generated on first run                                                                                                                                                                                                                                                                                                | **TOFU pinning.** First connect shows the fingerprint and asks; the pin is stored (`Client/src-tauri/src/ws_proxy.rs:379-425`, only writer) and every later connection must match (`Client/src-tauri/src/tofu.rs:132-166`) | Must use a publicly trusted or locally installed CA certificate; no pinning |
+| `acme`                                                                                       | Let's Encrypt via `autocert` (`Server/auth/tls.go:164-193`)                                                                                                                                                                                                                                                           | Pinned the same way                                                                                                                                                                                                        | Trusted by the browser's CA store                                           |
+| `manual`                                                                                     | operator-supplied files                                                                                                                                                                                                                                                                                               | Pinned the same way                                                                                                                                                                                                        | Trusted if the CA is                                                        |
+| `off`                                                                                        | none. **Served directly, every connection is plaintext HTTP** — passwords, tokens and messages are readable by anyone on the path (`Server/auth/tls.go:94-95`, `Server/main.go:636-639`). Nothing in the server enforces a proxy; the operator must put a TLS-terminating reverse proxy in front and expose only that | Pins the proxy's certificate (behind a proxy); no protection without one                                                                                                                                                   | Trusted if the proxy's CA is (behind a proxy); plaintext without one        |
 
 Desktop pinning details, each with its test:
 
@@ -147,6 +152,14 @@ Desktop pinning details, each with its test:
   accept writes a pin (`tofu.rs:6-10`, `:380-381` "deciding never writes a
   pin"). Tests: `valid_fingerprint_is_accepted` and the six rejection cases in
   `ws_proxy.rs:440-503`.
+- The first-use prompt is the same in every `tls.mode`: the desktop does
+  not validate a public-CA certificate against the CA list on the OwnCord
+  connection — it pins what it sees (`ws_proxy.rs:140-147`,
+  `tofu.rs:72-111`). Web-PKI validation exists only in the updater's
+  `HostScopedVerifier` (`tofu.rs:191-215`) for the GitHub download, not for
+  the server connection. Out-of-band fingerprint comparison is therefore the
+  only first-contact defence on the desktop, whatever certificate the server
+  has.
 - All three native tunnels (WebSocket, HTTP, LiveKit) use the same verifier:
   `ws_proxy.rs:207`, `http_proxy.rs:405`, `livekit_proxy.rs:448`.
 - The session token travels inside the first WebSocket frame, never in the

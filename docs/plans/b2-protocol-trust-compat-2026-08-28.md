@@ -660,6 +660,17 @@ Runs in parallel with B2-1 and B2-6.
   `WebSocket message types matching ... must not exist: directory_list`.
   P2 — plugins.md said unknown config keys are rejected; `config.go:520`
   warns and ignores them, which still leaves plugins off; corrected.
+- Codex re-review of `4d870ff6`: one P1 and one P2, both verified and
+  accepted. P1 — the round-1 fix had said a public-CA certificate has no
+  first-use window; on the desktop it does, because `ws_connect` installs
+  `tofu::CaptureVerifier` with no web-PKI validation in every `tls.mode`
+  (`Client/src-tauri/src/ws_proxy.rs:140-147`, `tofu.rs:72-111`; web-PKI
+  exists only in the updater's `HostScopedVerifier`). The short answer and
+  the pinning list now say the window applies to every certificate kind and
+  that a public CA closes it only for a browser. P2 — `tls.mode: off` served
+  directly is plaintext HTTP (`Server/auth/tls.go:94-95`,
+  `Server/main.go:636-639`) and nothing enforces the proxy; the transport
+  table row now states that in full.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
