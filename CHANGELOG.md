@@ -41,8 +41,8 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-User-visible: one change to how updates roll out. Not user-visible: the
-protocol now carries a version number.
+User-visible: one change to how updates roll out, and two new documents.
+Not user-visible: the protocol now carries a version number.
 
 ### Login & connection
 
@@ -63,6 +63,15 @@ protocol now carries a version number.
 - Creating or revoking an invite, and installing or uninstalling a plugin, now
   show up in the audit log. Invite entries name the invite by id, never by
   code.
+
+### Documentation
+
+- `docs/trust-model.md` answers "who can read my messages?": the server
+  operator can read text and files; voice, video and screen share are
+  end-to-end encrypted; what beta does not claim. Every claim cites the code
+  or test behind it.
+- `docs/architecture/plugins.md`: plugins are experimental, off by default,
+  compiled out of release binaries, and carry no API promise.
 
 ### Repository
 

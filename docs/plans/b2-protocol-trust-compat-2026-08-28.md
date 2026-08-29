@@ -5,7 +5,7 @@
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
 **Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
-B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is next.
+B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 is in review 2026-08-29 (evidence in its section).
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -569,6 +569,204 @@ Runs in parallel with B2-1 and B2-6.
    one of two: a compile-and-compare job using a second Go SDK, or
    re-tagging the gate to B10 with the reason recorded in HP-2. Doing
    neither is not an option.
+
+**Evidence, 2026-08-29** — branch `feat/b2-7-trust-model` from `dev`
+`2b2d58ab`; PR #1443 to `dev`. HP-2 questions 3 and 6 cite this block.
+
+- Pre-squash SHAs, one commit per item: `a4cd077b` (item 1, trust model +
+  links), `083d87d9` (item 2, absence test + outbound-host table), `cbfcf702`
+  (item 3, plugin boundary), and the commit carrying this block (item 4, the
+  L-08 decision + register row).
+- Item 1 — `docs/trust-model.md`. Sections as planned: the short answer,
+  server-readable data and why, E2EE rules with their tests, transport per
+  `tls.mode` with desktop pinning and the browser rule, the C-09 contract
+  (eight MUST clauses and the regression list, stated as requirements — the
+  private report's mechanism is not reproduced), at rest, operator can/cannot,
+  multi-device sessions, what beta does not claim. Every claim carries a
+  `path:line` or a test name, verified by reading the line at `2b2d58ab`;
+  two claims are absences with no positive test and say so (server holds no
+  room key; text is not encrypted). Linked from `docs/security.md` (new
+  §Trust model), `docs/deployment.md` §TLS Setup, `docs/quick-start.md`
+  §Client Connection Notes, `docs/README.md` (both tables).
+  - **BPR-051 exit evidence** — a non-developer reads "The short answer" and
+    answers "who can read my messages?" correctly. Reader: **\_\_\_\_**.
+    Date: **\_\_\_\_**. Answer given: **\_\_\_\_**. (Owner fills in;
+    HP-2 question 3 quotes this line.)
+- Item 2 — `Server/api/absence_contract_test.go`
+  `TestAbsenceContract_NoFederationDirectoryOrListingRoutes`. Builds the
+  production router with uploads, voice and the GIF proxy on (the bare
+  `setupRouter` config mounts only 92 routes; the full one clears the 100-route
+  floor), `chi.Walk`s the tree including the mounted `/admin` and
+  `/api/v1/admin/plugins` subrouters, and fails on `(?i)federat|directory|discover|listing`.
+  Green on `2b2d58ab` (`go test -race ./api/`). Proven able to fail by
+  temporarily mounting `r.Get("/directory", healthHandler)` under `/api/v1`
+  in `router.go`:
+
+  ```
+  absence_contract_test.go:92: routes matching "(?i)federat|directory|discover|listing" must not exist (see docs/trust-model.md, "What OwnCord does not have"):
+        GET /api/v1/directory
+  --- FAIL: TestAbsenceContract_NoFederationDirectoryOrListingRoutes (0.02s)
+  ```
+
+  `router.go` restored before the commit (`git checkout`, tree clean). A grep
+  of non-test `Server/` for `federat` is empty; every `directory|discover|listing`
+  hit is a filesystem directory, a config field or a query-result noun. The
+  outbound-host table in `trust-model.md` §"Outbound connections the server
+  makes" came from a read of every `http.Client`, `net.Dial` and URL literal
+  in non-test server code (ten rows, each with trigger, purpose, off switch
+  and anchor) and is B6's capture checklist; no analytics, crash reporting or
+  phone-home exists.
+
+- Item 3 — `docs/architecture/plugins.md`, linked from
+  `docs/architecture/README.md`, `docs/architecture/server.md`,
+  `docs/README.md`. Finding worth stating on its own: **release binaries and
+  the Docker image are built without `-tags wazero`**
+  (`.github/workflows/release.yml:261`, `:268`; `Server/Dockerfile:13`), so
+  no shipped artifact can execute a plugin regardless of `plugins.enabled`;
+  the HP-2 question 6 configuration audit (fresh, upgraded, Docker,
+  standalone, source-with-flag) is the table in that document. The beta
+  release-notes paragraph is in the same file and is to be quoted verbatim.
+- Item 4 — **L-08 decision: re-tag the build gate to B10.** The two options
+  were a compile-and-compare job with a second Go SDK, or re-tagging with the
+  reason recorded for HP-2. Re-tagged, because: (a) "compare" cannot pass in
+  principle — TinyGo 0.40.1 embeds absolute host paths and has no `-trimpath`
+  (`Server/plugin/examples/hello/README.md:70-74`), so the only honest
+  check is compile-only; (b) that compile needs TinyGo 0.40.1, a Go 1.25.x
+  SDK beside the repo's Go 1.26, and Binaryen 129 on every PR
+  (`hello/README.md:37-44`); (c) the subsystem is compiled out of every
+  shipped artifact (item 3), so a per-PR job guards nothing a release
+  contains. B10 (qualify and publish the beta) runs the compile once against
+  the release candidate or closes on the provenance record already in the
+  README. The register row now says so
+  (`docs/plans/repo-health-issue-register-2026-08-23.md` L-08, phase
+  `B1/B10`); the "no API promise" half of its closure evidence is closed by
+  item 3. HP-2 cites this paragraph as the reason.
+- Codex review of `56f23a36` (2026-08-29): two P1 and three P2, all
+  verified against the code and all accepted, fixed in one follow-up commit.
+  P1 — the short answer said "nobody in between because TLS"; it now states
+  the desktop's first-connection TOFU window and the out-of-band fingerprint
+  check that closes it. P1 — the identity-pin paragraph implied the pin
+  catches a substituted key at first contact; it now scopes TOFU to changes
+  after the first pin (`livekitE2EE.ts:611-620`) and points at the
+  verification surface. P2 — 2FA secrets: pre-encryption databases can still
+  hold plaintext (`totp_encrypt.go:109-117`), now disclosed with the
+  re-enrol remedy. P2 — the absence test pinned route vocabulary only; two
+  sibling tests now cover the WebSocket wire types in `protocol/schema.json`
+  and every `koanf` key of `config.Config` (allowlist: `plugins.directory`,
+  whose continued existence the test asserts so the walker is proven to see
+  a matching key), and the document states the bound — vocabulary at three
+  boundaries, network by the host table, semantics by review. RED for the
+  wire-type test: a temporary `directory_list` entry in the schema →
+  `WebSocket message types matching ... must not exist: directory_list`.
+  P2 — plugins.md said unknown config keys are rejected; `config.go:520`
+  warns and ignores them, which still leaves plugins off; corrected.
+- Codex re-review of `4d870ff6`: one P1 and one P2, both verified and
+  accepted. P1 — the round-1 fix had said a public-CA certificate has no
+  first-use window; on the desktop it does, because `ws_connect` installs
+  `tofu::CaptureVerifier` with no web-PKI validation in every `tls.mode`
+  (`Client/src-tauri/src/ws_proxy.rs:140-147`, `tofu.rs:72-111`; web-PKI
+  exists only in the updater's `HostScopedVerifier`). The short answer and
+  the pinning list now say the window applies to every certificate kind and
+  that a public CA closes it only for a browser. P2 — `tls.mode: off` served
+  directly is plaintext HTTP (`Server/auth/tls.go:94-95`,
+  `Server/main.go:636-639`) and nothing enforces the proxy; the transport
+  table row now states that in full.
+- Codex round 3 of `9e0593c0`: one P1 and one P2, both verified and
+  accepted. P1 — the document claimed E2EE media survives a hostile operator
+  with root; it does not on first contact: a modified server can deliver an
+  unpinned peer's first announce with keys the operator holds, the client
+  pins it (`livekitE2EE.ts:603-620`) and the key holder wraps the room key
+  to it (`:842-912`). The short answer, the operator can/cannot list, the
+  hostile-root paragraph and "What beta does not claim" now scope E2EE to a
+  reading operator, and to a modified server only for peers pinned and
+  compared out of band beforehand. P2 — plugins.md said the memory cap came
+  from the manifest or config; `platformInit` sizes the shared runtime from
+  `plugins.max_memory_mb` alone (`sandbox_wazero.go:83-102`) and the
+  manifest value is validated, never applied; the row now says so.
+- Codex round 4 of `2ade0bdb`: two P2, both accepted. The transport
+  introduction was still categorical ("everything ... is TLS"); it now
+  excludes `tls.mode: off`. The C-09 contract presented the server's
+  `ipAllowed` as the complete deny-set; it rejects loopback, private,
+  link-local, unspecified, multicast and CGN only (`host_http.go:224-249`),
+  so the clause now names the documentation and benchmarking ranges the
+  broker must add and records that widening `ipAllowed` is a separate server
+  change (plugin HTTP is off by default and the GIF proxy follows no
+  redirects, so the server-side gap is bounded).
+- Codex round 5 of `7b450b70`: one P1 and one P2, both accepted. P1 —
+  "export (via backup) any text or file" implied uploads are in the backup;
+  `handleBackup` only runs `VACUUM INTO` on the SQLite file
+  (`handlers_backup.go:76-84`, `admin_queries.go:404`), so the can/cannot
+  list and the at-rest table now say uploads are excluded and
+  `upload.storage_dir` needs its own backup; `docs/deployment.md` §Backup
+  Strategy gained the same sentence, since that is where an operator would
+  otherwise be misled. P2 — "no tracked script fetches an external host"
+  was categorical; the release workflow's AppImage step downloads
+  `appimagetool` at build time (`Client/scripts/strip-appimage-bundled-libs.sh:25-26`);
+  the claim is now scoped to scripts the server runs, with that build-time
+  fetch listed.
+- Codex round 6 of `5f4da93b`: two P1 and one P2, all accepted. P1 — the
+  quick-start cross-link still said voice and video are "not readable by the
+  operator"; it now says end-to-end encrypted with the stated limits. P1 —
+  the document claimed peers pin each device separately; pins are keyed
+  `{host}:{userId}` (`identity.ts:11-12`, `livekitE2EE.ts:521`, `:612`), one
+  per account, so a second device overwrites the pin and the first device
+  then mismatches; both places now say so. P2 — the outbound-host table
+  omitted the supervised LiveKit process's WebRTC media (UDP 50000–60000,
+  TCP 7881, `livekit_process.go:123-144`), which would have made any voice
+  call a false finding for B6; the row is added and the capture contract is
+  scoped to traffic the server initiates.
+- Codex round 7 of `6adae00a`: one P1 and one P2, both accepted. P1 —
+  the round-3 wording still claimed E2EE holds against a modified server for
+  pinned, out-of-band-verified peers; it does not, because membership is
+  server-controlled and the client accepts any first-sight identity
+  (`livekitE2EE.ts:603-638`), so a modified server can add a member it holds
+  the keys for and the key holder wraps the room key to it (`:842-912`).
+  All four places now say E2EE resists an operator who reads and is not a
+  defence against one who modifies the server; authenticated membership or
+  refusing unrecognised participants is named as the missing control and
+  listed under what beta does not claim. P2 — the supervised LiveKit
+  process's generated config sets `use_external_ip: true` unconditionally
+  (`livekit_process.go:130-133`), so STUN/metadata discovery traffic is a
+  normal part of a capture; a row is added with its conditions.
+- Codex round 8 of `20515e7f`: three P2, all accepted. The LiveKit
+  signalling row's "leave credentials empty — voice disabled" is not an off
+  switch: `applyVoiceDefaults` generates random credentials and defaults the
+  URL to loopback (`config.go:645-662`); the row now says no switch exists
+  and names `voice.enabled` as the server change that would be one. The
+  pinning bullet claimed rejection "before any application byte"; the
+  WebSocket upgrade request (no credential) reaches the peer before
+  `tofu::evaluate` (`ws_proxy.rs:148-178`), so the claim is scoped to the
+  auth frame and payloads. The identity keychain account is
+  `identity:{userId}@{host}` (`identity.ts:221-222`, `credentials.rs:214-220`),
+  not the legacy `identity:{host}`; corrected.
+- Codex round 9 of `a0ee10c0`: two P2, both accepted. The absence bullet
+  promised an off switch for every outbound row while two rows have none;
+  it now says condition-plus-control and names the two. The desktop-client
+  inventory listed LiveKit only via `/livekit/*`; local servers use
+  `direct_url` (`livekitSession.ts:711-738`) and media always goes straight
+  to the SFU's ICE endpoints (TCP 7881 / UDP 50000–60000); both listed.
+- Codex round 10 of `cdd793ab`: four P2, all accepted. Capture contract:
+  DNS to the configured resolver is now named and filtered by destination;
+  the LiveKit download row lists the GitHub asset hosts reached on redirect
+  (`http.DefaultClient`, `livekit_download.go:271-300`). plugins.md: the
+  100 ms CPU value is the final default, not a floor
+  (`sandbox_wazero.go:317-323`); `wasi_snapshot_preview1` is instantiated
+  (`:105`), so "no host imports" is scoped to the OwnCord-specific ones.
+- Codex round 11 of `308f57d8`: two P2. Clause 7 of the C-09 contract now
+  requires the broker to return the preview image as bytes or an opaque
+  handle, never a remote URL for the renderer to load (accepted). The other
+  asked the document to name which desktop fetch paths lack the destination
+  filter today; that is the private report's mechanism, so per
+  `docs/security.md` the paragraph states the public property instead — the
+  policy is applied per call site, not centralised, and not every automatic
+  fetch applies the same checks — and the reply says why. No further review
+  round requested after this commit so CI can complete on a quiet head.
+- Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
+  (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
+  them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`
+  (0 issues), `go test -race -count=1 ./api/`; the full server gate (four
+  build variants, `go vet`, `go test -race ./...`, `-tags deadlock ./ws/`,
+  `golangci-lint run`) ran before push.
 
 ## B2-8 — The B2-tagged findings
 

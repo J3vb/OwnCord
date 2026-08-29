@@ -11,16 +11,17 @@ natively) followed by a prose explanation and a **Source of truth** file list.
 
 ## Index
 
-| Doc                                            | Diagrams                                         | Covers                                                                                                                             |
-| ---------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| [system-overview.md](system-overview.md)       | D1 System context, D8 Deployment topology        | All processes, trust boundaries, ports, single-instance constraints                                                                |
-| [server.md](server.md)                         | D2 Server package map, D3 REST request lifecycle | Go package structure, DB-access styles, middleware chain                                                                           |
-| [websocket.md](websocket.md)                   | D4 WS connect / replay / dispatch                | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, typed dispatch                                            |
-| [data-model.md](data-model.md)                 | D5 Entity-relationship overview                  | All 26 tables from migrations 001–028, grouped by domain                                                                           |
-| [voice-e2ee.md](voice-e2ee.md)                 | D6 Voice + E2EE flow                             | LiveKit token flow, loopback TLS tunnel, ECDH key-holder relay                                                                     |
-| [client.md](client.md)                         | D7 Client module map                             | Tauri client: bootstrap, dispatcher, stores, Rust sidecars (structure, as-built)                                                   |
-| [ux/](ux/README.md)                            | UX flow + state diagrams                         | Client **behavior** spec (target state): what every view does and how it reacts to events, permissions, and failure                |
-| [platform-contracts.md](platform-contracts.md) | —                                                | Desktop/browser **seam** (target state): where native dependencies will be isolated, and the three that have no browser equivalent |
+| Doc                                            | Diagrams                                         | Covers                                                                                                                                 |
+| ---------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [system-overview.md](system-overview.md)       | D1 System context, D8 Deployment topology        | All processes, trust boundaries, ports, single-instance constraints                                                                    |
+| [server.md](server.md)                         | D2 Server package map, D3 REST request lifecycle | Go package structure, DB-access styles, middleware chain                                                                               |
+| [websocket.md](websocket.md)                   | D4 WS connect / replay / dispatch                | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, typed dispatch                                                |
+| [data-model.md](data-model.md)                 | D5 Entity-relationship overview                  | All 26 tables from migrations 001–028, grouped by domain                                                                               |
+| [voice-e2ee.md](voice-e2ee.md)                 | D6 Voice + E2EE flow                             | LiveKit token flow, loopback TLS tunnel, ECDH key-holder relay                                                                         |
+| [client.md](client.md)                         | D7 Client module map                             | Tauri client: bootstrap, dispatcher, stores, Rust sidecars (structure, as-built)                                                       |
+| [ux/](ux/README.md)                            | UX flow + state diagrams                         | Client **behavior** spec (target state): what every view does and how it reacts to events, permissions, and failure                    |
+| [platform-contracts.md](platform-contracts.md) | —                                                | Desktop/browser **seam** (target state): where native dependencies will be isolated, and the three that have no browser equivalent     |
+| [plugins.md](plugins.md)                       | —                                                | Experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, post-beta candidates, core that never moves |
 
 ### Structure vs. behavior
 

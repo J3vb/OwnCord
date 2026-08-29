@@ -231,6 +231,10 @@ self-update or restore the server starts its own replacement after draining.
 
 ## TLS Setup
 
+What each mode means for the people connecting — desktop pinning, what a
+browser will need, and what the operator can read regardless of TLS — is in
+[trust-model.md](trust-model.md).
+
 ### Self-Signed (default)
 
 Auto-generated on first run. The Tauri client uses TOFU pinning to accept the cert on first connect.
@@ -314,6 +318,10 @@ server {
 ```
 
 ## Backup Strategy
+
+The built-in backup covers the **database only**. Uploaded files live under
+`upload.storage_dir` and are not in it — back that directory up on the same
+schedule, or a restore comes back with every attachment missing.
 
 ### SQLite WAL Considerations
 

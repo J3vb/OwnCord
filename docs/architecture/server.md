@@ -85,6 +85,10 @@ spawns background goroutines; and mounts all routes. `main.go` performs only
 process-level wiring (config, TLS, DB, event persistence, HTTP server,
 shutdown).
 
+The `plugin` package is experimental and compiled out of release binaries;
+[plugins.md](plugins.md) records that boundary — what exists, what carries no
+promise, and which core concerns will never move behind it.
+
 **Source of truth:** `Server/main.go`, `Server/api/router.go`, package import
 graph (`go list -deps`), `Server/service/datastore.go`, `sqlc.yaml`.
 
