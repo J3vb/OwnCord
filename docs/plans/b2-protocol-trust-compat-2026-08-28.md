@@ -839,15 +839,15 @@ The seven local reports in `docs/security-findings/` (gitignored, never
 committed; the directory-to-row mapping lives in its local README) and
 where each goes:
 
-| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                            |
-| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
-| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440) — done                |
-| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440) — done; UI half in B5 |
-| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs; code in B7     |
-| SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below       |
-| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                    |
-| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                    |
-| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                    |
+| Public row | Owner phase                     | Acceptance test lives                                                                    | Lands with                                                      |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| S-01       | **B2**                          | landed with B2-5 (`Server/service/predicate_parity_test.go`)                             | B2-5 (PR #1440, `67fdd18d`) — done                              |
+| SEC-02     | **B2** (server half)            | landed with B2-5 (`Server/ws/voice_moderation_overrides_test.go`)                        | B2-5 (PR #1440, `67fdd18d`) — done; UI half in B5               |
+| C-09       | **B2** (contract) / B7 (client) | beside the report                                                                        | contract in B2-7 docs (PR #1443, `88c7a824`) — done; code in B7 |
+| SEC-03     | **B5** (decided 2026-08-29)     | beside the report                                                                        | B5 item 11 — see evidence below                                 |
+| SEC-01     | **B4**                          | private GitHub advisory (owner creates it)                                               | B4                                                              |
+| SEC-04     | **B3/B6**                       | private GitHub advisory (owner creates it)                                               | B6                                                              |
+| OC-0324    | **B4**                          | beside the report; no advisory — the tracked ledger already carries this finding in full | B4                                                              |
 
 An acceptance test demonstrates the defect, so it is exploit detail: it stays
 local until its fix lands, then lands publicly in the same PR. The two
@@ -878,6 +878,21 @@ PR to `dev` recorded below. HP-2 cites this block for exit-gate condition 7.
   the fix takes, so B5 implements the byte accounting once, where B7's
   broker will own it. No acceptance test lands here — it stays local
   beside the report until the fix, per the rule above.
+- **Table closed.** B2-owned rows, all done with their public acceptance
+  tests in the tree: S-01 and the SEC-02 server half (B2-5, PR #1440 →
+  `67fdd18d`), the C-09 contract (B2-7, PR #1443 → `88c7a824`; the client
+  code is B7's). Rows that stay where the table puts them: SEC-03 → B5
+  (above), OC-0324 and SEC-01 → B4, SEC-04 → B6. Exit-gate condition 7 ("no
+  unresolved B2 security advisory remains") is therefore met on the B2-owned
+  set: zero B2-owned rows open, and no advisory was needed for any of them.
+- **Advisories for the deferred rows** — created by the owner in the GitHub
+  UI (Security → Advisories → New draft), never by CLI, report text never
+  leaves the local package. IDs, once created (the local
+  `docs/security-findings/README.md` is the record of which report each maps
+  to): SEC-01 — `GHSA-____-____-____`; SEC-04 — `GHSA-____-____-____`.
+- Pre-squash SHAs: `355b1fc1` (records #1443's squash SHA in the B2-7
+  block), `be8454d0` (item 1, SEC-03 verdict), the commit carrying this
+  bullet (item 2, table closure); HP-2's commits are listed in its own block.
 
 `docs/plans/hp-2-scorecard-<date>.md`, in the HP-1 shape. Questions it must
 answer with commands, not assertions:
