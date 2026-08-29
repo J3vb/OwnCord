@@ -752,6 +752,15 @@ Runs in parallel with B2-1 and B2-6.
   100 ms CPU value is the final default, not a floor
   (`sandbox_wazero.go:317-323`); `wasi_snapshot_preview1` is instantiated
   (`:105`), so "no host imports" is scoped to the OwnCord-specific ones.
+- Codex round 11 of `308f57d8`: two P2. Clause 7 of the C-09 contract now
+  requires the broker to return the preview image as bytes or an opaque
+  handle, never a remote URL for the renderer to load (accepted). The other
+  asked the document to name which desktop fetch paths lack the destination
+  filter today; that is the private report's mechanism, so per
+  `docs/security.md` the paragraph states the public property instead — the
+  policy is applied per call site, not centralised, and not every automatic
+  fetch applies the same checks — and the reply says why. No further review
+  round requested after this commit so CI can complete on a quiet head.
 - Gates before each commit: `npm run check:docs`, `npm run check:hygiene`
   (prettier over the tree; shellcheck/actionlint skipped locally, CI runs
   them); for item 2 additionally `go vet ./api/`, `golangci-lint run ./api/...`

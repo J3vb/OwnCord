@@ -196,11 +196,16 @@ pinning flow — [architecture/platform-contracts.md](architecture/platform-cont
 ## Desktop preview destination policy (C-09) — contract for B7
 
 Link previews, avatars and external inline images make the desktop client
-fetch URLs that other users chose. Today that fetch is made from the renderer
-through the Tauri HTTP plugin with a TypeScript hostname filter in front of it
-(`Client/src/components/message-list/embeds.ts:132-142`, `:171-184`;
-`docs/security.md` §"Tauri Capabilities"). The B7 platform seam replaces that
-with **one native fetch broker** that owns the whole policy. This is the
+fetch URLs that other users chose. Today those fetches are made from the
+renderer through the Tauri HTTP plugin and the webview's own image loading,
+with destination policy applied in TypeScript per call site rather than in
+one place (`Client/src/components/message-list/embeds.ts`, `attachments.ts`,
+`media.ts`; `docs/security.md` §"Tauri Capabilities") — which is the C-09
+finding as publicly recorded: the policy is **not centralised at the native
+boundary**, and not every automatic fetch path applies the same checks. Until
+B7 lands, treat every automatic remote fetch on the desktop as governed by
+the capability scope and CSP only. The B7 platform seam replaces that with
+**one native fetch broker** that owns the whole policy. This is the
 contract B7 implements; it is written here so B7 does not rediscover it.
 
 The broker MUST:
@@ -229,8 +234,11 @@ The broker MUST:
 6. **Bound time, bytes and concurrency** — a total deadline, a streaming byte
    ceiling enforced while reading (a `Content-Length` header is not a limit),
    an allowed content-type list, and a cap on concurrent fetches.
-7. **Return a typed minimum** — title, description, image URL, dimensions —
-   never raw status, headers or bodies to message-controlled code.
+7. **Return a typed minimum** — title, description, dimensions, and the
+   preview image **as bytes or an opaque local handle fetched by the broker
+   under clauses 2–6** — never a remote image URL for the renderer to load
+   itself (a second, un-brokered request would bypass every control above),
+   and never raw status, headers or bodies to message-controlled code.
 8. **Narrow the renderer capability** once the broker owns these requests:
    the `https://*` entry in `Client/src-tauri/capabilities/default.json` is a
    URL-pattern control, not a DNS control, and stays only as defence in depth.
