@@ -1249,7 +1249,10 @@ in this order:
    (PR #1443 = `88c7a824`) and B2-9 — **done 2026-08-29**;
 6. HP-2 — **accepted 2026-08-29**
    ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)); B2 is
-   closed and B3 opens as described below.
+   closed;
+7. B3 — **started 2026-08-29**, execution plan
+   [b3-server-architecture-guardrails-2026-08-29.md](b3-server-architecture-guardrails-2026-08-29.md);
+   B3-0 (boundary inventory) is the first step, then the auth slice to HP-3.
 
 Do not begin B3 domain extraction, client platform extraction, or browser work
 before HP-2 closes. When it does, B3 opens with the "First actionable slice"
