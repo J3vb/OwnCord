@@ -178,40 +178,15 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
 }
 
-// hasPermChecked is hasPerm's error-preserving counterpart: it distinguishes
-// "the role/override lookup failed" (err != nil, verdict meaningless) from
-// "the lookup answered and the bit is absent" (false, nil error). hasPerm and
-// hasChannelAccess both collapse that distinction to a fail-closed false,
-// which is the correct posture for every gate that sends FORBIDDEN on denial
-// (requireChannelAccess, requirePerm, and friends) — do not route those
-// through this helper. It exists for a caller like applySetChannelID's
-// post-Subscribe revalidation (OC-0266), which documents that a transient
-// lookup error must NOT be treated as a denial: unwinding on a DB hiccup
-// would silently kill the channel's live message stream with no error frame
-// ever sent to the client.
-func hasPermChecked(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) (bool, error) {
-	if permSvc != nil {
-		return permSvc.HasChannelPermChecked(ctx, userID, channelID, perm)
-	}
-	if database == nil || perms == nil {
-		return false, nil
-	}
-	role, err := database.GetRoleForUser(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-	if role == nil {
-		return false, nil
-	}
-	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm), nil
-}
-
 // subjectFor resolves userID's role bits and both override layers for
 // channelID — from the PermissionService cache when one is wired, else live
 // through the Checker — as a permissions.Subject for the value-taking
 // predicates (CanSendMessage, CanJoinVoice, ...). Channel flags and DM state
-// stay the caller's to fill in. A lookup failure is returned, not collapsed,
-// so error-aware callers can tell it from a denial; a missing role row is the
+// stay the caller's to fill in. A lookup failure is returned, not collapsed
+// (hasPerm and hasChannelAccess collapse it to a fail-closed false, the right
+// posture for every gate that sends FORBIDDEN on denial), so an error-aware
+// caller like applySetChannelID's post-Subscribe revalidation (OC-0266) can
+// tell a transient read failure from a denial; a missing role row is the
 // zero Subject, which every predicate refuses.
 func subjectFor(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {
 	if permSvc != nil {

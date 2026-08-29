@@ -225,6 +225,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	// events to the whole server. Resolve the DM's real audience (its
 	// participants, intersected with who is actually connected) instead,
 	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
+	var ref permissions.ChannelRef
 	if h.db != nil {
 		ch, err := h.db.GetChannel(ctx, channelID)
 		if err != nil {
@@ -244,43 +245,36 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		if ch == nil {
 			return []int64{}
 		}
-		// Archived channels are hidden from every client regardless of
-		// permissions, mirroring RefreshChannelVisibility and VisibleChannelIDs.
-		// Without this, an admin edit to an archived channel (or a voice
-		// teardown inside one) fans out straight to every connected user whose
-		// base role holds READ_MESSAGES, none of whom have the channel in their
-		// ready payload or sidebar. ignoreArchived opts a caller out of this
-		// specific check only — see channelReadAudienceIgnoringArchived.
-		if ch.Archived && !ignoreArchived {
-			return []int64{}
-		}
 		if ch.Type == "dm" {
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
+		ref = channelRef(ch)
+		// CanViewChannel hides an archived channel from everyone, mirroring
+		// RefreshChannelVisibility and VisibleChannelIDs: without that, an
+		// admin edit to an archived channel (or a voice teardown inside one)
+		// would fan out to every connected user whose base role holds
+		// READ_MESSAGES, none of whom have the channel in their sidebar.
+		// ignoreArchived resolves the pre-archival audience instead — see
+		// channelReadAudienceIgnoringArchived.
+		if ignoreArchived {
+			ref.Archived = false
+		}
 	}
 
-	audience := make([]int64, 0, len(userIDs))
-	if h.perms != nil {
-		for _, uid := range userIDs {
-			if h.perms.HasChannelPerm(ctx, uid, channelID, permissions.ReadMessages) {
-				audience = append(audience, uid)
-			}
-		}
-		return audience
-	}
-	if h.db == nil || h.permChecker == nil {
-		return audience
-	}
 	// Resolved per USER, not memoised per role: channel_user_overrides is the
 	// last layer of the resolution order, so two members of the same role can
 	// legitimately disagree about one channel and a per-role memo would hand
-	// one of them the other's verdict.
+	// one of them the other's verdict. The verdict is CanViewChannel over
+	// subjectFor (cached service or live checker); an unresolvable user is
+	// left out.
+	audience := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {
-		role, err := h.db.GetRoleForUser(ctx, uid)
-		if err != nil || role == nil {
+		sub, err := h.subjectFor(ctx, uid, channelID)
+		if err != nil {
 			continue
 		}
-		if h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, uid, channelID, permissions.ReadMessages) {
+		sub.Channel = ref
+		if permissions.CanViewChannel(sub) == nil {
 			audience = append(audience, uid)
 		}
 	}
@@ -399,56 +393,33 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// the targeted re-sync must complete regardless of the triggering request.
 	ctx := context.Background()
 
-	// Visibility is resolved per user. With a PermissionService it comes from
-	// the per-user cache — safe because the admin handlers invalidate
-	// (InvalidateAll on override change, InvalidateUser on role change) before
-	// calling into the hub, so the lookups below repopulate from post-change
-	// data; the 30s TTL is only a backstop and the F6 gen-counter guard keeps
-	// a racing populate from caching stale rows. Without a service (bare test
-	// hubs) each client is resolved live.
+	// Visibility is CanViewChannel — the single predicate shared with
+	// buildReady / REST ListVisibleChannels — resolved per user from their
+	// CURRENT role (c.user is a connect-time snapshot). With a
+	// PermissionService the subject comes from the per-user cache — safe
+	// because the admin handlers invalidate (InvalidateAll on override
+	// change, InvalidateUser on role change) before calling into the hub, so
+	// the lookups below repopulate from post-change data; the 30s TTL is only
+	// a backstop and the F6 gen-counter guard keeps a racing populate from
+	// caching stale rows. Without a service (bare test hubs) each client is
+	// resolved live. Fails closed: an unresolvable role loses visibility
+	// rather than keeping a stale grant.
 	//
 	// Deliberately NOT memoised per role: channel_user_overrides is the last
 	// layer of the resolution order, so two members of the same role can
 	// legitimately disagree about one channel — exactly the case a per-user
 	// override edit creates, and exactly the fan-out this function targets.
-	userVisible := func(userID, roleID int64) bool {
-		role, err := h.db.GetRoleByID(ctx, roleID)
-		if err != nil || role == nil {
-			return false
-		}
-		// Single visibility predicate shared with buildReady / REST
-		// ListVisibleChannels; the checker fails closed on a lookup error
-		// and bypasses for admins, matching the other sites exactly.
-		return h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, userID, ch.ID, permissions.ReadMessages)
-	}
-
 	for _, c := range clients {
 		if c.user == nil {
 			continue
 		}
-		var visible bool
-		switch {
-		case ch.Archived:
-			// Archived channels are hidden from every client regardless of
-			// permissions, mirroring VisibleChannelIDs.
-			visible = false
-		case h.perms != nil:
-			// The service resolves the user's CURRENT role internally (c.user
-			// is a connect-time snapshot), failing closed — an unresolvable
-			// role loses visibility rather than keeping a stale grant.
-			visible = h.perms.HasChannelPerm(ctx, c.user.ID, ch.ID, permissions.ReadMessages)
-		default:
-			// c.user is a connect-time snapshot; an admin may have changed the
-			// user's role mid-session, so resolve the current role from the DB.
-			// Fail closed: on error send nothing rather than mis-target.
-			fresh, err := h.db.GetUserByID(ctx, c.user.ID)
-			if err != nil || fresh == nil {
-				slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
-					"user_id", c.user.ID, "err", err)
-				continue
-			}
-			visible = userVisible(fresh.ID, fresh.RoleID)
+		sub, err := h.subjectFor(ctx, c.user.ID, ch.ID)
+		if err != nil {
+			slog.Warn("hub: RefreshChannelVisibility could not resolve permissions, revoking",
+				"user_id", c.user.ID, "channel_id", ch.ID, "err", err)
 		}
+		sub.Channel = channelRef(ch)
+		visible := err == nil && permissions.CanViewChannel(sub) == nil
 
 		if refreshChannelVisibilityRaceHook != nil {
 			refreshChannelVisibilityRaceHook(c.user.ID)

@@ -138,3 +138,29 @@ func TestSendPolicyParity(t *testing.T) {
 		}
 	}
 }
+
+// TestViewPolicyParity: HandleChannelFocus (session admission: channel_focus
+// and mark_read) agrees with CanAdmitSession for every (user, channel).
+func TestViewPolicyParity(t *testing.T) {
+	database := newParityDB(t)
+	perms := NewPermissionService(database, permissions.NewChecker(database))
+	chSvc := NewChannelService(database, perms)
+	ctx := context.Background()
+
+	for _, uid := range parityUsers {
+		for _, cid := range parityChannels {
+			wantOK, want := parityWant(t, database, perms, permissions.CanAdmitSession, uid, cid)
+
+			_, got := chSvc.HandleChannelFocus(ctx, uid, cid)
+			if (got == nil) != wantOK {
+				t.Errorf("HandleChannelFocus(user=%d, chan=%d) = %v, predicate says %v", uid, cid, got, want)
+			}
+			switch {
+			case errors.Is(want, ErrNotFound) && !errors.Is(got, ErrNotFound):
+				t.Errorf("HandleChannelFocus(user=%d, chan=%d) = %v, want ErrNotFound", uid, cid, got)
+			case want != nil && !errors.Is(want, ErrNotFound) && !errors.Is(got, ErrForbidden):
+				t.Errorf("HandleChannelFocus(user=%d, chan=%d) = %v, want ErrForbidden", uid, cid, got)
+			}
+		}
+	}
+}

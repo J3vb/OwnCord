@@ -2,7 +2,9 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -109,6 +111,144 @@ func TestRefreshChannelVisibilityCanSend_Parity(t *testing.T) {
 			if got := h.refreshChannelVisibilityCanSend(ctx, ch, uid); got != want {
 				t.Errorf("%s/%s service: refreshChannelVisibilityCanSend = %v, CanSendMessage = %v", ch.Type, c.name, got, want)
 			}
+		}
+	}
+}
+
+// viewParityFixture is a bare hub with one registered client on a text
+// channel plus a second, archived channel, shared by the view-property
+// parity tables below.
+type viewParityFixture struct {
+	h        *Hub
+	database *db.DB
+	permSvc  *service.PermissionService
+	user     *db.User
+	textID   int64
+	oldID    int64 // archived
+	client   *Client
+	send     chan []byte
+}
+
+func newViewParityFixture(t *testing.T) *viewParityFixture {
+	t.Helper()
+	ctx := context.Background()
+	database := newHarvestVoiceDB(t)
+	uid := seedHarvestVoiceUser(t, database, "view-parity-user")
+	textID := mustCreateVoiceChannel(t, database, "view-parity-text")
+	oldID := mustCreateVoiceChannel(t, database, "view-parity-old")
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'text' WHERE id IN (?, ?)`, textID, oldID); err != nil {
+		t.Fatalf("retype: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, oldID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	h := NewHub(database, auth.NewRateLimiter(), nil)
+	user, err := database.GetUserByID(ctx, uid)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	send := make(chan []byte, 64)
+	c := NewTestClientWithUser(h, user, textID, send)
+	h.RegisterNowForTest(c)
+	return &viewParityFixture{
+		h: h, database: database, permSvc: service.NewPermissionService(database, h.permChecker),
+		user: user, textID: textID, oldID: oldID, client: c, send: send,
+	}
+}
+
+func (f *viewParityFixture) channel(t *testing.T, id int64) *db.Channel {
+	t.Helper()
+	ch, err := f.database.GetChannel(context.Background(), id)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel(%d): %v", id, err)
+	}
+	return ch
+}
+
+// eachBranch runs fn once with the bare hub and once with the cached
+// PermissionService wired, labelling the branch.
+func (f *viewParityFixture) eachBranch(fn func(branch string)) {
+	f.h.perms = nil
+	fn("bare")
+	f.h.perms = f.permSvc
+	fn("service")
+}
+
+// TestApplySetChannelID_Parity: the post-Subscribe revalidation keeps the
+// subscription exactly when CanAdmitSession allows it — for every override
+// layer, and for an archived channel.
+func TestApplySetChannelID_Parity(t *testing.T) {
+	f := newViewParityFixture(t)
+	for _, chID := range []int64{f.textID, f.oldID} {
+		ch := f.channel(t, chID)
+		for _, c := range parityOverrideCases {
+			setParityOverrides(t, f.database, f.permSvc, chID, harvestVoiceRoleID, f.user.ID, c)
+			want := permissions.CanAdmitSession(paritySubject(t, f.database, f.user.ID, ch)) == nil
+			f.eachBranch(func(branch string) {
+				f.h.applySetChannelID(f.client, 0) // a same-channel focus is a no-op; refocus from scratch
+				f.h.applySetChannelID(f.client, chID)
+				if got := f.h.SubscribedToChannelTopicForTest(f.client, chID); got != want {
+					t.Errorf("chan=%d/%s/%s: subscribed = %v, CanAdmitSession = %v", chID, c.name, branch, got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestChannelReadAudience_Parity: a connected user is in a channel's read
+// audience exactly when CanViewChannel allows it.
+func TestChannelReadAudience_Parity(t *testing.T) {
+	f := newViewParityFixture(t)
+	ctx := context.Background()
+	for _, chID := range []int64{f.textID, f.oldID} {
+		ch := f.channel(t, chID)
+		for _, c := range parityOverrideCases {
+			setParityOverrides(t, f.database, f.permSvc, chID, harvestVoiceRoleID, f.user.ID, c)
+			want := permissions.CanViewChannel(paritySubject(t, f.database, f.user.ID, ch)) == nil
+			f.eachBranch(func(branch string) {
+				got := false
+				for _, uid := range f.h.channelReadAudience(ctx, chID) {
+					if uid == f.user.ID {
+						got = true
+					}
+				}
+				if got != want {
+					t.Errorf("chan=%d/%s/%s: in audience = %v, CanViewChannel = %v", chID, c.name, branch, got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestRefreshChannelVisibility_Parity: the fan-out sends channel_create
+// exactly when CanViewChannel allows and channel_delete otherwise.
+func TestRefreshChannelVisibility_Parity(t *testing.T) {
+	f := newViewParityFixture(t)
+	for _, chID := range []int64{f.textID, f.oldID} {
+		ch := f.channel(t, chID)
+		for _, c := range parityOverrideCases {
+			setParityOverrides(t, f.database, f.permSvc, chID, harvestVoiceRoleID, f.user.ID, c)
+			want := MsgTypeChannelDelete
+			if permissions.CanViewChannel(paritySubject(t, f.database, f.user.ID, ch)) == nil {
+				want = MsgTypeChannelCreate
+			}
+			f.eachBranch(func(branch string) {
+				f.h.RefreshChannelVisibility(ch)
+				var env struct {
+					Type string `json:"type"`
+				}
+				select {
+				case raw := <-f.send:
+					if err := json.Unmarshal(raw, &env); err != nil {
+						t.Fatalf("unmarshal: %v", err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatalf("chan=%d/%s/%s: no frame from RefreshChannelVisibility", chID, c.name, branch)
+				}
+				if env.Type != want {
+					t.Errorf("chan=%d/%s/%s: got %s, CanViewChannel says %s", chID, c.name, branch, env.Type, want)
+				}
+			})
 		}
 	}
 }

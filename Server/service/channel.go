@@ -242,24 +242,18 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
-	switch {
-	case ch.Type == "dm":
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil || !ok {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-		}
-	case !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages):
+	// Session admission is permissions.CanAdmitSession — visibility, the same
+	// predicate behind ListVisibleChannels, the ready payload and reconnect
+	// replay — so a socket that still holds an id it can no longer see (or
+	// an archived channel, OC-0070) cannot resubscribe to the live topic or
+	// advance its read state. channel_focus and mark_read share this one
+	// service call, so the gate closes both at once.
+	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if subErr != nil {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-	case ch.Archived:
-		// Archived channels are hidden from every other client surface
-		// (ListVisibleChannels, ready payload, reconnect replay, voice join —
-		// see permissions.Checker.VisibleChannelIDs and ws/voice_join.go).
-		// HasChannelPerm alone doesn't know about the archive flag, so without
-		// this a socket that still held the id could resubscribe to the live
-		// topic and advance its own read state on a channel reconnect replay
-		// then filters back out. channel_focus and mark_read share this one
-		// service call, so the guard closes both at once (OC-0070).
-		return nil, fmt.Errorf("%w: channel is archived", ErrForbidden)
+	}
+	if err := permissions.CanAdmitSession(sub); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrForbidden, err)
 	}
 
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
