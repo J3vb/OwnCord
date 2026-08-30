@@ -96,11 +96,15 @@ protocol-verify:
 # Route, table and config-key indexes in ../docs. Same shape as the two
 # generator checks above: regenerate, then fail on any diff. The tool also
 # exits non-zero on its own when a config key is documented nowhere.
+#
+# -tags otel,wazero is not optional: /metrics mounts only when the otel build
+# supplies a Prometheus handler, so the default build would generate an index
+# missing a production route. The tool refuses to run without it.
 docs-generate:
-	go run ./cmd/gendocs
+	go run -tags otel,wazero ./cmd/gendocs
 
 docs-verify:
-	go run ./cmd/gendocs
+	go run -tags otel,wazero ./cmd/gendocs
 	@git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md || ( \
 		echo "ERROR: generated documentation blocks are stale. Run 'make docs-generate' and commit the result." ; \
 		exit 1 ; \

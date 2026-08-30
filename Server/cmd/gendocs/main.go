@@ -45,6 +45,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -57,7 +58,7 @@ const (
 
 // regenCmd is quoted into every generated block so a reader who spots a stale
 // row knows what to run without going looking for it.
-const regenCmd = "cd Server && go run ./cmd/gendocs"
+const regenCmd = "cd Server && go run -tags otel,wazero ./cmd/gendocs"
 
 // minRoutes is the vacuity floor the route index inherits from
 // TestAbsenceContract_NoFederationDirectoryOrListingRoutes: a walk over an
@@ -199,10 +200,17 @@ func openMigrated() (*db.DB, func(), error) {
 	return database, func() { _ = database.Close() }, nil
 }
 
-// genRoutes walks the production router with uploads, voice and the GIF proxy
-// switched on, so the optional route families mount and the table is the whole
-// tree rather than the bare-config subset. The scaffolding is a copy of
-// fullRouter in api/absence_contract_test.go; test code stays in the test.
+// genRoutes walks the production router with every optional family switched
+// on — uploads, voice, the GIF proxy and telemetry — so the table is the
+// whole tree rather than the bare-config subset. The scaffolding is a copy of
+// fullRouter in api/absence_contract_test.go plus the telemetry init main.go
+// does; test code stays in the test.
+//
+// The index is the superset build: /metrics mounts only when
+// telemetry.PrometheusHandler() returns non-nil, which needs -tags otel, so
+// every invocation of this tool passes -tags otel,wazero. Nothing under
+// Server/api or Server/admin is itself tag-gated, so wazero adds and removes
+// no route; it rides along so one build serves the whole repository.
 func genRoutes(w io.Writer) error {
 	database, closeDB, err := openMigrated()
 	if err != nil {
@@ -226,7 +234,25 @@ func genRoutes(w io.Writer) error {
 			LiveKitURL:       "ws://127.0.0.1:7880",
 		},
 		GIF: config.GIFConfig{APIKey: "gendocs"},
+		// /metrics mounts only when telemetry.PrometheusHandler() is non-nil,
+		// which needs both the otel build tag and telemetry switched on at
+		// runtime. Without this the index would silently omit a production
+		// route.
+		Telemetry: config.TelemetryConfig{Enabled: true, Exporter: "prometheus", ServiceName: "gendocs"},
 	}
+
+	ctx := context.Background()
+	shutdown, err := telemetry.Init(ctx, cfg.Telemetry)
+	if err != nil {
+		return fmt.Errorf("telemetry.Init: %w", err)
+	}
+	defer func() { _ = shutdown(ctx) }()
+	// The default build's Init installs a no-op provider, so this is the
+	// runtime check that the tool was built the way the index claims.
+	if telemetry.PrometheusHandler() == nil {
+		return errors.New("telemetry.Init left no Prometheus handler: run this tool as `go run -tags otel,wazero ./cmd/gendocs`, the build the route index is generated from")
+	}
+
 	handler, _, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil)
 	defer cleanup()
 
@@ -264,7 +290,7 @@ func genRoutes(w io.Writer) error {
 		r[1] = code(r[1])
 	}
 
-	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes.\n\n",
+	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).\n\n",
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Method", "Path"}, rows)
 	return nil

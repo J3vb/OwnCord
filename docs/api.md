@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 111 routes.
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 121 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -151,6 +151,16 @@ Generated from the mounted router by `cd Server && go run ./cmd/gendocs` — do 
 | PUT     | `/livekit/*`                                                         |
 | QUERY   | `/livekit/*`                                                         |
 | TRACE   | `/livekit/*`                                                         |
+| CONNECT | `/metrics/*`                                                         |
+| DELETE  | `/metrics/*`                                                         |
+| GET     | `/metrics/*`                                                         |
+| HEAD    | `/metrics/*`                                                         |
+| OPTIONS | `/metrics/*`                                                         |
+| PATCH   | `/metrics/*`                                                         |
+| POST    | `/metrics/*`                                                         |
+| PUT     | `/metrics/*`                                                         |
+| QUERY   | `/metrics/*`                                                         |
+| TRACE   | `/metrics/*`                                                         |
 
 <!-- gendocs:routes:end -->
 

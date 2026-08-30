@@ -182,7 +182,7 @@ ring buffer that backs the admin panel's live log view.
 
 <!-- gendocs:config:start -->
 
-Generated from the `koanf` tags of `config.Config` by `cd Server && go run ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 56 keys.
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 56 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |

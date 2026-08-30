@@ -859,12 +859,12 @@ db`). No control file is committed.
   0; `npx prettier --check .` → "All matched files use Prettier code style!";
   `.githooks/pre-commit` run by hand over the staged change → exit 0 with the
   generator's own log lines in its output.
-- Numbers: **111 routes** (`chi.Walk`; the floor of 100 and the admin-route
+- Numbers: **121 routes** (`chi.Walk`; the floor of 100 and the admin-route
   guard are carried over from the absence contract, the latter tightened to
   require a real `/admin/api/` subroute so the `/admin/*` mount catch-alls
   cannot satisfy it alone), **32 tables**, **56 config keys**, **0 undocumented keys at HEAD** — the hand-written reference
   already named every koanf tag, so no documentation fixes were needed.
-  Generated blocks: three, adding 124 + 45 + 67 lines to their documents.
+  Generated blocks: three, adding 134 + 45 + 67 lines to their documents.
   Output is byte-identical across two consecutive runs.
 - Verified against HEAD: the plan's pointer to `docs/deployment.md` is wrong —
   that document has no configuration table; the reference table is
@@ -876,7 +876,18 @@ db`). No control file is committed.
   is **included** rather than excluded, along with `sqlite_sequence` and the
   FTS5 shadow tables behind `messages_fts` — they are what the migrations
   create, and a change to any of them is a schema change worth seeing in the
-  diff. The `sqlite_stat*` tables are **excluded**: `db.Migrate` runs `ANALYZE`
+  diff. The route index is generated from the **`otel,wazero` build**, not the
+  default one: `/metrics` mounts only when `telemetry.PrometheusHandler()`
+  returns non-nil (`api/router.go:431-437`), which needs `-tags otel` and
+  telemetry enabled at runtime, so the tool calls `telemetry.Init` the way
+  `main.go` does with the Prometheus exporter and every invocation passes
+  `-tags otel,wazero` (Makefile, `run.mjs`, the hook, the block header lines,
+  the `CLAUDE.md` row; `ci.yml` inherits it through `make docs-verify`). The
+  tool refuses to run when that handler is absent, so the default build cannot
+  quietly generate a short index. Nothing under `Server/api` or `Server/admin`
+  carries a build constraint, so `wazero` adds and removes no route; it rides
+  along so one build serves the repository. The `sqlite_stat*` tables are
+  **excluded**: `db.Migrate` runs `ANALYZE`
   after applying the migrations, so they carry planner statistics rather than
   schema, and `sqlite_stat4` exists only because the current
   `modernc.org/sqlite` build has STAT4 — including them would fail this drift
