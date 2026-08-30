@@ -532,10 +532,13 @@ jobs:
 
   # Image build is verification only, so it is skipped on dev to keep day-to-day
   # work on the fast check suite. Runs for main pushes and PRs targeting main.
+  #
+  # Keep in sync with nightly-docker-smoke.yml's nightly-docker-smoke job.
   server-docker-build:
     name: Server Docker Build (verify)
     if: github.ref_name == 'main' || github.base_ref == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
