@@ -1192,6 +1192,68 @@ auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
   after 10m0s" with a goroutine dump that is not a detector hit); the gate
   needs `-timeout 60m`.
 
+#### Evidence — item 6 (benchmarks and baselines)
+
+- Branch `feat/b3-6-benchmarks`, cut from `feat/b3-6-hub-sim` (tip `3c091b41`)
+  so `BenchmarkReconnectStorm` is on the base; commits: c7917fcc
+  `test(b3-6): benchmarks and the bench-baseline script (item 6)` plus the docs
+  commit carrying this block (it carries this text, so its own SHA is in the
+  PR, not here).
+- The six, one `_test.go` per package touched: `PermissionInvalidation`,
+  `BroadcastFanout`, `ReplaySelection`, `ReconnectStorm` (`ws/hub_bench_test.go`),
+  `ReadStateWrite` (`service/readstate_bench_test.go`), `UploadAdmission`
+  (`api/upload_bench_test.go`). Each drives a real entry point —
+  `RefreshChannelVisibility`, `deliverBroadcast`, `EventRingBuffer.EventsSince`,
+  `reconnectRegister`, `ChannelService.HandleChannelFocus`,
+  `sanitizeUploadFilename` + `storage.ValidateFileType` — with setup outside the
+  timer and `b.ReportAllocs()`.
+- RED: `BenchmarkReplaySelection` renamed to `BenchmarkReplaySelectionRenamed`,
+  then `BENCH_COUNT=1 ./scripts/bench-baseline.sh` →
+  `bench-baseline: expected benchmark(s) missing from the run: ReplaySelection`
+  / `renamed or deleted. Restore the name, or edit EXPECTED in` /
+  `scripts/bench-baseline.sh on purpose. No baseline written.`, exit 1 and no
+  file written. Name restored.
+- GREEN (guardrail): `./scripts/bench-baseline.sh` →
+  `bench-baseline: wrote ../docs/plans/b3-bench-baseline-2026-08-30.md`,
+  65 s wall at `-count=6` — inside the ~5 minute budget the item sets.
+- GREEN (smoke): `go test -run '^$' -bench '^Benchmark(PermissionInvalidation|ReadStateWrite|BroadcastFanout|ReplaySelection|UploadAdmission|ReconnectStorm)$' -benchmem -benchtime=1x ./...`
+  → all six ran, one iteration each: `BenchmarkUploadAdmission-32 1 5300 ns/op`,
+  `BenchmarkReadStateWrite-32 1 156000 ns/op`,
+  `BenchmarkReconnectStorm-32 1 320300 ns/op`,
+  `BenchmarkPermissionInvalidation-32 1 938700 ns/op`,
+  `BenchmarkBroadcastFanout-32 1 5100 ns/op`,
+  `BenchmarkReplaySelection-32 1 3600 ns/op`.
+- Numbers — benchstat medians over `-count=6` at c7917fcc, go1.26.7
+  windows/amd64, Ryzen 9 7950X3D. Full table in
+  [b3-bench-baseline-2026-08-30](b3-bench-baseline-2026-08-30.md):
+
+| Benchmark              | sec/op       | B/op    | allocs/op |
+| ---------------------- | ------------ | ------- | --------- |
+| PermissionInvalidation | 860.6µ ± 2%  | 121.0Ki | 3601      |
+| ReconnectStorm         | 358.9µ ± 7%  | 592.2Ki | 952       |
+| ReadStateWrite         | 52.61µ ± 5%  | 5.597Ki | 163       |
+| ReplaySelection        | 16.26µ ± 32% | 31.35Ki | 10        |
+| BroadcastFanout        | 3.480µ ± 3%  | 992.0   | 2         |
+| UploadAdmission        | 253.2n ± 4%  | 56.00   | 3         |
+
+- Verified against HEAD: (a) `BenchmarkReconnectStorm` is on the base, so the
+  expected set is six, as the item's base note allows. (b) `golang.org/x/perf`
+  publishes no semver tags — `proxy.golang.org/golang.org/x/perf/@v/list` is
+  empty — so the pin is the newest resolvable version, the pseudo-version
+  `v0.0.0-20260825160852-19be9d8e6c70`, run through `go run` and deliberately
+  absent from `go.mod`. (c) `newTestHub` already took `testing.TB`; the three
+  `service` seed helpers the read-state benchmark reuses (`newTestDB`,
+  `seedRole`, `seedChannel`) took `*testing.T` and were widened to `testing.TB`,
+  which every existing caller still satisfies — no production file changed.
+  (d) `go test` prints a benchmark's name and padding _before_ running it, so
+  the hub's per-registration `INFO` line landed inside the result line and
+  benchstat dropped three of the six from the table without failing; the
+  benchmarks now point the default logger at `io.Discard` for their duration
+  (`quietLogs`), which is the one line added to the hub-simulation item's
+  `BenchmarkReconnectStorm`. (e) `HandleChannelFocus` skips a no-op read-state
+  write, so a repeated focus by one user measures the skip; the benchmark
+  focuses a distinct pre-seeded user per iteration to stay on the write branch.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
