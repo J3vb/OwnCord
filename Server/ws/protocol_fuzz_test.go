@@ -258,6 +258,7 @@ func corpusFirstString(t *testing.T, target string) []string {
 		if err != nil {
 			t.Fatalf("reading corpus entry %s: %v", e.Name(), err)
 		}
+		found := false
 		for line := range strings.SplitSeq(string(body), "\n") {
 			line = strings.TrimSpace(line)
 			if !strings.HasPrefix(line, "string(") || !strings.HasSuffix(line, ")") {
@@ -268,7 +269,14 @@ func corpusFirstString(t *testing.T, target string) []string {
 				t.Fatalf("corpus entry %s: cannot unquote %s: %v", e.Name(), line, uerr)
 			}
 			out = append(out, v)
+			found = true
 			break
+		}
+		if !found {
+			// Skipping it silently would let a malformed entry masquerade as a
+			// seeded command: the coverage check would pass while the corpus
+			// file contributed nothing.
+			t.Fatalf("corpus entry %s has no string(...) argument, so it seeds no message type", filepath.Join(dir, e.Name()))
 		}
 	}
 	return out
@@ -315,7 +323,7 @@ func TestCommandPayloadSeedsCoverEveryConstructor(t *testing.T) {
 }
 
 // authPayloadMirror mirrors the anonymous struct authenticateConn decodes the
-// auth payload into (serve_auth.go:44). auth is deliberately NOT in
+// auth payload into (serve_auth.go:45). auth is deliberately NOT in
 // commandConstructors — the handshake runs before the hub knows the client —
 // and that decode is inline behind a live websocket read and a session lookup,
 // so it cannot be called headlessly. Factoring it out would be a production
@@ -344,6 +352,11 @@ func FuzzAuthPayload(f *testing.F) {
 		`{"type":"auth","payload":{"token":"t","epoch":-1}}`,
 		`{"type":"auth","payload":{"token":"t","epoch":2}}`,
 		`{"type":"auth","payload":{"token":"t","epoch":99999999999999999999}}`,
+		// encoding/json matches a tag case-insensitively when no exact key is
+		// present, so these three DO set Epoch and are not "absent".
+		`{"type":"auth","payload":{"token":"t","epoCh":10}}`,
+		`{"type":"auth","payload":{"token":"t","EPOCH":1}}`,
+		`{"type":"auth","payload":{"token":"t","epoch":1,"EPOCH":9}}`,
 		`{"type":"auth","payload":{"token":""}}`,
 		`{"type":"auth","payload":{"token":null}}`,
 		`{"type":"auth","payload":{"token":"a","token":"b"}}`,
@@ -399,9 +412,39 @@ func FuzzAuthPayload(f *testing.F) {
 			}
 		}
 
-		if structErr != nil {
+		// The handshake gate, mirrored from serve_auth.go:58 (the decode error
+		// and the empty token are one rejection) and :62 (the epoch window),
+		// using the real constants so that moving either one turns this target
+		// red instead of leaving it quietly stale.
+		decoded := structErr == nil && p.Token != ""
+		admitted := decoded && p.Epoch >= minClientEpoch && p.Epoch <= ProtocolEpoch
+
+		if minClientEpoch > ProtocolEpoch {
+			t.Fatalf("epoch window [%d, %d] is empty — no client can complete the handshake", minClientEpoch, ProtocolEpoch)
+		}
+		// Absent epoch means 0 (serve_auth.go:53-55): every client up to
+		// v1.2.0-alpha.4 predates the field, so a payload that omits it and
+		// carries a token must still be admitted. Raising minClientEpoch above
+		// 0 locks those clients out, and fails here rather than in the field.
+		//
+		// "Omits" is decided by decoding into a *int rather than by looking
+		// the key up in fields: encoding/json falls back to a
+		// case-INSENSITIVE tag match, so "epoCh" populates Epoch while an
+		// exact-key probe calls it absent. Fuzzing caught that in three
+		// seconds; the pointer probe is the same matching the server does.
+		var epochProbe struct {
+			Epoch *int `json:"epoch"`
+		}
+		hasEpoch := json.Unmarshal(env.Payload, &epochProbe) == nil && epochProbe.Epoch != nil
+		if !hasEpoch && decoded && !admitted {
+			t.Fatalf("auth payload %q omits epoch, as every client up to v1.2.0-alpha.4 does, but the epoch window [%d, %d] refuses the default 0", env.Payload, minClientEpoch, ProtocolEpoch)
+		}
+		if !admitted {
 			return
 		}
+
+		// Admitted: the token authenticateConn goes on to hash must be the
+		// string the JSON carried, not something a struct tag reshaped.
 		var wantToken string
 		if json.Unmarshal(fields["token"], &wantToken) == nil && wantToken != p.Token {
 			t.Fatalf("auth payload %q: token is %q through the handshake struct but %q decoded on its own", env.Payload, p.Token, wantToken)
