@@ -359,6 +359,119 @@ rewrite, remove old path — with B3-1's tests green after every commit.
 
 Exit: HP-3.
 
+**Evidence, 2026-08-30** — branch `feat/b3-2-auth-slice` from `dev`
+`71d867cb`; PR to `dev` recorded below.
+
+- **Pre-squash SHAs**, one per numbered item. For each, the characterization
+  file was run against that exact tree in a detached worktree
+  (`go test -count=1 -run TestAuthCharacterization ./api/`) and the frozen
+  files (`auth_characterization_test.go`, `totp_handler_test.go`) diffed
+  against `71d867cb`:
+
+  | Commit      | Item                                                                                                                                          | Characterization | Frozen files vs `71d867cb` |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------- |
+  | `825b406f`  | B3-1's merge SHA recorded in this plan                                                                                                        | ok 1.860 s       | identical                  |
+  | `448c50f6`  | 1 — `api/auth_deps.go`: the consumer-owned interface, and the input/result types it names in `service/auth.go`                                | ok 1.852 s       | identical                  |
+  | `24ed138d`  | 2 — `service/auth.go`: orchestration moved verbatim, the `Err*` set; `auth/ratescale.go`                                                      | ok 1.854 s       | identical                  |
+  | `fe1d11b8`  | 3 — thin handlers; `MountAuthRoutes(r, svc, requireAuth, limiter, proxies)`; `router.go` builds the service; two `DBImportAllow` rows deleted | ok 1.849 s       | identical (see wiring)     |
+  | `3f0d24ec`  | 4 — after-state inventory and graph rows in `server-boundaries.md`                                                                            | ok 1.832 s       | identical                  |
+  | this commit | 5 — this block                                                                                                                                | docs only        | —                          |
+
+- **The interface.** Nine methods — `RegistrationPolicy`, `Register`,
+  `Login`, `VerifyTOTP`, `Logout`, `DeleteAccount`, `EnableTOTP`,
+  `ConfirmTOTP`, `DisableTOTP` — against the ten distinct `*db.DB` methods,
+  two `db` functions and two `db` sentinels the handlers called at
+  `71d867cb`. `RegistrationPolicy` is the ninth: two characterization rows
+  pin `/register`'s 403 "before any credential is read" (a malformed body
+  still receives the policy's 403), so that gate stays ahead of the body
+  decode as its own call. `service.AuthService` is constructed with the
+  `Store` (`*db.DB`), the shared `auth.RateLimiter`, the TOTP key and the
+  `AuthBroadcaster`; it creates the partial-login, pending-TOTP and used-code
+  stores itself with the fixed TTLs the route mount used to own.
+- **Error semantics** (item 4): every refusal is a named `service.Err*` value
+  whose `Error()` is the exact public message the handler wrote and whose
+  category (`ErrRateLimited`, `ErrForbidden`, `ErrBadRequest`, `ErrConflict`,
+  `ErrInternal`, plus the new `ErrUnauthorized` and `ErrInvalidInput`) the one
+  `writeAuthError` switch maps to a status and code; two values carry their
+  own code (`INVALID_CREDENTIALS`, `TOTP_ALREADY_ENABLED`). Thirty-one values,
+  because the pre-slice handlers had thirty-one distinct refusal triples. No
+  sentinel-mapping row changed.
+- **Behaviour notes** — no row changed; listed because HP-3 Q1 asks:
+  1. _Decode before gate on five routes._ At `71d867cb`, `DELETE /account`,
+     the three TOTP-management routes and `/verify-totp` ran a gate (per-user
+     lockout; already-enrolled; challenge lookup) before decoding the body. A
+     thin handler decodes first and the service runs the same gates in the
+     same order. Observable only for a _malformed_ body behind a gate:
+     locked-out + malformed → 400 (was 429); enrolled + malformed enable →
+     400 (was 409); unknown partial token + malformed verify body → 400 (was
+     401). No frozen row exercises those; every well-formed request is
+     byte-identical. `/register` kept its gate first (above).
+  2. _One `AuthMiddleware` for the six authenticated auth routes._ The caller
+     builds it once and passes it in; before, each `r.With(AuthMiddleware(database))`
+     had its own `last_used` touch throttle. Fewer writes, same semantics.
+  3. `confirmPassword` folds the three identical password-confirmation blocks
+     of the TOTP routes into one method (verbatim otherwise; the accounting
+     — a missing or wrong password counts, a correct one resets — is
+     unchanged).
+  4. The auth-slice limits left `api/constants.go` with the code that reads
+     them; the shared `pw_confirm` budget is exported as `service.PwConfirm*`
+     and `profile_handler.go` reads it there. The auth rate multiplier moved
+     to `auth/ratescale.go` (`SetRateScale`, `ScaledLimit`) so the route
+     mounts and the service's login accounting read one value; `api` keeps
+     `setAuthRateScale`/`scaledAuthLimit` as wrappers, and
+     `TestPerUserFailureCapsStayUnscaled` now pins `../service/auth.go`.
+  5. `userResponse`/`toUserResponse` moved to `profile_handler.go` (the other
+     consumer, which still imports `db`); `middleware.go` gained
+     `principal(r)`, which hands the handlers the context's `*db.User` and
+     `*db.Session` as `service.Principal`.
+- **Test files changed** — wiring only (`git diff -U0 71d867cb fe1d11b8 -- '*_test.go'`):
+  `auth_handler_test.go` (+1 import, the one mount line in
+  `buildAuthRouterWithProxies`), `auth_handler_delete_broadcast_test.go` (+1
+  import, two mount lines, one comment), `coverage_push_test.go` and
+  `invite_handler_test.go` (one mount line each), `constants_test.go` (the
+  scale tests follow the constant), `router_delete_account_broadcast_test.go`
+  (comment and failure message), `invariants/db_import_boundary_test.go`
+  (fixture path). `auth_characterization_test.go` and `totp_handler_test.go`:
+  untouched. No assertion, row or expected value moved.
+- **Graph tables:** [server-boundaries.md](../architecture/server-boundaries.md)
+  §"Auth slice" — before at `ad4defc2`, after at `fe1d11b8`. `api` `db`
+  importers **12 → 10**, `move` rows 28 → 26, 51 → 49 files. The handlers
+  import `service` (the interface's types, the `Err*` categories,
+  `SanitizeText`), so the plan's "neither `db` nor `service`" is met for
+  `db` only — stated there, not bent.
+- **Gates**, before every commit per `ci-check`: from `Server/` the four
+  build-tag variants, `go vet ./...`, `go test -race ./...` (18 packages
+  ok), `go test -tags deadlock -count=1 ./ws/` (ok, 59.9 s),
+  `golangci-lint run` (0 issues — one `funlen` on `NewRouter` at 101 lines
+  during item 3, fixed by folding the constructor into the mount call),
+  `sqlc generate` and `genprotocol` drift clean, `go test ./invariants/` ok;
+  from the root `check:docs` and `check:hygiene`.
+  `go test -count=1 -race ./api/ ./service/ ./auth/` at `3f0d24ec`:
+  `ok api 51.447s`, `ok service 84.403s`, `ok auth 1.802s`.
+- **Coverage** (statements; `go test -coverprofile` blocks merged per file —
+  before is `-coverprofile ./api/` at `71d867cb`, after is the same run for
+  the handler files plus `-coverpkg=./api/,./service/ ./api/ ./service/` for
+  the slice, each profile block counted once):
+
+  | File                           | Before (`71d867cb`) | After (`fe1d11b8`)  |
+  | ------------------------------ | ------------------- | ------------------- |
+  | `api/auth_handler.go`          | 229/254 = 90.2%     | 98/114 = 86.0%      |
+  | `api/totp_handler.go`          | 163/179 = 91.1%     | 54/60 = 90.0%       |
+  | `service/auth.go`              | —                   | 240/253 = 94.9%     |
+  | **slice (handlers + service)** | **392/433 = 90.5%** | **392/427 = 91.8%** |
+
+  The same 392 statements are exercised after the move; the total shrank by
+  six (the folded confirmation blocks). The handler files' percentages dip
+  because their unreachable branches are now a larger share of a smaller
+  file: `writeNotAuthenticated` (the no-principal branch behind
+  `AuthMiddleware` — B3-1's `handleMe` note), `writeAuthError`'s default (a
+  service contract bug, unreachable by construction), and
+  `registerReadRequest`/`loginReadRequest`, unchanged at 78.9%/83.3% (B3-1's
+  note: those branches are `auth/` tests). The service's gaps are B3-1's
+  not-injectable set: `Register` 85.0% (hash failure, post-commit
+  `GetUserByID`), `issueSession` 83.3% (`GenerateToken`), `Logout` 90.0% (the
+  nil-session guard the handler answers first).
+
 ## HP-3 — First vertical-slice review
 
 `docs/plans/hp-3-scorecard-<date>.md`, in the HP-2 shape. Questions:
