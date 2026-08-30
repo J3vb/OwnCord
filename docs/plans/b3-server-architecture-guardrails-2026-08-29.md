@@ -1123,22 +1123,32 @@ auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
   boundary is not raced — so every figure on the stats line is a pure
   function of the seed. Proof, three runs of
   `OWNCORD_SIM_SEED=1 OWNCORD_SIM_STEPS=10000 go test -race -count=1 -v -run '^TestHubSimulation$' ./ws/`:
-  `seed 1: 10000 steps, seq 4500, map[channel:300 cut:142 dm:1285 fallback:751 fresh:22 global:1975 kicked:38 recipients:940 resume:710 shed:1630]`
+  `seed 1: 10000 steps, seq 4500, map[bursts:508 channel:300 cut:142 dm:1285 fallback:751 fresh:22 global:1975 kicked:38 recipients:940 resume:710 shed:1630]`
   three times, byte-identical. What still varies between runs is the
   scheduler's interleaving inside a racing reconnect step — how many of the
   racing seqs land in the replay burst rather than the live queue (420, 424
-  and 425 in those runs, printed on a second line) — so a model defect that
-  depends on that split replays only probabilistically; run the seed with
-  `-count`.
-- Floor (review fix): `TestHubSimulation` aggregates the per-seed stats and
-  requires `global`, `channel`, `recipients`, `dm`, `resume`, `raced` (a
-  resume that got a replay while a burst ran), `fallback`, `fresh`, `cut` and
-  `kicked` each ≥ 1 across the default run — every key a function of the
-  seed; the scheduler-decided racing-in-replay count is printed, not floored.
-  Skipped, with a log line, for `OWNCORD_SIM_SEED` or fewer than 20 seeds.
+  and 425 in earlier runs) and how many resumes are observed overlapping a
+  broadcast at all (`raced`), both printed on a second line — so a model
+  defect that depends on that split replays only probabilistically; run the
+  seed with `-count`.
+- Floor (review fix, Codex P2 on #1458): `TestHubSimulation` aggregates the
+  per-seed stats and requires `global`, `channel`, `recipients`, `dm`,
+  `resume`, `bursts` (a resume that got a replay with a burst requested),
+  `fallback`, `fresh`, `cut` and `kicked` each ≥ 1 across the default run —
+  every one a function of the seed — plus `raced`, a resume where a
+  broadcast allocated a seq while the registration goroutine had not yet
+  been observed to return. That overlap is the scheduler's, so `raced` lives
+  on the second (scheduler-decided) line, not the stats line, and is floored
+  only in aggregate across the 20 seeds: the default run has 179 bursts and
+  178–179 of them were observed overlapping in three measured runs
+  (registerNow makes two slog syscalls before the goroutine can return), so
+  an all-miss run is a scheduler or lock change, not luck. Skipped, with a
+  log line, for `OWNCORD_SIM_SEED` or fewer than 20 seeds; totals logged.
   RED: reconnect weight set to 0 →
   `hub simulation: "resume" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`
-  (and `raced`, `fallback`, `fresh`); restored.
+  (and `bursts`, `fallback`, `fresh`); goroutine joined before the burst →
+  `hub simulation: "raced" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`;
+  both restored.
 - Numbers: 8 clients, 3 channels, ring 48, normal queue 12; default 20 seeds ×
   200 steps in 2.3 s under `-race` (CI budget: under 10 s); `make sim` = 20 ×
   10,000 steps in 16.5 s (18 s wall with compile) under `-race`; per seed at 200 steps ≈ 13

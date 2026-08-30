@@ -69,7 +69,9 @@ package ws_test
 // that split — the I3 class — replays only probabilistically; run the seed
 // with -count. The default run also carries a floor (TestHubSimulation):
 // every load-bearing transition must occur at least once across the seeds,
-// so a constant change cannot quietly turn the simulation into no-ops.
+// so a constant change cannot quietly turn the simulation into no-ops — and
+// one of them, a broadcast observed running against a registration in
+// flight, is the scheduler's and is floored only in aggregate.
 
 import (
 	"fmt"
@@ -169,6 +171,7 @@ type sim struct {
 	trace   []string
 	stats   map[string]int // every figure here is a pure function of the seed
 	racing  int            // racing seqs that landed inside a replay burst: the scheduler's call, not the seed's
+	raced   int            // resumes where a broadcast allocated a seq while registration was still in flight: also the scheduler's
 }
 
 func TestHubSimulation(t *testing.T) {
@@ -176,18 +179,27 @@ func TestHubSimulation(t *testing.T) {
 	total := map[string]int{}
 	for _, seed := range seeds {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-			for k, v := range runHubSim(t, seed, steps) {
+			stats, raced := runHubSim(t, seed, steps)
+			for k, v := range stats {
 				total[k] += v
 			}
+			total["raced"] += raced
 		})
 	}
 	// The floor: every load-bearing transition must have happened at least
 	// once across the run, or a constant change (weights, ring, queue, wire
 	// schedule) could turn the simulation into no-ops with CI still green.
-	// Every key is a function of the seed ("raced" is a resume that got a
-	// replay while a burst ran; how many racing seqs landed inside the burst
-	// is the scheduler's and is only printed). Calibrated for the default
-	// seed count; a single-seed replay or a shorter seed list skips it.
+	// Every key but one is a function of the seed. "raced" — a broadcast
+	// that allocated a seq while a resume's registration was still in flight
+	// — is the scheduler's, so it is floored only in aggregate: the default
+	// run has 179 resumes with a burst ("bursts", seed-determined), and each
+	// one overlaps with odds far above a coin flip — registerNow makes two
+	// slog syscalls before the goroutine can return, and 178–179 of the 179
+	// were observed overlapping in three measured runs — so an all-miss run
+	// is not luck but a scheduler or lock change that no longer lets a
+	// broadcast run against a registration, the very thing this simulation
+	// exists to exercise. Calibrated for the default seed count; a
+	// single-seed replay or a shorter seed list skips it.
 	if t.Failed() {
 		return
 	}
@@ -195,7 +207,8 @@ func TestHubSimulation(t *testing.T) {
 		t.Logf("hub simulation: floor skipped — OWNCORD_SIM_SEED=%q, %d seed(s) (calibrated for %d)", os.Getenv("OWNCORD_SIM_SEED"), len(seeds), simDefaultSeeds)
 		return
 	}
-	for _, k := range []string{"global", "channel", "recipients", "dm", "resume", "raced", "fallback", "fresh", "cut", "kicked"} {
+	t.Logf("hub simulation: floor totals %v", total)
+	for _, k := range []string{"global", "channel", "recipients", "dm", "resume", "bursts", "raced", "fallback", "fresh", "cut", "kicked"} {
 		if total[k] == 0 {
 			t.Errorf("hub simulation: %q never happened across %d seeds x %d steps — the step mix no longer reaches it", k, len(seeds), steps)
 		}
@@ -235,7 +248,7 @@ func simDMChannel(i, j int) int64 {
 	return 1000 + int64(min(i, j))*simClients + int64(max(i, j))
 }
 
-func runHubSim(t *testing.T, seed uint64, steps int) map[string]int {
+func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, raced int) {
 	hub, database := newTestHub(t)
 	hub.ConfigureReplay(simRing, 0)
 	hub.FreezeTopicLimiterForTest()
@@ -287,8 +300,8 @@ func runHubSim(t *testing.T, seed uint64, steps int) map[string]int {
 		}
 	}
 	t.Logf("seed %d: %d steps, seq %d, %v", seed, steps, hub.SeqForTest(), s.stats)
-	t.Logf("seed %d: %d racing seq(s) landed inside a replay burst (interleaving-dependent, kept off the stats line)", seed, s.racing)
-	return s.stats
+	t.Logf("seed %d: %d resume(s) overlapped a broadcast (raced), %d racing seq(s) landed inside a replay burst — both scheduler-decided, kept off the stats line", seed, s.raced, s.racing)
+	return s.stats, s.raced
 }
 
 func (s *sim) pick(weights []int) int {
@@ -564,9 +577,21 @@ func (s *sim) reconnect(c *simClient) {
 		burst = 0
 	}
 	var racing []simAlloc
+	overlapped := false
 	for range burst {
-		if a := s.broadcast(c); a.seq != 0 {
-			racing = append(racing, a)
+		a := s.broadcast(c)
+		if a.seq == 0 {
+			continue
+		}
+		racing = append(racing, a)
+		// An overlap on record: this seq was allocated while the goroutine
+		// had not yet been seen to return, so the broadcast ran against a
+		// registration in flight. A burst the goroutine beat to the lock, or
+		// one the limiter shed entirely, is not one.
+		select {
+		case <-done:
+		default:
+			overlapped = true
 		}
 	}
 	<-done
@@ -575,7 +600,10 @@ func (s *sim) reconnect(c *simClient) {
 		owed = s.checkReplay(c, events, s0, racing)
 		s.stats["resume"]++
 		if burst > 0 {
-			s.stats["raced"]++
+			s.stats["bursts"]++
+		}
+		if overlapped {
+			s.raced++
 		}
 	} else {
 		if s.hub.ReplayBuffer().EventsSinceFiltered(c.w, c.allowed) != nil {
