@@ -129,6 +129,10 @@ func spliceBlock(doc, name, body string) (string, error) {
 // with that many dashes. Emitting anything else means `prettier --check` and
 // `git diff --exit-code` fight each other forever, each undoing the other.
 func writeTable(w io.Writer, header []string, rows [][]string) {
+	// ponytail: widths are rune counts, Prettier's are display widths — a
+	// full-width CJK or emoji cell would pad two columns narrow. No generated
+	// cell holds one (route paths, SQL identifiers, config keys, section
+	// headings); switch to a display-width count if that ever changes.
 	widths := make([]int, len(header))
 	cells := make([][]string, 0, len(rows)+1)
 	for _, r := range append([][]string{header}, rows...) {
@@ -233,7 +237,10 @@ func genRoutes(w io.Writer) error {
 	var rows [][]string
 	admin := 0
 	walk := func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		if strings.HasPrefix(route, "/admin/") {
+		// A real admin subroute, not the per-method `/admin/*` catch-all chi
+		// emits for the Mount itself — those appear whether or not the walk
+		// ever descended into the subrouter.
+		if strings.HasPrefix(route, "/admin/api/") && !strings.HasSuffix(route, "/*") {
 			admin++
 		}
 		rows = append(rows, []string{method, route})
@@ -246,7 +253,7 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("walked only %d routes; expected the full production router (>= %d)", len(rows), minRoutes)
 	}
 	if admin == 0 {
-		return errors.New("walk saw no /admin/ routes; the mounted admin subrouter was not traversed")
+		return errors.New("walk saw no /admin/api/ routes; the mounted admin subrouter was not traversed")
 	}
 	// chi hands the methods of one pattern back in map order, so the sort is
 	// what makes two runs produce the same bytes. Sorted on the bare path,
@@ -276,9 +283,13 @@ func cmpRoute(a, b []string) int {
 // migrations/), so the migrated database is the catalog — the same trick the
 // absence contract's fullRouter uses to get a real schema without a file.
 //
-// Nothing is filtered: SQLite's own bookkeeping (sqlite_sequence) and the FTS5
-// shadow tables behind messages_fts are part of what the migrations create,
-// and a change to either is a schema change worth seeing in the diff.
+// sqlite_sequence and the FTS5 shadow tables behind messages_fts are kept:
+// they are what the migrations create, and a change to either is a schema
+// change worth seeing in the diff. The sqlite_stat* tables are dropped —
+// db.Migrate runs ANALYZE after applying migrations, so they hold planner
+// statistics rather than schema, and which of them exists is a property of
+// the SQLite build (sqlite_stat4 only with STAT4 compiled in). Including them
+// would fail this drift check on a modernc.org/sqlite bump.
 func genSchema(w io.Writer) error {
 	database, closeDB, err := openMigrated()
 	if err != nil {
@@ -287,7 +298,9 @@ func genSchema(w io.Writer) error {
 	defer closeDB()
 
 	ctx := context.Background()
-	tables, err := queryStrings(ctx, database, `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	// GLOB, not LIKE: LIKE's "_" is a wildcard, GLOB's is not.
+	tables, err := queryStrings(ctx, database,
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_stat*' ORDER BY name`)
 	if err != nil {
 		return err
 	}
@@ -308,7 +321,7 @@ func genSchema(w io.Writer) error {
 		rows = append(rows, []string{code(t), joinCode(cols), joinCode(idx)})
 	}
 
-	printf(w, "Generated from the migrated schema by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d tables, SQLite's own bookkeeping and the FTS5 shadow tables included.\n\n",
+	printf(w, "Generated from the migrated schema by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d tables: `sqlite_sequence` and the FTS5 shadow tables behind `messages_fts` are included; the `sqlite_stat*` tables `ANALYZE` writes are not, since they hold planner statistics and which of them exists depends on the SQLite build.\n\n",
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Table", "Columns", "Indexes"}, rows)
 	return nil

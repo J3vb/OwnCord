@@ -187,7 +187,6 @@ const TASKS = {
   check: [...CHECK_DOCS, ...CHECK_HYGIENE, ...CHECK_SERVER, ...CHECK_CLIENT, ...CHECK_RUST],
   generate: [
     step("go", ["run", "./cmd/genprotocol"], "Server"),
-    step("go", ["run", "./cmd/gendocs"], "Server"),
     optional(
       "sqlc",
       "sqlc",
@@ -195,6 +194,8 @@ const TASKS = {
       "Server",
       "sqlc not on PATH — install the version in Server/sqlc.version",
     ),
+    // After sqlc: gendocs compiles the api package, which imports db/dbgen.
+    step("go", ["run", "./cmd/gendocs"], "Server"),
   ],
   format: [
     step("npx", ["prettier", "--write", "."], "."),

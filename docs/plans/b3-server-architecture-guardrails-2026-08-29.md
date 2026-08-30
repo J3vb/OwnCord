@@ -859,11 +859,12 @@ db`). No control file is committed.
   0; `npx prettier --check .` → "All matched files use Prettier code style!";
   `.githooks/pre-commit` run by hand over the staged change → exit 0 with the
   generator's own log lines in its output.
-- Numbers: **111 routes** (`chi.Walk`; the floor of 100 and the `/admin/`
-  guard are carried over from the absence contract), **34 tables**, **56
-  config keys**, **0 undocumented keys at HEAD** — the hand-written reference
+- Numbers: **111 routes** (`chi.Walk`; the floor of 100 and the admin-route
+  guard are carried over from the absence contract, the latter tightened to
+  require a real `/admin/api/` subroute so the `/admin/*` mount catch-alls
+  cannot satisfy it alone), **32 tables**, **56 config keys**, **0 undocumented keys at HEAD** — the hand-written reference
   already named every koanf tag, so no documentation fixes were needed.
-  Generated blocks: three, adding 124 + 47 + 67 lines to their documents.
+  Generated blocks: three, adding 124 + 45 + 67 lines to their documents.
   Output is byte-identical across two consecutive runs.
 - Verified against HEAD: the plan's pointer to `docs/deployment.md` is wrong —
   that document has no configuration table; the reference table is
@@ -875,7 +876,11 @@ db`). No control file is committed.
   is **included** rather than excluded, along with `sqlite_sequence` and the
   FTS5 shadow tables behind `messages_fts` — they are what the migrations
   create, and a change to any of them is a schema change worth seeing in the
-  diff. `cmd/gendocs/main.go` imports `db` for that catalog, so it takes a
+  diff. The `sqlite_stat*` tables are **excluded**: `db.Migrate` runs `ANALYZE`
+  after applying the migrations, so they carry planner statistics rather than
+  schema, and `sqlite_stat4` exists only because the current
+  `modernc.org/sqlite` build has STAT4 — including them would fail this drift
+  check on an unrelated driver bump. `cmd/gendocs/main.go` imports `db` for that catalog, so it takes a
   `boundary` row in `DBImportAllow` and `server-boundaries.md` was regenerated
   with it (50 importers, was 49); the dbinventory block is otherwise untouched
   and still has no automated drift check of its own.
