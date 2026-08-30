@@ -1,1 +1,14 @@
-{}
+{
+  "permissions": {
+    "deny": [
+      "Edit(Server/db/dbgen/**)",
+      "Write(Server/db/dbgen/**)",
+      "Edit(Server/ws/message_types.go)",
+      "Write(Server/ws/message_types.go)",
+      "Edit(Client/src/lib/protocolTypes.ts)",
+      "Write(Client/src/lib/protocolTypes.ts)",
+      "Edit(Client/src/generated/**)",
+      "Write(Client/src/generated/**)"
+    ]
+  }
+}
