@@ -10,7 +10,7 @@ cannot silently shorten the table.
 
 ## Provenance
 
-- Commit: `ec8ef24a6e6ad96e09d208f6bc95777a203ec051`
+- Commit: `1356cc1a52348d0d81c0a39608f3f7a7eccedf43`
 - Date (UTC): 2026-08-30
 - Toolchain: `go version go1.26.7 windows/amd64`
 - Platform: `windows/amd64`
@@ -50,9 +50,9 @@ goos: windows
 goarch: amd64
 pkg: github.com/J3vb/OwnCord/Server/api
 cpu: AMD Ryzen 9 7950X3D 16-Core Processor
-                   │ b3-baseline │
-                   │   sec/op    │
-UploadAdmission-32   260.9n ± 4%
+                   │ b3-baseline  │
+                   │    sec/op    │
+UploadAdmission-32   286.8n ± 14%
 
                    │ b3-baseline │
                    │    B/op     │
@@ -63,13 +63,13 @@ UploadAdmission-32    56.00 ± 0%
 UploadAdmission-32    3.000 ± 0%
 
 pkg: github.com/J3vb/OwnCord/Server/service
-                  │ b3-baseline  │
-                  │    sec/op    │
-ReadStateWrite-32   54.59µ ± 12%
+                  │ b3-baseline │
+                  │   sec/op    │
+ReadStateWrite-32   59.00µ ± 8%
 
                   │ b3-baseline  │
                   │     B/op     │
-ReadStateWrite-32   5.599Ki ± 0%
+ReadStateWrite-32   5.602Ki ± 0%
 
                   │ b3-baseline │
                   │  allocs/op  │
@@ -78,11 +78,11 @@ ReadStateWrite-32    163.0 ± 0%
 pkg: github.com/J3vb/OwnCord/Server/ws
                           │ b3-baseline  │
                           │    sec/op    │
-ReconnectStorm-32           428.0µ ±  9%
-PermissionInvalidation-32   884.2µ ±  6%
-BroadcastFanout-32          3.390µ ±  1%
-ReplaySelection-32          14.82µ ± 14%
-geomean                     66.03µ
+ReconnectStorm-32           449.6µ ± 27%
+PermissionInvalidation-32   927.4µ ±  2%
+BroadcastFanout-32          3.486µ ±  3%
+ReplaySelection-32          25.53µ ±  9%
+geomean                     78.05µ
 
                           │ b3-baseline  │
                           │     B/op     │
