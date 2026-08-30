@@ -80,6 +80,12 @@ type App struct {
 	// it starts for real, so the assertions are about what teardown does with
 	// what was already up. Never set outside tests.
 	failStage string
+
+	// onCloseStep is called with each stage's name just before its close step
+	// runs. It makes the teardown walk observable, which is how the tests
+	// assert what is still alive at a given point in it. Never set outside
+	// tests.
+	onCloseStep func(stage string)
 }
 
 // errStageInjected is what a failStage-selected stage returns. It exists so
@@ -139,6 +145,9 @@ func (a *App) Close(ctx context.Context) error {
 	var first error
 	for i := len(a.closers) - 1; i >= 0; i-- {
 		step := a.closers[i]
+		if a.onCloseStep != nil {
+			a.onCloseStep(step.stage)
+		}
 		err := step.stop(ctx)
 		if err == nil {
 			continue

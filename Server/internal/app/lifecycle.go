@@ -75,7 +75,16 @@ func (a *App) stages() []stage {
 // when there is no earlier one to report.
 func (a *App) Run(ctx context.Context) (err error) {
 	a.rootCtx = ctx
-	bgCtx, bgCancel := context.WithCancel(ctx)
+	// WithoutCancel: bgCtx takes ctx's values but NOT its cancellation. The
+	// event persister, the audit writer and the maintenance loop run under
+	// it, and Close drains in-flight HTTP handlers FIRST precisely so their
+	// broadcasts and audit records still reach live consumers — inheriting
+	// cancellation would kill all three the instant a caller cancelled,
+	// before that drain, and would make caller-context shutdown behave
+	// differently from the SIGTERM and restart paths, which cancel only the
+	// serve context. Cancelling ctx stops SERVING (serveCtx descends from it
+	// in startSignals); when the background work stops is Close's decision.
+	bgCtx, bgCancel := context.WithCancel(context.WithoutCancel(ctx))
 	// The deferred cancel is only a hard backstop for an App whose Close is
 	// somehow never reached; the ordered teardown cancels bgCtx through the
 	// first-registered close step, which the reverse walk runs LAST — after

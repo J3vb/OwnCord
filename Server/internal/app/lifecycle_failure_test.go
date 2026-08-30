@@ -143,6 +143,27 @@ func TestAppRun_ListenerBindFailure_ReleasesEverythingItStarted(t *testing.T) {
 	}
 }
 
+// waitForHealth blocks until the server answers /health on port, failing the
+// test if Run exits first or the server never comes up.
+func waitForHealth(t *testing.T, port int, runErr <-chan error) {
+	t.Helper()
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
+		if healthErr == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			return
+		}
+		select {
+		case err := <-runErr:
+			t.Fatalf("Run exited before serving: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	t.Fatal("server never became reachable on /health")
+}
+
 // TestAppRun_ContextCancel_DrainsAndReleases is the control the injected rows
 // need: the same four properties on the path where nothing fails at all. Run
 // serves for real, the caller's context is cancelled (the same cancellation a
@@ -160,25 +181,7 @@ func TestAppRun_ContextCancel_DrainsAndReleases(t *testing.T) {
 	runErr := make(chan error, 1)
 	go func() { runErr <- a.Run(ctx) }()
 
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	up := false
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
-		resp, healthErr := http.Get(healthURL) //nolint:gosec // G107: loopback URL built from the test's own port
-		if healthErr == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-			up = true
-			break
-		}
-		select {
-		case err := <-runErr:
-			t.Fatalf("Run exited before serving: %v", err)
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if !up {
-		t.Fatal("server never became reachable on /health")
-	}
+	waitForHealth(t, port, runErr)
 
 	cancel()
 	select {
@@ -191,4 +194,60 @@ func TestAppRun_ContextCancel_DrainsAndReleases(t *testing.T) {
 	}
 
 	assertReleased(t, a, port, leakOpt)
+}
+
+// TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain pins the
+// one thing the HTTP-first close order exists for: when Close drains
+// in-flight HTTP handlers, the consumers their work feeds — the event
+// persister, the audit writer and the maintenance loop, all running under
+// bgCtx — must still be alive, or those handlers' broadcasts never reach the
+// replay/event store and their audit records are dropped.
+//
+// run() got this for free by rooting bgCtx at context.Background(): only
+// bgCancel ever ended it, and the ordered teardown called that last. Deriving
+// bgCtx from Run's own ctx instead would cancel all three the instant a
+// caller cancelled — before the drain — and would make caller-context
+// shutdown behave differently from the SIGTERM and restart paths, which
+// cancel only the serve context. So bgCtx inherits ctx's values but not its
+// cancellation, and this asserts that at the exact point it matters.
+func TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain(t *testing.T) {
+	port := freePort(t)
+	a := bootTestApp(t, fmt.Sprint(port), "")
+
+	// Record what bgCtx looked like as each close step was about to run.
+	bgErrAt := map[string]error{}
+	a.onCloseStep = func(stage string) { bgErrAt[stage] = a.bgCtx.Err() }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- a.Run(ctx) }()
+	waitForHealth(t, port, runErr)
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run() after the context was cancelled = %v, want nil (clean drain)", err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("Run did not return after its context was cancelled")
+	}
+
+	// The steps that must find bgCtx still live, in the order Close runs them.
+	for _, stage := range []string{"signals", "http", "maintenance", "audit-writer"} {
+		if err, ran := bgErrAt[stage]; !ran {
+			t.Errorf("the %q close step never ran", stage)
+		} else if err != nil {
+			t.Errorf("bgCtx was already cancelled (%v) when the %q close step ran — the event persister, audit writer and maintenance loop had exited before the HTTP drain, so an in-flight handler's broadcasts and audit records are dropped", err, stage)
+		}
+	}
+	// event-persistence is the step that cancels bgCtx and joins the pruner,
+	// so from there down it is expected to be done.
+	if err, ran := bgErrAt["database"]; !ran {
+		t.Error(`the "database" close step never ran`)
+	} else if err == nil {
+		t.Error("bgCtx was still live when the database closed — the event pruner and maintenance loop had not been joined, so a query could still be in flight against a closing pool")
+	}
 }

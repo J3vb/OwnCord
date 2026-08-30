@@ -543,7 +543,8 @@ Exit: `main.go` under 150 lines; the failure-injection test green under
   | `556cdb11`  | 2 — `type App`, `app.New`/`Run`, one composite `App.Close`                                                      | full, green | ok 0.939 s                 |
   | `beebd3f9`  | 3 — hub construction out of `api.NewRouter`; `NewRouter` takes `api.Runtime`                                    | full, green | ok 0.943 s                 |
   | `ca59ad44`  | 4 — `internal/app/lifecycle_failure_test.go`, the failure-injection report                                      | full, green | ok 0.929 s                 |
-  | this commit | 5 — this block, the after-state rows in `server-boundaries.md`, status line, step table, `docs/plans/README.md` | docs only   | —                          |
+  | `0c29636c`  | 5 — this block, the after-state rows in `server-boundaries.md`, status line, step table, `docs/plans/README.md` | docs only   | —                          |
+  | this commit | 6 — Codex P2: `bgCtx` must not inherit `Run`'s caller cancellation                                              | full, green | ok 0.9 s                   |
 
 - **`main.go`: 1,019 → 99 lines.** What is left is the two CLI dispatches
   (`healthcheck`, `token`), the ring buffer and log handlers, the restart
@@ -605,6 +606,25 @@ App`, `undefined: New`, `undefined: LoadConfig`, `undefined: Deps`). Each
   | the hub stops when a stage after the router fails    | skip teardown on a failed start | FAIL           |
   | the database close step actually releases the handle | drop the `database` close step  | FAIL (11 rows) |
   | the hub close step actually stops the dispatch loop  | drop the `hub` close step       | FAIL (12 rows) |
+
+- **Codex review (P2), fixed test-first.** Codex read the rewrite and found
+  that `Run(ctx)` derived `bgCtx` from its caller's context, so cancelling
+  that context killed the event persister, the audit writer and the
+  maintenance loop _before_ `Close` ran its HTTP-first drain — the one
+  ordering the drain exists for, since in-flight handlers' broadcasts and
+  audit records have to reach live consumers. It also made caller-context
+  shutdown behave unlike the SIGTERM and restart paths, which cancel only the
+  serve context. `run()` had this right for free by rooting `bgCtx` at
+  `context.Background()`. `main.go` passes `context.Background()`, so no
+  released build was affected; the defect was in B3-3's own new `Run(ctx)`
+  contract. Fixed with `context.WithoutCancel(ctx)` — values inherited,
+  cancellation not — and pinned by
+  `TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain`, which
+  records `bgCtx.Err()` as each close step runs (a new test-only
+  `onCloseStep` seam makes the walk observable) and requires it still live at
+  `signals`, `http`, `maintenance` and `audit-writer`, and already cancelled
+  by `database`. RED before the fix on all four rows; the negative control —
+  restoring `context.WithCancel(ctx)` — fails it again.
 
 - **Failure-injection report** (item 3, and exit-gate row 4's evidence).
   `internal/app/lifecycle_failure_test.go`. The table is generated from
