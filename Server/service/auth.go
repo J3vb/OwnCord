@@ -296,26 +296,27 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		return nil, ErrPasswordHash
 	}
 
-	// The session token exists before the transaction so the account, the
+	// The session token is issued through the same path as login's, but it is
+	// persisted by CreateUserWithInvite's transaction, so the account, the
 	// invite use and the first session commit together: a fault at any step
 	// — the session insert included — rolls the whole registration back and
 	// burns nothing (OC-0376).
-	token, err := auth.GenerateToken()
-	if err != nil {
-		return nil, ErrSessionIssue
-	}
-	uid, err := s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode,
-		auth.HashToken(token), in.Device, in.IP)
+	var uid int64
+	token, err := newSessionToken(func(tokenHash string) (err error) {
+		uid, err = s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode,
+			tokenHash, in.Device, in.IP)
+		return err
+	})
 	if err != nil {
 		// UNIQUE constraint violation → duplicate username → 400.
-		// Any other DB error → 500.
+		// Any other error → 500.
 		switch {
 		case db.IsUniqueConstraintError(err):
 			return nil, ErrRegistrationRejected
 		case errors.Is(err, db.ErrNotFound):
 			return nil, ErrRegistrationRejected
 		default:
-			slog.Error("CreateUserWithInvite failed", "err", err, "username", in.Username)
+			slog.Error("register: account creation failed", "err", err, "username", in.Username)
 			return nil, ErrRegistrationFailed
 		}
 	}
@@ -827,15 +828,26 @@ func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, us
 
 // ─── Helpers moved from api/auth_handler.go ──────────────────────────────────
 
-func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+// newSessionToken generates a bearer token and hands its hash to persist,
+// which stores the session row — CreateSession, or CreateUserWithInvite's
+// transaction for a registration. The token is returned only once persist
+// succeeded.
+func newSessionToken(persist func(tokenHash string) error) (string, error) {
 	token, err := auth.GenerateToken()
 	if err != nil {
 		return "", err
 	}
-	if _, err := st.CreateSession(ctx, userID, auth.HashToken(token), device, ip); err != nil {
+	if err := persist(auth.HashToken(token)); err != nil {
 		return "", err
 	}
 	return token, nil
+}
+
+func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+	return newSessionToken(func(tokenHash string) error {
+		_, err := st.CreateSession(ctx, userID, tokenHash, device, ip)
+		return err
+	})
 }
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
