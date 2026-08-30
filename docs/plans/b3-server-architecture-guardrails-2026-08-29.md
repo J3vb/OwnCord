@@ -799,13 +799,17 @@ db`). No control file is committed.
 - GREEN: `npx vitest run tests/unit/connection.model.test.ts` →
   `Test Files 1 passed (1) / Tests 2 passed (2)`; `npm test` →
   `Test Files 194 passed (194) / Tests 5275 passed (5275)`.
-- Numbers: seed `20260830` (override with `OWNCORD_MODEL_SEED`), `numRuns`
-  150, `maxCommands` 30, `size: "large"` → ~2.2k generated commands and 1083
-  invariant checks per run of the file; 119 ms of test time, ~0.9 s wall for
-  the file, +0.4 s on the full client suite (10.8 s). A second test asserts
-  every invariant family was actually reached (ids 309, seq 305, verified 252,
-  stale teardown 59), so a family that stops being reachable fails instead of
-  silently passing.
+- Numbers: seed `20260830` (a non-integer `OWNCORD_MODEL_SEED` override
+  throws rather than reaching fast-check), `numRuns` 150, `maxCommands` 30,
+  `size: "large"` → ~2.2k generated commands and ~1080 invariant checks per
+  run of the file; 120 ms of test time, 0.83–0.92 s wall for the file. The
+  full client suite measured 10.8 s and 11.9 s on two runs of the same tree,
+  so its run-to-run spread is larger than this file's whole cost and no
+  meaningful delta can be quoted. A second test asserts every invariant family
+  was actually reached, counting only the non-trivial case for each (a resume
+  declaring `last_seq > 0`; a verification check that survived a command other
+  than the one that wrote it), so a family that degrades to its no-op form
+  fails instead of silently passing.
 - Verified against HEAD: `fast-check ^4.9.0` and the property-test conventions
   are as the spec says. Two spec details were resolved against the code: the
   design's `RegisterNow` has no client-side symbol (it is the server's hub

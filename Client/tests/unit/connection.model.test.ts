@@ -222,7 +222,7 @@ function realVerifiedPeers(): number[] {
  * The four invariants from the design, checked after every command so
  * shrinking lands on the first step that broke one.
  */
-function checkInvariants(m: Model, r: Real): void {
+function checkInvariants(m: Model, r: Real, afterSeeding = false): void {
   // 1. Message ids never duplicate, and the store holds exactly the ids the
   //    connection delivered — a redelivery reconciles in place, it does not
   //    add a row, and a resync does not lose one.
@@ -231,18 +231,20 @@ function checkInvariants(m: Model, r: Real): void {
   expect(ids).toEqual(m.ids);
   if (m.ids.length > 0) exercised.ids++;
 
-  // 2. Per-client seq is monotonic: the watermark ws.ts declares only ever
-  //    rises, except at the two epoch resets the model knows about (a full
-  //    re-sync and a logout). Observed at the auth frame in Connect; here we
-  //    only pin the model's own floor so a negative or fractional watermark
-  //    can never be declared correct.
-  expect(Number.isInteger(m.seq) && m.seq >= 0).toBe(true);
+  // 2. Per-client seq is monotonic. Not checked here: the watermark is only
+  //    observable when ws.ts puts it on the wire, so the assertion lives in
+  //    `connectCmd` against that connect's own auth frame. Anything asserted
+  //    here would only be the model against itself.
 
   // 3. A verified peer never flips to unverified (and back). The model is the
   //    arbiter: a peer stays verified until it genuinely leaves our call, and
-  //    a re-join re-verifies — anything else is a flip.
+  //    a re-join re-verifies — anything else is a flip. `afterSeeding` marks
+  //    the one call that runs immediately after Supersede wrote the
+  //    verifications itself: it still asserts, but it must not count as
+  //    coverage, or the family would look reached even if every check that
+  //    survives a later command disappeared.
   expect(realVerifiedPeers()).toEqual(m.verifiedPeers.toSorted((a, b) => a - b));
-  if (m.verifiedPeers.length > 0) exercised.verified++;
+  if (m.verifiedPeers.length > 0 && !afterSeeding) exercised.verified++;
 
   // 4. An aborted attempt never tears down a live session owned by a newer
   //    attempt: the store's voice session always belongs to the newest join.
@@ -277,12 +279,14 @@ const connectCmd = cmd(
     emitTauriEvent("ws-state", "open");
     await settle();
 
-    // The auth frame is where the seq watermark becomes observable — this is
-    // the monotonic-seq invariant's real assertion point.
+    // Invariant 2's only real assertion point: the auth frame is where the seq
+    // watermark becomes observable. A fresh connect declares 0 and proves
+    // nothing, so only a resume (`m.seq > 0`, i.e. frames survived a
+    // Disconnect without a resync or logout in between) counts as coverage.
     const auth = r.sent.slice(before).find((e) => e.type === "auth");
     expect(auth, "connect sent no auth frame").toBeDefined();
     expect(auth?.payload?.last_seq).toBe(m.seq);
-    exercised.seq++;
+    if (m.seq > 0) exercised.seq++;
 
     emit("auth_ok", {
       user: { id: SELF_ID, username: "me", avatar: null, role: "member" },
@@ -378,7 +382,7 @@ function supersedeCmd(next: number, stale: boolean): Cmd {
       }
       m.voiceChannel = channel;
       m.verifiedPeers = [...PEER_IDS];
-      checkInvariants(m, r);
+      checkInvariants(m, r, true);
 
       // …and now the teardown frame arrives.
       emit("voice_leave", { channel_id: stale ? other : channel, user_id: SELF_ID });
@@ -460,9 +464,24 @@ const commandArbs = [
 
 /**
  * Fixed by default so CI is reproducible run to run; override to replay a
- * reported counterexample (`OWNCORD_MODEL_SEED=<seed> npm test`).
+ * reported counterexample (`OWNCORD_MODEL_SEED=<seed> npm test`). A malformed
+ * override throws rather than silently handing fast-check `NaN` (or the `0`
+ * an empty variable coerces to) and running a different suite than the one
+ * that was asked for.
  */
-const SEED = Number(process.env.OWNCORD_MODEL_SEED ?? 20260830);
+function modelSeed(): number {
+  const raw = process.env.OWNCORD_MODEL_SEED;
+  if (raw === undefined) return 20260830;
+  // Number("") is 0 and Number("abc") is NaN — both would run a different
+  // suite than the one that was asked for, so neither gets a fallback.
+  const seed = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(seed)) {
+    throw new Error(`OWNCORD_MODEL_SEED must be an integer, got ${JSON.stringify(raw)}`);
+  }
+  return seed;
+}
+
+const SEED = modelSeed();
 const NUM_RUNS = 150;
 const MAX_COMMANDS = 30;
 
