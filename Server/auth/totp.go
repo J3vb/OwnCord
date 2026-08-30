@@ -108,6 +108,16 @@ func (s *PartialAuthStore) Consume(token string) (PartialAuthChallenge, bool) {
 	return entry, true
 }
 
+// Restore puts a challenge Consume returned back under its original token —
+// the recovery path for a caller that claimed the challenge and then could
+// not finish the login (OC-0378). The entry keeps its expiry and failure
+// count, so a challenge that expired meanwhile is dropped by the next Lookup.
+func (s *PartialAuthStore) Restore(token string, challenge PartialAuthChallenge) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries[token] = challenge
+}
+
 func (s *PartialAuthStore) RegisterFailure(token string, maxFailures int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -196,6 +206,15 @@ func (s *UsedTOTPCodeStore) MarkUsed(userID int64, code string) bool {
 	// Codes are valid for at most 90 seconds (current period ± 1).
 	s.entries[key] = time.Now().Add(usedTOTPCodeTTL)
 	return true
+}
+
+// Unmark forgets a code MarkUsed recorded so it can be accepted once more —
+// the companion of PartialAuthStore.Restore: a verification the caller could
+// not complete is released together with its challenge.
+func (s *UsedTOTPCodeStore) Unmark(userID int64, code string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, fmt.Sprintf("%d:%s", userID, code))
 }
 
 func (s *UsedTOTPCodeStore) cleanupExpiredLocked() {

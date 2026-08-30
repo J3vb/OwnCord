@@ -128,7 +128,15 @@ func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
 		}
 
 		role, err := database.GetRoleByID(r.Context(), user.RoleID)
-		if err != nil || role == nil {
+		if err != nil {
+			// A read fault is an outage, not a missing role: answering 403
+			// would tell the Owner they lack the Owner role. Mirror the
+			// perimeter's contract above — log it, report 503 (OC-0345).
+			slog.ErrorContext(r.Context(), "admin: owner role lookup failed", "error", err)
+			writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authorization service temporarily unavailable")
+			return
+		}
+		if role == nil {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "role not found")
 			return
 		}

@@ -522,3 +522,52 @@ func TestSpawnDetached_CommandConstruction(t *testing.T) {
 		t.Error("cmd.Stderr should not be nil")
 	}
 }
+
+// TestOwnerOnlyMiddleware_RoleLookupFailureIs503 pins OC-0345: a database
+// fault on the owner gate's role read is an outage, not a missing role, so the
+// Owner must get 503 SERVICE_UNAVAILABLE — never the 403 "role not found" a
+// genuinely absent role earns. Whitebox on purpose: through the full stack
+// adminAuthMiddleware reads the role first and would answer its own 503, so
+// the branch under test would never run.
+func TestOwnerOnlyMiddleware_RoleLookupFailureIs503(t *testing.T) {
+	database := openWhiteboxTestDB(t)
+
+	uid, err := database.CreateUser(context.Background(), "ownerfault", "$2a$12$x", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	user, err := database.GetUserByID(context.Background(), uid)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	// Every query against roles now fails with a non-sentinel error.
+	if _, err := database.ExecContext(context.Background(), `ALTER TABLE roles RENAME TO roles_gone`); err != nil {
+		t.Fatalf("hide roles: %v", err)
+	}
+
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := ownerOnlyMiddleware(database, next)
+
+	ctx := context.WithValue(context.Background(), adminUserKey, user)
+	req := httptest.NewRequest(http.MethodPost, "/backup", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if reached {
+		t.Error("next handler was reached although the role could not be read")
+	}
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 (a role read fault is not a missing role)", w.Code)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "SERVICE_UNAVAILABLE" {
+		t.Errorf("error = %q, want SERVICE_UNAVAILABLE", resp["error"])
+	}
+}

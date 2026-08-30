@@ -6,7 +6,9 @@
 verified at `bf7b886d`  
 **Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
-B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 in progress 2026-08-30.
+B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
+(PR #1450 = `75d64dd4`); B3-9 done 2026-08-30 (PR #1454 to `dev`, squash SHA
+recorded at merge; OC-0323 rides B3-8).
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -31,19 +33,19 @@ surface to it.
 
 ## Steps at a glance
 
-| Step     | What                                                                                                                               | Size     | Parallel with                                                    |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
-| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7                                                       |
-| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**  | 1 day    | B3-6, B3-7                                                       |
-| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7                                                       |
-| **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                                                                |
-| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                                                             |
-| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                   | 1 day    | after B3-3                                                       |
-| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                    | 2–3 days | after B3-3/B3-4                                                  |
-| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                | 3–4 days | B3-0..B3-2                                                       |
-| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                     | 1–2 days | B3-0..B3-2                                                       |
-| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                              | spread   | after HP-3, per-family                                           |
-| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape)             | 1 day    | OC-0345/0346: any; OC-0323: with B3-8; OC-0376..0378: after B3-2 |
+| Step     | What                                                                                                                                                                    | Size     | Parallel with                                                    |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
+| **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)**                                      | 1–2 days | B3-6, B3-7                                                       |
+| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**                                       | 1 day    | B3-6, B3-7                                                       |
+| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral — **DONE 2026-08-30 (PR #1450)**                                                | 2–3 days | B3-6, B3-7                                                       |
+| **HP-3** | First vertical-slice review — scorecard                                                                                                                                 | —        | —                                                                |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                                                     | 1–2 days | B3-4                                                             |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                                                        | 1 day    | after B3-3                                                       |
+| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                                                         | 2–3 days | after B3-3/B3-4                                                  |
+| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                                                     | 3–4 days | B3-0..B3-2                                                       |
+| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                                                          | 1–2 days | B3-0..B3-2                                                       |
+| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                                                                   | spread   | after HP-3, per-family                                           |
+| **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape) — **DONE 2026-08-30 (PR #1454; OC-0323 → B3-8)** | 1 day    | OC-0345/0346: any; OC-0323: with B3-8; OC-0376..0378: after B3-2 |
 
 Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
 and B3-9 run beside the slice (roadmap "Safe parallelism": guardrail tooling
@@ -360,7 +362,7 @@ rewrite, remove old path — with B3-1's tests green after every commit.
 Exit: HP-3.
 
 **Evidence, 2026-08-30** — branch `feat/b3-2-auth-slice` from `dev`
-`71d867cb`; PR #1450 to `dev` (squash SHA recorded at merge).
+`71d867cb`; PR #1450 to `dev`, merged 2026-08-30 as `75d64dd4`.
 
 - **Pre-squash SHAs**, one per numbered item. For each, the characterization
   file was run against that exact tree in a detached worktree
@@ -762,6 +764,133 @@ They are fixed here, after B3-2 has moved the orchestration into
 `service.AuthService` — each fix flips its `// known:` row in the same commit.
 Any of the six that cannot land in B3 is re-tagged in HP-3's scorecard with
 the reason.
+
+**Evidence, 2026-08-30** — branch `fix/b3-9-findings` from `dev` `75d64dd4`;
+PR #1454 to `dev` (squash SHA recorded at merge). Five of the six findings
+land here; **OC-0323 is not in this PR** — it rides B3-8's message/read-state
+family (the fix is a shared read-state query, the family's own
+characterization file is the right home) and stays `open`, low, tagged B3.
+
+- **Shape.** Test-first, one fix commit per finding (the RED test and the
+  fix, plus that finding's `// known:` row flipped to the fixed behaviour in
+  the same commit), then one ledger commit closing all five with their
+  pre-squash SHAs — a commit cannot cite its own SHA, and the
+  `check:docs` count claims can only be re-derived once, so the flips and
+  the four count-carrying documents move together in `8fdb51ed`.
+  Revert-proof per finding: the fix's source hunk reverse-applied onto the
+  committed tree, the test run RED, restored, run GREEN (lines below); then
+  `.superpowers/verify-fixes.mjs` independently on the four untagged
+  commits: `fb1afb8a`, `be37d7ee`, `85d86dc7` PASS at the branch head (red then green on server); `f7015809` PASS at its own tree (`git worktree add … f7015809`) — its reverse hunk no longer applies over `be37d7ee`, which edits the adjacent lines, so the script defers to a hand run there; both runs from a detached worktree so the script's reverse-applies never touched the working tree. The otel-tagged OC-0346 test is invisible to
+  that script (it runs the untagged suite), so its proof is the hand run.
+- **Gates**, before every commit, as one `set -e` script with no pipes
+  (the first ledger flip of the day was made over a red `check:docs` hidden
+  behind `| grep` — dropped before push, obs #110): the four build-tag
+  variants, `go vet ./...` and `go vet -tags otel ./api/`,
+  `go test -race ./...`, `go test -tags deadlock -count=1 ./ws/`,
+  `golangci-lint run` (0 issues), `sqlc generate` and `genprotocol` drift
+  (clean — OC-0376 adds no query), the otel-tagged test, the frozen
+  characterization file, `check:docs`, `check:hygiene`,
+  `render-ledger.mjs --check`.
+  `go test -count=1 -run TestAuthCharacterization ./api/` green at every
+  commit: `3b7716e2`, `775eba50`, `fb1afb8a`, `f7015809`, `be37d7ee`,
+  `85d86dc7`, `4b304f6e`, `8fdb51ed`, `1be1eea4` (this block's
+  own commit is docs-only).
+
+  | Finding | Commit     | Test                                                                                                                                                                                      | RED line (fix reverted)                                                                                                                                                                                                                                                                    | GREEN                                                                                                            |
+  | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+  | OC-0346 | `775eba50` | `api/recoverer_otel_test.go` `TestRecoverer_PanicLogCarriesTraceID` — `go test -tags otel`                                                                                                | `recoverer_otel_test.go:73: panic record trace_id = "", want the span's 32-hex trace id` (req_id present, 500 returned)                                                                                                                                                                    | `ok api 1.918s`                                                                                                  |
+  | OC-0345 | `fb1afb8a` | `admin/middleware_and_spawn_test.go` `TestOwnerOnlyMiddleware_RoleLookupFailureIs503`                                                                                                     | `middleware_and_spawn_test.go:564: status = 403, want 503`                                                                                                                                                                                                                                 | all 8 `TestOwnerOnlyMiddleware_*` `ok admin 1.360s`                                                              |
+  | OC-0377 | `f7015809` | `VerifyTOTPFailurePaths/user lookup fails -> 500, challenge kept, attempt not counted`                                                                                                    | `auth_characterization_test.go:787: status = 401, want 500`                                                                                                                                                                                                                                | `ok api 3.281s`                                                                                                  |
+  | OC-0378 | `be37d7ee` | `VerifyTOTPFailurePaths/session insert fails -> 500, the challenge and the code survive` + `auth/totp_test.go` `TestPartialAuthStore_Restore*`, `TestUsedTOTPCodeStore_UnmarkAllowsReuse` | `auth_characterization_test.go:843: retry status = 401, want 200` ("invalid or expired two-factor challenge")                                                                                                                                                                              | `ok auth 0.902s`, `ok api 1.522s`                                                                                |
+  | OC-0376 | `85d86dc7` | `RegisterPolicyAndFailurePaths/session insert fails -> 500, nothing committed` + `db/coverage_boost_test.go` `TestCreateUserWithInvite_*`                                                 | ``auth_characterization_test.go:462: user row exists after the session insert failed` / `:465: invite use_count = 1, want 0 (transaction rolled back)` / `:467: body = {"INTERNAL_ERROR", "failed to create session"}, want {"INTERNAL_ERROR", "registration failed — please try again"}`` | ``ok db 0.578s` (4/4 `TestCreateUserWithInvite_*`, the happy path now asserts the session row), `ok api 1.487s`` |
+
+- **Negative controls on the exact branch** (HP-2 obs #96): OC-0377 with the
+  limiter reservation moved back ahead of the store read →
+  `auth_characterization_test.go:799: status = 429, want 401` (the faulted
+  attempt was counted); OC-0378 with `Restore` but no `Unmark` →
+  `:843: retry status = 401 … "invalid two-factor code"` (the replay
+  refusal). Both mutations reverted, rows green again.
+- **What changed, per finding.**
+  1. OC-0346 — `routerMiddleware`: `telemetry.HTTPMiddleware()` mounted
+     ahead of `recoverer`; request-id binding, security headers and the body
+     cap keep their relative positions (the file comment now names tracing
+     before recovery as part of the ordering property). The test drives a
+     panicking handler through the real stack with a real tracer provider
+     (`Exporter: "prometheus"`, no network) and reads the slog record.
+  2. OC-0345 — `ownerOnlyMiddleware`: `err != nil` → log + 503
+     `SERVICE_UNAVAILABLE` "authorization service temporarily unavailable";
+     `role == nil` stays 403 "role not found". Not switched to the context
+     role: `_RoleNotFound` and `_OwnerPassesThrough` inject only
+     `adminUserKey` and are untouched. The new test is whitebox because the
+     perimeter reads the role first and would answer its own 503.
+  3. OC-0377 — `service.ErrTOTPUnavailable` (`ErrInternal`, "two-factor
+     verification temporarily unavailable"); `challengeSecret` splits the
+     store error from nil-user/nil-secret; `limiter.Allow(totp_fail…)` moves
+     after the store read (authenticate's rule) and still precedes the code
+     compare. The row proves "not counted" with ten wrong codes → 401 and an
+     eleventh → 429. `per-user failure cap spans challenges` unchanged.
+  4. OC-0378 — claim stays atomic and first; on `issueSession` failure
+     `usedCodes.Unmark(user, code)` then `partial.Restore(token, claimed)`
+     (code first, so a concurrent retry never finds a live token with a dead
+     code). `auth.PartialAuthStore.Restore` keeps expiry and failure count
+     (an expired challenge stays gone — leaf test); `UsedTOTPCodeStore.Unmark`
+     is per (user, code). The same token and the same code then answer 200.
+  5. OC-0376 — option **B** (atomic). The client (`Client/src/main.ts`
+     `onRegister`) passes `result.token` straight to `wirePostAuth` with no
+     token-less branch, so option A (201 without a token) would have needed
+     client work; B is one `Store` method: `CreateUserWithInvite` takes the
+     session token hash, device and IP and inserts the first session inside
+     its transaction through `db.insertSession(ctx, d.q.WithTx(tx), …)` — the
+     helper `CreateSession` now shares — no query or migration change (sqlc
+     drift clean). `Register` generates the token before the transaction;
+     the H-6 cap needs no eviction for a user with no sessions. A session
+     insert fault now answers 500 "registration failed — please try again"
+     with no user row and `use_count` 0.
+- **Codex round** (`1be1eea4`, two P2s on `VerifyTOTP`, both verified
+  against the code and fixed test-first): (1) an exhausted `totp_fail`
+  window is now refused by the read-only `Check` before the store read and
+  the secret decrypt, so rotating IPs cannot drive that work past the cap;
+  the atomic `Allow` still records after the read (OC-0377 intact) —
+  `api/totp_cap_before_store_test.go`, RED `status = 500, want 429`. (2) A
+  verify whose claim loses at `Consume` releases the code it marked, so a
+  winner mid-recovery (`Restore`) is not left with a live token behind a
+  dead code — `service/auth_lost_claim_test.go` forces the interleaving
+  through the store's `GetUserByID`, RED `the losing claim left its code
+marked as used`. Codex's security review was refused by its usage limit
+  (re-requested once).
+- **Frozen set.** `auth_characterization_test.go` changed at exactly the
+  three `// known:` rows (OC-0376 ~:452, OC-0377 ~:780, OC-0378 ~:812); no
+  fourth row moved. `auth_handler_test.go`, `totp_handler_test.go`,
+  `auth_handler_delete_broadcast_test.go`: `git diff 75d64dd4 -- <file>`
+  empty.
+- **Ledger diff** (`8fdb51ed`): OC-0345, OC-0346, OC-0376, OC-0377,
+  OC-0378 `open` → `fixed` with `fix.commit`, `fix.test`,
+  `fix.revertProof: pass`; totals **315 fixed / 59 open** → **320 fixed /
+  54 open** (3 declined, 1 duplicate, 378). The four count-carrying
+  documents (`docs/plans/README.md`, `hp-0-scorecard`, `issue-register`,
+  `b0-baseline`) re-derived around every number: 54 open = 1 high, 12
+  medium, 41 low; hunts 27 / 26 / 1 (the three `b3-1` records closed);
+  53 of the 54 resolve (OC-0323 still the exception); Client 33 / Server 21.
+  Issue-register rows OC-0345 and OC-0346 marked fixed with this PR.
+- **Coverage** (statements; cover-profile blocks merged per file by range
+  with max count, then summed — the B3-2 method): `-coverpkg=./api/,./service/
+./api/ ./service/` at `1be1eea4`:
+
+  | File                  | B3-2 (`fe1d11b8`)   | B3-9 (`1be1eea4`)   |
+  | --------------------- | ------------------- | ------------------- |
+  | `api/auth_handler.go` | 98/114 = 86.0%      | 98/114 = 86.0%      |
+  | `api/totp_handler.go` | 54/60 = 90.0%       | 54/60 = 90.0%       |
+  | `service/auth.go`     | 240/253 = 94.9%     | 253/266 = 95.1%     |
+  | **slice**             | **392/427 = 91.8%** | **405/440 = 92.0%** |
+
+  At `85d86dc7` the slice measured 398/434 = 91.7%: OC-0376 gave `Register`
+  its own `auth.GenerateToken` failure branch — unreachable (crypto/rand),
+  and a duplicate of the one `issueSession` already carried — so one new
+  statement was uncovered while covered statements rose 392 → 398. Commit
+  `4b304f6e` folds token generation into one `newSessionToken`
+  helper that both `issueSession` and `Register` persist through (behaviour
+  identical: the characterization file green before and after), which is
+  the row above. Measured again at `4b304f6e`: 402/437 = 92.0%, `service/auth.go` 250/263 = 95.1%; the Codex round's two branches (`Check`, the lost-claim `Unmark`) are covered by their own tests, giving the table's figures. The handler files are untouched by B3-9 and keep B3-2's numbers.
 
 ## Exit gate
 

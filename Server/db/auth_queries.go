@@ -71,9 +71,13 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	return uid, nil
 }
 
-// CreateUserWithInvite atomically consumes an invite and creates the user in
-// the same transaction so a failed registration does not burn the invite.
-func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error) {
+// CreateUserWithInvite atomically consumes an invite, creates the user and
+// inserts the account's first session in one transaction, so a failure at any
+// step — the session insert included (OC-0376) — leaves no half-registered
+// account and does not burn the invite. sessionTokenHash must already be
+// hashed. The H-6 session cap needs no eviction here: the user has no sessions
+// yet.
+func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
@@ -113,6 +117,9 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	uid, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
+	}
+	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip); err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite create session: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite commit: %w", err)
@@ -254,9 +261,15 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 			"user_id", userID, "err", err)
 	}
 
+	return insertSession(ctx, d.q, userID, tokenHash, device, ip)
+}
+
+// insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
+// when the row must commit with other writes (CreateUserWithInvite).
+func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
 	deviceCopy, ipCopy := device, ip
-	res, err := d.q.InsertSession(ctx, dbgen.InsertSessionParams{
+	res, err := q.InsertSession(ctx, dbgen.InsertSessionParams{
 		UserID:    userID,
 		Token:     tokenHash,
 		Device:    &deviceCopy,

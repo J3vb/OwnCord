@@ -271,7 +271,8 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 }
 
 // routerMiddleware installs NewRouter's global middleware stack. The order is a
-// security property (request-id binding before the logger reads it, security
+// security property (request-id binding before the logger reads it, tracing
+// before panic recovery so the panic log carries the trace id, security
 // headers and the body cap before any handler runs) — keep it exactly as
 // written.
 func routerMiddleware(r chi.Router, cfg *config.Config) {
@@ -282,12 +283,14 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
 	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
-	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
-	r.Use(requestLogger) // structured request/response logging
 	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
 	// disabled or the otel build tag is not set, so this is safe to mount
-	// unconditionally.
+	// unconditionally. Mounted ahead of recoverer, which snapshots the trace
+	// id before dispatch: the span must already exist for the panic record to
+	// carry trace_id (OC-0346).
 	r.Use(telemetry.HTTPMiddleware())
+	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
+	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
 

@@ -449,23 +449,22 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 			t.Error("user row exists after a failed insert")
 		}
 	})
-	t.Run("session insert fails after the user is committed -> 500", func(t *testing.T) {
+	t.Run("session insert fails -> 500, nothing committed", func(t *testing.T) {
 		database := newAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
 		code := seedInvite(t, database)
 		failWrite(t, database, "INSERT", "sessions")
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
-		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
-		// known: the account and the invite use are already committed when the
-		// session insert fails, so the caller sees a 500 for a registration
-		// that succeeded — a retry gets "invalid invite or credentials" while
-		// a login with the same password works (ledger OC-0376).
-		if userByName(t, database, "fresh") == nil {
-			t.Error("user row missing: this row pins the partial-success behaviour, which has changed")
+		// OC-0376 (fixed in B3-9): the first session is inserted inside the
+		// registration transaction, so a store fault leaves no half-registered
+		// account and does not burn the invite — the caller simply retries.
+		if userByName(t, database, "fresh") != nil {
+			t.Error("user row exists after the session insert failed")
 		}
-		if n := inviteUseCount(t, database, code); n != 1 {
-			t.Errorf("invite use_count = %d, want 1 (pinned partial success)", n)
+		if n := inviteUseCount(t, database, code); n != 0 {
+			t.Errorf("invite use_count = %d, want 0 (transaction rolled back)", n)
 		}
+		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "registration failed — please try again")
 	})
 }
 
@@ -777,16 +776,31 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 	}
 	const challengeGone = "invalid or expired two-factor challenge"
 
-	t.Run("user lookup fails -> 401", func(t *testing.T) {
+	t.Run("user lookup fails -> 500, challenge kept, attempt not counted", func(t *testing.T) {
 		database, router, _, secret := setup(t)
 		pt := loginPartial(t, router, "two", "correctPass1", "", "")
 		hideTable(t, database, "users")
-		// known: totpChallengeSecret folds a database error into the same 401
-		// an expired challenge gets, so a DB fault during the second factor
-		// reads as a bad code and burns the caller's attempt budget (ledger
-		// OC-0377). The plan's rule is 5xx for a non-sentinel error; pinned
-		// as-is for B3-2, fixed in B3-9.
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusUnauthorized, "UNAUTHORIZED", challengeGone)
+		// OC-0377 (fixed in B3-9): a store fault while loading the challenged
+		// user is an outage, not a bad challenge — 5xx, the challenge stays
+		// live, and the attempt is not charged to the per-user totp_fail cap.
+		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "two-factor verification temporarily unavailable")
+		if _, err := database.ExecContext(context.Background(), `ALTER TABLE users_gone RENAME TO users`); err != nil {
+			t.Fatalf("restore users: %v", err)
+		}
+		// The cap is 10 per user: ten wrong codes must all still answer 401
+		// "invalid two-factor code" — had the faulted attempt counted, the
+		// tenth would be the 429. The first five ride the surviving challenge
+		// (which proves it was kept), the next five a fresh one.
+		attempt := 0
+		for _, token := range []string{pt, loginPartial(t, router, "two", "correctPass1", "", "")} {
+			for range 5 {
+				attempt++
+				wantErr(t, verify(t, router, token, wrongTOTPCode(t, secret), fmt.Sprintf("203.0.113.%d", attempt)), http.StatusUnauthorized, "UNAUTHORIZED", "invalid two-factor code")
+			}
+		}
+		// Negative control: the counter is live — the eleventh attempt is refused.
+		pt = loginPartial(t, router, "two", "correctPass1", "", "")
+		wantErr(t, verify(t, router, pt, totpCode(t, secret), "203.0.113.99"), http.StatusTooManyRequests, "RATE_LIMITED", "too many failed attempts, try again later")
 	})
 	t.Run("secret removed after the challenge was issued -> 401", func(t *testing.T) {
 		database, router, uid, secret := setup(t)
@@ -809,18 +823,31 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 		}
 		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to verify two-factor code")
 	})
-	t.Run("session insert fails -> 500 and the challenge is consumed", func(t *testing.T) {
+	t.Run("session insert fails -> 500, the challenge and the code survive", func(t *testing.T) {
 		database, router, _, secret := setup(t)
 		pt := loginPartial(t, router, "two", "correctPass1", "", "")
 		failWrite(t, database, "INSERT", "sessions")
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
-		// known: the partial token was consumed before the session insert, so
-		// the user must repeat the password step after a transient store
-		// failure (ledger OC-0378). Pinned as-is; the code is also marked used.
+		code := totpCode(t, secret)
+		wantErr(t, verify(t, router, pt, code, ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
+		// OC-0378 (fixed in B3-9): the verified second factor is not discarded
+		// by a store fault — the challenge is restored under the same partial
+		// token and the accepted code is released, so once the store is back
+		// the same token and the same code complete the login. (Restore alone
+		// would refuse the retry as a replay.)
 		if _, err := database.ExecContext(context.Background(), `DROP TRIGGER fault_insert_sessions`); err != nil {
 			t.Fatalf("drop trigger: %v", err)
 		}
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), "203.0.113.2"), http.StatusUnauthorized, "UNAUTHORIZED", challengeGone)
+		rr := verify(t, router, pt, code, "203.0.113.2")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("retry status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var res struct {
+			Token       string `json:"token"`
+			Requires2FA bool   `json:"requires_2fa"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &res); err != nil || res.Token == "" || res.Requires2FA {
+			t.Fatalf("retry body = %s (err %v), want a session token", rr.Body.String(), err)
+		}
 	})
 	t.Run("per-user failure cap spans challenges -> 429 on the 11th attempt", func(t *testing.T) {
 		_, router, _, secret := setup(t)
