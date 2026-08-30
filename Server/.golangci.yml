@@ -28,6 +28,7 @@ linters:
     # Silent-drop and sentinel-error classes (added 2026-08-30).
     - exhaustive # a switch over an enum-like type with no default that misses a member
     - errorlint # errors.Is/As instead of == and type assertions on wrapped errors; %w in Errorf
+    - durationcheck # time.Duration multiplied by a Duration-typed value, e.g. d*time.Second where d is already a Duration
 
   settings:
     exhaustive:
