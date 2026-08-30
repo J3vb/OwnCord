@@ -88,6 +88,16 @@ jobs:
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/...
 
+      # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
+      # but placed after the other test steps so a floor miss does not hide
+      # their results. Linux leg only: the profile is not the same on both legs
+      # — OS-tagged files swap in and out and several tests skip on Windows —
+      # so the floors are pinned to one leg and the figure stays deterministic.
+      # Ratchet rule in Server/CLAUDE.md.
+      - name: Check coverage floor
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/coverage-floor.sh coverage.out
+
       - name: Upload Go coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

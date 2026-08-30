@@ -51,3 +51,26 @@ prometheus.
   class, a reason, and the exact helper calls it is frozen at — a row is an
   inventory, not a licence for the function, so a second raw call inside a
   listed one still fails. That list only shrinks too.
+
+## Coverage floor
+
+`coverage-floor.json` holds the aggregate floor and one floor per core package
+(`ws`, `service`, `permissions`, `auth`, `db`); `db/dbgen` and `cmd/` are
+excluded there because they are generated or entry points, and an exclusion is
+spelled without a trailing slash (`cmd`, not `cmd/`). CI checks it on the Linux
+leg, after the test steps that share the job. Locally, from `Server/`:
+
+```bash
+go test -race ./... -coverprofile=coverage.out -cover
+bash scripts/coverage-floor.sh coverage.out
+```
+
+**Ratchet.** A floor is the **lowest Linux figure observed** for that package,
+truncated to 0.1, **minus 0.1 where the package varied between runs** — `ws`
+and the aggregate do vary, because a few `-race` branches in `ws` are
+timing-dependent and move four or so statements per run. A PR that raises a
+figure raises that floor in the same PR; the number in the file is what the
+branch measured, not a stale one. Nobody lowers a floor without a hold-point
+(HP) entry recording why. Coverage also differs between the Linux and Windows
+legs, so the floors track the Linux figure and the check runs only there — on
+Windows the script will report `aggregate` and `ws` under floor, by design.

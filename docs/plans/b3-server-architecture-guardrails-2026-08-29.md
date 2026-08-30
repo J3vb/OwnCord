@@ -701,6 +701,69 @@ baseline) in this section's evidence block.
   200→213), which is why rows are keyed by `<dir>.<enclosing symbol>` and never
   by `file:line`; the hit count is unchanged at 21. No production code changed.
 
+#### Evidence — item 1 (coverage floor)
+
+- Branch `feat/b3-6-coverage-floor`; commits: `843dd6c6` feat(b3-6): coverage
+  floor — script, floors and CI step (S-06), the commit carrying this block, and
+  the review-fix commit that follows them on this branch.
+- RED: `bash scripts/coverage-floor.sh --floor <99-aggregate.json> coverage.out`
+  → `coverage-floor: FAIL aggregate 79.1% (floor 99.0%, 11241/14194 statements)`
+  (exit 1); `bash scripts/coverage-floor.sh --floor <99-ws.json> coverage.out`
+  → `coverage-floor: FAIL ws 84.5% (floor 99.0%, 3181/3763 statements)`
+  (exit 1). The parser also fails closed on a floor file it cannot read whole: a
+  Prettier-wrapped `"exclude"` array exits 2 rather than silently excluding
+  nothing; a package entry sharing the closing-brace line is enforced, not
+  dropped (`"ws": 99.0 }` → `FAIL ws 84.5% (floor 99.0%)`, exit 1); a value that
+  is not an unquoted number exits 2 naming the line (`"auth": "90.8"` →
+  `floor file line 6 is not a "name": <number> entry`); and a floor file missing
+  any of the five core packages exits 2 naming it (`no floor for core package
+db`). No control file is committed.
+- GREEN: the `Check coverage floor` step of CI run `33302062524` (ubuntu leg) →
+  exit 0, six lines, `coverage-floor: ok aggregate 79.9% (floor 79.9%, 11344/14191 statements)`
+  and one `ok` line per core package. The RED runs above are local, against the
+  Windows profile, which is why their measured column reads 79.1/84.5 rather
+  than the committed Linux floors.
+- Numbers. The floors are **Linux** figures, measured by the gate itself on the
+  ubuntu leg of PR #1453 — the leg that enforces them. Two runs were needed:
+  the second (`33302732286`) failed `ws` at 86.8 against a floor of 86.9 set
+  from the first (`33302062524`), so the leg is not bit-for-bit repeatable. The
+  rule the numbers now follow: **the lowest observed Linux figure, truncated to
+  0.1, minus 0.1 where the package varied between runs.**
+
+  | figure        | run 33302062524 | run 33302732286 | varies | floor     |
+  | ------------- | --------------- | --------------- | ------ | --------- |
+  | aggregate     | 11344/14191     | 11340/14191     | yes    | **79.8**  |
+  | `auth`        | 418/460         | 418/460         | no     | **90.8**  |
+  | `db`          | 1738/2189       | 1738/2189       | no     | **79.3**  |
+  | `permissions` | 94/94           | 94/94           | no     | **100.0** |
+  | `service`     | 1204/1775       | 1204/1775       | no     | **67.8**  |
+  | `ws`          | 3271/3763       | 3267/3763       | yes    | **86.7**  |
+
+  Only `ws` moves — four statements, timing-dependent branches under `-race` —
+  and it carries the aggregate with it; the other four packages are identical
+  across both runs, so they take no headroom.
+
+  The Windows/Linux gap is separate and was measured locally with
+  `go test -race -timeout 20m ./... -coverprofile=coverage.out -cover` at the
+  merge base with `origin/dev` (`75d64dd4`): aggregate 79.1 (11241/14194),
+  `auth` 90.8, `db` 79.4 (1738/2188), `permissions` 100.0, `service` 67.8, `ws`
+  84.5 (3181/3763). It falls exactly where the pre-merge analysis said it would:
+  `ws` is higher on Linux because three `EnsureLiveKitBinary` tests and one
+  `harvest_s5` case skip on Windows, and `db` is one statement larger on Linux
+  (`lockfile_unix.go` has 11 statements where `lockfile_windows.go` has 10),
+  which costs it a tenth. `auth`, `permissions` and `service` carry no
+  OS-conditional code and are identical everywhere. Running the committed
+  floors against a Windows profile therefore reports `aggregate` and `ws` under
+  floor — expected, and the reason the gate is Linux-only.
+
+  The spec's starting aggregate of 74.6 is the B0 baseline at an older SHA; the
+  ratchet rule applies to this PR, so the committed floor is 79.8.
+
+- Verified against HEAD: `ci.yml:73` matched the spec. The gate step runs on the
+  **ubuntu-latest** leg only, and after the job's other test steps so a floor
+  miss does not hide them. Two legs would not be deterministic: the table above
+  is the measured proof that the profile is not the same on both.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
