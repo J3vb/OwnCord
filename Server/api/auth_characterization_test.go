@@ -777,16 +777,31 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 	}
 	const challengeGone = "invalid or expired two-factor challenge"
 
-	t.Run("user lookup fails -> 401", func(t *testing.T) {
+	t.Run("user lookup fails -> 500, challenge kept, attempt not counted", func(t *testing.T) {
 		database, router, _, secret := setup(t)
 		pt := loginPartial(t, router, "two", "correctPass1", "", "")
 		hideTable(t, database, "users")
-		// known: totpChallengeSecret folds a database error into the same 401
-		// an expired challenge gets, so a DB fault during the second factor
-		// reads as a bad code and burns the caller's attempt budget (ledger
-		// OC-0377). The plan's rule is 5xx for a non-sentinel error; pinned
-		// as-is for B3-2, fixed in B3-9.
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusUnauthorized, "UNAUTHORIZED", challengeGone)
+		// OC-0377 (fixed in B3-9): a store fault while loading the challenged
+		// user is an outage, not a bad challenge — 5xx, the challenge stays
+		// live, and the attempt is not charged to the per-user totp_fail cap.
+		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "two-factor verification temporarily unavailable")
+		if _, err := database.ExecContext(context.Background(), `ALTER TABLE users_gone RENAME TO users`); err != nil {
+			t.Fatalf("restore users: %v", err)
+		}
+		// The cap is 10 per user: ten wrong codes must all still answer 401
+		// "invalid two-factor code" — had the faulted attempt counted, the
+		// tenth would be the 429. The first five ride the surviving challenge
+		// (which proves it was kept), the next five a fresh one.
+		attempt := 0
+		for _, token := range []string{pt, loginPartial(t, router, "two", "correctPass1", "", "")} {
+			for range 5 {
+				attempt++
+				wantErr(t, verify(t, router, token, wrongTOTPCode(t, secret), fmt.Sprintf("203.0.113.%d", attempt)), http.StatusUnauthorized, "UNAUTHORIZED", "invalid two-factor code")
+			}
+		}
+		// Negative control: the counter is live — the eleventh attempt is refused.
+		pt = loginPartial(t, router, "two", "correctPass1", "", "")
+		wantErr(t, verify(t, router, pt, totpCode(t, secret), "203.0.113.99"), http.StatusTooManyRequests, "RATE_LIMITED", "too many failed attempts, try again later")
 	})
 	t.Run("secret removed after the challenge was issued -> 401", func(t *testing.T) {
 		database, router, uid, secret := setup(t)

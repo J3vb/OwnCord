@@ -216,7 +216,10 @@ var (
 	// Second factor.
 	ErrTOTPChallengeInvalid = &authError{ErrUnauthorized, "invalid or expired two-factor challenge"}
 	ErrTOTPSecretUnreadable = &authError{ErrInternal, "failed to verify two-factor code"}
-	ErrTOTPCodeInvalid      = &authError{ErrUnauthorized, "invalid two-factor code"}
+	// ErrTOTPUnavailable is a store fault while loading the challenged user
+	// (OC-0377): an outage, not a bad challenge, so no attempt is charged.
+	ErrTOTPUnavailable = &authError{ErrInternal, "two-factor verification temporarily unavailable"}
+	ErrTOTPCodeInvalid = &authError{ErrUnauthorized, "invalid two-factor code"}
 	// ErrTOTPAlreadyEnabled is written by the transport as 409
 	// TOTP_ALREADY_ENABLED, not the generic CONFLICT code.
 	ErrTOTPAlreadyEnabled   = &authError{ErrConflict, "disable 2FA before re-enabling"}
@@ -472,6 +475,11 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
+	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	if err != nil {
+		return nil, err
+	}
+
 	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
 	// Atomically record this attempt and reject once the per-user failure cap
 	// is reached. Recording up-front — rather than a read-only Check now and
@@ -485,13 +493,11 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// multiplier exists for shared-NAT per-IP limits; scaling a per-user
 	// threshold with it would hand a distributed attacker more guesses.
 	// Mirrors loginUserFailureThreshold staying unscaled in authenticate.
+	// The reservation sits after the store read above, as in authenticate,
+	// so an outage does not consume attempts (OC-0377); it still precedes
+	// the code compare, the check-then-act the up-front record closes.
 	if !s.limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 		return nil, ErrTooManyAttempts
-	}
-
-	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
-	if err != nil {
-		return nil, err
 	}
 
 	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
@@ -522,7 +528,14 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 // returns their decrypted TOTP secret.
 func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
 	user, err := s.st.GetUserByID(ctx, challengeUserID)
-	if err != nil || user == nil || user.TOTPSecret == nil {
+	if err != nil {
+		// GetUserByID answers (nil, nil) for an unknown user, so a non-nil
+		// error is a store fault: report the outage, not a bad challenge
+		// (OC-0377). VerifyTOTP records no attempt for it.
+		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
+		return nil, "", ErrTOTPUnavailable
+	}
+	if user == nil || user.TOTPSecret == nil {
 		return nil, "", ErrTOTPChallengeInvalid
 	}
 
