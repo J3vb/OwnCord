@@ -6,6 +6,8 @@
 #                    committed seed corpus; this generates new inputs.
 # sim                Run the seeded hub simulation long: 10,000 steps per seed.
 #                    CI runs its 200 x 20 default through `go test -race ./...`.
+# bench-baseline     Record a benchmark baseline into docs/plans/. Recorded, not
+#                    gated: no CI step reads it (that gate is B6's).
 # cover              Per-package coverage (what CI uploads) + a function summary.
 # cover-all          Cross-package coverage — the honest number. See below.
 # sqlc-generate      Regenerate type-safe Go from sqlc.yaml (db/dbgen).
@@ -20,7 +22,7 @@
 
 SQLC_VERSION := $(shell cat sqlc.version)
 
-.PHONY: test test-deadlock fuzz sim cover cover-all sqlc-install sqlc-generate sqlc-verify \
+.PHONY: test test-deadlock fuzz sim bench-baseline cover cover-all sqlc-install sqlc-generate sqlc-verify \
         protocol-generate protocol-verify docs-generate docs-verify otel-up otel-down
 
 test:
@@ -60,6 +62,17 @@ fuzz:
 SIMSTEPS ?= 10000
 sim:
 	OWNCORD_SIM_STEPS=$(SIMSTEPS) go test -race -count=1 -run '^TestHubSimulation$$' ./ws/
+
+# The six Benchmark* the baseline is made of, six repeats each, through
+# benchstat into docs/plans/b3-bench-baseline-<date>.md. Deliberately local and
+# deliberately in no workflow: baselines are recorded, not gated (B6 owns the
+# gate). The script fails if any expected benchmark name is missing from the
+# run, so a rename cannot silently shorten the table.
+#
+# No make on Windows? ./scripts/bench-baseline.sh from Server/ in Git Bash.
+BENCH_COUNT ?= 6
+bench-baseline:
+	BENCH_COUNT=$(BENCH_COUNT) ./scripts/bench-baseline.sh
 
 # Matches the CI invocation. Note that `go test ./... -coverprofile` instruments
 # each package only for itself, so a package whose code is mostly exercised

@@ -18,7 +18,7 @@ import (
 
 // newTestDB opens an in-memory database with the full migration set applied and
 // registers cleanup. Each test gets an isolated database.
-func newTestDB(t *testing.T) *db.DB {
+func newTestDB(t testing.TB) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -33,7 +33,7 @@ func newTestDB(t *testing.T) *db.DB {
 
 // seedRole upserts a role by id (overriding a default role's bits when the id
 // collides with one of the migration-seeded defaults).
-func seedRole(t *testing.T, database *db.DB, r *db.Role) {
+func seedRole(t testing.TB, database *db.DB, r *db.Role) {
 	t.Helper()
 	// Migration 023 made role names unique case-insensitively, so a test that
 	// redefines role 3 as "member" now collides with the seeded "Member"
@@ -120,7 +120,7 @@ func seedUser(t *testing.T, database *db.DB, u *db.User) {
 }
 
 // seedChannel upserts a channel by id.
-func seedChannel(t *testing.T, database *db.DB, ch *db.Channel) {
+func seedChannel(t testing.TB, database *db.DB, ch *db.Channel) {
 	t.Helper()
 	ctype := ch.Type
 	if ctype == "" {

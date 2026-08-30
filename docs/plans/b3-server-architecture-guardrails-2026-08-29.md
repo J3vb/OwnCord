@@ -1192,6 +1192,92 @@ auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
   after 10m0s" with a goroutine dump that is not a detector hit); the gate
   needs `-timeout 60m`.
 
+#### Evidence — item 6 (benchmarks and baselines)
+
+- Branch `feat/b3-6-benchmarks`, rebased onto `feat/b3-6-hub-sim` tip
+  `84568330` so `BenchmarkReconnectStorm` is on the base; commits: 2b313730
+  `test(b3-6): benchmarks and the bench-baseline script (item 6)`, ec8ef24a
+  `docs(b3-6): recorded bench baseline 2026-08-30 and the item 6 evidence
+block`, plus the review-fix commit carrying this text (its own SHA is in the
+  PR, not here).
+- The six, one `_test.go` per package touched: `PermissionInvalidation`,
+  `BroadcastFanout`, `ReplaySelection`, `ReconnectStorm` (`ws/hub_bench_test.go`),
+  `ReadStateWrite` (`service/readstate_bench_test.go`), `UploadAdmission`
+  (`api/upload_bench_test.go`). Each drives a real entry point —
+  `RefreshChannelVisibility`, `deliverBroadcast`, `EventRingBuffer.EventsSince`,
+  `reconnectRegister`, `ChannelService.HandleChannelFocus`,
+  `sanitizeUploadFilename` + `storage.ValidateFileType` — with setup outside the
+  timer and `b.ReportAllocs()`.
+- RED (guard 1, the name is gone): `BenchmarkReplaySelection` renamed to
+  `BenchmarkReplaySelectionRenamed`, then
+  `BENCH_COUNT=1 ./scripts/bench-baseline.sh` →
+  `bench-baseline: expected benchmark(s) missing from the run: ReplaySelection`
+  / `renamed or deleted. Restore the name, or edit EXPECTED in` /
+  `scripts/bench-baseline.sh on purpose. No baseline written.`, exit 1 and no
+  file written. Name restored.
+- RED (guard 2, the row is gone but the name is not): `quietLogs(b)` removed
+  from `BenchmarkReconnectStorm` so its result line is corrupted by the hub's
+  own log output, then `BENCH_COUNT=1 ./scripts/bench-baseline.sh` → guard 1
+  passes (the raw line still starts with `BenchmarkReconnectStorm-`), benchstat
+  warns `parsing iteration count: invalid syntax` and exits 0, and guard 2
+  fires: `bench-baseline: benchstat produced no row for: ReconnectStorm` /
+  `the benchmark ran but its result line was unparseable —` / `No baseline
+written.`, exit 1. The committed baseline's checksum was unchanged across the
+  run. Restored.
+- RED (no truncation on a render failure): the benchstat pin temporarily set to
+  `v0.0.0-00010101000000-000000000000`, then
+  `BENCH_COUNT=1 ./scripts/bench-baseline.sh` →
+  `go: golang.org/x/perf/cmd/benchstat@…: invalid version: unknown revision
+000000000000`, exit 1, and the committed baseline unchanged (4593 bytes, same
+  md5 before and after). The document renders into the temp directory and is
+  `mv`-ed onto its path only after both guards pass. Pin restored.
+- GREEN (guardrail): `./scripts/bench-baseline.sh` →
+  `bench-baseline: wrote ../docs/plans/b3-bench-baseline-2026-08-30.md`,
+  64 s wall at `-count=6` — inside the ~5 minute budget the item sets.
+- GREEN (smoke): `go test -run '^$' -bench '^Benchmark(PermissionInvalidation|ReadStateWrite|BroadcastFanout|ReplaySelection|UploadAdmission|ReconnectStorm)$' -benchmem -benchtime=1x ./...`
+  → all six ran, one iteration each: `BenchmarkUploadAdmission-32 1 5600 ns/op`,
+  `BenchmarkReadStateWrite-32 1 145300 ns/op`,
+  `BenchmarkReconnectStorm-32 1 347200 ns/op`,
+  `BenchmarkPermissionInvalidation-32 1 947800 ns/op`,
+  `BenchmarkBroadcastFanout-32 1 5500 ns/op`,
+  `BenchmarkReplaySelection-32 1 4000 ns/op`.
+- Numbers — benchstat medians over `-count=6` at ec8ef24a, go1.26.7
+  windows/amd64, Ryzen 9 7950X3D. Full table in
+  [b3-bench-baseline-2026-08-30](b3-bench-baseline-2026-08-30.md):
+
+| Benchmark              | sec/op       | B/op    | allocs/op |
+| ---------------------- | ------------ | ------- | --------- |
+| PermissionInvalidation | 884.2µ ± 6%  | 121.0Ki | 3601      |
+| ReconnectStorm         | 428.0µ ± 9%  | 592.2Ki | 952       |
+| ReadStateWrite         | 54.59µ ± 12% | 5.599Ki | 163       |
+| ReplaySelection        | 14.82µ ± 14% | 31.35Ki | 10        |
+| BroadcastFanout        | 3.390µ ± 1%  | 992.0   | 2         |
+| UploadAdmission        | 260.9n ± 4%  | 56.00   | 3         |
+
+- Verified against HEAD: (a) `BenchmarkReconnectStorm` is on the base, so the
+  expected set is six, as the item's base note allows. (b) `golang.org/x/perf`
+  publishes no semver tags — `proxy.golang.org/golang.org/x/perf/@v/list` is
+  empty — so the pin is the newest resolvable version, the pseudo-version
+  `v0.0.0-20260825160852-19be9d8e6c70`, run through `go run` and deliberately
+  absent from `go.mod`. (c) `newTestHub` already took `testing.TB`; the three
+  `service` seed helpers the read-state benchmark reuses (`newTestDB`,
+  `seedRole`, `seedChannel`) took `*testing.T` and were widened to `testing.TB`,
+  which every existing caller still satisfies — no production file changed.
+  (d) `go test` prints a benchmark's name and padding _before_ running it, so
+  the hub's per-registration `INFO` line landed inside the result line and
+  benchstat dropped three of the six from the table without failing; the
+  benchmarks now point the default logger at `io.Discard` for their duration
+  (`quietLogs`), which is the one line added to the hub-simulation item's
+  `BenchmarkReconnectStorm`. (e) `HandleChannelFocus` skips a no-op read-state
+  write, so a repeated focus by one user measures the skip; the benchmark
+  focuses a distinct pre-seeded user per iteration to stay on the write branch.
+  (f) Review round 1: the document is rendered into the temp directory and
+  `mv`-ed onto its path only after both guards pass, so a benchstat failure can
+  no longer truncate the committed baseline; and the expected-name loop runs a
+  second time over the rendered table, because a result line corrupted from
+  inside the benchmark still starts with the benchmark's name and so satisfies
+  the raw-output guard while benchstat silently drops the row.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
