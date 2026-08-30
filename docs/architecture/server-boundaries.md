@@ -3,7 +3,8 @@
 **Written:** 2026-08-29 (B3-0), measured at `dev` `ad4defc2`.
 **Re-measured:** 2026-08-30 (B3-2) — the first table and the auth slice's
 after-state at `fe1d11b8` (pre-squash; the squash SHA is in the plan's B3-2
-evidence block).
+evidence block); 2026-08-30 (B3-3) — the first table again, and the hub
+lifecycle section's after-state rows, on `feat/b3-3-lifecycle`.
 **Owner:** the B3 plan,
 [plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
@@ -147,14 +148,15 @@ Reading the table:
 
 ## Hub lifecycle inventory
 
-Input to B3-3 (`internal/app/`) and B3-4 (constructor options). Measured at
-the same commit.
+Input to B3-3 (`internal/app/`) and B3-4 (constructor options). The
+before-state was measured at `ad4defc2`; the after-state rows are B3-3's, on
+`feat/b3-3-lifecycle`, and are what B3-4 starts from.
 
-### Construction and setters (S-11)
+### Construction and setters (S-11) — before B3-3
 
-`ws.NewHub(database, limiter, svc)` is called **once**, inside
+`ws.NewHub(database, limiter, svc)` was called **once**, inside
 `api.NewRouter` (`Server/api/router.go:106`) — not in `main.go`. The seven
-post-construction setters and where they are called:
+post-construction setters and where they were called:
 
 | Setter                    | Declared                     | Called from                       | Required before `Run`?                                                                     |
 | ------------------------- | ---------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -167,11 +169,34 @@ post-construction setters and where they are called:
 | `SetPendingVoiceModFlags` | `ws/voice_moderation.go:599` | voice moderation paths at runtime | no — genuinely replaceable runtime state; stays a setter                                   |
 
 Two owners (the router and `main.go`) set collaborators on one hub, and the
-hub starts (`hub.Run`, `ws/hub.go:273`) with no check that the required ones
-are present. B3-3 moves construction into `internal/app/` so there is one
-call site; B3-4 turns the four "yes" rows into validated `HubOptions` and
-leaves the three optional ones as setters with that reason written beside
-them.
+hub started (`hub.Run`, `ws/hub.go:273`) with no check that the required ones
+were present.
+
+### Construction and setters (S-11) — after B3-3
+
+`ws.NewHub` is called from `app.StartRuntime`
+(`Server/internal/app/hub.go`), which also applies every setter that must
+land before `hub.Run` and then starts the dispatch goroutine.
+`api.NewRouter` takes the built hub as part of `api.Runtime` and returns only
+the handler and its cleanup.
+
+| Setter                    | Called from (before)              | Called from (after)                                   | Still required before `Run`?   |
+| ------------------------- | --------------------------------- | ----------------------------------------------------- | ------------------------------ |
+| `SetPluginRegistry`       | `api/router.go:325`               | `internal/app/hub.go` (`wirePlugins`)                 | optional                       |
+| `SetPluginEventSink`      | `api/router.go:328`               | `internal/app/hub.go` (`wirePlugins`)                 | optional                       |
+| `SetLiveKit`              | `api/router.go:342`               | `internal/app/hub.go` (`startVoice`)                  | **yes** for voice              |
+| `SetLiveKitProcess`       | `api/router.go:360`               | `internal/app/hub.go` (`startVoice`)                  | when supervised                |
+| `SetEventPersister`       | `main.go:453`                     | `internal/app/persistence.go` (`startEventPersister`) | **yes** when persistence is on |
+| `SetEventStore`           | `main.go:454`                     | `internal/app/persistence.go` (`startEventPersister`) | **yes** for replay             |
+| `SetPendingVoiceModFlags` | voice moderation paths at runtime | unchanged                                             | no                             |
+
+One **owner**: every row is now inside `internal/app`. Two of them are still
+in a second file — the persister and the store are set where the persister is
+built, one lifecycle stage after the hub, because both setters are explicitly
+safe to call after `Run` has started (`ws/hub_events.go`) and moving them
+earlier would reorder the boot. B3-4 is what collapses them into validated
+`HubOptions` at the single construction point; the router is no longer one of
+the places that has to change for it.
 
 ### Locks
 
@@ -191,12 +216,12 @@ Five locks on `Hub`, all `syncutil` (so the `-tags deadlock` pass sees them):
 package comment before it moves a single function, so every pure-move commit
 has something to be checked against.
 
-### Start, drain, stop (`main.go` `run`, `main.go:107`)
+### Start, drain, stop — before B3-3 (`main.go` `run`, `main.go:107`)
 
-Start order, then the `defer` stack that undoes it (LIFO — the last started
-is the first stopped):
+Start order, then the `defer` stack that undid it (LIFO — the last started
+was the first stopped):
 
-| #   | Start (`main.go`)                                        | Stop (`defer`, in registration order — runs in reverse)    |
+| #   | Start (`main.go`)                                        | Stop (`defer`, in registration order — ran in reverse)     |
 | --- | -------------------------------------------------------- | ---------------------------------------------------------- |
 | 1   | background context                                       | `bgCancel()` `:118`                                        |
 | 2   | `runOpenDatabase` → `db.OpenWithMaxReaders` `:314-322`   | `database.Close()` `:148`                                  |
@@ -211,14 +236,62 @@ is the first stopped):
 | 11  | `signal.NotifyContext` `:214`                            | `stop()` `:215`                                            |
 | 12  | `runServeAndWait` `:629` → `runShutdownServers` `:667`   | `srv.Shutdown`, `acmeSrv.Shutdown`, hub drain              |
 
-Three facts B3-3's composite close must preserve, each already encoded in a
+Three facts B3-3's composite close had to preserve, each already encoded in a
 comment at the cited line: the audit writer's stop is registered **after**
 `database.Close` so it flushes before the handle goes (`:183-186`); event
 persistence stops before the LIFO-later `database.Close` so no prune is still
 running (`:476`); `hub.GracefulStop` must run even on an early return so the
 supervised LiveKit process is not orphaned (`:168-172`). Any early `return
-err` between steps 2 and 12 relies on this defer stack — there is no single
-close function, which is exactly what B3-3's failure-injection test pins.
+err` between steps 2 and 12 relied on this defer stack — there was no single
+close function, which is exactly what B3-3's failure-injection test now pins.
+
+### Start, drain, stop — after B3-3 (`App.stages()` / `App.Close`)
+
+`Server/internal/app/lifecycle.go` declares the start sequence as a list, and
+`App.Close` walks the close step each stage registered in the reverse of that
+order. There is no `defer` stack and no second teardown path: `App.Run` closes
+on every return — a failed start, a serve error and a clean shutdown alike.
+
+| #   | Stage (`App.stages()`) | Close step, and what it does                                                      |
+| --- | ---------------------- | --------------------------------------------------------------------------------- |
+| 1   | (in `Run`) `bgCtx`     | `background-context` — cancels bgCtx; registered first, so it runs **last**       |
+| 2   | `data-dir`             | —                                                                                 |
+| 3   | `tls`                  | —                                                                                 |
+| 4   | `database`             | `database` — `database.Close()`, registered before the migration runs             |
+| 5   | `migrate`              | —                                                                                 |
+| 6   | `telemetry`            | `telemetry` — bounded OTel shutdown                                               |
+| 7   | `plugins`              | `plugins` — `registry.Close`                                                      |
+| 8   | `hub`                  | `hub` — `GracefulStopContext`, the only caller of `LiveKitProcess.Stop`           |
+| 9   | `router`               | `router` — the rate-limiter cleanup goroutine                                     |
+| 10  | `event-persistence`    | `event-persistence` — drains the persister, cancels bgCtx, joins the pruner       |
+| 11  | `audit-writer`         | `audit-writer` — drains the audit queue                                           |
+| 12  | `maintenance`          | `maintenance` — joins the maintenance loop                                        |
+| 13  | `acme`                 | — (shut down by the `http` step, in the order the drain requires)                 |
+| 14  | `http`                 | `http` — ACME shutdown, then in-flight handlers, then the hub, on one 30s budget  |
+| 15  | `signals`              | `signals` — unregisters the signal handler; registered last, so it runs **first** |
+
+Close order is therefore `signals`, `http`, `maintenance`, `audit-writer`,
+`event-persistence`, `router`, `hub`, `plugins`, `telemetry`, `database`,
+`background-context`. All three facts hold, and now hold **because of the
+ordering rule** rather than because of where a `defer` happened to sit:
+
+- the audit writer and event persistence both start after the database opens,
+  so both stop before `database.Close`;
+- the `http` step runs first, so in-flight handlers drain while the hub and
+  the event persister are still live — which is why ACME and the HTTP server
+  start one stage after the maintenance loop rather than before it;
+- the `hub` step is reached on every return from `Run`, so a supervised
+  livekit-server process is never orphaned (OC-0027).
+
+`App.Close` reports the **first** error and still runs every later step: the
+steps below a failing one are the ones that release the database handle, the
+LiveKit process and the audit queue. `internal/app/close_test.go` pins the
+order, the first-error rule and idempotence;
+`internal/app/lifecycle_failure_test.go` fails each stage in turn — the table
+is generated from `App.stages()`, so a new stage is covered the day it is
+added — and asserts on every row that the error names the stage, no goroutine
+is left running, the database handle is closed and the listener is not left
+bound.
 
 ## Auth slice — before-state dependency graph
 
