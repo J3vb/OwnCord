@@ -27,8 +27,9 @@ func TestRateLimiterCleanupHorizon_CoversMaxSlowMode(t *testing.T) {
 }
 
 // setAuthRateScale/scaledAuthLimit gate every per-IP auth limit
-// (auth_handler.go:107-136) and the per-IP login failure threshold that arms
-// the lockout (auth_handler.go:514,537). The multiplier is operator-supplied
+// (auth_handler.go MountAuthRoutes) and, through auth.ScaledLimit, the per-IP
+// login failure threshold that arms the lockout (service/auth.go
+// authenticate). The multiplier is operator-supplied
 // via security.auth_rate_limit_multiplier and config validates nothing, so
 // this clamp is all that stands between a typo and brute-force protection
 // disappearing.
@@ -49,7 +50,7 @@ func TestSetAuthRateScale_ClampsMultiplier(t *testing.T) {
 		{"below the floor clamps to 0.1x", 1e-9, verifyTOTPRateLimitPerMinute, 1},
 		{"at the floor is 0.1x", 0.1, verifyTOTPRateLimitPerMinute, 1},
 		{"in range scales and rounds", 0.5, loginRateLimitPerMinute, 3},
-		{"in range scales the failure threshold", 2, loginFailureThreshold, 18},
+		{"in range scales the failure threshold", 2, 9, 18}, // 9 = service/auth.go loginFailureThreshold
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,7 +64,7 @@ func TestSetAuthRateScale_ClampsMultiplier(t *testing.T) {
 }
 
 // A limit of 0 lets nothing through: on the login failure threshold
-// (auth_handler.go:514) that locks every IP out on its first attempt. The
+// (service/auth.go authenticate) that locks every IP out on its first attempt. The
 // smallest allowed multiplier must still leave every scaled limit usable.
 func TestScaledAuthLimit_NeverBelowOne(t *testing.T) {
 	t.Cleanup(func() { setAuthRateScale(1.0) })
@@ -75,7 +76,7 @@ func TestScaledAuthLimit_NeverBelowOne(t *testing.T) {
 		loginRateLimitPerMinute,
 		verifyTOTPRateLimitPerMinute,
 		sensitiveEndpointRateLimitPerMinute,
-		loginFailureThreshold,
+		9, // service/auth.go loginFailureThreshold
 	} {
 		if got := scaledAuthLimit(n); got < 1 {
 			t.Errorf("scaledAuthLimit(%d) = %d at the 0.1x floor, want >= 1", n, got)
@@ -85,20 +86,19 @@ func TestScaledAuthLimit_NeverBelowOne(t *testing.T) {
 
 // The multiplier exists for shared-NAT *per-IP* limits. The per-user caps are
 // the only cross-IP brute-force defence, so scaling them would hand a
-// distributed attacker up to 100x the guesses (totp_handler.go:76-80). Those
-// caps are only observable through a limiter key inside the handler, so this
-// pins the call site instead.
+// distributed attacker up to 100x the guesses (service/auth.go VerifyTOTP).
+// Those caps are only observable through a limiter key inside the service, so
+// this pins the call site instead.
 func TestPerUserFailureCapsStayUnscaled(t *testing.T) {
 	for file, constants := range map[string][]string{
-		"totp_handler.go": {"totpFailureRateLimit"},
-		"auth_handler.go": {"loginUserFailureThreshold"},
+		"../service/auth.go": {"totpFailureRateLimit", "loginUserFailureThreshold"},
 	} {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		for _, c := range constants {
-			if strings.Contains(string(src), "scaledAuthLimit("+c) {
+			if strings.Contains(string(src), "ScaledLimit("+c) || strings.Contains(string(src), "scaledAuthLimit("+c) {
 				t.Errorf("%s scales %s with the per-IP auth multiplier; per-user caps must stay unscaled",
 					file, c)
 			}

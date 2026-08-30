@@ -14,6 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // contextKey is an unexported type for context keys in this package.
@@ -65,6 +66,18 @@ func (t *touchThrottle) shouldTouch(hash string, now time.Time) bool {
 	}
 	t.seen[hash] = now
 	return true
+}
+
+// principal returns the caller AuthMiddleware resolved for r as the shape
+// the service layer takes. ok is false when the request carries no
+// authenticated user; Session is nil for an API-token principal.
+func principal(r *http.Request) (service.Principal, bool) {
+	user, ok := r.Context().Value(UserKey).(*db.User)
+	if !ok || user == nil {
+		return service.Principal{}, false
+	}
+	sess, _ := r.Context().Value(SessionKey).(*db.Session)
+	return service.Principal{User: user, Session: sess}, true
 }
 
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates

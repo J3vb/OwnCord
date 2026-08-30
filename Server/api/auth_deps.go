@@ -12,12 +12,17 @@ import (
 // service.AuthService implements it. A handler decodes and validates the
 // request, calls one method, and encodes either the result or the returned
 // service.Err* value; every lockout, password compare, sentinel mapping,
-// audit write and broadcast lives behind these eight methods.
+// audit write and broadcast lives behind these nine methods.
 //
-// Eight methods stand in for the ten *db.DB methods, two db functions and two
+// Nine methods stand in for the ten *db.DB methods, two db functions and two
 // db sentinels the two handlers called directly at 71d867cb
 // (docs/architecture/server-boundaries.md, "Auth slice").
 type AuthService interface {
+	// RegistrationPolicy reports whether registration is permitted right now.
+	// It is the one gate that runs before the body is read: two
+	// characterization rows pin a closed server's 403 ahead of any
+	// credential, malformed body included.
+	RegistrationPolicy(ctx context.Context) error
 	// Register consumes the invite, creates the account and issues a session.
 	// in is already validated (see service.RegisterInput).
 	Register(ctx context.Context, in service.RegisterInput) (*service.AuthResult, error)
@@ -43,3 +48,6 @@ type AuthService interface {
 	// 2FA, clears the secret and revokes the caller's other sessions.
 	DisableTOTP(ctx context.Context, p service.Principal, password string) (*service.TOTPChangeResult, error)
 }
+
+// The production implementation satisfies the interface it was extracted for.
+var _ AuthService = (*service.AuthService)(nil)

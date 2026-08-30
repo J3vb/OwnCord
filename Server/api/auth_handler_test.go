@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -45,7 +46,7 @@ func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 
 func buildAuthRouterWithProxies(database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) http.Handler {
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, trustedProxies, testTOTPKey)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(database), limiter, trustedProxies)
 	return r
 }
 
