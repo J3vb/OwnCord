@@ -72,6 +72,14 @@ jobs:
       - name: Run tests with race detection and coverage
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
+      # Coverage ratchet (B3-6 item 1). Linux leg only: the profile is not the
+      # same on both legs — OS-tagged files swap in and out and several tests
+      # skip on Windows — so the floors are pinned to one leg's number and the
+      # figure stays deterministic. Ratchet rule in Server/CLAUDE.md.
+      - name: Check coverage floor
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/coverage-floor.sh coverage.out
+
       - name: Run tests with deadlock detection
         run: go test -tags deadlock -count=1 ./...
 

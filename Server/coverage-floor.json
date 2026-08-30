@@ -1,0 +1,12 @@
+{
+  "_doc": "Coverage floors enforced by scripts/coverage-floor.sh. Ratchet rule and shape: Server/CLAUDE.md.",
+  "aggregate": 79.1,
+  "exclude": ["db/dbgen", "cmd"],
+  "packages": {
+    "auth": 90.8,
+    "db": 79.4,
+    "permissions": 100.0,
+    "service": 67.8,
+    "ws": 84.5
+  }
+}
