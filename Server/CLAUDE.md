@@ -40,3 +40,12 @@ prometheus.
   imports it needs a row in `invariants/db_import_boundary.go` (`DBImportAllow`)
   with a disposition and reason — the B3 inventory, which only shrinks. New
   persistence goes behind a service, not into a handler.
+- Only `permissions/` calls the raw permission bit helpers (`HasPerm`,
+  `HasAnyPerm`, `HasServerPerm`, `HasAdmin`, `EffectivePerms`,
+  `EffectiveChannelPerms`). Everywhere else resolves a `permissions.Subject`
+  and asks the predicate that owns the property (`CanViewChannel`,
+  `CanAdmitSession`, `CanSendMessage`, `CanType`, `CanJoinVoice`,
+  `CanModerateVoice`) — one predicate per security property, so a call site
+  cannot re-derive half a rule. The residue that predates B2-5 is listed by
+  symbol in `invariants/authz_chokepoint.go` (`AuthzResidueAllow`) with a
+  class and a reason; that list only shrinks too.

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -61,7 +62,81 @@ func (r Rule) inScope(dir string) bool {
 }
 
 // Rules is the registry every gate runs.
-var Rules = []Rule{syncutilLocks, dbImportBoundary}
+var Rules = []Rule{syncutilLocks, dbImportBoundary, authzChokepoint}
+
+// importNames returns the local identifiers this file binds to the import
+// path, and separately every dot-import of it (import . "p"), which binds no
+// identifier at all. A rule that matches pkg.Sym selectors needs both: the
+// names to match against, and the dot-imports to report, since a dot-import
+// lets the symbol be spelled bare and evade the selector match entirely.
+//
+// An unaliased import binds the package's own clause name, which is not in the
+// file being parsed; the last path element stands in for it. That holds for
+// every path these rules care about (all first-party, all named after their
+// directory) and would need the package's own source for one where it does not
+// (gopkg.in/yaml.v3 binds yaml, not yaml.v3).
+func importNames(f *ast.File, importPath string) (names map[string]bool, dotImports []*ast.ImportSpec) {
+	names = make(map[string]bool)
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != importPath {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			names[path.Base(importPath)] = true
+		case imp.Name.Name == "_":
+			// Blank import: no identifier is bound, so pkg.Sym cannot be
+			// spelled at all.
+		case imp.Name.Name == ".":
+			dotImports = append(dotImports, imp)
+		default:
+			names[imp.Name.Name] = true
+		}
+	}
+	return names, dotImports
+}
+
+// enclosingSymbol names the function or method containing pos, in the form
+// rules use for a symbol-keyed allowlist: "requirePerm" for a function,
+// "(*Hub).canSee" for a method. An expression outside every function body (a
+// package-level var initializer) has no enclosing function and gets
+// fileScopeSymbol, which no allowlist row is expected to name.
+func enclosingSymbol(f *ast.File, pos token.Pos) string {
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || pos < fd.Pos() || pos >= fd.End() {
+			continue
+		}
+		if fd.Recv == nil || len(fd.Recv.List) == 0 {
+			return fd.Name.Name
+		}
+		return "(" + receiverTypeName(fd.Recv.List[0].Type) + ")." + fd.Name.Name
+	}
+	return fileScopeSymbol
+}
+
+// fileScopeSymbol stands in for "not inside any function".
+const fileScopeSymbol = "<file-scope>"
+
+// receiverTypeName renders a method receiver's type syntactically: Hub,
+// *Hub, or the generic forms *Hub[T] / *Hub[K, V] reduced to their base name,
+// which is what identifies the method. Written by hand rather than with
+// go/types.ExprString so the package keeps its go/ast-only promise.
+func receiverTypeName(e ast.Expr) string {
+	switch t := e.(type) {
+	case *ast.StarExpr:
+		return "*" + receiverTypeName(t.X)
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr: // generic receiver: Hub[T]
+		return receiverTypeName(t.X)
+	case *ast.IndexListExpr: // generic receiver: Hub[K, V]
+		return receiverTypeName(t.X)
+	default:
+		return "?"
+	}
+}
 
 // allowPrefix introduces a line-scoped suppression:
 //
@@ -172,6 +247,13 @@ var skipDirs = map[string]bool{
 // separated and already relative to root, which is exactly the form
 // CheckSource and Violation.File want.
 func Run(root string) ([]Violation, error) {
+	return runWith(Rules, root)
+}
+
+// runWith is Run against an explicit rule set rather than the global registry
+// — the walker counterpart of checkSourceWith, so one rule's tests can sweep
+// the real tree in isolation.
+func runWith(rules []Rule, root string) ([]Violation, error) {
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, err
@@ -206,7 +288,7 @@ func Run(root string) ([]Violation, error) {
 		if err != nil {
 			return err
 		}
-		out = append(out, CheckSource(fset, p, src)...)
+		out = append(out, checkSourceWith(rules, fset, p, src)...)
 		return nil
 	})
 	if err != nil {
