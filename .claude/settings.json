@@ -8,7 +8,31 @@
       "Edit(Client/src/lib/protocolTypes.ts)",
       "Write(Client/src/lib/protocolTypes.ts)",
       "Edit(Client/src/generated/**)",
-      "Write(Client/src/generated/**)"
+      "Write(Client/src/generated/**)",
+      "Read(**/.env)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/claude-hook.mjs\" session-start"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/claude-hook.mjs\" pre-bash"
+          }
+        ]
+      }
     ]
   }
 }
