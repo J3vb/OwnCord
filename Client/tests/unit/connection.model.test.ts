@@ -85,6 +85,7 @@ import { clearAuth } from "../../src/stores/auth.store";
 import { getChannelMessages } from "../../src/stores/messages.store";
 import { voiceStore, setPeerVerification } from "../../src/stores/voice.store";
 import type {
+  AuthOkPayload,
   ChatMessagePayload,
   ReadyPayload,
   ReadyVoiceState,
@@ -136,7 +137,7 @@ interface Real {
  * that can no longer fire, a payload the dispatcher starts ignoring) is a
  * silent hole, not a pass.
  */
-const exercised = { ids: 0, seq: 0, verified: 0, staleTeardown: 0 };
+const exercised = { ids: 0, seq: 0, verified: 0, staleTeardown: 0, resumeReplay: 0 };
 
 /** Let the ws client's awaits and the dispatcher's lazy imports settle. */
 async function settle(): Promise<void> {
@@ -152,6 +153,27 @@ function emit(type: string, payload: unknown, seq?: number): void {
 
 function member(id: number, username: string) {
   return { id, username, avatar: null, role: "member", status: "online" as const };
+}
+
+function authOkPayload(replaySource: "none" | "buffer"): AuthOkPayload {
+  return {
+    user: { id: SELF_ID, username: "me", avatar: null, role: "member" },
+    server_name: "test",
+    motd: "",
+    replay_source: replaySource,
+  };
+}
+
+/**
+ * The message a resume replays: one that committed while we were away, or —
+ * once the id pool is exhausted — a redelivery of one we already hold, which
+ * is the other real shape a replay burst takes.
+ */
+function replayedMessageId(m: Model): number {
+  for (let id = MESSAGE_IDS.min; id <= MESSAGE_IDS.max; id++) {
+    if (!m.ids.includes(id)) return id;
+  }
+  return m.ids[m.ids.length - 1] as number;
 }
 
 function chatPayload(id: number): ChatMessagePayload {
@@ -266,7 +288,22 @@ function cmd(
   return { check, run, toString: () => name };
 }
 
-/** Connect: open the socket, hand over the auth frame, complete the handshake. */
+/**
+ * Connect: open the socket, hand over the auth frame, complete the handshake.
+ *
+ * The handshake has two shapes on the wire, and they are not interchangeable
+ * (`Server/ws/serve.go`; the epoch-1 fixtures record both):
+ *  - fresh / full-resync fallback (`last_seq` 0, or replay refused):
+ *    `handleFreshConnect` writes `auth_ok` with `replay_source: "none"`
+ *    followed by `ready` — `fresh-connect.json` records exactly that.
+ *  - resume (`last_seq > 0`, replay accepted): `reconnectWriteReplay` writes
+ *    `auth_ok` with the tier, then the missed events, and **no `ready` at
+ *    all** — `resume-replay.json` records `auth_ok(buffer)` → `presence` →
+ *    `chat_message` → `presence`.
+ * Modelling a resume as `auth_ok` + `ready` (as this did before) meant the
+ * dispatcher never saw the `auth_ok → replayed events` ordering, and the
+ * post-resume state was repaired by a snapshot that never arrives.
+ */
 const connectCmd = cmd(
   "Connect",
   (m) => !m.connected,
@@ -283,21 +320,32 @@ const connectCmd = cmd(
     // watermark becomes observable. A fresh connect declares 0 and proves
     // nothing, so only a resume (`m.seq > 0`, i.e. frames survived a
     // Disconnect without a resync or logout in between) counts as coverage.
+    const resume = m.seq > 0;
     const auth = r.sent.slice(before).find((e) => e.type === "auth");
     expect(auth, "connect sent no auth frame").toBeDefined();
     expect(auth?.payload?.last_seq).toBe(m.seq);
-    if (m.seq > 0) exercised.seq++;
+    if (resume) exercised.seq++;
 
-    emit("auth_ok", {
-      user: { id: SELF_ID, username: "me", avatar: null, role: "member" },
-      server_name: "test",
-      motd: "",
-      replay_source: "buffer",
-    });
-    emit("ready", readyPayload(m));
+    emit("auth_ok", authOkPayload(resume ? "buffer" : "none"));
+    const replayId = resume ? replayedMessageId(m) : null;
+    if (replayId === null) {
+      emit("ready", readyPayload(m));
+    } else {
+      emit("chat_message", chatPayload(replayId), m.seq + 1);
+    }
     await settle();
 
     m.connected = true;
+    if (replayId !== null) {
+      m.seq += 1;
+      if (!m.ids.includes(replayId)) m.ids.push(replayId);
+      // The replay burst is the only thing that repairs this client's state —
+      // no `ready` follows it — so the frame has to be in the store already.
+      // Re-adding a `ready` here would let a snapshot do that repair instead,
+      // which is the shape this test must not silently accept.
+      expect(getChannelMessages(TEXT_CHANNEL).map((row) => row.id)).toContain(replayId);
+      exercised.resumeReplay++;
+    }
     expect(r.client.getState()).toBe("connected");
     checkInvariants(m, r);
   },
@@ -321,15 +369,22 @@ const disconnectCmd = cmd(
  * RegisterNow: the server registered this connection and then built `ready`.
  * A message that committed in between is in the snapshot AND is redelivered as
  * a queued frame — the redelivery must reconcile, not duplicate.
+ *
+ * `ready` never travels alone: `handleFreshConnect` is its only writer and it
+ * always follows that path's `auth_ok`, so this drives the full handshake.
+ * `replay_source: "none"` resets ws.ts's watermark, and the redelivered frame
+ * then carries the server's restarted counter (OC-0032).
  */
 const registerNowCmd = cmd(
   "RegisterNow",
   (m) => m.connected && m.ids.length > 0,
   async (m, r) => {
+    emit("auth_ok", authOkPayload("none"));
     emit("ready", readyPayload(m));
-    emit("chat_message", chatPayload(m.ids[m.ids.length - 1] as number), m.seq);
+    emit("chat_message", chatPayload(m.ids[m.ids.length - 1] as number), 1);
     await settle();
 
+    m.seq = 1;
     checkInvariants(m, r);
   },
 );
@@ -412,12 +467,7 @@ function resyncCmd(dropPeer: boolean): Cmd {
     (m) => m.connected,
     async (m, r) => {
       const dropped = dropPeer && m.verifiedPeers.length > 0 ? [m.verifiedPeers[0] as number] : [];
-      emit("auth_ok", {
-        user: { id: SELF_ID, username: "me", avatar: null, role: "member" },
-        server_name: "test",
-        motd: "",
-        replay_source: "none",
-      });
+      emit("auth_ok", authOkPayload("none"));
       emit("ready", readyPayload(m, dropped));
       await settle();
 

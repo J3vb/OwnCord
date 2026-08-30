@@ -774,8 +774,10 @@ db`). No control file is committed.
   `createWsClient()` + `wireDispatcher()` + the real stores; only the Tauri
   IPC wire (shared `tests/unit/helpers/ws-mocks.ts`) and the LiveKit /
   notification / toast / identity leaves are mocked, as in `dispatcher.test.ts`.
-- Commands: `Connect`, `Disconnect`, `RegisterNow`, `Receive(id, seq)`,
-  `Supersede(channel, stale|live)`, `Resync(dropPeer)`, `Logout`.
+- Commands: `Connect` (fresh → `auth_ok(none)` + `ready`; resume → `auth_ok`
+  - the replayed events, no `ready`), `Disconnect`, `RegisterNow`,
+    `Receive(id, seq)`, `Supersede(channel, stale|live)`, `Resync(dropPeer)`,
+    `Logout`.
 - Invariants (checked after every command): (1) no duplicate message ids and
   the store holds exactly the ids delivered; (2) the seq watermark ws.ts
   declares in the auth frame is monotonic except at the modelled epoch resets
@@ -796,6 +798,11 @@ db`). No control file is committed.
   - aborted attempt — stale teardown retargeted at the live channel →
     `Counterexample: [Connect,Supersede(channel=10,stale)]`,
     `expected null to be 10`
+  - resume replay — resume handshake reverted to `auth_ok` + `ready` with no
+    replayed events (the pre-Codex-P2 shape) →
+    `Counterexample: [Connect,Receive(id=1,seq=1),Disconnect,Connect]`,
+    `expected [ 1 ] to include 2`, plus
+    `invariant family "resumeReplay" was never exercised`
 - GREEN: `npx vitest run tests/unit/connection.model.test.ts` →
   `Test Files 1 passed (1) / Tests 2 passed (2)`; `npm test` →
   `Test Files 194 passed (194) / Tests 5275 passed (5275)`.
@@ -811,13 +818,25 @@ db`). No control file is committed.
   than the one that wrote it), so a family that degrades to its no-op form
   fails instead of silently passing.
 - Verified against HEAD: `fast-check ^4.9.0` and the property-test conventions
-  are as the spec says. Two spec details were resolved against the code: the
-  design's `RegisterNow` has no client-side symbol (it is the server's hub
-  registration — the client-visible effect is the ready-snapshot/queued-frame
-  redelivery the OC-0328 and OC-0242 guards handle), and the design's "aborted
-  voice attempt" is reachable from the connection layer through the stale
-  `voice_leave` guard in the dispatcher (OC-0031/OC-0033/OC-0311), not through
-  `LiveKitSession`'s join generations, which need a real LiveKit room.
+  are as the spec says. Three details were resolved against the code:
+  - The handshake has two wire shapes and they are not interchangeable.
+    `handleFreshConnect` writes `auth_ok` (`replay_source: "none"`) then
+    `ready`; `reconnectWriteReplay` (`serve.go:593`) writes `auth_ok` with the
+    tier then the missed events and **never a `ready`**, and
+    `reconnectPrecheck` returning false is what falls through to the full
+    ready. The epoch-1 fixtures record exactly that: `fresh-connect.json` is
+    `auth_ok(none)` → `ready` → …, `resume-replay.json` is `auth_ok(buffer)` →
+    `presence` → `chat_message` → `presence`, with no `ready` anywhere. The
+    model drives both shapes, and `ready` never travels without the `auth_ok`
+    that precedes it on the wire (Codex P2 on #1455).
+  - The design's `RegisterNow` has no client-side symbol — it is the server's
+    hub registration, and the client-visible effect is the
+    ready-snapshot/queued-frame redelivery the OC-0328 and OC-0242 guards
+    handle.
+  - The design's "aborted voice attempt" is reachable from the connection
+    layer through the stale `voice_leave` guard in the dispatcher
+    (OC-0031/OC-0033/OC-0311), not through `LiveKitSession`'s join
+    generations, which need a real LiveKit room.
 
 ## B3-7 — Alpha-shaped test dataset
 
