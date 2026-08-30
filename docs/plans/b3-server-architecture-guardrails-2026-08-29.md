@@ -838,6 +838,64 @@ db`). No control file is committed.
     (OC-0031/OC-0033/OC-0311), not through `LiveKitSession`'s join
     generations, which need a real LiveKit room.
 
+#### Evidence — item 9 (machine-readable contract drift)
+
+- Branch `feat/b3-6-contract-drift` from `dev` `75d64dd4`; commits: `f5f467ed`
+  feat(b3-6): contract drift — generated route, table and config-key indexes
+  (tool, three blocks, wiring), plus this evidence commit.
+- The drift check is `make docs-verify`, which reduces to
+  `go run ./cmd/gendocs` then `git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md`, both from `Server/`. `make` is not on PATH on this machine, so the three controls below ran that pair directly; `node scripts/run.mjs --list` shows `check:server` running exactly those two steps.
+- RED (a), a stale committed block — one row deleted from the route index and
+  staged, then the pair above: the diff puts the deleted `GET /api/v1/health`
+  row back and `git diff --exit-code` exits 1.
+- RED (b), a route added without regenerating — a throwaway
+  `r.Get("/gendocs-red-proof", handleInfo(cfg))` in `api/router.go`, then the
+  pair: the header line goes from "111 routes." to "112 routes." and a
+  `GET /api/v1/gendocs-red-proof` row appears; exit 1.
+- RED (c), a config key documented nowhere — the hand-written `voice.quality`
+  row removed from `docs/server-configuration.md`, then `go run ./cmd/gendocs`
+  alone: `gendocs: config index: 1 config key(s) are documented nowhere under "## Config Key Reference" in ../docs/server-configuration.md … voice.quality`, exit status 1, and no document written.
+- GREEN, all three controls reverted (`git status` clean): the same pair exits
+  0; `npx prettier --check .` → "All matched files use Prettier code style!";
+  `.githooks/pre-commit` run by hand over the staged change → exit 0 with the
+  generator's own log lines in its output.
+- Numbers: **121 routes** (`chi.Walk`; the floor of 100 and the admin-route
+  guard are carried over from the absence contract, the latter tightened to
+  require a real `/admin/api/` subroute so the `/admin/*` mount catch-alls
+  cannot satisfy it alone), **32 tables**, **56 config keys**, **0 undocumented keys at HEAD** — the hand-written reference
+  already named every koanf tag, so no documentation fixes were needed.
+  Generated blocks: three, adding 134 + 45 + 67 lines to their documents.
+  Output is byte-identical across two consecutive runs.
+- Verified against HEAD: the plan's pointer to `docs/deployment.md` is wrong —
+  that document has no configuration table; the reference table is
+  `docs/server-configuration.md` "## Config Key Reference", and the key index
+  went there. `sqlc` exposes no catalog at HEAD (`Server/sqlc.yaml` declares no
+  plugins and no vet rules; its schema source is `migrations/`), so the
+  migrated in-memory schema is the catalog: `db.Open(":memory:")` plus
+  `db.Migrate`, then `sqlite_master` and `pragma_table_info`. `schema_versions`
+  is **included** rather than excluded, along with `sqlite_sequence` and the
+  FTS5 shadow tables behind `messages_fts` — they are what the migrations
+  create, and a change to any of them is a schema change worth seeing in the
+  diff. The route index is generated from the **`otel,wazero` build**, not the
+  default one: `/metrics` mounts only when `telemetry.PrometheusHandler()`
+  returns non-nil (`api/router.go:431-437`), which needs `-tags otel` and
+  telemetry enabled at runtime, so the tool calls `telemetry.Init` the way
+  `main.go` does with the Prometheus exporter and every invocation passes
+  `-tags otel,wazero` (Makefile, `run.mjs`, the hook, the block header lines,
+  the `CLAUDE.md` row; `ci.yml` inherits it through `make docs-verify`). The
+  tool refuses to run when that handler is absent, so the default build cannot
+  quietly generate a short index. Nothing under `Server/api` or `Server/admin`
+  carries a build constraint, so `wazero` adds and removes no route; it rides
+  along so one build serves the repository. The `sqlite_stat*` tables are
+  **excluded**: `db.Migrate` runs `ANALYZE`
+  after applying the migrations, so they carry planner statistics rather than
+  schema, and `sqlite_stat4` exists only because the current
+  `modernc.org/sqlite` build has STAT4 — including them would fail this drift
+  check on an unrelated driver bump. `cmd/gendocs/main.go` imports `db` for that catalog, so it takes a
+  `boundary` row in `DBImportAllow` and `server-boundaries.md` was regenerated
+  with it (50 importers, was 49); the dbinventory block is otherwise untouched
+  and still has no automated drift check of its own.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.

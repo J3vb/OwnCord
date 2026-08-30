@@ -66,6 +66,25 @@ const PROTOCOL_VERIFY = [
     "Server",
   ),
 ];
+// The route, table and config-key indexes in docs/. Same shape again: the
+// generator rewrites the marked blocks, git reports any drift. cmd/gendocs
+// also exits non-zero on its own when a config key is documented nowhere, or
+// when it was built without -tags otel,wazero -- the superset build the route
+// index is generated from, since /metrics mounts only under otel.
+const DOCS_VERIFY = [
+  step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
+  step(
+    "git",
+    [
+      "diff",
+      "--exit-code",
+      "../docs/api.md",
+      "../docs/schema.md",
+      "../docs/server-configuration.md",
+    ],
+    "Server",
+  ),
+];
 const SQLC_VERIFY = [
   optional(
     "sqlc",
@@ -94,6 +113,7 @@ const CHECK_SERVER = [
   ),
   ...PROTOCOL_VERIFY,
   ...SQLC_VERIFY,
+  ...DOCS_VERIFY,
 ];
 
 const CHECK_CLIENT = [
@@ -176,6 +196,8 @@ const TASKS = {
       "Server",
       "sqlc not on PATH — install the version in Server/sqlc.version",
     ),
+    // After sqlc: gendocs compiles the api package, which imports db/dbgen.
+    step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
   ],
   format: [
     step("npx", ["prettier", "--write", "."], "."),
