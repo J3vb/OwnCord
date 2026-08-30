@@ -6,7 +6,8 @@
 verified at `bf7b886d`  
 **Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
-B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 in progress 2026-08-30.
+B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
+(PR #1450 = `75d64dd4`); B3-9 in progress 2026-08-30.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -35,7 +36,7 @@ surface to it.
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
 | **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7                                                       |
 | **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**  | 1 day    | B3-6, B3-7                                                       |
-| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7                                                       |
+| **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral — **DONE 2026-08-30 (PR #1450)**           | 2–3 days | B3-6, B3-7                                                       |
 | **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                                                                |
 | **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                                                             |
 | **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                   | 1 day    | after B3-3                                                       |
@@ -360,7 +361,7 @@ rewrite, remove old path — with B3-1's tests green after every commit.
 Exit: HP-3.
 
 **Evidence, 2026-08-30** — branch `feat/b3-2-auth-slice` from `dev`
-`71d867cb`; PR #1450 to `dev` (squash SHA recorded at merge).
+`71d867cb`; PR #1450 to `dev`, merged 2026-08-30 as `75d64dd4`.
 
 - **Pre-squash SHAs**, one per numbered item. For each, the characterization
   file was run against that exact tree in a detached worktree
