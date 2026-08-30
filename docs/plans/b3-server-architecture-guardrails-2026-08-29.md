@@ -1001,9 +1001,10 @@ db`). No control file is committed.
 
 - Branch `feat/b3-6-docker-smoke-nightly`. Code commit: `3f27447e` feat(b3-6):
   nightly docker smoke on dev — its own workflow, plus a timeout on ci.yml's
-  verify job. A temporary commit at the tip of the branch adds a `push:`
-  trigger so the proof run can happen at all; it is dropped before the PR
-  opens.
+  verify job. A temporary commit added a `push:` trigger so the proof run
+  below could happen at all — neither of the file's real triggers can fire
+  before it is on the default branch — and was dropped once the run was
+  recorded.
 - **Deviation from this item's text, and why.** The item says `ci.yml` gains
   the `schedule:` trigger and that the job is deliberately "not moved to its
   own workflow file". It is moved. Scoping a schedule inside `ci.yml` means
@@ -1050,13 +1051,24 @@ db`). No control file is committed.
   assertions pass;
   `npm run check:docs` → passed; `node scripts/run.mjs --list` → picks the new
   workflow up in the actionlint file list, which is built from `git ls-files`.
-- Proof (controller runs it, on the pushed branch):
-  `gh run list --workflow nightly-docker-smoke.yml --branch feat/b3-6-docker-smoke-nightly --limit 1`
-  for the run id, then
-  `gh run view <id> --log | grep -A2 "Print checked-out revision"`.
-  Expected: `event=push`, and `git rev-parse HEAD` printing **`dev`'s tip**,
-  not the branch's — `git rev-parse origin/dev` for comparison.
-  Observed SHA: `<controller: observed SHA>`.
+- Proof, observed: run `33301623322`
+  (https://github.com/J3vb/OwnCord/actions/runs/33301623322), workflow
+  "Nightly Docker Smoke", fired by the temporary push trigger that was dropped
+  from the branch afterwards. "Print checked-out revision" logged
+  `event=push ref=refs/heads/feat/b3-6-docker-smoke-nightly`, and
+  `git rev-parse HEAD` printed `75d64dd412b6e81a19ae0cb2e09ecfc84d6f644e` —
+  `origin/dev`'s tip (`75d64dd4`) at the time of the run, not the branch's,
+  which is the whole point of `ref: dev`. Build and boot-smoke green. Re-read
+  it with
+  `gh run view 33301623322 --log | grep -A2 "Print checked-out revision"`.
+- The one behavioural difference from `ci.yml`'s job: a scheduled run has
+  `github.ref = refs/heads/main`, so the buildx `type=gha` cache is scoped to
+  the default branch while the layers written into it come from `dev`'s tree.
+  The cache is content-addressed, so a layer is only ever reused where its
+  content matches — the mismatch costs cache hits, never correctness.
+- A red nightly is the repository owner's: GitHub emails a scheduled
+  workflow's failure to the account that owns it. No new process, just where
+  it lands.
 - Verified against HEAD: the item states "`concurrency` and `timeout-minutes`
   are already present (B1-7's guard check enforces both)". Only `concurrency`
   was. `scripts/check-workflow-guards.mjs` audits only the workflows in

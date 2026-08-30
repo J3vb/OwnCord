@@ -219,7 +219,8 @@ jobs:
       # R-09 / RL-16. The release gate itself is only invoked for real at tag
       # time, which is the wrong place to find a bug in it — so its decision
       # logic is exercised here, on every pull request, against fixtures. Same
-      # reason Server/scripts/docker-smoke.sh is called from both workflows.
+      # reason Server/scripts/docker-smoke.sh is called from all three
+      # workflows (ci.yml, release.yml, nightly-docker-smoke.yml).
       # This also parses the required-check list out of
       # b0-dev-branch-protection.sh, so a change to that list's shape fails here
       # rather than silently weakening the gate.
