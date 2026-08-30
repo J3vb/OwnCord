@@ -15,6 +15,11 @@ export default tseslint.config(
     rules: {
       // --- Key rules from T-191 ---
       "@typescript-eslint/no-floating-promises": "error",
+      // A switch over a union that misses a member is a silent drop, not a type error.
+      "@typescript-eslint/switch-exhaustiveness-check": [
+        "error",
+        { considerDefaultExhaustiveForUnions: true },
+      ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
