@@ -13,12 +13,12 @@ import (
 func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list channels: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
 	}
 
 	role, err := s.perms.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
-		return nil, fmt.Errorf("%w: failed to get role: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to get role: %w", ErrInternal, err)
 	}
 
 	var overrides map[int64]db.ChannelOverride
@@ -26,7 +26,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		var overrideErr error
 		overrides, overrideErr = s.st.GetChannelOverridesFor(ctx, role.ID, userID)
 		if overrideErr != nil {
-			return nil, fmt.Errorf("%w: failed to fetch channel overrides: %v", ErrInternal, overrideErr)
+			return nil, fmt.Errorf("%w: failed to fetch channel overrides: %w", ErrInternal, overrideErr)
 		}
 	}
 
@@ -50,7 +50,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 	// computeAllowedChannels in ws/serve.go.
 	dmIDs, err := s.st.GetUserDMChannelIDs(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch DM channels: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to fetch DM channels: %w", ErrInternal, err)
 	}
 	ids = append(ids, dmIDs...)
 
@@ -101,7 +101,7 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	}
 	ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)
 	if dmErr != nil {
-		return sub, fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, dmErr)
+		return sub, fmt.Errorf("%w: failed to check DM participation: %w", ErrInternal, dmErr)
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
@@ -125,7 +125,7 @@ func denial(err error) error {
 	case errors.Is(err, permissions.ErrBlocked):
 		return fmt.Errorf("%w: user is blocked", ErrBlocked)
 	default:
-		return fmt.Errorf("%w: %v", ErrForbidden, err)
+		return fmt.Errorf("%w: %w", ErrForbidden, err)
 	}
 }
 
@@ -199,7 +199,7 @@ func requireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64)
 	}
 	blocked, blkErr := st.IsEitherBlocked(ctx, userID, recipient.ID)
 	if blkErr != nil {
-		return fmt.Errorf("%w: failed to check block status: %v", ErrInternal, blkErr)
+		return fmt.Errorf("%w: failed to check block status: %w", ErrInternal, blkErr)
 	}
 	if blocked {
 		return fmt.Errorf("%w: user is blocked", ErrBlocked)

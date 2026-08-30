@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -122,7 +123,8 @@ func TestChannelFocusV2_NoPermission_ReturnsForbidden(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected FORBIDDEN error for denied permission")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}

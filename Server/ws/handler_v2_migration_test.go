@@ -7,6 +7,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -77,7 +78,8 @@ func TestHandleVoiceLeaveV2_RateLimited(t *testing.T) {
 	for range voiceLeaveRateLimit + 1 {
 		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
 		if res.Error != nil {
-			ce, ok := res.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(res.Error, &ce)
 			if !ok || ce.Code != ErrCodeRateLimited {
 				t.Fatalf("expected rate-limit ClientError, got %v", res.Error)
 			}
@@ -108,7 +110,8 @@ func TestHandleVoiceLeaveV2_RateLimited_StillSignalsLeave(t *testing.T) {
 	for range voiceLeaveRateLimit + 1 {
 		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
 		if res.Error != nil {
-			ce, ok := res.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(res.Error, &ce)
 			if !ok || ce.Code != ErrCodeRateLimited {
 				t.Fatalf("expected rate-limit ClientError, got %v", res.Error)
 			}
@@ -160,7 +163,8 @@ func TestHandleChatCommandV2_NoRegistry(t *testing.T) {
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: 1}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -178,7 +182,8 @@ func TestCanPluginBroadcast_NilServiceFailsClosed(t *testing.T) {
 	if gate == nil {
 		t.Fatal("expected a forbidden Result when MessageSvc is nil")
 	}
-	ce, ok := gate.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(gate.Error, &ce)
 	if !ok || ce.Code != ErrCodeForbidden {
 		t.Errorf("expected FORBIDDEN ClientError, got %v", gate.Error)
 	}

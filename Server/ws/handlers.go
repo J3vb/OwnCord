@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -96,7 +97,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 	if result.Error != nil {
-		if ce, ok := result.Error.(ClientError); ok {
+		var ce ClientError
+		if errors.As(result.Error, &ce) {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 		} else {
 			slog.Error("ws handler internal error",

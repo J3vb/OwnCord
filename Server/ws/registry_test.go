@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -62,7 +63,8 @@ func TestDispatchV2_PanicIsRecovered(t *testing.T) {
 	if !ok {
 		t.Fatal("DispatchV2 must return ok=true even after a panic (handler was found)")
 	}
-	ce, isCE := result.Error.(ClientError)
+	var ce ClientError
+	isCE := errors.As(result.Error, &ce)
 	if !isCE {
 		t.Fatalf("expected ClientError after panic recovery, got %T", result.Error)
 	}

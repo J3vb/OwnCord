@@ -129,7 +129,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	blocked, err := s.st.IsEitherBlocked(ctx, userID, recipientID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 	}
 	if blocked {
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
@@ -152,7 +152,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelInfo, error) {
 	dms, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list DMs: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list DMs: %w", ErrInternal, err)
 	}
 	// GetUserDMChannels only applies db.StatusForViewer (invisible ->
 	// offline); apply the "no live connection" half too, see
@@ -198,12 +198,12 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 
 	if !isGroup {
 		if err := s.st.CloseDM(ctx, userID, channelID); err != nil {
-			return nil, fmt.Errorf("%w: failed to close DM: %v", ErrInternal, err)
+			return nil, fmt.Errorf("%w: failed to close DM: %w", ErrInternal, err)
 		}
 		slog.Debug("DM closed", "user_id", userID, "channel_id", channelID)
 		return &CloseDMResult{}, nil
@@ -214,7 +214,7 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 	// never in it" if the delete half-succeeded.
 	remaining, err := s.st.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 	survivors := make([]int64, 0, len(remaining))
 	for _, pid := range remaining {
@@ -225,7 +225,7 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 
 	deleted, err := s.st.LeaveGroupDM(ctx, userID, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to leave group DM: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to leave group DM: %w", ErrInternal, err)
 	}
 
 	slog.Debug("group DM left", "user_id", userID, "channel_id", channelID, "deleted", deleted)
@@ -330,7 +330,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		for j := i + 1; j < len(participantIDs); j++ {
 			blocked, err := s.st.IsEitherBlocked(ctx, participantIDs[i], participantIDs[j])
 			if err != nil {
-				return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
+				return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 			}
 			if blocked {
 				return nil, fmt.Errorf("%w: cannot add a blocked user to a group DM", ErrForbidden)
@@ -389,7 +389,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 	if !isGroup {
 		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
@@ -403,7 +403,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	}
 
 	if err := s.st.SetDMChannelName(ctx, channelID, cleanName); err != nil {
-		return nil, fmt.Errorf("%w: failed to rename group DM: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to rename group DM: %w", ErrInternal, err)
 	}
 
 	ch, err := s.st.GetChannel(ctx, channelID)
@@ -427,7 +427,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	}
 	participants, err := s.st.GetDMParticipants(ctx, channelID, viewerID)
 	if err != nil {
-		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -435,7 +435,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	}
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
-		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %v", ErrInternal, err)
+		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 	// See presentableDMChannelInfo: this is the single place broadcastDMOpen
 	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
@@ -450,7 +450,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
 	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
 	if err != nil {
-		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %v", ErrInternal, err)
+		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %w", ErrInternal, err)
 	}
 	return id, ok, nil
 }
@@ -469,7 +469,7 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	}
 	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to check DM participation: %w", ErrInternal, err)
 	}
 	if !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
@@ -484,7 +484,7 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 	targets := make([]int64, 0, len(ids))
 	for _, pid := range ids {
