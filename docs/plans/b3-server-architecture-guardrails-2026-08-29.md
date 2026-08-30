@@ -1077,6 +1077,72 @@ db`). No control file is committed.
   with no `timeout-minutes`, so it inherited GitHub's 360-minute default.
   Hence the one-line `ci.yml` change; the new workflow declares its own.
 
+#### Evidence — items 2 + 3 (hub simulation + fault-injected transport)
+
+- Branch `feat/b3-6-hub-sim`; commits: 3c5d75f8 `test(b3-6): seeded hub
+simulation and fault-injected transport (items 2 and 3)`, then the docs
+  commit carrying this block.
+- Oracle (the doc comment of `Server/ws/hub_sim_test.go`, written before the
+  driver): I1 per-connection strictly increasing `seq`, never on the high or
+  low queue; I2 a live connection yields exactly the seqs allocated for its
+  audience, in order — nothing missing, extra or twice — with the unread count
+  checked after every step; I3 a resume from watermark W is replayed exactly
+  `{s in (W, S] : channel 0 or READ-allowed}` where S is the hub seq at the
+  instant `registerNow` ran (atomic with the snapshot under `seqMu`) and every
+  audience seq above S arrives live; I4 `h.seq` advances only for a frame that
+  reached the ring; I5 an evicted W is refused a replay and registered as the
+  full-ready fallback; I6 a replaced socket's late teardown reports
+  `replaced=true`. The one narrowing: frames the dying socket still held above
+  W are delivered again by the replay — a cross-connection duplicate the
+  max(seq) ack makes by design — and the oracle allows exactly that.
+- RED (a): inverted the I2 head check →
+  `hub simulation: seed 1 step 28: I2: c3 conn 2: expected seq 4 next, got 4 (owed [4 6 8 9])`
+  plus the replay line, on 20/20 seeds.
+- RED (b): `OWNCORD_SIM_SEED=1 OWNCORD_SIM_STEPS=200 go test -race -count=1 -run '^TestHubSimulation$' ./ws/`
+  → `seed 1 step 28: I2: c3 conn 2: expected seq 4 next, got 4` — the same
+  step, the same frame.
+- RED (c): `FaultSchedule{Drop: 1}` (silent, no tail cut) on the resumed
+  connection's wire →
+  `seed 1 step 121: I2: c6 conn 3: owed [45 46 47 48 49] but only 0 unread frame(s) remain (W=44)`
+  on 20/20 seeds. With `DropTail` instead, the same drop is a socket death and
+  correctly invisible: the client resumes from W and the replay repairs it.
+- RED (d, extra): replay snapshot and `registerNow` outside one `seqMu`
+  section with a 1 ms gap →
+  `seed 1 step 100: I2: c3 conn 3 holds 33 unread frame(s) but is owed 34`
+  on 19/20 seeds — the registerNow-gap class `hub_register_race_test.go` pins,
+  found by the generated orderings rather than a hand-written interleaving.
+- GREEN: `go test -race -count=1 -run '^TestHubSimulation$' ./ws/` →
+  `ok github.com/J3vb/OwnCord/Server/ws 2.258s`.
+- Numbers: 8 clients, 3 channels, ring 48, normal queue 32; default 20 seeds ×
+  200 steps in 2.3 s under `-race` (CI budget: under 10 s); `make sim` = 20 ×
+  10,000 steps in 20.5 s (23 s wall with compile) under `-race`; per seed at 200 steps ≈ 14
+  buffer resumes, 6 evicted-ring fallbacks, 10 fresh reconnects, 4 wire cuts,
+  9 resumes with a racing broadcast landing inside the replay, ~105 seqs;
+  `BenchmarkReconnectStorm-32` 1590 ops, 702,410 ns/op for 50 resumes (≈14 µs
+  each), 608,031 B/op, 954 allocs/op. Gates: the four build variants and
+  `go vet` clean; `go test -tags deadlock -count=10 -timeout 60m ./ws/` →
+  `ok 594.098s`; `go test -race ./...` → every package ok (ws 138.316s);
+  `golangci-lint run` → 0 issues; `npm run check:docs` passed; prettier clean.
+- Epoch harness: no use added. `TestEpoch1Fixtures` reads real sockets with
+  expects interleaved across two connections, so a lag would wait for frames
+  the journey has not produced yet (a deadlock) and any drop, duplicate or
+  reorder changes the frame list the fixture pins; only the identity schedule
+  is harmless, and that proves nothing. `NewFaultConnForTest` stays exported
+  for item 4's client model and for a network-pattern proxy if one is needed.
+- Verified against HEAD: there is no ack message — the only ack is `last_seq`
+  on the next auth frame — so the simulation's ack step is the client reading
+  frames and advancing max(seq); the headless pattern expresses
+  reconnect-transfer faithfully because `reconnectRegister` (the snapshot and
+  `registerNow` under one `seqMu` section) is exported as-is, not
+  re-implemented, and the fresh/fallback paths call the same `registerNow`
+  handleFreshConnect does; no production file changed
+  (`newTestHub`/`openTestDB`/`seedOwnerUser`/`seedTestChannel` in
+  `hub_test.go` now take `testing.TB` so the benchmark can share them). The
+  shared rules' `go test -tags deadlock -count=10 ./ws/` overruns `go test`'s
+  default 10-minute timeout on a 16-core desktop (601 s, "test timed out
+  after 10m0s" with a goroutine dump that is not a detector hit); the gate
+  needs `-timeout 60m`.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
