@@ -4,6 +4,8 @@
 # test-deadlock      Run the deadlock-detection pass CI also runs.
 # fuzz               Actually fuzz. CI (and plain `go test`) only replays the
 #                    committed seed corpus; this generates new inputs.
+# sim                Run the seeded hub simulation long: 10,000 steps per seed.
+#                    CI runs its 200 x 20 default through `go test -race ./...`.
 # cover              Per-package coverage (what CI uploads) + a function summary.
 # cover-all          Cross-package coverage — the honest number. See below.
 # sqlc-generate      Regenerate type-safe Go from sqlc.yaml (db/dbgen).
@@ -18,7 +20,7 @@
 
 SQLC_VERSION := $(shell cat sqlc.version)
 
-.PHONY: test test-deadlock fuzz cover cover-all sqlc-install sqlc-generate sqlc-verify \
+.PHONY: test test-deadlock fuzz sim cover cover-all sqlc-install sqlc-generate sqlc-verify \
         protocol-generate protocol-verify docs-generate docs-verify otel-up otel-down
 
 test:
@@ -49,6 +51,15 @@ fuzz:
 	    go test $$pkg -run='^$$' -fuzz="^$$fn$$" -fuzztime=$(FUZZTIME) || exit 1; \
 	  done; \
 	done
+
+# The seeded hub simulation (ws/hub_sim_test.go), long form: the default 20
+# seeds at 10,000 steps each instead of the 200 CI runs. A failure prints a
+# ready-to-paste OWNCORD_SIM_SEED=... OWNCORD_SIM_STEPS=... replay line.
+#
+# No make on Windows? OWNCORD_SIM_STEPS=10000 go test -race -count=1 -run '^TestHubSimulation$' ./ws/
+SIMSTEPS ?= 10000
+sim:
+	OWNCORD_SIM_STEPS=$(SIMSTEPS) go test -race -count=1 -run '^TestHubSimulation$$' ./ws/
 
 # Matches the CI invocation. Note that `go test ./... -coverprofile` instruments
 # each package only for itself, so a package whose code is mostly exercised
