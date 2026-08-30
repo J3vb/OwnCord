@@ -6,7 +6,7 @@
 verified at `bf7b886d`  
 **Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
-B3-1 in progress 2026-08-29.
+B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 in progress 2026-08-30.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -34,7 +34,7 @@ surface to it.
 | Step     | What                                                                                                                               | Size     | Parallel with                                                    |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
 | **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)** | 1–2 days | B3-6, B3-7                                                       |
-| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths                                   | 1 day    | B3-6, B3-7                                                       |
+| **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**  | 1 day    | B3-6, B3-7                                                       |
 | **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral                                            | 2–3 days | B3-6, B3-7                                                       |
 | **HP-3** | First vertical-slice review — scorecard                                                                                            | —        | —                                                                |
 | **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                | 1–2 days | B3-4                                                             |
@@ -233,7 +233,7 @@ Exit: the characterization file is green on HEAD; its row count and the two
 files' coverage are in the evidence block. One PR.
 
 **Evidence, 2026-08-29** — branch `feat/b3-1-auth-characterization` from `dev`
-`d383d8c7`; PR to `dev` recorded below.
+`d383d8c7`; PR #1449 to `dev`, squash-merged 2026-08-29 as `71d867cb`.
 
 - **Inventory.** The three existing files hold **85** tests (`auth_handler_test.go`
   61, `totp_handler_test.go` 22, `auth_handler_delete_broadcast_test.go` 2 —
@@ -316,8 +316,8 @@ TO x_gone` for read faults, `RAISE(FAIL)` triggers for write faults), so no
   83.3% (`GenerateToken` failure).
 
 - **Pre-squash SHAs:** `659c8cbd` (B3-0 SHA recorded), `0905a942` (inventory
-  table), `b7317d03` (characterization file + ledger + claim updates), plus the
-  coverage commit that carries this bullet.
+  table), `b7317d03` (characterization file + ledger + claim updates), `a0356ee1`
+  (this coverage bullet); Codex rounds `7c38c2bd`, `bf49453c`, `8614603b` (head).
 - Gates before every commit: `check:docs`, `check:hygiene`; from `Server/` the
   four build-tag variants, `go vet`, `go test -race ./...`, `go test -tags
 deadlock ./ws/`, `golangci-lint run` (first run tripped `prealloc` and
