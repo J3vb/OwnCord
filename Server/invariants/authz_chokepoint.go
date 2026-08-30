@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/token"
 	"path"
-	"strings"
 )
 
 // authzChokepointID is the rule's stable id (a const for the same
@@ -55,6 +54,12 @@ const (
 	classBaseBitRejection = "base-bit-rejection"
 )
 
+// authzResidueClasses is the closed set of classes a row may carry;
+// TestAuthzResidueAllowIsLive rejects any other value. A row cannot invent a
+// class, and that includes the "unclassified" escape valve the B3-6 brief
+// sketched: a genuinely new kind of residue means adding a constant above as a
+// deliberate, reviewable edit, so nothing reaches the allowlist without a
+// classification someone chose. authzClassList must name it too.
 var authzResidueClasses = map[string]bool{
 	classServerScoped:      true,
 	classAdminShortCircuit: true,
@@ -63,11 +68,17 @@ var authzResidueClasses = map[string]bool{
 	classBaseBitRejection:  true,
 }
 
+// authzClassList names the legal classes in the violation message. Built from
+// the constants, so it cannot drift from them; TestAuthzResidueAllowIsLive
+// checks it covers authzResidueClasses.
+const authzClassList = classServerScoped + ", " + classAdminShortCircuit + ", " +
+	classAdminPerimeter + ", " + classBulkReaderWalk + ", " + classBaseBitRejection
+
 // AuthzResidueEntry is one row of HP-2 question 5's residue table: why a
 // production symbol outside Server/permissions still calls a raw bit helper
 // instead of a predicate.
 type AuthzResidueEntry struct {
-	Class string // one of the classes above
+	Class string // one of the classes above; the set is closed
 	Note  string // what this particular site does
 }
 
@@ -157,10 +168,12 @@ func (h authzHit) message() string {
 	if h.Helper == "" {
 		return `dot-import of the permissions package defeats authz-chokepoint (a bare HasAdmin/HasPerm call can no longer be matched); import permissions normally`
 	}
-	return "raw permissions." + h.Helper + " decides authorization at the call site; " +
+	return "raw permissions." + h.Helper + " resolves permission bits outside Server/permissions " +
+		"(the Has* helpers decide, the Effective* ones compute the mask a decision then reads); " +
 		"resolve a permissions.Subject and ask the predicate that owns the property " +
 		"(CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice), " +
-		"or add an AuthzResidueAllow entry for " + h.Symbol + " with a class and a reason"
+		"or add an AuthzResidueAllow entry for " + h.Symbol + " with a reason and one of the classes " +
+		authzClassList
 }
 
 // authzHits reports every raw permission check in one file, whether or not it
@@ -175,12 +188,12 @@ func authzHits(f *ast.File, fset *token.FileSet, rel string) []authzHit {
 	if dir == "." {
 		dir = ""
 	}
-	// permissions/ is the package the rule funnels everything into; the
-	// helpers are its own, and predicates.go calls them by definition.
-	if dir == "permissions" || strings.HasPrefix(dir, "permissions/") {
-		return nil
-	}
-
+	// permissions/ needs no exemption and deliberately does not get one: a file
+	// in that package cannot import itself, so it binds no "permissions"
+	// identifier and matches nothing here. A directory-keyed exemption would be
+	// worse than redundant — it would silently exempt a future
+	// permissions/<sub>, which is a different package that does import
+	// permissions and must be checked like any other.
 	names, dotImports := importNames(f, permissionsImportPath)
 
 	var out []authzHit

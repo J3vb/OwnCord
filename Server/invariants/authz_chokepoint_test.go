@@ -128,12 +128,26 @@ func serveFileAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
 			want: 1,
 		},
 		{
-			name: "permissions itself is out of scope",
+			// Not an exemption: a file in package permissions cannot import
+			// itself, so it binds no "permissions" identifier and the bare
+			// call matches nothing.
+			name: "a file inside permissions binds no name and is not flagged",
 			path: "permissions/checker.go",
 			src: `package permissions
 func f(bits int64) bool { return HasAdmin(bits) }
 `,
 			want: 0,
+		},
+		{
+			// A directory-keyed exemption for permissions/ would silently let
+			// this through, which is why the rule has none. Re-adding one must
+			// fail here.
+			name: "a permissions subpackage does import permissions and is checked like any other",
+			path: "permissions/policy/x.go",
+			src: "package policy\n" + importPerms + `
+func decide(bits int64) bool { return permissions.HasAdmin(bits) }
+`,
+			want: 1,
 		},
 		{
 			name: "a call at package scope has no enclosing symbol and is flagged",
@@ -213,6 +227,36 @@ func (x *h) decide(bits int64) bool { return permissions.HasPerm(bits, 1) }
 	if !strings.Contains(v.Msg, "api.(*h).decide") {
 		t.Errorf("message must name the symbol an AuthzResidueAllow row would use, got %q", v.Msg)
 	}
+	// A row is only writable if the caller is told which classes are legal.
+	for _, class := range []string{
+		classServerScoped, classAdminShortCircuit, classAdminPerimeter,
+		classBulkReaderWalk, classBaseBitRejection,
+	} {
+		if !strings.Contains(v.Msg, class) {
+			t.Errorf("message must name the legal class %q, got %q", class, v.Msg)
+		}
+	}
+}
+
+// TestAuthzChokepointMessageFitsAllSixTargets guards the wording: two of the
+// six helpers compute a mask rather than deciding, so the message cannot claim
+// the call "decides authorization".
+func TestAuthzChokepointMessageFitsAllSixTargets(t *testing.T) {
+	src := `package api
+import "github.com/J3vb/OwnCord/Server/permissions"
+
+func compute(bits, a, d int64) int64 { return permissions.EffectivePerms(bits, a, d) }
+`
+	got := checkSourceWith([]Rule{authzChokepoint}, token.NewFileSet(), "api/x.go", []byte(src))
+	if len(got) != 1 {
+		t.Fatalf("got %d violation(s), want 1: %v", len(got), got)
+	}
+	if strings.Contains(got[0].Msg, "decides authorization") {
+		t.Errorf("EffectivePerms computes a mask, it does not decide: %q", got[0].Msg)
+	}
+	if !strings.Contains(got[0].Msg, "resolves permission bits") {
+		t.Errorf("message must describe all six targets accurately, got %q", got[0].Msg)
+	}
 }
 
 // TestAuthzResidueAllowIsLive keeps the residue honest in the other direction:
@@ -243,11 +287,42 @@ func TestAuthzResidueAllowIsLive(t *testing.T) {
 		if !live[sym] {
 			t.Errorf("AuthzResidueAllow[%q] no longer performs a raw permission check — delete the row", sym)
 		}
+		if fileScopeRow(sym) {
+			t.Errorf("AuthzResidueAllow[%q] would exempt every package-scope raw call and dot-import "+
+				"in that directory at once; move the call into a named function and key the row on it", sym)
+		}
 		if !authzResidueClasses[entry.Class] {
 			t.Errorf("AuthzResidueAllow[%q]: unknown class %q", sym, entry.Class)
 		}
 		if entry.Note == "" {
 			t.Errorf("AuthzResidueAllow[%q]: the reason is mandatory", sym)
+		}
+	}
+
+	// The message can only tell a caller which classes are legal if it names
+	// every one of them.
+	for class := range authzResidueClasses {
+		if !strings.Contains(authzClassList, class) {
+			t.Errorf("class %q is missing from authzClassList, so the violation message never names it", class)
+		}
+	}
+}
+
+// fileScopeRow reports whether an allowlist key names a whole directory's file
+// scope rather than one function. Such a row is never residue: it would match
+// every package-scope raw call and every dot-import in that directory at once.
+func fileScopeRow(sym string) bool { return strings.HasSuffix(sym, "."+fileScopeSymbol) }
+
+func TestFileScopeRowsAreRejected(t *testing.T) {
+	for sym, want := range map[string]bool{
+		"api.<file-scope>":                         true,
+		".<file-scope>":                            true, // a root-level file
+		"api.serveFileAuthorize":                   false,
+		"ws.(*Hub).readyVisibleChannels":           false,
+		"service.(*MessageService).mentionReaders": false,
+	} {
+		if got := fileScopeRow(sym); got != want {
+			t.Errorf("fileScopeRow(%q) = %v, want %v", sym, got, want)
 		}
 	}
 }
