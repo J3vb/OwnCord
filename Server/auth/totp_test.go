@@ -376,3 +376,73 @@ func TestBuildTOTPURI_ContainsIssuerAndSecret(t *testing.T) {
 		t.Fatalf("issuer = %q, want OwnCord", query.Get("issuer"))
 	}
 }
+
+// ─── OC-0378: Restore / Unmark ──────────────────────────────────────────────
+
+func TestPartialAuthStore_RestoreAfterConsume(t *testing.T) {
+	store := auth.NewPartialAuthStore(time.Minute)
+	token, err := store.Issue(7, "device", "203.0.113.7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	store.RegisterFailure(token, 5) // Failures=1 must survive the round trip
+
+	claimed, ok := store.Consume(token)
+	if !ok {
+		t.Fatal("Consume: challenge not found")
+	}
+	if _, ok := store.Lookup(token); ok {
+		t.Fatal("consumed token still resolves")
+	}
+
+	store.Restore(token, claimed)
+	got, ok := store.Lookup(token)
+	if !ok {
+		t.Fatal("restored token does not resolve")
+	}
+	if got != claimed {
+		t.Fatalf("restored challenge = %+v, want %+v", got, claimed)
+	}
+	if got.Failures != 1 {
+		t.Fatalf("Failures = %d, want 1 (restore keeps the count)", got.Failures)
+	}
+}
+
+func TestPartialAuthStore_RestoreExpiredStaysGone(t *testing.T) {
+	store := auth.NewPartialAuthStore(20 * time.Millisecond)
+	token, err := store.Issue(7, "device", "203.0.113.7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	claimed, ok := store.Consume(token)
+	if !ok {
+		t.Fatal("Consume: challenge not found")
+	}
+	time.Sleep(40 * time.Millisecond)
+
+	store.Restore(token, claimed)
+	if _, ok := store.Lookup(token); ok {
+		t.Fatal("an expired challenge came back to life")
+	}
+}
+
+func TestUsedTOTPCodeStore_UnmarkAllowsReuse(t *testing.T) {
+	store := auth.NewUsedTOTPCodeStore()
+	if !store.MarkUsed(1, "123456") {
+		t.Fatal("first MarkUsed refused")
+	}
+	if store.MarkUsed(1, "123456") {
+		t.Fatal("replay accepted before Unmark")
+	}
+	if !store.MarkUsed(2, "123456") {
+		t.Fatal("another user's identical code refused")
+	}
+
+	store.Unmark(1, "123456")
+	if !store.MarkUsed(1, "123456") {
+		t.Fatal("code still marked after Unmark")
+	}
+	if store.MarkUsed(2, "123456") {
+		t.Fatal("Unmark for user 1 released user 2's code")
+	}
+}

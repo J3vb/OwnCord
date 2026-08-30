@@ -7967,13 +7967,19 @@
       "why": "`adminAuthMiddleware` already resolved the principal's `*db.Role` via `auth.ResolveTokenHash` and stored it in the request context under `adminRoleKey` (line 90). `ownerOnlyMiddleware` ignores that value, issues a second `GetRoleByID` on the request context, and collapses `err != nil` into the same 403 \"role not found\" it uses for a genuinely missing role. This is the exact fail-closed-as-authorization-denial collapse that the perimeter branch 60 lines above was explicitly fixed for (it now answers 503 SERVICE_UNAVAILABLE and logs, precisely so a DB outage is not reported as a bad credential), and that `api/middleware.go:117` was fixed for. The function's own doc comment (lines 120-121) claims it \"reads the user from context ... rather than re-authenticating, avoiding redundant DB queries\" — the redundant query it claims to avoid is the one that introduces the fault.",
       "repro": "Owner is signed into the admin panel. Any transient read failure on the `roles` lookup (SQLITE_BUSY / \"database is locked\" while a scheduled backup's `VACUUM INTO` runs, a disk I/O error, or a context deadline on the reader pool) hits `GetRoleByID` during a request to one of the nine owner-only routes registered in Server/admin/api.go:148-176 — `GET /admin/api/updates`, `POST /admin/api/updates/apply`, `POST /admin/api/backup`, `GET /admin/api/backups`, `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET|POST /admin/api/tokens`, `DELETE /admin/api/tokens/{id}`. The perimeter middleware immediately before it already succeeded and put the correct, non-nil Owner role in the context, so the request is fully authenticated and authorized. The Owner nevertheless receives HTTP 403 `FORBIDDEN {\"code\":\"FORBIDDEN\",\"message\":\"role not found\"}` — the admin panel renders a permission-denied error telling the server Owner they lack the Owner role — and nothing is logged, unlike the perimeter path which logs the underlying error. Using the already-resolved `adminRoleKey` value (or mirroring the perimeter's 503 + slog on `err != nil`) makes the outcome correct.",
       "evidence": "// middleware.go:89-93 (perimeter already stores the role)\nctx := context.WithValue(r.Context(), adminUserKey, user)\nctx = context.WithValue(ctx, adminRoleKey, role)\n\n// middleware.go:59-69 (perimeter, after the OC fix: DB error != bad token)\ndefault:\n    slog.ErrorContext(r.Context(), \"admin: token resolution failed\", \"error\", err)\n    writeErr(w, http.StatusServiceUnavailable, \"SERVICE_UNAVAILABLE\", \"authentication service temporarily unavailable\")\n\n// middleware.go:130-134 (ownerOnlyMiddleware, unfixed sibling)\nrole, err := database.GetRoleByID(r.Context(), user.RoleID)\nif err != nil || role == nil {\n    writeErr(w, http.StatusForbidden, \"FORBIDDEN\", \"role not found\")\n    return\n}",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-1",
       "suggestedFix": "Split the two outcomes in ownerOnlyMiddleware rather than switching to the context role. Reading adminRoleKey would be the cleaner design but it breaks both TestOwnerOnlyMiddleware_RoleNotFound and TestOwnerOnlyMiddleware_OwnerPassesThrough, which inject only adminUserKey. Smallest change that preserves every locked behavior, at Server/admin/middleware.go:130-134:\n\n    role, err := database.GetRoleByID(r.Context(), user.RoleID)\n    if err != nil {\n        slog.ErrorContext(r.Context(), \"admin: owner role lookup failed\", \"error\", err)\n        writeErr(w, http.StatusServiceUnavailable, \"SERVICE_UNAVAILABLE\", \"authorization service temporarily unavailable\")\n        return\n    }\n    if role == nil {\n        writeErr(w, http.StatusForbidden, \"FORBIDDEN\", \"role not found\")\n        return\n    }\n\nrole==nil still yields 403 (test at middleware_and_spawn_test.go:211 unaffected), the owner path still yields 200, and the DB fault now matches the perimeter's 503 + slog contract.",
       "confidence": "medium",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-30",
+      "fix": {
+        "commit": "fb1afb8a",
+        "test": "Server/admin/middleware_and_spawn_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0346",
@@ -7984,13 +7990,19 @@
       "why": "`recoverer` is registered at router.go:286, two slots ahead of `telemetry.HTTPMiddleware()` at router.go:291, and it snapshots `telemetry.TraceIDFromContext(r.Context())` *before* calling `next.ServeHTTP`. At that moment no span exists in the request context (otelhttp is downstream), so `TraceIDFromContext` returns \"\" on every request and the `trace_id` attribute the recovery closure promises is always dropped by the `if traceID != \"\"` guard at line 666. The panic record — the one log line where trace correlation matters most — is the only one that silently loses it, while in-handler logs via logctx.go:38 get it correctly because they run inside the span.",
       "repro": "Build with `-tags otel`, set telemetry.enabled=true and exporter=\"otlp\" (or \"prometheus\"), then issue a request to any REST route whose handler panics (e.g. force a nil deref in a handler). The recovered-panic slog record contains method/path/panic/stack/req_id but never a trace_id attribute, even though otelhttp created a live span for that exact request and the trace is exported. Moving `r.Use(telemetry.HTTPMiddleware())` above `r.Use(recoverer)` (or reading the trace ID inside the deferred closure instead of before dispatch) makes the same request log the real trace ID.",
       "evidence": "router.go:286-291\n\tr.Use(recoverer)     // slog-routing panic recovery ...\n\tr.Use(requestLogger)\n\tr.Use(telemetry.HTTPMiddleware())\n\nrouter.go:646-667\n\t// Capture correlation IDs before dispatch ... while the\n\t// panic log still carries req_id/trace_id.\n\treqID := middleware.GetReqID(r.Context())\n\ttraceID := telemetry.TraceIDFromContext(r.Context())   // <- no span yet: always \"\"\n\tdefer func() {\n\t\tif rec := recover(); rec != nil {\n\t\t\t...\n\t\t\tif traceID != \"\" {\n\t\t\t\tattrs = append(attrs, \"trace_id\", traceID)\n\t\t\t}\n\t\t\tslog.Error(\"http handler panic recovered\", attrs...)\n\nBuild-tag dependency: telemetry_otel.go's TraceIDFromContext is the only implementation that can ever return non-empty (telemetry_default.go:26 hardcodes \"\"), and it reads trace.SpanContextFromContext(ctx), which is populated by otelhttp.NewHandler in (*otelProvider).HTTPMiddleware — mounted after recoverer.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "explore-2",
       "suggestedFix": "In routerMiddleware (Server/api/router.go:278-292) move `r.Use(telemetry.HTTPMiddleware())` above `r.Use(recoverer)`. With otelhttp outermost, recoverer's r.Context() already carries the live span, so the existing line 650 capture yields the real trace ID, and recoverer still recovers handler panics because it remains outside every route handler. This is one line in the shared stack rather than a change in recoverer, and it keeps the deferred closure free of context calls (the contextcheck constraint the comment cites). It does not disturb the ordering the file comment calls a security property — request-id binding, security headers and the body cap keep their relative positions.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-08-30",
+      "fix": {
+        "commit": "775eba50",
+        "test": "Server/api/recoverer_otel_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0347",
@@ -8495,12 +8507,18 @@
       "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_RegisterPolicyAndFailurePaths/session_insert_fails' ./api/ — the row installs a BEFORE INSERT ON sessions trigger, registers with a valid invite, and pins today's outcome: 500, user row present, invite use_count 1.",
       "evidence": "Server/api/auth_handler.go:166  uid, err := database.CreateUserWithInvite(...)   // commits user + invite use\nServer/api/auth_handler.go:201  if _, err := database.CreateSession(...); err != nil {   // 500 after the commit\nServer/api/auth_handler.go:153  // Hash password before consuming the invite so that a hashing failure\n                                // does not burn a valid invite code.",
       "suggestedFix": "Either answer 201 without a token when the session insert fails after the account commit (the account exists; the client logs in), or move the session insert into the CreateUserWithInvite transaction so registration is atomic. Belongs to the AuthService in B3-2/B3-9, not to the handler.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "b3-1-auth-characterization-2026-08-29",
       "lens": "characterization",
       "confidence": "high",
-      "finder": "claude"
+      "finder": "claude",
+      "fixed": "2026-08-30",
+      "fix": {
+        "commit": "85d86dc7",
+        "test": "Server/api/auth_characterization_test.go, Server/db/coverage_boost_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0377",
@@ -8512,12 +8530,18 @@
       "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_VerifyTOTPFailurePaths/user_lookup_fails' ./api/ — the row renames the users table after the challenge is issued and pins today's 401.",
       "evidence": "Server/api/totp_handler.go:140  user, err := database.GetUserByID(r.Context(), challengeUserID)\nServer/api/totp_handler.go:141  if err != nil || user == nil || user.TOTPSecret == nil {\nServer/api/totp_handler.go:142      writeJSON(w, http.StatusUnauthorized, errorResponse{ ... \"invalid or expired two-factor challenge\" })\nServer/api/auth_handler.go:488-497  the login sibling: a non-nil error is a genuine DB failure -> 500 \"login temporarily unavailable\"",
       "suggestedFix": "Split the condition: `err != nil` -> 500 INTERNAL_ERROR (\"two-factor verification temporarily unavailable\") without RegisterFailure and with the limiter reservation undone or not made; keep 401 for `user == nil || user.TOTPSecret == nil`. Fix in B3-9 after B3-2 lands, and flip the characterization row with it.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "b3-1-auth-characterization-2026-08-29",
       "lens": "characterization",
       "confidence": "high",
-      "finder": "claude"
+      "finder": "claude",
+      "fixed": "2026-08-30",
+      "fix": {
+        "commit": "f7015809",
+        "test": "Server/api/auth_characterization_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0378",
@@ -8529,12 +8553,18 @@
       "repro": "cd Server && go test -count=1 -run 'TestAuthCharacterization_VerifyTOTPFailurePaths/session_insert_fails' ./api/ — the row installs a BEFORE INSERT ON sessions trigger, verifies a valid code, pins the 500, drops the trigger and pins that the same partial token is now refused with 401.",
       "evidence": "Server/api/totp_handler.go:107  if _, ok := partialStore.Consume(partialToken); !ok {   // challenge gone here\nServer/api/totp_handler.go:115  token, err := issueSession(r.Context(), database, user.ID, challenge.Device, challenge.IP)   // fails after it",
       "suggestedFix": "Keep the claim atomic and first: Consume the challenge before issuing the session (as today), then on CreateSession failure re-issue or restore the challenge for the same user/device/IP so the verified second factor is not discarded. The restore must also keep the accepted verification usable: VerifyTOTPCodeOnce has already recorded (user, code) in UsedTOTPCodeStore for 90 s, so an immediate retry with the authenticator's still-current code would be refused as a replay - either carry the verified state on the restored challenge (retry issues the session without a new code) or roll back that MarkUsed claim together with the challenge. Do NOT issue the session before Consume: two concurrent requests holding the same partial token can pass Lookup with different valid codes from the +/-1 step window (the used-code store keys on (user, code), not the token), both would create sessions, and the losing Consume would leave an unreturned bearer session in the database; if the order must change, the loser has to revoke the session it created. Belongs to the AuthService in B3-2/B3-9.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "b3-1-auth-characterization-2026-08-29",
       "lens": "characterization",
       "confidence": "high",
-      "finder": "claude"
+      "finder": "claude",
+      "fixed": "2026-08-30",
+      "fix": {
+        "commit": "be37d7ee",
+        "test": "Server/api/auth_characterization_test.go, Server/auth/totp_test.go",
+        "revertProof": "pass"
+      }
     }
   ]
 }

@@ -216,7 +216,10 @@ var (
 	// Second factor.
 	ErrTOTPChallengeInvalid = &authError{ErrUnauthorized, "invalid or expired two-factor challenge"}
 	ErrTOTPSecretUnreadable = &authError{ErrInternal, "failed to verify two-factor code"}
-	ErrTOTPCodeInvalid      = &authError{ErrUnauthorized, "invalid two-factor code"}
+	// ErrTOTPUnavailable is a store fault while loading the challenged user
+	// (OC-0377): an outage, not a bad challenge, so no attempt is charged.
+	ErrTOTPUnavailable = &authError{ErrInternal, "two-factor verification temporarily unavailable"}
+	ErrTOTPCodeInvalid = &authError{ErrUnauthorized, "invalid two-factor code"}
 	// ErrTOTPAlreadyEnabled is written by the transport as 409
 	// TOTP_ALREADY_ENABLED, not the generic CONFLICT code.
 	ErrTOTPAlreadyEnabled   = &authError{ErrConflict, "disable 2FA before re-enabling"}
@@ -293,19 +296,27 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		return nil, ErrPasswordHash
 	}
 
-	// Atomically consume the invite and create the user so failed
-	// registrations do not burn a valid invite code.
-	uid, err := s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode)
+	// The session token is issued through the same path as login's, but it is
+	// persisted by CreateUserWithInvite's transaction, so the account, the
+	// invite use and the first session commit together: a fault at any step
+	// — the session insert included — rolls the whole registration back and
+	// burns nothing (OC-0376).
+	var uid int64
+	token, err := newSessionToken(func(tokenHash string) (err error) {
+		uid, err = s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode,
+			tokenHash, in.Device, in.IP)
+		return err
+	})
 	if err != nil {
 		// UNIQUE constraint violation → duplicate username → 400.
-		// Any other DB error → 500.
+		// Any other error → 500.
 		switch {
 		case db.IsUniqueConstraintError(err):
 			return nil, ErrRegistrationRejected
 		case errors.Is(err, db.ErrNotFound):
 			return nil, ErrRegistrationRejected
 		default:
-			slog.Error("CreateUserWithInvite failed", "err", err, "username", in.Username)
+			slog.Error("register: account creation failed", "err", err, "username", in.Username)
 			return nil, ErrRegistrationFailed
 		}
 	}
@@ -313,12 +324,6 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP)
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
 		"new account created via invite")
-
-	// Issue session.
-	token, err := issueSession(ctx, s.st, uid, in.Device, in.IP)
-	if err != nil {
-		return nil, ErrSessionIssue
-	}
 
 	user, err := s.st.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
@@ -467,12 +472,27 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 // VerifyTOTP completes a challenge Login started and issues the session,
 // bound to the login request's device and IP rather than this one's.
 func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string) (*AuthResult, error) {
+	code = strings.TrimSpace(code)
 	challenge, ok := s.partial.Lookup(partialToken)
 	if !ok {
 		return nil, ErrTOTPChallengeInvalid
 	}
 
+	// Refuse an exhausted per-user budget before touching the store: the
+	// read-only Check costs nothing and charges nothing, so rotating source
+	// IPs cannot drive user reads and secret decryptions past the cap
+	// (Codex P2 on PR #1454). The atomic Allow below still records the
+	// attempt only once the store read succeeded (OC-0377).
 	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
+	if !s.limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		return nil, ErrTooManyAttempts
+	}
+
+	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Atomically record this attempt and reject once the per-user failure cap
 	// is reached. Recording up-front — rather than a read-only Check now and
 	// Allow only on failure — closes a TOCTOU where many concurrent requests
@@ -485,16 +505,14 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// multiplier exists for shared-NAT per-IP limits; scaling a per-user
 	// threshold with it would hand a distributed attacker more guesses.
 	// Mirrors loginUserFailureThreshold staying unscaled in authenticate.
+	// The reservation sits after the store read above, as in authenticate,
+	// so an outage does not consume attempts (OC-0377); it still precedes
+	// the code compare, the check-then-act the up-front record closes.
 	if !s.limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 		return nil, ErrTooManyAttempts
 	}
 
-	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
-	if err != nil {
-		return nil, err
-	}
-
-	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
+	if !auth.VerifyTOTPCodeOnce(secret, code, time.Now().UTC(), user.ID, s.usedCodes) {
 		// The attempt was already recorded atomically up-front via
 		// limiter.Allow; only the per-partial-token counter is advanced here.
 		s.partial.RegisterFailure(partialToken, partialAuthMaxFailures)
@@ -503,12 +521,28 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 
 	s.limiter.Reset(ctx, totpRateLimitKey)
 
-	if _, ok := s.partial.Consume(partialToken); !ok {
+	claimed, ok := s.partial.Consume(partialToken)
+	if !ok {
+		// The claim lost: a concurrent verify consumed the challenge (or it
+		// expired) after this request marked its code. Release the code —
+		// if the winner is mid-recovery (Consume → issueSession failed →
+		// Restore), the restored token must not be stuck behind this mark
+		// until the authenticator rolls over (Codex P2 on PR #1454).
+		s.usedCodes.Unmark(user.ID, code)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
 	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
 	if err != nil {
+		// The second factor was verified; a store fault must not discard it
+		// (OC-0378). The claim stays atomic and first — two concurrent
+		// verifies can never both reach issueSession — so on failure put the
+		// challenge back under the same token (the client still holds it) and
+		// release the accepted code: the retry completes the login without
+		// another password step. Code first, then token, so a concurrent
+		// retry never finds a live token with a dead code.
+		s.usedCodes.Unmark(user.ID, code)
+		s.partial.Restore(partialToken, claimed)
 		return nil, ErrSessionIssue
 	}
 
@@ -522,7 +556,14 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 // returns their decrypted TOTP secret.
 func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
 	user, err := s.st.GetUserByID(ctx, challengeUserID)
-	if err != nil || user == nil || user.TOTPSecret == nil {
+	if err != nil {
+		// GetUserByID answers (nil, nil) for an unknown user, so a non-nil
+		// error is a store fault: report the outage, not a bad challenge
+		// (OC-0377). VerifyTOTP records no attempt for it.
+		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
+		return nil, "", ErrTOTPUnavailable
+	}
+	if user == nil || user.TOTPSecret == nil {
 		return nil, "", ErrTOTPChallengeInvalid
 	}
 
@@ -802,15 +843,26 @@ func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, us
 
 // ─── Helpers moved from api/auth_handler.go ──────────────────────────────────
 
-func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+// newSessionToken generates a bearer token and hands its hash to persist,
+// which stores the session row — CreateSession, or CreateUserWithInvite's
+// transaction for a registration. The token is returned only once persist
+// succeeded.
+func newSessionToken(persist func(tokenHash string) error) (string, error) {
 	token, err := auth.GenerateToken()
 	if err != nil {
 		return "", err
 	}
-	if _, err := st.CreateSession(ctx, userID, auth.HashToken(token), device, ip); err != nil {
+	if err := persist(auth.HashToken(token)); err != nil {
 		return "", err
 	}
 	return token, nil
+}
+
+func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+	return newSessionToken(func(tokenHash string) error {
+		_, err := st.CreateSession(ctx, userID, tokenHash, device, ip)
+		return err
+	})
 }
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
