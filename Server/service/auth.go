@@ -296,9 +296,16 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		return nil, ErrPasswordHash
 	}
 
-	// Atomically consume the invite and create the user so failed
-	// registrations do not burn a valid invite code.
-	uid, err := s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode)
+	// The session token exists before the transaction so the account, the
+	// invite use and the first session commit together: a fault at any step
+	// — the session insert included — rolls the whole registration back and
+	// burns nothing (OC-0376).
+	token, err := auth.GenerateToken()
+	if err != nil {
+		return nil, ErrSessionIssue
+	}
+	uid, err := s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode,
+		auth.HashToken(token), in.Device, in.IP)
 	if err != nil {
 		// UNIQUE constraint violation → duplicate username → 400.
 		// Any other DB error → 500.
@@ -316,12 +323,6 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP)
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
 		"new account created via invite")
-
-	// Issue session.
-	token, err := issueSession(ctx, s.st, uid, in.Device, in.IP)
-	if err != nil {
-		return nil, ErrSessionIssue
-	}
 
 	user, err := s.st.GetUserByID(ctx, uid)
 	if err != nil || user == nil {

@@ -449,23 +449,22 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 			t.Error("user row exists after a failed insert")
 		}
 	})
-	t.Run("session insert fails after the user is committed -> 500", func(t *testing.T) {
+	t.Run("session insert fails -> 500, nothing committed", func(t *testing.T) {
 		database := newAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
 		code := seedInvite(t, database)
 		failWrite(t, database, "INSERT", "sessions")
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
-		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
-		// known: the account and the invite use are already committed when the
-		// session insert fails, so the caller sees a 500 for a registration
-		// that succeeded — a retry gets "invalid invite or credentials" while
-		// a login with the same password works (ledger OC-0376).
-		if userByName(t, database, "fresh") == nil {
-			t.Error("user row missing: this row pins the partial-success behaviour, which has changed")
+		// OC-0376 (fixed in B3-9): the first session is inserted inside the
+		// registration transaction, so a store fault leaves no half-registered
+		// account and does not burn the invite — the caller simply retries.
+		if userByName(t, database, "fresh") != nil {
+			t.Error("user row exists after the session insert failed")
 		}
-		if n := inviteUseCount(t, database, code); n != 1 {
-			t.Errorf("invite use_count = %d, want 1 (pinned partial success)", n)
+		if n := inviteUseCount(t, database, code); n != 0 {
+			t.Errorf("invite use_count = %d, want 0 (transaction rolled back)", n)
 		}
+		wantErr(t, rr, http.StatusInternalServerError, "INTERNAL_ERROR", "registration failed — please try again")
 	})
 }
 
