@@ -60,6 +60,19 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
     fi
 fi
 
+# Router, migrations, config or the generator changed -> the regenerated docs
+# index blocks must be part of the same commit. Inlined like the two blocks
+# above, and for the same reason: make is not on PATH on a stock Windows box.
+if printf '%s\n' "$staged" | grep -qE '^Server/(api/router\.go|api/.*_handler\.go|migrations/|config/config\.go|cmd/gendocs/)'; then
+    if command -v go >/dev/null 2>&1; then
+        (cd Server && go run ./cmd/gendocs \
+            && git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md) \
+            || fail "generated docs blocks are stale — run 'go run ./cmd/gendocs' in Server/ and stage the result"
+    else
+        printf 'pre-commit: WARNING: go not installed; skipping the generated-docs check. CI will run it.\n' >&2
+    fi
+fi
+
 # Findings ledger changed -> it must still be valid. Unlike the two blocks
 # above there is nothing to diff: FINDINGS.md is not tracked (RL-07), so a
 # stale rendering cannot be committed. --check is the whole gate here, and it

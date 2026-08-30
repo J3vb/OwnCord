@@ -11,13 +11,15 @@
 # sqlc-install       Install the pinned sqlc version into $GOBIN.
 # protocol-generate  Regenerate WS message-type constants (Go + TS) from ../protocol/schema.json.
 # protocol-verify    Fail if the committed protocol constants are stale (used by CI).
+# docs-generate      Regenerate the route/table/config index blocks in ../docs.
+# docs-verify        Fail if those generated blocks are stale (used by CI).
 # otel-up            Start Jaeger + Prometheus for local tracing development.
 # otel-down          Stop and remove the OTel dev containers.
 
 SQLC_VERSION := $(shell cat sqlc.version)
 
 .PHONY: test test-deadlock fuzz cover cover-all sqlc-install sqlc-generate sqlc-verify \
-        protocol-generate protocol-verify otel-up otel-down
+        protocol-generate protocol-verify docs-generate docs-verify otel-up otel-down
 
 test:
 	go test -race -timeout 20m ./...
@@ -88,6 +90,19 @@ protocol-verify:
 	go run ./cmd/genprotocol
 	@git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts || ( \
 		echo "ERROR: generated protocol constants are stale. Run 'make protocol-generate' and commit the result." ; \
+		exit 1 ; \
+	)
+
+# Route, table and config-key indexes in ../docs. Same shape as the two
+# generator checks above: regenerate, then fail on any diff. The tool also
+# exits non-zero on its own when a config key is documented nowhere.
+docs-generate:
+	go run ./cmd/gendocs
+
+docs-verify:
+	go run ./cmd/gendocs
+	@git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md || ( \
+		echo "ERROR: generated documentation blocks are stale. Run 'make docs-generate' and commit the result." ; \
 		exit 1 ; \
 	)
 

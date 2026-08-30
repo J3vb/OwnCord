@@ -32,6 +32,130 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 ---
 
+## Route index (generated)
+
+<!-- gendocs:routes:start -->
+
+Generated from the mounted router by `cd Server && go run ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 111 routes.
+
+| Method  | Path                                                                 |
+| ------- | -------------------------------------------------------------------- |
+| GET     | `/admin/`                                                            |
+| CONNECT | `/admin/*`                                                           |
+| DELETE  | `/admin/*`                                                           |
+| GET     | `/admin/*`                                                           |
+| HEAD    | `/admin/*`                                                           |
+| OPTIONS | `/admin/*`                                                           |
+| PATCH   | `/admin/*`                                                           |
+| POST    | `/admin/*`                                                           |
+| PUT     | `/admin/*`                                                           |
+| QUERY   | `/admin/*`                                                           |
+| TRACE   | `/admin/*`                                                           |
+| GET     | `/admin/api/audit-log`                                               |
+| POST    | `/admin/api/backup`                                                  |
+| GET     | `/admin/api/backups`                                                 |
+| DELETE  | `/admin/api/backups/{name}`                                          |
+| POST    | `/admin/api/backups/{name}/restore`                                  |
+| GET     | `/admin/api/channels`                                                |
+| POST    | `/admin/api/channels`                                                |
+| DELETE  | `/admin/api/channels/{id}`                                           |
+| PATCH   | `/admin/api/channels/{id}`                                           |
+| GET     | `/admin/api/channels/{id}/permissions`                               |
+| DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
+| PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
+| DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
+| PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
+| POST    | `/admin/api/logs/ticket`                                             |
+| GET     | `/admin/api/me`                                                      |
+| GET     | `/admin/api/roles`                                                   |
+| POST    | `/admin/api/roles`                                                   |
+| PATCH   | `/admin/api/roles/reorder`                                           |
+| DELETE  | `/admin/api/roles/{id}`                                              |
+| PATCH   | `/admin/api/roles/{id}`                                              |
+| GET     | `/admin/api/settings`                                                |
+| PATCH   | `/admin/api/settings`                                                |
+| POST    | `/admin/api/setup`                                                   |
+| GET     | `/admin/api/setup/status`                                            |
+| GET     | `/admin/api/stats`                                                   |
+| GET     | `/admin/api/tokens`                                                  |
+| POST    | `/admin/api/tokens`                                                  |
+| DELETE  | `/admin/api/tokens/{id}`                                             |
+| GET     | `/admin/api/updates`                                                 |
+| POST    | `/admin/api/updates/apply`                                           |
+| GET     | `/admin/api/users`                                                   |
+| PATCH   | `/admin/api/users/{id}`                                              |
+| DELETE  | `/admin/api/users/{id}/sessions`                                     |
+| GET     | `/api/v1/admin/plugins/`                                             |
+| POST    | `/api/v1/admin/plugins/install`                                      |
+| DELETE  | `/api/v1/admin/plugins/{id}`                                         |
+| POST    | `/api/v1/admin/plugins/{id}/disable`                                 |
+| POST    | `/api/v1/admin/plugins/{id}/enable`                                  |
+| DELETE  | `/api/v1/auth/account`                                               |
+| POST    | `/api/v1/auth/login`                                                 |
+| POST    | `/api/v1/auth/logout`                                                |
+| GET     | `/api/v1/auth/me`                                                    |
+| POST    | `/api/v1/auth/register`                                              |
+| POST    | `/api/v1/auth/verify-totp`                                           |
+| GET     | `/api/v1/blocks/`                                                    |
+| DELETE  | `/api/v1/blocks/{userId}`                                            |
+| PUT     | `/api/v1/blocks/{userId}`                                            |
+| GET     | `/api/v1/channels/`                                                  |
+| GET     | `/api/v1/channels/{id}/messages`                                     |
+| GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
+| POST    | `/api/v1/channels/{id}/messages/purge`                               |
+| GET     | `/api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users` |
+| GET     | `/api/v1/channels/{id}/pins`                                         |
+| DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| GET     | `/api/v1/client-update/{target}/{current_version}`                   |
+| GET     | `/api/v1/diagnostics/connectivity`                                   |
+| GET     | `/api/v1/dms/`                                                       |
+| POST    | `/api/v1/dms/`                                                       |
+| POST    | `/api/v1/dms/group`                                                  |
+| DELETE  | `/api/v1/dms/{channelId}`                                            |
+| PATCH   | `/api/v1/dms/{channelId}`                                            |
+| GET     | `/api/v1/emoji/`                                                     |
+| POST    | `/api/v1/emoji/`                                                     |
+| DELETE  | `/api/v1/emoji/{id}`                                                 |
+| GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/files/{id}`                                                 |
+| GET     | `/api/v1/gif/search`                                                 |
+| GET     | `/api/v1/gif/trending`                                               |
+| GET     | `/api/v1/health`                                                     |
+| GET     | `/api/v1/info`                                                       |
+| GET     | `/api/v1/invites/`                                                   |
+| POST    | `/api/v1/invites/`                                                   |
+| DELETE  | `/api/v1/invites/{code}`                                             |
+| GET     | `/api/v1/livekit/health`                                             |
+| POST    | `/api/v1/livekit/webhook`                                            |
+| GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/search`                                                     |
+| POST    | `/api/v1/uploads`                                                    |
+| PATCH   | `/api/v1/users/me/`                                                  |
+| POST    | `/api/v1/users/me/avatar`                                            |
+| PUT     | `/api/v1/users/me/password`                                          |
+| GET     | `/api/v1/users/me/sessions`                                          |
+| DELETE  | `/api/v1/users/me/sessions/{id}`                                     |
+| DELETE  | `/api/v1/users/me/totp`                                              |
+| POST    | `/api/v1/users/me/totp/confirm`                                      |
+| POST    | `/api/v1/users/me/totp/enable`                                       |
+| GET     | `/api/v1/ws`                                                         |
+| GET     | `/health`                                                            |
+| CONNECT | `/livekit/*`                                                         |
+| DELETE  | `/livekit/*`                                                         |
+| GET     | `/livekit/*`                                                         |
+| HEAD    | `/livekit/*`                                                         |
+| OPTIONS | `/livekit/*`                                                         |
+| PATCH   | `/livekit/*`                                                         |
+| POST    | `/livekit/*`                                                         |
+| PUT     | `/livekit/*`                                                         |
+| QUERY   | `/livekit/*`                                                         |
+| TRACE   | `/livekit/*`                                                         |
+
+<!-- gendocs:routes:end -->
+
+---
+
 ## Standard Error Response
 
 Error responses use this JSON envelope (one exception: the plugin admin

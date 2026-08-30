@@ -178,6 +178,73 @@ ring buffer that backs the admin panel's live log view.
 | --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
 
+## Key index (generated)
+
+<!-- gendocs:config:start -->
+
+Generated from the `koanf` tags of `config.Config` by `cd Server && go run ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 56 keys.
+
+| Key                                         | Documented in                           |
+| ------------------------------------------- | --------------------------------------- |
+| `backup.dir`                                | Backups (`backup`)                      |
+| `database.max_readers`                      | Database (`database`)                   |
+| `database.path`                             | Database (`database`)                   |
+| `database.type`                             | Database (`database`)                   |
+| `event_persistence.batch_flush_ms`          | Event Persistence (`event_persistence`) |
+| `event_persistence.batch_size`              | Event Persistence (`event_persistence`) |
+| `event_persistence.enabled`                 | Event Persistence (`event_persistence`) |
+| `event_persistence.pruner_interval_minutes` | Event Persistence (`event_persistence`) |
+| `event_persistence.replay_cold_limit`       | Event Persistence (`event_persistence`) |
+| `event_persistence.replay_ring_size`        | Event Persistence (`event_persistence`) |
+| `event_persistence.retention_hours`         | Event Persistence (`event_persistence`) |
+| `gif.api_key`                               | GIF Picker (`gif`)                      |
+| `github.owner`                              | GitHub / Updates (`github`)             |
+| `github.repo`                               | GitHub / Updates (`github`)             |
+| `github.token`                              | GitHub / Updates (`github`)             |
+| `logging.level`                             | Logging (`logging`)                     |
+| `plugins.cpu_budget_ms`                     | Plugins (`plugins`)                     |
+| `plugins.directory`                         | Plugins (`plugins`)                     |
+| `plugins.enabled`                           | Plugins (`plugins`)                     |
+| `plugins.http_allowlist`                    | Plugins (`plugins`)                     |
+| `plugins.max_memory_mb`                     | Plugins (`plugins`)                     |
+| `security.auth_rate_limit_multiplier`       | Security (`security`)                   |
+| `server.admin_allowed_cidrs`                | Server (`server`)                       |
+| `server.allowed_origins`                    | Server (`server`)                       |
+| `server.data_dir`                           | Server (`server`)                       |
+| `server.livekit_webhook_allowed_cidrs`      | Server (`server`)                       |
+| `server.max_ws_connections`                 | Server (`server`)                       |
+| `server.metrics_allowed_cidrs`              | Server (`server`)                       |
+| `server.name`                               | Server (`server`)                       |
+| `server.port`                               | Server (`server`)                       |
+| `server.restart_mode`                       | Server (`server`)                       |
+| `server.trusted_proxies`                    | Server (`server`)                       |
+| `server.waf_crs_mode`                       | Server (`server`)                       |
+| `server.waf_enabled`                        | Server (`server`)                       |
+| `server.waf_paranoia_level`                 | Server (`server`)                       |
+| `telemetry.enabled`                         | Telemetry / OpenTelemetry (`telemetry`) |
+| `telemetry.exporter`                        | Telemetry / OpenTelemetry (`telemetry`) |
+| `telemetry.otlp_endpoint`                   | Telemetry / OpenTelemetry (`telemetry`) |
+| `telemetry.otlp_insecure`                   | Telemetry / OpenTelemetry (`telemetry`) |
+| `telemetry.service_name`                    | Telemetry / OpenTelemetry (`telemetry`) |
+| `tls.acme_cache_dir`                        | TLS (`tls`)                             |
+| `tls.cert_file`                             | TLS (`tls`)                             |
+| `tls.domain`                                | TLS (`tls`)                             |
+| `tls.key_file`                              | TLS (`tls`)                             |
+| `tls.mode`                                  | TLS (`tls`)                             |
+| `upload.max_size_mb`                        | Uploads (`upload`)                      |
+| `upload.storage_dir`                        | Uploads (`upload`)                      |
+| `voice.advertise_internal_ip`               | Voice / LiveKit (`voice`)               |
+| `voice.auto_download_livekit`               | Voice / LiveKit (`voice`)               |
+| `voice.livekit_api_key`                     | Voice / LiveKit (`voice`)               |
+| `voice.livekit_api_secret`                  | Voice / LiveKit (`voice`)               |
+| `voice.livekit_binary`                      | Voice / LiveKit (`voice`)               |
+| `voice.livekit_url`                         | Voice / LiveKit (`voice`)               |
+| `voice.livekit_version`                     | Voice / LiveKit (`voice`)               |
+| `voice.node_ip`                             | Voice / LiveKit (`voice`)               |
+| `voice.quality`                             | Voice / LiveKit (`voice`)               |
+
+<!-- gendocs:config:end -->
+
 ## Environment Variable Overrides
 
 Every config key can be overridden via environment variables using the prefix `OWNCORD_`.

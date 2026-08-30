@@ -11,11 +11,12 @@ and schema are documented in `docs/protocol.md`, `docs/schema.md`, and
 
 CI fails on drift, and the next generator run silently discards your edit.
 
-| Generated                                                              | Source of truth                                 | Workflow                                                       |
-| ---------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| `Server/db/dbgen/`                                                     | `Server/db/queries/*.sql`, `Server/migrations/` | `db-change` skill                                              |
-| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                          | `protocol-change` skill                                        |
-| `Client/src/generated/`                                                | `tauri-typegen`                                 | CI patches known typegen bugs — see `.github/workflows/ci.yml` |
+| Generated                                                                             | Source of truth                                                         | Workflow                                                       |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `Server/db/dbgen/`                                                                    | `Server/db/queries/*.sql`, `Server/migrations/`                         | `db-change` skill                                              |
+| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts`                | `protocol/schema.json`                                                  | `protocol-change` skill                                        |
+| `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md` | `Server/api/router.go`, `Server/migrations/`, `Server/config/config.go` | `cd Server && go run ./cmd/gendocs` (`make docs-verify` in CI) |
+| `Client/src/generated/`                                                               | `tauri-typegen`                                                         | CI patches known typegen bugs — see `.github/workflows/ci.yml` |
 
 ## Bug-hunt ledger
 

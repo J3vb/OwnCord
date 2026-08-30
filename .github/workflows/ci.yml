@@ -69,6 +69,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make protocol-verify
 
+      # The route, table and config-key index blocks in docs/ must never drift
+      # from the mounted router, the migrated schema and config.Config's koanf
+      # tags. Same one-leg rule as the two checks above.
+      - name: Verify generated docs (make docs-verify)
+        if: matrix.os == 'ubuntu-latest'
+        run: make docs-verify
+
       - name: Run tests with race detection and coverage
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
