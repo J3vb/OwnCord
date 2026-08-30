@@ -896,6 +896,107 @@ db`). No control file is committed.
   with it (50 importers, was 49); the dbinventory block is otherwise untouched
   and still has no automated drift check of its own.
 
+#### Evidence — item 5 (fuzz seeds)
+
+- Branch `feat/b3-6-fuzz-seeds`; commits: `aee0b2b` test(b3-6): fuzz seeds —
+  epoch-1 corpora for every target, protocol + predicate-parity fuzz targets,
+  plus the commit adding this block
+- RED: `go test ./ws -run FuzzHandleMessageDecode -v`, with
+  `handleMessageDecode` temporarily returning `false` for a valid `chat_send`
+  envelope → `--- FAIL: FuzzHandleMessageDecode/chat-send-fanout-a-chat_send`
+  (`ok = false, but json.Unmarshal into an envelope succeeds`). 3 failures,
+  all three fixture-derived corpus entries; **0 of the 22 hand-written
+  `f.Add` seeds caught it** — the corpus is what covers the real wire.
+  Second control: `CanViewChannel` letting an administrator see an archived
+  channel → `--- FAIL: FuzzPredicateParity/ready-owner-voice-archived`
+  (`= <nil>, want channel is archived`) plus 30 seeds. Both reverted.
+- GREEN: `go test ./api ./auth ./db ./permissions ./plugin ./service ./storage ./ws -run Fuzz -v`
+  → 20 `--- PASS`, corpus entries listed by fixture name
+  (`FuzzHandleMessageDecode/voice-join-e2ee-leave-a-voice_e2ee_offer`, …).
+  Full gates: 4 build variants, `go vet ./...`, `go test -race ./...`,
+  `go test -tags deadlock -count=10 -timeout=40m ./ws/`, `golangci-lint run`
+  (0 issues), `npm run check:docs`. **`-timeout` matters there:** ten
+  sequential `ws` runs under the deadlock tag take ~592 s, inside Go's default
+  600 s only on an otherwise-idle box — a run competing with other `go test`
+  work was killed at 601.393 s, a wall-clock artifact and not a lock-ordering
+  failure. Anything that raises `-count` on this package must raise
+  `-timeout` with it.
+- Numbers: **17 → 21** `Fuzz*` targets; **3 → 21** with a committed corpus;
+  **6 → 114** corpus files (**108 added**). Per target: HandleMessageDecode 17,
+  CommandPayloads 25 (the 15 distinct `c2s` command frames of the 11 epoch-1
+  journeys, placeholders concretised, plus a minimal valid payload for each of
+  the 10 command types no journey exercises), AuthPayload 2,
+  PredicateParity 12, ValidateFileType 6,
+  SanitizeFTSQuery / EffectivePerms / EffectiveChannelPerms / ParseMentionTokens
+  4 each, SanitizeUploadFilename +4 (2 → 6), ValidateAvatarURL /
+  ValidateDisplayName / ValidateUsername / ValidateRelativePath /
+  ValidateShortcode / SanitizeFilename / ParseParticipantIdentity /
+  ParseRoomChannelID 3 each, ValidatePasswordStrength 2. Replay cost: every
+  target ≤ **0.02 s** (`FuzzSanitizeFTSQuery`, which runs each entry through a
+  real FTS5 `MATCH`); every other ≤ 0.01 s. 30 s of `-fuzz` on each of the
+  three new targets found nothing (1.09 M, 0.74 M and 34.9 M execs); a 20 s
+  pass over each previously corpus-less target is written up in the item's
+  report, which is also where anything it turned up is recorded.
+- `make fuzz` was red at HEAD on `FuzzParseMentionTokens`, which still asserted
+  the Unicode fold (`strings.ToLower`) that OC-0131 replaced with
+  `db.LowerASCII` in `parseMentionTokens` — a stale assertion in the target,
+  not a production defect. Before: `FAIL … spelling "Ł" is not lowercased`
+  after 66,255 execs (3.69 s, empty corpus and cleared fuzz cache). After the
+  one-line swap, the same 30 s `-fuzz` run on a cleared cache is `PASS` at
+  1,159,227 execs, and the corpus replay stays green.
+- Verified against HEAD: the item's four pointers were all stale, and each was
+  resolved rather than followed. (1) `ws/messages.go` holds only outbound
+  builders plus `parseChannelID`, so "protocol parsing" is
+  `handleMessageDecode` (`ws/handlers.go`) for the envelope and
+  `commandConstructors` (`ws/command.go`) for the payloads; every constructor
+  in that map is a pure `func(userID, reqID, raw)`, so `FuzzCommandPayloads`
+  reaches them directly — no hub, no DB, better than the fallback the brief
+  allowed. The table registers **26** constructors and all **26** are now
+  seeded: 15 come from the journeys, 10 have a minimal valid corpus payload
+  because no journey exercises them, and
+  `TestCommandPayloadSeedsCoverEveryConstructor` fails if a newly registered
+  command arrives without one (RED: removing
+  `FuzzCommandPayloads/voice-mod-kick-target` fails the test with
+  `1 of 26 … have no seed or corpus entry: [voice_mod_kick]`).
+  `auth` is **not** in the
+  table — `authenticateConn` (`ws/serve_auth.go:40`) decodes it before the hub
+  knows the client — so its entries moved to their own headless target,
+  `FuzzAuthPayload`, which pins that no numeric handshake field accepts a value
+  its Go type cannot hold (a `last_seq` of `-1` wrapping to 2^64-1 would let a
+  reconnecting client skip its whole replay). That decode is inline behind a
+  live socket read and a session lookup, so the target mirrors the struct and
+  says so rather than changing production to expose it; 30 s of `-fuzz` on it
+  found nothing (1.37 M execs). (2) `permissions.Subject` has no wire form, so there is
+  nothing to round-trip; `FuzzPredicateParity` is the honest reading —
+  every B2-5 predicate against the raw two-layer bit formula written out
+  longhand, plus the two definitional identities (`CanAdmitSession` ≡
+  `CanViewChannel`, `CanType` ≡ `CanSendMessage`). Writing the formula out
+  surfaced one ordering worth stating: `Subject.Has` applies the Administrator
+  bypass **before** the zero-permission refusal, so an administrator holds the
+  empty mask while `HasPerm(_, 0)` is false. Parity is the target's purpose, so
+  the oracle keeps that ordering and
+  `TestSubjectHasZeroPermIsAdminBypassed` records the divergence as observed
+  behaviour. **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
+  is called from `permissions/predicates.go` (five fixed masks) and from
+  `Checker.HasChannelPerm` / `HasChannelPermBatch`; every leaf caller across
+  `api/`, `service/` and `ws/` names a `permissions.*` constant or an OR of
+  two. The only variable-forwarding chains are `ws/deps.go`
+  (`requirePerm`/`hasPerm`), `service/permission.go` and
+  `checker.go:156`, and their callers are all named constants — the one
+  table-driven site, `ws/voice_controls.go:148`, has exactly two rows
+  (`UseVideo`, `ShareScreen`). Both `RequireChannelAccess` overloads have no
+  production caller at all. No production change was made. (3) There is no pure upload
+  admission function at HEAD — `handleUpload` inlines `MaxBytesReader`,
+  `ParseMultipartForm`, `DetectContentType` and `store.Save` — so no
+  `FuzzUploadAdmission` was created (it would have needed production code);
+  upload admission is covered by corpora for `FuzzValidateFileType` (6 real
+  magic headers) and `FuzzSanitizeUploadFilename` (+4 attachment names).
+  (4) There is no recovery-token parser: backup codes exist only as
+  `[]string{}` in `totp_handler.go`'s response, and
+  `(*PartialAuthStore).Consume` is a mutex-guarded map lookup with an expiry
+  check, not a parse — skipped, and no file under `auth/`, `service/` or
+  `api/auth_*` was touched.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"payload\":{\"public_key\":\"Ym9iLWVjZGgtcHVibGljLWtleS1maXh0dXJl\"},\"type\":\"voice_e2ee_announce\"}")

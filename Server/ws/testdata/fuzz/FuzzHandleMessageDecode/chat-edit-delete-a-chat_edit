@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"req-1\",\"payload\":{\"content\":\"edited text\",\"message_id\":1},\"type\":\"chat_edit\"}")
