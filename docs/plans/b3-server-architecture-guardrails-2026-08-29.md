@@ -997,6 +997,74 @@ db`). No control file is committed.
   check, not a parse — skipped, and no file under `auth/`, `service/` or
   `api/auth_*` was touched.
 
+#### Evidence — item 8 (Docker smoke nightly on `dev`)
+
+- Branch `feat/b3-6-docker-smoke-nightly`. Code commit: `3f27447e` feat(b3-6):
+  nightly docker smoke on dev — its own workflow, plus a timeout on ci.yml's
+  verify job. A temporary commit at the tip of the branch adds a `push:`
+  trigger so the proof run can happen at all; it is dropped before the PR
+  opens.
+- **Deviation from this item's text, and why.** The item says `ci.yml` gains
+  the `schedule:` trigger and that the job is deliberately "not moved to its
+  own workflow file". It is moved. Scoping a schedule inside `ci.yml` means
+  skipping the other jobs with a job-level `if:`, and **a skipped job still
+  writes a check run** — observed on `main`'s tip, where
+  `Tauri Full Build (${{ matrix.os }})` reports `conclusion: skipped` beside
+  the green required contexts (`gh api repos/J3vb/OwnCord/commits/main/check-runs`).
+  A scheduled run is attached to the **default branch's tip SHA** whatever it
+  later checks out, so each nightly would stamp `skipped` onto `main`'s tip
+  under seven of the twelve `contexts` in `b0-dev-branch-protection.sh`:
+  Client Static Checks, Client Unit Tests, Rust Unit Tests, Repository
+  Hygiene, Docs & Ledger Consistency, Client E2E (Playwright), Client E2E
+  (parity subset, blocking). `scripts/verify-gate-evidence.mjs:45-61` keeps
+  the latest attempt per name and treats `skipped` as not-success, and
+  `release.yml`'s `gate-evidence` job runs it on the tagged SHA and gates
+  every build and publish job — so a release cut from a `main` tip that had
+  sat through one nightly would be refused, for a reason that has nothing to
+  do with that commit. `nightly-docker-smoke.yml`'s single job matches no
+  required context, so it cannot overwrite gate evidence, and `ci.yml`'s job
+  selection is untouched.
+  (`server-build-test` would have escaped: a skipped matrix job reports under
+  the unexpanded name, which is not a required context. `admin-e2e` is not
+  required, and the three `Analyze` contexts come from CodeQL default setup.)
+- **When the nightly actually starts.** A scheduled workflow only ever runs
+  from the default branch, so this file does nothing on `dev`: the first
+  nightly fires after it reaches `main` at the next release merge. Until
+  then, `workflow_dispatch` is the only way to run it.
+- Contents: `on: schedule` (`0 3 * * *`) + `workflow_dispatch`; a
+  `concurrency` group with `cancel-in-progress: true`;
+  `permissions: contents: read`; one job, `nightly-docker-smoke`, with
+  `timeout-minutes: 20`; `actions/checkout` on the same pinned SHA `ci.yml`
+  uses, with `ref: dev`, since a schedule reads the file from `main`; a
+  "Print checked-out revision" step logging `github.event_name`,
+  `github.ref` and `git rev-parse HEAD`; then the buildx, build and
+  `Server/scripts/docker-smoke.sh` steps of `server-docker-build`, verbatim.
+  Both jobs carry a one-line keep-in-sync comment naming the other.
+- Numbers: `ci.yml` +3 lines (a two-line comment and `timeout-minutes: 20`);
+  `nightly-docker-smoke.yml` 68 lines; the shared buildx/build/smoke steps
+  diff clean between the two files, ignoring comments.
+- GREEN: `npx prettier --check` on both workflows → "All matched files use
+  Prettier code style!"; `actionlint` on all five workflows → clean;
+  `node scripts/check-workflow-guards.mjs` →
+  `4 guard(s) present in 1 metered workflow(s)`, and its `--selftest` → all
+  assertions pass;
+  `npm run check:docs` → passed; `node scripts/run.mjs --list` → picks the new
+  workflow up in the actionlint file list, which is built from `git ls-files`.
+- Proof (controller runs it, on the pushed branch):
+  `gh run list --workflow nightly-docker-smoke.yml --branch feat/b3-6-docker-smoke-nightly --limit 1`
+  for the run id, then
+  `gh run view <id> --log | grep -A2 "Print checked-out revision"`.
+  Expected: `event=push`, and `git rev-parse HEAD` printing **`dev`'s tip**,
+  not the branch's — `git rev-parse origin/dev` for comparison.
+  Observed SHA: `<controller: observed SHA>`.
+- Verified against HEAD: the item states "`concurrency` and `timeout-minutes`
+  are already present (B1-7's guard check enforces both)". Only `concurrency`
+  was. `scripts/check-workflow-guards.mjs` audits only the workflows in
+  `METERED`, which is `[".github/workflows/claude.yml"]` — it never looked at
+  `ci.yml` — and `server-docker-build` was one of seven jobs of eleven there
+  with no `timeout-minutes`, so it inherited GitHub's 360-minute default.
+  Hence the one-line `ci.yml` change; the new workflow declares its own.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
