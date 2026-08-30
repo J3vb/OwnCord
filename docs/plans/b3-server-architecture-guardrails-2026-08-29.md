@@ -673,14 +673,26 @@ baseline) in this section's evidence block.
   Every row is load-bearing, and `TestAuthzResidueAllowIsLive` proves all 19 at
   once on every run.
 - GREEN: `cd Server && go test -count=1 ./invariants/` → `ok github.com/J3vb/OwnCord/Server/invariants`
-- Numbers: allowlist **19 symbols / 21 call sites**, which is HP-2 question 5's
+- RED (Codex P2 on #1451 — a row must not exempt the whole function): a second
+  `permissions.HasAdmin` inside `api/serveFileAuthorize` →
+  `api/upload_handler.go:405: … the residue row binds 1 call(s) of HasAdmin here, found 2`;
+  swapping that call to `permissions.HasPerm` →
+  `api/upload_handler.go:404: … binds 0 call(s) of HasPerm here, found 1`;
+  setting the row to `HasAdmin: 2` →
+  `TestAuthzResidueAllowIsLive … binds map[HasAdmin:2] but the tree has map[HasAdmin:1]`.
+  All three restored.
+- Numbers: allowlist **19 rows / 21 bound calls**, which is HP-2 question 5's
   21 code hits exactly — re-measured at `dev` `75d64dd4`, zero hits outside its
-  five classes and zero unclassified. Classes: `server-scoped` 6,
-  `admin-short-circuit` 6, `admin-perimeter` 5, `bulk-reader-walk` 3 (one
-  symbol), `base-bit-rejection` 1. Six flagged call targets (`HasPerm`,
-  `HasAnyPerm`, `HasServerPerm`, `HasAdmin`, `EffectivePerms`,
-  `EffectiveChannelPerms`) — the whole exported surface of `permissions.go`
-  except `Name`. Registry is now three rules.
+  five classes and zero unclassified. A row binds symbol **and** helper **and**
+  count, so the residue cannot grow inside an allowlisted function; 18 rows bind
+  one call, `service.(*MessageService).mentionReaders` binds three
+  (`EffectivePerms` 1, `HasAdmin` 2). By helper: `HasAdmin` 13,
+  `HasServerPerm` 6, `HasAnyPerm` 1, `EffectivePerms` 1. Classes:
+  `server-scoped` 6, `admin-short-circuit` 6, `admin-perimeter` 5,
+  `bulk-reader-walk` 3 (one symbol), `base-bit-rejection` 1. Six flagged call
+  targets (`HasPerm`, `HasAnyPerm`, `HasServerPerm`, `HasAdmin`,
+  `EffectivePerms`, `EffectiveChannelPerms`) — the whole exported surface of
+  `permissions.go` except `Name`. Registry is now three rules.
 - Verified against HEAD: the plan's "`Rules = []Rule{syncutilLocks}` … one
   rule" predates B3-0; `authz-chokepoint` is the third, not the second. The
   residue table's line numbers had moved (B3-2 shifted `api/middleware.go`

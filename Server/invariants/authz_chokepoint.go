@@ -1,6 +1,7 @@
 package invariants
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"path"
@@ -74,12 +75,24 @@ var authzResidueClasses = map[string]bool{
 const authzClassList = classServerScoped + ", " + classAdminShortCircuit + ", " +
 	classAdminPerimeter + ", " + classBulkReaderWalk + ", " + classBaseBitRejection
 
+// calls is a helper-name → call-count multiset, aliased purely to keep the
+// residue table's literals short. An alias rather than a defined type, so the
+// exported field below stays a plain map[string]int.
+type calls = map[string]int
+
 // AuthzResidueEntry is one row of HP-2 question 5's residue table: why a
 // production symbol outside Server/permissions still calls a raw bit helper
-// instead of a predicate.
+// instead of a predicate, and exactly which raw calls it is frozen at.
 type AuthzResidueEntry struct {
 	Class string // one of the classes above; the set is closed
 	Note  string // what this particular site does
+	// Calls is the exact multiset of raw helper calls the symbol may contain:
+	// helper name → count. It is what stops a row from being a licence for the
+	// whole function. A symbol with an extra call, a call of a different
+	// helper, or one more of the same helper fails authz-chokepoint at the
+	// offending line; one with fewer fails TestAuthzResidueAllowIsLive, which
+	// compares the multiset exactly rather than asking for at least one hit.
+	Calls calls
 }
 
 // AuthzResidueAllow is the residue. Rows are keyed by symbol — the file's
@@ -89,41 +102,51 @@ type AuthzResidueEntry struct {
 // matching. The directory rather than the package clause keeps the four
 // `package main` files at different paths from colliding.
 //
-// The list only shrinks: a symbol that stops calling a raw helper fails
-// TestAuthzResidueAllowIsLive, and a new raw call anywhere else fails
-// authz-chokepoint. B3-8 deletes rows as it moves each family behind a
-// service.
+// A row binds three things, not one: the symbol, which raw helpers it calls,
+// and how many times each. Allowlisting a symbol alone would exempt the whole
+// function — a second raw call added inside it, or a switch to a different
+// helper, would then pass silently and the residue could grow without review.
 //
-// 19 symbols, 21 call sites, matching HP-2 question 5 at dev 75d64dd4.
+// The list only shrinks and never widens: a symbol that stops calling a raw
+// helper, or whose counts no longer match, fails TestAuthzResidueAllowIsLive;
+// an extra or different call fails authz-chokepoint at the offending line; a
+// new raw call anywhere else fails it too. B3-8 deletes rows as it moves each
+// family behind a service. Raising a count is a reviewable edit here, never a
+// side effect of editing the function.
+//
+// 19 symbols, 21 bound calls, matching HP-2 question 5 at dev 75d64dd4.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
-	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole"},
-	"admin.requirePerm":                        {classServerScoped, "per-route server permission for the admin mux"},
-	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux"},
-	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel"},
-	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide"},
-	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide"},
+	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
+	"admin.requirePerm":                        {classServerScoped, "per-route server permission for the admin mux", calls{"HasServerPerm": 1}},
+	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
+	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
+	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
+	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
-	"service.(*ChannelService).ListVisibleChannels":     {classAdminShortCircuit, "an administrator sees every channel; skips the override query"},
-	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query"},
-	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator"},
-	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator"},
-	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator"},
-	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator"},
+	"service.(*ChannelService).ListVisibleChannels":     {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
+	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},
 
 	// ── HasAdmin as an authorization input: role hierarchy and perimeter ───
-	"admin.requireGrantableOverride": {classAdminPerimeter, "refuses an override that grants past the actor's own role"},
-	"admin.requireManageableUser":    {classAdminPerimeter, "role-hierarchy check on the target user"},
-	"admin.logStreamAuthorize":       {classAdminPerimeter, "the log stream is administrator-only, re-checked per tick"},
-	"api.serveFileAuthorize":         {classAdminPerimeter, "administrator bypass for attachment access"},
-	"service.requireGrantable":       {classAdminPerimeter, "refuses a role edit that grants past the actor's own bits"},
+	"admin.requireGrantableOverride": {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
+	"admin.requireManageableUser":    {classAdminPerimeter, "role-hierarchy check on the target user", calls{"HasAdmin": 1}},
+	"admin.logStreamAuthorize":       {classAdminPerimeter, "the log stream is administrator-only, re-checked per tick", calls{"HasAdmin": 1}},
+	"api.serveFileAuthorize":         {classAdminPerimeter, "administrator bypass for attachment access", calls{"HasAdmin": 1}},
+	"service.requireGrantable":       {classAdminPerimeter, "refuses a role edit that grants past the actor's own bits", calls{"HasAdmin": 1}},
 
 	// ── bulk @everyone reader walk ─────────────────────────────────────────
-	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel"},
+	// The one multi-call row: one EffectivePerms for the layer's mask, then
+	// HasAdmin twice — once to keep an administrator role in, once in the
+	// read test.
+	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
 	// ── base-bit early rejection ahead of CanModerateVoice ─────────────────
-	"ws.voiceModTarget": {classBaseBitRejection, "rejects on MUTE_MEMBERS before the voice-state lookup; never admits"},
+	"ws.voiceModTarget": {classBaseBitRejection, "rejects on MUTE_MEMBERS before the voice-state lookup; never admits", calls{"HasServerPerm": 1}},
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions
@@ -142,16 +165,35 @@ var authzChokepoint = Rule{
 
 func checkAuthzChokepoint(f *ast.File, fset *token.FileSet, rel string) []Violation {
 	var out []Violation
+	flag := func(h authzHit, msg string) {
+		out = append(out, Violation{Rule: authzChokepointID, File: rel, Line: h.Line, Msg: msg})
+	}
+
+	// Per symbol, how many calls of each helper have been seen so far in this
+	// file. A symbol's hits are always in one file — Go forbids two functions
+	// of the same name in a package — so one pass sees the whole multiset, and
+	// counting as we go means the violation lands on the extra call itself.
+	seen := make(map[string]calls)
+
 	for _, h := range authzHits(f, fset, rel) {
-		if _, listed := AuthzResidueAllow[h.Symbol]; listed {
+		if h.Helper == "" {
+			// A dot-import binds no call to count, and an allowlisted symbol
+			// is no excuse for one.
+			flag(h, h.message())
 			continue
 		}
-		out = append(out, Violation{
-			Rule: authzChokepointID,
-			File: rel,
-			Line: h.Line,
-			Msg:  h.message(),
-		})
+		row, listed := AuthzResidueAllow[h.Symbol]
+		if !listed {
+			flag(h, h.message())
+			continue
+		}
+		if seen[h.Symbol] == nil {
+			seen[h.Symbol] = make(calls)
+		}
+		seen[h.Symbol][h.Helper]++
+		if got, want := seen[h.Symbol][h.Helper], row.Calls[h.Helper]; got > want {
+			flag(h, h.excessMessage(want, got))
+		}
 	}
 	return out
 }
@@ -171,10 +213,24 @@ func (h authzHit) message() string {
 	return "raw permissions." + h.Helper + " resolves permission bits outside Server/permissions " +
 		"(the Has* helpers decide, the Effective* ones compute the mask a decision then reads); " +
 		"resolve a permissions.Subject and ask the predicate that owns the property " +
-		"(CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice), " +
-		"or add an AuthzResidueAllow entry for " + h.Symbol + " with a reason and one of the classes " +
-		authzClassList
+		"(" + authzPredicateList + "), " +
+		"or add an AuthzResidueAllow entry for " + h.Symbol + " with a reason, the calls it binds, " +
+		"and one of the classes " + authzClassList
 }
+
+// excessMessage is the message for a call inside an allowlisted symbol that the
+// symbol's row does not account for: a helper the row never listed (want 0), or
+// one more of a helper than it binds.
+func (h authzHit) excessMessage(want, got int) string {
+	return fmt.Sprintf("raw permissions.%s at %s: the residue row binds %d call(s) of %s here, found %d. "+
+		"A row freezes an inventory, it is not a licence for the function — resolve a permissions.Subject "+
+		"and ask the predicate that owns the property (%s), or have the row's count raised under review. "+
+		"B3-8 removes rows, it never widens them.",
+		h.Helper, h.Symbol, want, h.Helper, got, authzPredicateList)
+}
+
+// authzPredicateList names the B2-5 predicates a call site should be using.
+const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice"
 
 // authzHits reports every raw permission check in one file, whether or not it
 // is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same

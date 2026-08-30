@@ -48,4 +48,6 @@ prometheus.
   `CanModerateVoice`) — one predicate per security property, so a call site
   cannot re-derive half a rule. The residue that predates B2-5 is listed by
   symbol in `invariants/authz_chokepoint.go` (`AuthzResidueAllow`) with a
-  class and a reason; that list only shrinks too.
+  class, a reason, and the exact helper calls it is frozen at — a row is an
+  inventory, not a licence for the function, so a second raw call inside a
+  listed one still fails. That list only shrinks too.
