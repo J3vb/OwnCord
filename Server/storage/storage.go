@@ -124,7 +124,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	// Read the first 8 bytes to check magic bytes without consuming the stream.
 	var header [8]byte
 	n, err := io.ReadFull(r, header[:])
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return 0, fmt.Errorf("reading file header: %w", err)
 	}
 	headerSlice := header[:n]

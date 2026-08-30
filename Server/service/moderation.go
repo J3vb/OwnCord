@@ -120,7 +120,7 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 	}
 
 	if err := s.st.BanUser(ctx, targetID, reason, expires); err != nil {
-		return fmt.Errorf("%w: failed to ban user: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to ban user: %w", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the ban committed.
@@ -194,7 +194,7 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 	}
 
 	if err := s.st.UpdateUserRole(ctx, targetID, newRoleID); err != nil {
-		return nil, fmt.Errorf("%w: failed to update role: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to update role: %w", ErrInternal, err)
 	}
 	// Drop the target's cached role immediately: without this a demotion keeps
 	// granting the old bits (and the old rank) for up to permCacheTTL.
@@ -233,7 +233,7 @@ func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID i
 	}
 
 	if err := s.st.ForceLogoutUser(ctx, targetID); err != nil {
-		return fmt.Errorf("%w: failed to log out user: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to log out user: %w", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the sessions were cut.
@@ -263,7 +263,7 @@ func (s *ModerationService) UnbanUser(ctx context.Context, actorID, targetID int
 	}
 
 	if err := s.st.UnbanUser(ctx, targetID); err != nil {
-		return fmt.Errorf("%w: failed to unban user: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to unban user: %w", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the unban committed.

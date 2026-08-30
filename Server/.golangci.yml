@@ -25,7 +25,16 @@ linters:
     - nestif # deeply nested if-blocks
     - dupl # verbatim duplicated blocks
 
+    # Silent-drop and sentinel-error classes (added 2026-08-30).
+    - exhaustive # a switch over an enum-like type with no default that misses a member
+    - errorlint # errors.Is/As instead of == and type assertions on wrapped errors; %w in Errorf
+    - durationcheck # time.Duration multiplied by a Duration-typed value, e.g. d*time.Second where d is already a Duration
+
   settings:
+    exhaustive:
+      # An explicit default branch is a deliberate catch-all; only switches without
+      # one, which fall through in silence, must list every member.
+      default-signifies-exhaustive: true
     staticcheck:
       checks:
         - "all"

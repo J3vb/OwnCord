@@ -409,7 +409,7 @@ func installZipWriteEntry(f *zip.File, destAbs string, remaining int64) (int64, 
 	n, copyErr := io.CopyN(out, rc, remaining+1)
 	_ = rc.Close()
 	_ = out.Close()
-	if copyErr != nil && copyErr != io.EOF {
+	if copyErr != nil && !errors.Is(copyErr, io.EOF) {
 		return 0, copyErr
 	}
 	if n > remaining {

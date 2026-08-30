@@ -188,20 +188,20 @@ func GuardedDialContext() func(ctx context.Context, network, addr string) (net.C
 		// IP literal: validate and dial as-is (no resolution happens).
 		if ip := net.ParseIP(h); ip != nil {
 			if err := ipAllowed(ip); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+				return nil, fmt.Errorf("%w: %w", ErrHTTPHostDenied, err)
 			}
 			return dialContext(ctx, network, addr)
 		}
 		ips, lookupErr := lookupIPAddr(ctx, h)
 		if lookupErr != nil {
-			return nil, fmt.Errorf("%w: dns lookup failed: %v", ErrHTTPHostDenied, lookupErr)
+			return nil, fmt.Errorf("%w: dns lookup failed: %w", ErrHTTPHostDenied, lookupErr)
 		}
 		if len(ips) == 0 {
 			return nil, fmt.Errorf("%w: no addresses for %s", ErrHTTPHostDenied, h)
 		}
 		for _, resolved := range ips {
 			if err := ipAllowed(resolved.IP); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+				return nil, fmt.Errorf("%w: %w", ErrHTTPHostDenied, err)
 			}
 		}
 		var dialErr error

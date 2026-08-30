@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 
@@ -153,7 +154,8 @@ func TestVoiceE2EEOfferV2_NotInVoiceChannel(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error for not in voice channel")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -180,7 +182,8 @@ func TestVoiceE2EEOfferV2_EmptyFields(t *testing.T) {
 			if result.Error == nil {
 				t.Fatal("expected error for empty field")
 			}
-			ce, ok := result.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(result.Error, &ce)
 			if !ok {
 				t.Fatalf("expected ClientError, got %T", result.Error)
 			}
@@ -208,7 +211,8 @@ func TestVoiceE2EEOfferV2_OversizedFields(t *testing.T) {
 			if result.Error == nil {
 				t.Fatal("expected error for oversized field")
 			}
-			ce, ok := result.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(result.Error, &ce)
 			if !ok {
 				t.Fatalf("expected ClientError, got %T", result.Error)
 			}
@@ -236,7 +240,8 @@ func TestVoiceE2EEOfferV2_InvalidBase64(t *testing.T) {
 			if result.Error == nil {
 				t.Fatal("expected error for invalid base64")
 			}
-			ce, ok := result.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(result.Error, &ce)
 			if !ok {
 				t.Fatalf("expected ClientError, got %T", result.Error)
 			}
@@ -257,7 +262,8 @@ func TestVoiceE2EEOfferV2_NotKeyHolder(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error for non-key-holder")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -276,7 +282,8 @@ func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error for nil KeyHolder")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}

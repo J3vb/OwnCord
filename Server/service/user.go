@@ -225,7 +225,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
-		return nil, fmt.Errorf("%w: failed to update profile: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to update profile: %w", ErrInternal, err)
 	}
 	// This re-read, like the audit write below, must survive a request ctx
 	// canceled after the write above committed — otherwise a client that
@@ -273,7 +273,7 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 		return err
 	}
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nullable(cleaned)); err != nil {
-		return fmt.Errorf("%w: failed to update custom status: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to update custom status: %w", ErrInternal, err)
 	}
 	return nil
 }
@@ -283,7 +283,7 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 // user signed out states something about them that is no longer true.
 func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error {
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nil); err != nil {
-		return fmt.Errorf("%w: failed to clear custom status: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to clear custom status: %w", ErrInternal, err)
 	}
 	return nil
 }
@@ -324,7 +324,7 @@ type ChangePasswordResult struct {
 // ChangePassword updates the user's password and revokes other sessions.
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
-		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %v", ErrInternal, err)
+		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
 
 	// The password is committed from here on: every path below reports
@@ -356,7 +356,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Session, error) {
 	sessions, err := s.st.ListUserSessions(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list sessions: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list sessions: %w", ErrInternal, err)
 	}
 	return sessions, nil
 }
@@ -367,7 +367,7 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 		if errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("%w: session not found", ErrNotFound)
 		}
-		return fmt.Errorf("%w: failed to revoke session: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to revoke session: %w", ErrInternal, err)
 	}
 	// Audit rows must survive a request canceled after the delete committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke", "session", sessionID, "session revoked")

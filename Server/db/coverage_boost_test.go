@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_AtLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ErrChannelFull, got nil")
 	}
-	if err != db.ErrChannelFull {
+	if !errors.Is(err, db.ErrChannelFull) {
 		t.Errorf("error = %v, want ErrChannelFull", err)
 	}
 }

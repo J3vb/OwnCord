@@ -92,7 +92,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 		}
 		results, err := s.st.SearchMessages(ctx, query, channelID, limit)
 		if err != nil {
-			return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
+			return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
 		}
 		return results, nil
 	}
@@ -108,7 +108,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 
 	results, err := s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, limit)
 	if err != nil {
-		return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
 	}
 	return results, nil
 }
@@ -191,7 +191,7 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	}
 	msgs, err := s.st.GetPinnedMessages(ctx, channelID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %w", ErrInternal, err)
 	}
 	return msgs, nil
 }
@@ -242,7 +242,7 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 		}
-		return fmt.Errorf("%w: %v", ErrInternal, err)
+		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return nil
 }

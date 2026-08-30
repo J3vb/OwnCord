@@ -482,12 +482,11 @@ func (s *sim) read(c *simClient, n int) {
 	read := 0
 	for n < 0 || read < n {
 		frame, st := c.wire.Recv()
-		if st == ws.FaultOK {
+		switch st {
+		case ws.FaultOK:
 			s.observe(c, frame)
 			read++
 			continue
-		}
-		switch st {
 		case ws.FaultEmpty:
 			if len(c.owed) != c.wire.Buffered() {
 				s.failf("I2: c%d conn %d: owed %v but only %d unread frame(s) remain (W=%d)", c.idx, c.conns, c.owed, c.wire.Buffered(), c.w)

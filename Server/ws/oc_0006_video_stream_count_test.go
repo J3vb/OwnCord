@@ -11,6 +11,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -105,7 +106,8 @@ func TestEnableVideoSlot_SameUserDoubleStreamCountsTwoSlots(t *testing.T) {
 	if bobCamRes.Error == nil {
 		t.Fatal("bob's camera enable succeeded as the channel's 3rd live video stream against a cap of 2 -- the same-user double-publish (camera+screenshare on one row) was undercounted as a single slot")
 	}
-	if ce, ok := bobCamRes.Error.(ClientError); !ok || ce.Code != ErrCodeVideoLimit {
+	var ce ClientError
+	if !errors.As(bobCamRes.Error, &ce) || ce.Code != ErrCodeVideoLimit {
 		t.Errorf("error = %+v, want ClientError{Code: %q}", bobCamRes.Error, ErrCodeVideoLimit)
 	}
 
