@@ -445,9 +445,19 @@ func FuzzAuthPayload(f *testing.F) {
 
 		// Admitted: the token authenticateConn goes on to hash must be the
 		// string the JSON carried, not something a struct tag reshaped.
-		var wantToken string
-		if json.Unmarshal(fields["token"], &wantToken) == nil && wantToken != p.Token {
-			t.Fatalf("auth payload %q: token is %q through the handshake struct but %q decoded on its own", env.Payload, p.Token, wantToken)
+		//
+		// The expectation is decoded through a probe carrying the SAME
+		// `json:"token"` tag, not looked up in fields: with
+		// {"token":"a","TOKEN":"b"} both keys resolve to the tagged field and
+		// the last one wins, so the exact-key lookup would expect "a" while
+		// the handshake legitimately holds "b". Same lesson as the epoch
+		// probe above — the oracle has to use the decoder's field resolution,
+		// not the raw key set.
+		var tokenProbe struct {
+			Token *string `json:"token"`
+		}
+		if json.Unmarshal(env.Payload, &tokenProbe) == nil && tokenProbe.Token != nil && *tokenProbe.Token != p.Token {
+			t.Fatalf("auth payload %q: token is %q through the handshake struct but %q through a probe with the same tag", env.Payload, p.Token, *tokenProbe.Token)
 		}
 	})
 }

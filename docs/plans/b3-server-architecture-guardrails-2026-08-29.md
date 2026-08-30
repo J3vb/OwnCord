@@ -970,7 +970,22 @@ db`). No control file is committed.
   nothing to round-trip; `FuzzPredicateParity` is the honest reading —
   every B2-5 predicate against the raw two-layer bit formula written out
   longhand, plus the two definitional identities (`CanAdmitSession` ≡
-  `CanViewChannel`, `CanType` ≡ `CanSendMessage`). (3) There is no pure upload
+  `CanViewChannel`, `CanType` ≡ `CanSendMessage`). Writing the formula out
+  surfaced one ordering worth stating: `Subject.Has` applies the Administrator
+  bypass **before** the zero-permission refusal, so an administrator holds the
+  empty mask while `HasPerm(_, 0)` is false. Parity is the target's purpose, so
+  the oracle keeps that ordering and
+  `TestSubjectHasZeroPermIsAdminBypassed` records the divergence as observed
+  behaviour. **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
+  is called from `permissions/predicates.go` (five fixed masks) and from
+  `Checker.HasChannelPerm` / `HasChannelPermBatch`; every leaf caller across
+  `api/`, `service/` and `ws/` names a `permissions.*` constant or an OR of
+  two. The only variable-forwarding chains are `ws/deps.go`
+  (`requirePerm`/`hasPerm`), `service/permission.go` and
+  `checker.go:156`, and their callers are all named constants — the one
+  table-driven site, `ws/voice_controls.go:148`, has exactly two rows
+  (`UseVideo`, `ShareScreen`). Both `RequireChannelAccess` overloads have no
+  production caller at all. No production change was made. (3) There is no pure upload
   admission function at HEAD — `handleUpload` inlines `MaxBytesReader`,
   `ParseMultipartForm`, `DetectContentType` and `store.Save` — so no
   `FuzzUploadAdmission` was created (it would have needed production code);
