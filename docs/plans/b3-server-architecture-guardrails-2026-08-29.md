@@ -360,7 +360,7 @@ rewrite, remove old path — with B3-1's tests green after every commit.
 Exit: HP-3.
 
 **Evidence, 2026-08-30** — branch `feat/b3-2-auth-slice` from `dev`
-`71d867cb`; PR to `dev` recorded below.
+`71d867cb`; PR #1450 to `dev` (squash SHA recorded at merge).
 
 - **Pre-squash SHAs**, one per numbered item. For each, the characterization
   file was run against that exact tree in a detached worktree

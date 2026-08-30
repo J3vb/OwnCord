@@ -4,8 +4,7 @@
 [b3-server-architecture-guardrails-2026-08-29.md](b3-server-architecture-guardrails-2026-08-29.md)
 §HP-3 (roadmap
 [repo-health-roadmap-2026-08-23.md](repo-health-roadmap-2026-08-23.md), B3)
-**Commits reviewed:** the pre-squash commits of the B3-2 pull request (table
-below), on top of B3-0 (#1448 = `d383d8c7`) and B3-1 (#1449 = `71d867cb`)
+**Commits reviewed:** the pre-squash commits of #1450 (B3-2; table below), on top of B3-0 (#1448 = `d383d8c7`) and B3-1 (#1449 = `71d867cb`)
 **Measured at:** `fe1d11b8` (the handler-move commit) and `3f0d24ec` (the
 after-state inventory), branch `feat/b3-2-auth-slice` off `dev` `71d867cb`
 **Measured:** 2026-08-30
@@ -29,7 +28,7 @@ numbered item of §B3-2, characterization green after each — survives only on
 the pull-request ref:
 
 ```bash
-git fetch origin 'refs/pull/<B3-2 PR>/head:pr-b3-2'   # number recorded in the plan's B3-2 block at merge
+git fetch origin 'refs/pull/1450/head:pr-1450'
 ```
 
 | Commit      | §B3-2 item                                                                                                                 |
