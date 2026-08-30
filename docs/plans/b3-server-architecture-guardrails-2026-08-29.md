@@ -896,6 +896,68 @@ db`). No control file is committed.
   with it (50 importers, was 49); the dbinventory block is otherwise untouched
   and still has no automated drift check of its own.
 
+#### Evidence — item 5 (fuzz seeds)
+
+- Branch `feat/b3-6-fuzz-seeds`; commits: `aee0b2b` test(b3-6): fuzz seeds —
+  epoch-1 corpora for every target, protocol + predicate-parity fuzz targets,
+  plus the commit adding this block
+- RED: `go test ./ws -run FuzzHandleMessageDecode -v`, with
+  `handleMessageDecode` temporarily returning `false` for a valid `chat_send`
+  envelope → `--- FAIL: FuzzHandleMessageDecode/chat-send-fanout-a-chat_send`
+  (`ok = false, but json.Unmarshal into an envelope succeeds`). 3 failures,
+  all three fixture-derived corpus entries; **0 of the 22 hand-written
+  `f.Add` seeds caught it** — the corpus is what covers the real wire.
+  Second control: `CanViewChannel` letting an administrator see an archived
+  channel → `--- FAIL: FuzzPredicateParity/ready-owner-voice-archived`
+  (`= <nil>, want channel is archived`) plus 30 seeds. Both reverted.
+- GREEN: `go test ./api ./auth ./db ./permissions ./plugin ./service ./storage ./ws -run Fuzz -v`
+  → 20 `--- PASS`, corpus entries listed by fixture name
+  (`FuzzHandleMessageDecode/voice-join-e2ee-leave-a-voice_e2ee_offer`, …).
+  Full gates: 4 build variants, `go vet ./...`, `go test -race ./...`,
+  `go test -tags deadlock -count=10 -timeout=40m ./ws/`, `golangci-lint run`
+  (0 issues), `npm run check:docs`. **`-timeout` matters there:** ten
+  sequential `ws` runs under the deadlock tag take ~592 s, inside Go's default
+  600 s only on an otherwise-idle box — a run competing with other `go test`
+  work was killed at 601.393 s, a wall-clock artifact and not a lock-ordering
+  failure. Anything that raises `-count` on this package must raise
+  `-timeout` with it.
+- Numbers: **17 → 20** `Fuzz*` targets; **3 → 20** with a committed corpus;
+  **6 → 104** corpus files (**98 added**). Per target: HandleMessageDecode 17,
+  CommandPayloads 17 (every distinct `c2s` frame of the 11 epoch-1 journeys,
+  placeholders concretised), PredicateParity 12, ValidateFileType 6,
+  SanitizeFTSQuery / EffectivePerms / EffectiveChannelPerms / ParseMentionTokens
+  4 each, SanitizeUploadFilename +4 (2 → 6), ValidateAvatarURL /
+  ValidateDisplayName / ValidateUsername / ValidateRelativePath /
+  ValidateShortcode / SanitizeFilename / ParseParticipantIdentity /
+  ParseRoomChannelID 3 each, ValidatePasswordStrength 2. Replay cost: every
+  target ≤ **0.02 s** (`FuzzSanitizeFTSQuery`, which runs each entry through a
+  real FTS5 `MATCH`); every other ≤ 0.01 s. 30 s of `-fuzz` on each of the
+  three new targets found nothing (1.09 M, 0.74 M and 34.9 M execs); a 20 s
+  pass over each previously corpus-less target is written up in the item's
+  report, which is also where anything it turned up is recorded.
+- Verified against HEAD: the item's four pointers were all stale, and each was
+  resolved rather than followed. (1) `ws/messages.go` holds only outbound
+  builders plus `parseChannelID`, so "protocol parsing" is
+  `handleMessageDecode` (`ws/handlers.go`) for the envelope and
+  `commandConstructors` (`ws/command.go`) for the payloads; every constructor
+  in that map is a pure `func(userID, reqID, raw)`, so `FuzzCommandPayloads`
+  reaches all 24 of them directly — no hub, no DB, better than the fallback
+  the brief allowed. (2) `permissions.Subject` has no wire form, so there is
+  nothing to round-trip; `FuzzPredicateParity` is the honest reading —
+  every B2-5 predicate against the raw two-layer bit formula written out
+  longhand, plus the two definitional identities (`CanAdmitSession` ≡
+  `CanViewChannel`, `CanType` ≡ `CanSendMessage`). (3) There is no pure upload
+  admission function at HEAD — `handleUpload` inlines `MaxBytesReader`,
+  `ParseMultipartForm`, `DetectContentType` and `store.Save` — so no
+  `FuzzUploadAdmission` was created (it would have needed production code);
+  upload admission is covered by corpora for `FuzzValidateFileType` (6 real
+  magic headers) and `FuzzSanitizeUploadFilename` (+4 attachment names).
+  (4) There is no recovery-token parser: backup codes exist only as
+  `[]string{}` in `totp_handler.go`'s response, and
+  `(*PartialAuthStore).Consume` is a mutex-guarded map lookup with an expiry
+  check, not a parse — skipped, and no file under `auth/`, `service/` or
+  `api/auth_*` was touched.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
