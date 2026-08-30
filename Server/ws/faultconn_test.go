@@ -66,9 +66,11 @@ type FaultConn struct {
 	Dropped, Duplicated, Reordered int
 }
 
-func newFaultConn(seed uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
+// seed and stream are the PCG's two words — one seed per run, one stream per
+// connection — so no arithmetic mix can make two connections collide.
+func newFaultConn(seed, stream uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
 	return &FaultConn{
-		rng:     rand.New(rand.NewPCG(seed, seed^0x9E3779B97F4A7C15)),
+		rng:     rand.New(rand.NewPCG(seed, stream)),
 		sched:   sched,
 		preface: preface,
 		in:      in,
@@ -155,6 +157,13 @@ func (f *FaultConn) Cut() bool {
 	return f.cut
 }
 
+// Pull moves whatever the source holds right now into the transport, faults
+// applied, releasing nothing. A harness whose queue-fill accounting must not
+// depend on when frames were written (hub_sim_test.go's attach) calls it.
+func (f *FaultConn) Pull() {
+	f.pull()
+}
+
 // ─── tests ───────────────────────────────────────────────────────────────────
 
 func faultFrames(n int) [][]byte {
@@ -177,7 +186,7 @@ func faultDrain(f *FaultConn) (frames []byte, last FaultStatus) {
 
 func TestFaultConn_IdentityAndDeterminism(t *testing.T) {
 	in := faultFrames(20)
-	got, st := faultDrain(newFaultConn(1, FaultSchedule{}, in, nil))
+	got, st := faultDrain(newFaultConn(1, 0, FaultSchedule{}, in, nil))
 	if st != FaultClosed || len(got) != 20 {
 		t.Fatalf("identity schedule: %d frames, status %d; want 20, FaultClosed", len(got), st)
 	}
@@ -188,14 +197,15 @@ func TestFaultConn_IdentityAndDeterminism(t *testing.T) {
 	}
 
 	sched := FaultSchedule{Drop: 0.2, Dup: 0.2, Reorder: 0.3, ReorderWindow: 3, Delay: 1}
-	a, _ := faultDrain(newFaultConn(7, sched, in, nil))
-	b, _ := faultDrain(newFaultConn(7, sched, in, nil))
-	c, _ := faultDrain(newFaultConn(8, sched, in, nil))
+	a, _ := faultDrain(newFaultConn(7, 1, sched, in, nil))
+	b, _ := faultDrain(newFaultConn(7, 1, sched, in, nil))
+	c, _ := faultDrain(newFaultConn(8, 1, sched, in, nil))
+	d, _ := faultDrain(newFaultConn(7, 2, sched, in, nil))
 	if !slices.Equal(a, b) {
-		t.Fatalf("same seed, different output:\n%v\n%v", a, b)
+		t.Fatalf("same seed and stream, different output:\n%v\n%v", a, b)
 	}
-	if slices.Equal(a, c) {
-		t.Fatalf("seeds 7 and 8 produced the same schedule %v", a)
+	if slices.Equal(a, c) || slices.Equal(a, d) {
+		t.Fatalf("a different seed (7 vs 8) or stream (1 vs 2) produced the same schedule %v", a)
 	}
 }
 
@@ -203,14 +213,14 @@ func TestFaultConn_Schedule(t *testing.T) {
 	in := faultFrames(20)
 
 	t.Run("drop all", func(t *testing.T) {
-		f := newFaultConn(1, FaultSchedule{Drop: 1}, in, nil)
+		f := newFaultConn(1, 0, FaultSchedule{Drop: 1}, in, nil)
 		got, st := faultDrain(f)
 		if len(got) != 0 || st != FaultClosed || f.Dropped != 20 {
 			t.Fatalf("got %d frames, status %d, dropped %d; want 0, FaultClosed, 20", len(got), st, f.Dropped)
 		}
 	})
 	t.Run("drop tail cuts", func(t *testing.T) {
-		f := newFaultConn(3, FaultSchedule{Drop: 0.15, DropTail: true}, in, nil)
+		f := newFaultConn(3, 0, FaultSchedule{Drop: 0.15, DropTail: true}, in, nil)
 		got, st := faultDrain(f)
 		if st != FaultCut || f.Dropped != 1 || len(got) >= 20 {
 			t.Fatalf("got %d frames, status %d, dropped %d; want a prefix, FaultCut, 1", len(got), st, f.Dropped)
@@ -225,7 +235,7 @@ func TestFaultConn_Schedule(t *testing.T) {
 		}
 	})
 	t.Run("dup", func(t *testing.T) {
-		f := newFaultConn(1, FaultSchedule{Dup: 1}, in, nil)
+		f := newFaultConn(1, 0, FaultSchedule{Dup: 1}, in, nil)
 		got, _ := faultDrain(f)
 		if len(got) != 40 || f.Duplicated != 20 {
 			t.Fatalf("got %d frames, duplicated %d; want 40, 20", len(got), f.Duplicated)
@@ -239,7 +249,7 @@ func TestFaultConn_Schedule(t *testing.T) {
 	t.Run("reorder is a bounded permutation", func(t *testing.T) {
 		// Half the frames: pushing every frame back keeps their keys sorted
 		// and the order intact — a reorder needs an unpushed neighbour.
-		f := newFaultConn(5, FaultSchedule{Reorder: 0.5, ReorderWindow: 2}, in, nil)
+		f := newFaultConn(5, 0, FaultSchedule{Reorder: 0.5, ReorderWindow: 2}, in, nil)
 		got, _ := faultDrain(f)
 		sorted := slices.Clone(got)
 		slices.Sort(sorted)
@@ -257,7 +267,7 @@ func TestFaultConn_Schedule(t *testing.T) {
 	})
 	t.Run("delay lags an open source and flushes on close", func(t *testing.T) {
 		ch := make(chan []byte, 8)
-		f := newFaultConn(1, FaultSchedule{Delay: 2}, nil, ch)
+		f := newFaultConn(1, 0, FaultSchedule{Delay: 2}, nil, ch)
 		for _, fr := range faultFrames(5) {
 			ch <- fr
 		}
@@ -276,7 +286,7 @@ func TestFaultConn_Schedule(t *testing.T) {
 		// frames 0 and 1 arrive intact, frame 2 is the cut. With Delay 2 the
 		// cut satisfies frame 0's lag but not frame 1's — it was in flight.
 		ch := make(chan []byte, 1)
-		f := newFaultConn(1, FaultSchedule{Delay: 2, DropTail: true}, nil, ch)
+		f := newFaultConn(1, 0, FaultSchedule{Delay: 2, DropTail: true}, nil, ch)
 		var got []byte
 		for i := range 3 {
 			f.sched.Drop = 0

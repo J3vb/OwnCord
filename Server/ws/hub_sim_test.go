@@ -55,9 +55,21 @@ package ws_test
 // Knobs: OWNCORD_SIM_SEED replays one seed; OWNCORD_SIM_SEEDS (default 20)
 // and OWNCORD_SIM_STEPS (default 200) size a run; `make sim` runs 10,000
 // steps. A failure prints the seed, the step, a ready-to-paste replay line
-// and the last steps. The step sequence is a pure function of the seed; the
-// scheduler's interleaving inside a racing reconnect step is not, and every
-// assertion is written to hold for any interleaving.
+// and the last steps.
+//
+// Determinism: the step sequence, every seq allocation (the topic limiter is
+// frozen to a per-channel count, FreezeTopicLimiterForTest), every wire fault
+// and every figure on the stats line are a pure function of the seed — three
+// runs of one seed print byte-identical stats — so a failure in any of them
+// replays exactly from the printed line. What still varies between runs is
+// the scheduler's interleaving inside a racing reconnect step: which of the
+// racing seqs land in the replay burst and which arrive live. The oracle
+// holds for every interleaving, and the burst is shaped so the client reads
+// the same frames either way (see broadcast), but a defect that depends on
+// that split — the I3 class — replays only probabilistically; run the seed
+// with -count. The default run also carries a floor (TestHubSimulation):
+// every load-bearing transition must occur at least once across the seeds,
+// so a constant change cannot quietly turn the simulation into no-ops.
 
 import (
 	"fmt"
@@ -76,7 +88,7 @@ const (
 	simClients      = 8
 	simChannels     = 3
 	simRing         = 48 // replay ring (production 1000): small enough that I5's eviction is reachable in 200 steps
-	simSendBuf      = 32 // normal queue (production 256, client.go sendBufSize): small enough that the BUG-124 overflow kick is reachable in 200 steps
+	simSendBuf      = 12 // normal queue (production 256, client.go sendBufSize): small enough that the BUG-124 overflow kick happens a few times per seed at 200 steps
 	simDefaultSeeds = 20
 	simDefaultSteps = 200
 )
@@ -155,13 +167,34 @@ type sim struct {
 	chanOf  []int64 // chanOf[seq] = channel of every allocated seq; index 0 unused
 	sched   ws.FaultSchedule
 	trace   []string
-	stats   map[string]int
+	stats   map[string]int // every figure here is a pure function of the seed
+	racing  int            // racing seqs that landed inside a replay burst: the scheduler's call, not the seed's
 }
 
 func TestHubSimulation(t *testing.T) {
 	seeds, steps := simConfig(t)
+	total := map[string]int{}
 	for _, seed := range seeds {
-		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) { runHubSim(t, seed, steps) })
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			stats, racing := runHubSim(t, seed, steps)
+			for k, v := range stats {
+				total[k] += v
+			}
+			total["racing-in-replay"] += racing
+		})
+	}
+	// The floor: every load-bearing transition must have happened at least
+	// once across the run, or a constant change (weights, ring, queue, wire
+	// schedule) could turn the simulation into no-ops with CI still green.
+	// Calibrated for the default seed count; a single-seed replay or a
+	// shorter seed list skips it.
+	if t.Failed() || os.Getenv("OWNCORD_SIM_SEED") != "" || len(seeds) < simDefaultSeeds {
+		return
+	}
+	for _, k := range []string{"global", "channel", "recipients", "dm", "resume", "fallback", "fresh", "cut", "kicked", "racing-in-replay"} {
+		if total[k] == 0 {
+			t.Errorf("hub simulation: %q never happened across %d seeds x %d steps — the step mix no longer reaches it", k, len(seeds), steps)
+		}
 	}
 }
 
@@ -198,9 +231,10 @@ func simDMChannel(i, j int) int64 {
 	return 1000 + int64(min(i, j))*simClients + int64(max(i, j))
 }
 
-func runHubSim(t *testing.T, seed uint64, steps int) {
+func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, racing int) {
 	hub, database := newTestHub(t)
 	hub.ConfigureReplay(simRing, 0)
+	hub.FreezeTopicLimiterForTest()
 	s := &sim{
 		t: t, hub: hub, seed: seed, steps: steps,
 		rng:    rand.New(rand.NewPCG(seed, seed^0xD1B54A32D192ED03)),
@@ -249,6 +283,8 @@ func runHubSim(t *testing.T, seed uint64, steps int) {
 		}
 	}
 	t.Logf("seed %d: %d steps, seq %d, %v", seed, steps, hub.SeqForTest(), s.stats)
+	t.Logf("seed %d: %d racing seq(s) landed inside a replay burst (interleaving-dependent, kept off the stats line)", seed, s.racing)
+	return s.stats, s.racing
 }
 
 func (s *sim) pick(weights []int) int {
@@ -291,7 +327,13 @@ func (s *sim) newConn(c *simClient, channelID int64, lastSeq uint64) *ws.Client 
 func (s *sim) attach(c *simClient, conn *ws.Client, preface [][]byte, owed []uint64) {
 	c.conns++
 	c.conn, c.cut, c.owed = conn, false, owed
-	c.wire = ws.NewFaultConnForTest(s.seed*7919+uint64(c.idx)*131+uint64(c.conns), s.sched, preface, c.send)
+	c.wire = ws.NewFaultConnForTest(s.seed, uint64(c.idx)<<32|uint64(c.conns), s.sched, preface, c.send)
+	// Take what the queue already holds — the racing broadcasts that landed
+	// after registerNow — into the wire now: the queue's fill, and so the
+	// step at which it could overflow, must not depend on which side of the
+	// snapshot those frames fell, the one thing the scheduler rather than
+	// the seed decides.
+	c.wire.Pull()
 	if got := s.hub.GetClient(c.user.ID); got != conn {
 		s.failf("c%d: hub holds %p for the user after registration, want %p", c.idx, got, conn)
 	}
@@ -336,10 +378,20 @@ func (s *sim) subscribe(c *simClient) {
 }
 
 // broadcast allocates one seq through the real delivery path and records who
-// is owed it. exclude is a client mid-reconnect whose audience the caller
-// resolves itself.
-func (s *sim) broadcast(exclude *simClient) simAlloc {
-	a := simAlloc{kind: simKind(s.pick(simKindWeights[:]))}
+// is owed it. racing, when set, is the client mid-reconnect: the caller
+// resolves its audience itself, and the frame is aimed so that it reaches
+// that client whether it lands before the snapshot (replayed) or after it
+// (live) — global, the channel it is focused on, a recipient list it is on,
+// a DM it is in. A frame the replay filter would carry but the live audience
+// would not (another channel, someone else's recipients) would make what the
+// client reads depend on the interleaving, and with it every later wire
+// draw; the replay-superset case is covered by every non-racing broadcast.
+func (s *sim) broadcast(racing *simClient) simAlloc {
+	kind := simKind(s.pick(simKindWeights[:]))
+	if racing != nil && kind == kindChannel && racing.focus == 0 {
+		kind = kindGlobal
+	}
+	a := simAlloc{kind: kind}
 	payload := fmt.Appendf(nil, `{"type":"sim","step":%d}`, s.step)
 	before := s.hub.SeqForTest()
 	switch a.kind {
@@ -347,18 +399,24 @@ func (s *sim) broadcast(exclude *simClient) simAlloc {
 		a.seq = s.hub.DeliverBroadcastForTest(0, nil, payload)
 	case kindChannel:
 		a.ch = s.chIDs[s.rng.IntN(simChannels)]
+		if racing != nil {
+			a.ch = racing.focus
+		}
 		a.seq = s.hub.DeliverBroadcastForTest(a.ch, nil, payload)
 	case kindRecipients:
 		a.ch = s.chIDs[s.rng.IntN(simChannels)]
 		a.users = make([]int64, 0, simClients)
 		for _, c := range s.clients {
-			if s.rng.IntN(2) == 0 {
+			if c == racing || s.rng.IntN(2) == 0 {
 				a.users = append(a.users, c.user.ID)
 			}
 		}
 		a.seq = s.hub.DeliverBroadcastForTest(a.ch, a.users, payload)
 	case kindDM:
 		i := s.rng.IntN(simClients)
+		if racing != nil {
+			i = racing.idx
+		}
 		j := (i + 1 + s.rng.IntN(simClients-1)) % simClients
 		a.ch = simDMChannel(i, j)
 		a.users = []int64{s.clients[i].user.ID, s.clients[j].user.ID}
@@ -379,7 +437,7 @@ func (s *sim) broadcast(exclude *simClient) simAlloc {
 	}
 	s.chanOf = append(s.chanOf, a.ch)
 	for _, c := range s.clients {
-		if c != exclude && c.conn != nil && !c.cut && a.reaches(c) {
+		if c != racing && c.conn != nil && !c.cut && a.reaches(c) {
 			c.owed = append(c.owed, a.seq)
 		}
 	}
@@ -465,9 +523,19 @@ func (s *sim) reconnect(c *simClient) {
 		s.note("reconnect c%d: fresh (W=0)", c.idx)
 		return
 	}
+	// The auth frame's active_channel_id: none, the channel the client had
+	// open, or one it switched to while offline. handleReconnect honours it
+	// when READ-allowed (every text channel here), and registerNow lets it
+	// win over the transfer, which lands only on a client that declared none.
 	var authCh int64
-	if old == nil {
+	switch s.rng.IntN(3) {
+	case 1:
 		authCh = c.focus
+	case 2:
+		authCh = s.chIDs[s.rng.IntN(simChannels)]
+	}
+	if authCh != 0 || old == nil {
+		c.focus = authCh
 	}
 	conn := s.newConn(c, authCh, c.w)
 	s0 := s.hub.SeqForTest()
@@ -480,8 +548,19 @@ func (s *sim) reconnect(c *simClient) {
 		defer close(done)
 		events, ok = s.hub.ReconnectRegisterForTest(conn, c.w, c.allowed)
 	}()
+	burst := s.rng.IntN(4)
+	// Racing allocations can evict W from the ring before or after the
+	// snapshot. Where that would decide replay-or-fallback, the scheduler
+	// would be choosing the path and everything the client reads after it,
+	// so a resume that close to the eviction boundary is not raced; the
+	// paths on either side of the boundary are the seed's alone. What stays
+	// the scheduler's is only the split of the racing seqs between the
+	// replay burst and the live queue.
+	if oldest := s.hub.ReplayBuffer().OldestSeq(); oldest < c.w && c.w <= oldest+uint64(burst) {
+		burst = 0
+	}
 	var racing []simAlloc
-	for range s.rng.IntN(4) {
+	for range burst {
 		if a := s.broadcast(c); a.seq != 0 {
 			racing = append(racing, a)
 		}
@@ -506,5 +585,5 @@ func (s *sim) reconnect(c *simClient) {
 	if got := ws.ClientChannelIDForTest(conn); got != c.focus {
 		s.failf("c%d: resumed connection focused on %d, want %d", c.idx, got, c.focus)
 	}
-	s.note("reconnect c%d: W=%d old=%v replay=%v racing=%d owed=%v", c.idx, c.w, old != nil, ok, len(racing), owed)
+	s.note("reconnect c%d: W=%d old=%v auth_ch=%d replay=%v racing=%d owed=%v", c.idx, c.w, old != nil, authCh, ok, len(racing), owed)
 }

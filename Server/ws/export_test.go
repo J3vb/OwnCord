@@ -554,7 +554,17 @@ func CloseSendForTest(c *Client) {
 
 // NewFaultConnForTest builds the fault-injecting frame transport of
 // faultconn_test.go over preface (delivered first, e.g. a replay burst) and
-// then in (a client's outbound queue; nil for a preface-only source).
-func NewFaultConnForTest(seed uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
-	return newFaultConn(seed, sched, preface, in)
+// then in (a client's outbound queue; nil for a preface-only source). seed
+// and stream are the PCG's two words.
+func NewFaultConnForTest(seed, stream uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
+	return newFaultConn(seed, stream, sched, preface, in)
+}
+
+// FreezeTopicLimiterForTest swaps the hub's per-topic limiter for one whose
+// window never rolls over inside a test run, so a shed is a deterministic
+// count — the first topicRateLimitPerSecond frames per channel pass, the rest
+// shed — instead of one that depends on where time.Now() falls. Call before
+// the first broadcast; the simulation needs it so a seed replays exactly.
+func (h *Hub) FreezeTopicLimiterForTest() {
+	h.topicLimiter = NewTopicRateLimiter(topicRateLimitPerSecond, time.Hour)
 }

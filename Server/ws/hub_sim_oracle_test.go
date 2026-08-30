@@ -81,7 +81,7 @@ func (s *sim) checkReplay(c *simClient, events [][]byte, s0 uint64, racing []sim
 			}
 		}
 		if j > 0 {
-			s.stats["racing-in-replay"]++
+			s.racing++
 		}
 		return owed
 	}

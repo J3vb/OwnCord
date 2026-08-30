@@ -1080,8 +1080,11 @@ db`). No control file is committed.
 #### Evidence — items 2 + 3 (hub simulation + fault-injected transport)
 
 - Branch `feat/b3-6-hub-sim`; commits: 3c5d75f8 `test(b3-6): seeded hub
-simulation and fault-injected transport (items 2 and 3)`, then the docs
-  commit carrying this block.
+simulation and fault-injected transport (items 2 and 3)`, 932b5d6b the docs
+  commit carrying this block, and the review-fix commit `fix(b3-6): hub sim
+— deterministic topic limiter for exact replay, a floor on the step mix,
+auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
+  its own SHA is in the PR, not here).
 - Oracle (the doc comment of `Server/ws/hub_sim_test.go`, written before the
   driver): I1 per-connection strictly increasing `seq`, never on the high or
   low queue; I2 a live connection yields exactly the seqs allocated for its
@@ -1113,16 +1116,50 @@ simulation and fault-injected transport (items 2 and 3)`, then the docs
   found by the generated orderings rather than a hand-written interleaving.
 - GREEN: `go test -race -count=1 -run '^TestHubSimulation$' ./ws/` →
   `ok github.com/J3vb/OwnCord/Server/ws 2.258s`.
-- Numbers: 8 clients, 3 channels, ring 48, normal queue 32; default 20 seeds ×
+- Exact replay (review fix): the topic limiter is frozen to a per-channel
+  count (`FreezeTopicLimiterForTest`), the racing burst is aimed only at the
+  resuming client's own audience, its frames are pulled into the wire at
+  attach time, and a resume within the burst's reach of the ring's eviction
+  boundary is not raced — so every figure on the stats line is a pure
+  function of the seed. Proof, three runs of
+  `OWNCORD_SIM_SEED=1 OWNCORD_SIM_STEPS=10000 go test -race -count=1 -v -run '^TestHubSimulation$' ./ws/`:
+  `seed 1: 10000 steps, seq 4500, map[channel:300 cut:142 dm:1285 fallback:751 fresh:22 global:1975 kicked:38 recipients:940 resume:710 shed:1630]`
+  three times, byte-identical. What still varies between runs is the
+  scheduler's interleaving inside a racing reconnect step — how many of the
+  racing seqs land in the replay burst rather than the live queue (420, 424
+  and 425 in those runs, printed on a second line) — so a model defect that
+  depends on that split replays only probabilistically; run the seed with
+  `-count`.
+- Floor (review fix): `TestHubSimulation` aggregates the per-seed stats and
+  requires `global`, `channel`, `recipients`, `dm`, `resume`, `fallback`,
+  `fresh`, `cut`, `kicked` and `racing-in-replay` each ≥ 1 across the default
+  run (skipped for `OWNCORD_SIM_SEED` or fewer than 20 seeds). RED: reconnect
+  weight set to 0 →
+  `hub simulation: "resume" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`
+  (and `fallback`, `fresh`, `racing-in-replay`); restored.
+- Numbers: 8 clients, 3 channels, ring 48, normal queue 12; default 20 seeds ×
   200 steps in 2.3 s under `-race` (CI budget: under 10 s); `make sim` = 20 ×
-  10,000 steps in 20.5 s (23 s wall with compile) under `-race`; per seed at 200 steps ≈ 14
-  buffer resumes, 6 evicted-ring fallbacks, 10 fresh reconnects, 4 wire cuts,
-  9 resumes with a racing broadcast landing inside the replay, ~105 seqs;
+  10,000 steps in 16.5 s (18 s wall with compile) under `-race`; per seed at 200 steps ≈ 13
+  buffer resumes, 5 evicted-ring fallbacks, 12 fresh reconnects, 4 wire cuts,
+  1–3 overflow kicks on about half the seeds, ~105 seqs; at 10,000 steps per
+  seed ≈ 4,500 seqs, 700 resumes, 750 fallbacks, 140 cuts, 40 kicks, 300
+  channel frames allocated and ≈1,630 shed by the frozen limiter;
   `BenchmarkReconnectStorm-32` 1590 ops, 702,410 ns/op for 50 resumes (≈14 µs
-  each), 608,031 B/op, 954 allocs/op. Gates: the four build variants and
-  `go vet` clean; `go test -tags deadlock -count=10 -timeout 60m ./ws/` →
-  `ok 594.098s`; `go test -race ./...` → every package ok (ws 138.316s);
-  `golangci-lint run` → 0 issues; `npm run check:docs` passed; prettier clean.
+  each), 608,031 B/op, 954 allocs/op. Gates on the fix commit: `go vet ./...`
+  clean; `go test -race ./ws/` → `ok 119.767s`;
+  `go test -tags deadlock -count=10 -timeout 60m ./ws/` → `ok 586.646s`;
+  `golangci-lint run` → 0 issues; `npm run check:docs` passed; prettier
+  clean. (Before the fix: the four build variants clean, deadlock ×10
+  `ok 594.098s`, `go test -race ./...` every package ok.)
+- Not simulated (the driver's five steps only): hub-originated frames —
+  `hub.Run()` is never started, the driver is the sole allocator; tier
+  selection is always "buffer", so the db tier, `mustFullResync` and
+  visibility resyncs never interleave with a resume; `c.allowed` is the
+  driver's own map (every text channel plus synthetic DM ids), not
+  `computeAllowedChannels`, so permission variance is out of scope
+  (`hub_register_test.go` covers the denial branch); there is no `writePump`,
+  so I1's high/low-queue check is vacuous today — nothing in the step mix
+  emits a priority frame; no voice supersession, no concurrent allocators.
 - Epoch harness: no use added. `TestEpoch1Fixtures` reads real sockets with
   expects interleaved across two connections, so a lag would wait for frames
   the journey has not produced yet (a deadlock) and any drop, duplicate or
@@ -1136,8 +1173,8 @@ simulation and fault-injected transport (items 2 and 3)`, then the docs
   `registerNow` under one `seqMu` section) is exported as-is, not
   re-implemented, and the fresh/fallback paths call the same `registerNow`
   handleFreshConnect does; no production file changed
-  (`newTestHub`/`openTestDB`/`seedOwnerUser`/`seedTestChannel` in
-  `hub_test.go` now take `testing.TB` so the benchmark can share them). The
+  (`newTestHub`/`openTestDB`/`seedOwnerUser`/`seedTestChannel`/`seedTestUser`
+  in `hub_test.go` now take `testing.TB` so the benchmark can share them). The
   shared rules' `go test -tags deadlock -count=10 ./ws/` overruns `go test`'s
   default 10-minute timeout on a 16-core desktop (601 s, "test timed out
   after 10m0s" with a goroutine dump that is not a detector hit); the gate
@@ -1380,5 +1417,9 @@ appended to the HP-3 scorecard as a dated "B3 exit" section the owner signs.
 - **Check the PR is still open before pushing a review fix** (HP-2 obs #97).
 - **`make` is not on PATH on Windows**; `npm run check:server` runs the same
   steps. `go test -tags deadlock -count=10 ./ws/` after every `ws` move.
+- **Ten deadlock passes overrun `go test`'s default 10-minute timeout** (B3-6
+  items 2+3): write it as `go test -tags deadlock -count=10 -timeout 60m ./ws/`.
+  A "test timed out after 10m0s" goroutine dump is the timeout, not a
+  detector hit.
 - **`check:docs` counts.** `docs/plans/README.md` is watched; the register's
   row count and the ledger's status counts must agree with it.

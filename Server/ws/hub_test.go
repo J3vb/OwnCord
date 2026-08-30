@@ -43,7 +43,7 @@ func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
 }
 
 // seedTestUser inserts a Member-role user and returns its ID.
-func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
+func seedTestUser(t testing.TB, database *db.DB, username string) int64 {
 	t.Helper()
 	id, err := database.CreateUser(context.Background(), username, "hash", 4)
 	if err != nil {
