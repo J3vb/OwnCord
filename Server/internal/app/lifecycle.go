@@ -54,6 +54,7 @@ func (a *App) stages() []stage {
 		{"migrate", a.startMigrate},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
+		{"hub", a.startHub},
 		{"router", a.startRouter},
 		{"event-persistence", a.startEventPersistence},
 		{"audit-writer", a.startAuditWriter},
@@ -188,21 +189,33 @@ func (a *App) startPlugins() error {
 	return nil
 }
 
-// startRouter builds the HTTP handler and the hub. The hub's GracefulStop is
-// registered after the router's cleanup so the reverse walk stops the hub
-// first: it is the only caller of LiveKitProcess.Stop and what closes the
-// dispatch goroutine, and gracefulOnce makes it idempotent alongside the
-// context-bounded stop the http step performs (OC-0027).
-func (a *App) startRouter() error {
-	router, hub, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins)
-	a.router = router
-	a.hub = hub
-	a.onClose("router", func(context.Context) error {
-		cleanup()
+// startHub builds the hub and the collaborators it shares with the router,
+// applies every pre-Run setter and starts the dispatch goroutine — B3-3 moved
+// all of that out of api.NewRouter so the hub has exactly one owner.
+//
+// Its close step is GracefulStopContext, the only caller of
+// LiveKitProcess.Stop and what closes the dispatch goroutine. gracefulOnce
+// makes it idempotent alongside the stop the http step performs on the normal
+// path, so it is reached on every return from Run and a supervised
+// livekit-server process is never orphaned (OC-0027).
+func (a *App) startHub() error {
+	a.runtime = StartRuntime(a.cfg, a.database, a.plugins)
+	a.hub = a.runtime.Hub
+	a.onClose("hub", func(ctx context.Context) error {
+		a.runtime.Hub.GracefulStopContext(ctx)
 		return nil
 	})
-	a.onClose("hub", func(ctx context.Context) error {
-		hub.GracefulStopContext(ctx)
+	return nil
+}
+
+// startRouter mounts the HTTP handler over the already-built collaborators.
+// Its close step stops the router's own background goroutine (rate-limiter
+// cleanup); the hub it serves is stopped by the step above.
+func (a *App) startRouter() error {
+	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
+	a.router = router
+	a.onClose("router", func(context.Context) error {
+		cleanup()
 		return nil
 	})
 	return nil

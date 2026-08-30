@@ -14,6 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -55,7 +56,8 @@ func fullRouter(t *testing.T) http.Handler {
 		GIF: config.GIFConfig{APIKey: "absence-test"},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 	return handler
 }

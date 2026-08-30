@@ -45,6 +45,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/go-chi/chi/v5"
 )
@@ -253,7 +254,11 @@ func genRoutes(w io.Writer) error {
 		return errors.New("telemetry.Init left no Prometheus handler: run this tool as `go run -tags otel,wazero ./cmd/gendocs`, the build the route index is generated from")
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil)
+	// internal/app owns hub construction since B3-3, so the route index is
+	// generated over the same collaborators the server runs with.
+	rt := app.StartRuntime(cfg, database, nil)
+	defer rt.Hub.GracefulStop()
+	handler, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil, rt)
 	defer cleanup()
 
 	routes, ok := handler.(chi.Routes)

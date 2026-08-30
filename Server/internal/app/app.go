@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -60,6 +61,7 @@ type App struct {
 	httpHandler http.Handler // ACME HTTP-01 handler; nil outside acme mode
 	database    *db.DB
 	plugins     *plugin.Registry
+	runtime     api.Runtime
 	hub         *ws.Hub
 	router      http.Handler
 	addr        string

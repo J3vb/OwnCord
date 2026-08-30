@@ -30,6 +30,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // voiceJoinWSMsg builds a raw voice_join WebSocket frame for the given channel.
@@ -72,7 +73,8 @@ func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T)
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
 	// role_id=1 -> Owner, so CONNECT_VOICE is granted and the test isolates

@@ -6,6 +6,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // TestNewRouterRefusesToStartWithMalformedTOTPKey pins OC-0228: a malformed
@@ -49,7 +50,7 @@ func TestNewRouterRefusesToStartWithMalformedTOTPKey(t *testing.T) {
 				panicked = true
 			}
 		}()
-		api.NewRouter(cfg, database, "test", nil, nil)
+		api.NewRouter(cfg, database, "test", nil, nil, app.StartRuntime(cfg, database, nil))
 	}()
 
 	if !panicked {

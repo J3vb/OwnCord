@@ -10,6 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // setupRouter creates a test router with an in-memory database.
@@ -32,7 +33,8 @@ func setupRouter(t *testing.T) http.Handler {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 	return handler
 }
