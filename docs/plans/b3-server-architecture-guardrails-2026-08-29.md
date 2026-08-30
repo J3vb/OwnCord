@@ -764,6 +764,80 @@ db`). No control file is committed.
   miss does not hide them. Two legs would not be deterministic: the table above
   is the measured proof that the profile is not the same on both.
 
+#### Evidence — item 4 (client connection model test)
+
+- Branch `feat/b3-6-client-model-test`; commits: `7b2dc055`
+  `test(b3-6): client connection model test — fc.commands over the real stack`,
+  plus this evidence block.
+- File: `Client/tests/unit/connection.model.test.ts` (test only; no
+  `Client/src/` change, so B7's rule holds). System under test is the real
+  `createWsClient()` + `wireDispatcher()` + the real stores; only the Tauri
+  IPC wire (shared `tests/unit/helpers/ws-mocks.ts`) and the LiveKit /
+  notification / toast / identity leaves are mocked, as in `dispatcher.test.ts`.
+- Commands: `Connect` (fresh → `auth_ok(none)` + `ready`; resume → `auth_ok`
+  - the replayed events, no `ready`), `Disconnect`, `RegisterNow`,
+    `Receive(id, seq)`, `Supersede(channel, stale|live)`, `Resync(dropPeer)`,
+    `Logout`.
+- Invariants (checked after every command): (1) no duplicate message ids and
+  the store holds exactly the ids delivered; (2) the seq watermark ws.ts
+  declares in the auth frame is monotonic except at the modelled epoch resets
+  (`replay_source: "none"`, logout); (3) a verified peer never flips to
+  unverified — only a real departure clears it; (4) a teardown frame for a
+  superseded attempt never tears down the newer session.
+- RED (each control reverted before commit):
+  - ids — model pushes every received id without deduping →
+    `npx vitest run tests/unit/connection.model.test.ts` →
+    `Counterexample: [Connect,Receive(id=2,seq=0),Receive(id=2,seq=0)]`,
+    `expected [ 2 ] to deeply equal [ 2, 2 ]`
+  - seq — model takes each frame's seq verbatim instead of `max` →
+    `Counterexample: [Connect,Receive(id=1,seq=1),Receive(id=1,seq=0),Disconnect,Connect]`,
+    `expected 1 to be +0`
+  - verified — model keeps a peer the resync roster dropped →
+    `Counterexample: [Connect,Supersede(channel=10,live),Resync(dropPeer=true)]`,
+    `expected [] to deeply equal [ 3 ]`
+  - aborted attempt — stale teardown retargeted at the live channel →
+    `Counterexample: [Connect,Supersede(channel=10,stale)]`,
+    `expected null to be 10`
+  - resume replay — resume handshake reverted to `auth_ok` + `ready` with no
+    replayed events (the pre-Codex-P2 shape) →
+    `Counterexample: [Connect,Receive(id=1,seq=1),Disconnect,Connect]`,
+    `expected [ 1 ] to include 2`, plus
+    `invariant family "resumeReplay" was never exercised`
+- GREEN: `npx vitest run tests/unit/connection.model.test.ts` →
+  `Test Files 1 passed (1) / Tests 2 passed (2)`; `npm test` →
+  `Test Files 194 passed (194) / Tests 5275 passed (5275)`.
+- Numbers: seed `20260830` (a non-integer `OWNCORD_MODEL_SEED` override
+  throws rather than reaching fast-check), `numRuns` 150, `maxCommands` 30,
+  `size: "large"` → ~2.2k generated commands and ~1080 invariant checks per
+  run of the file; 120 ms of test time, 0.83–0.92 s wall for the file. The
+  full client suite measured 10.8 s and 11.9 s on two runs of the same tree,
+  so its run-to-run spread is larger than this file's whole cost and no
+  meaningful delta can be quoted. A second test asserts every invariant family
+  was actually reached, counting only the non-trivial case for each (a resume
+  declaring `last_seq > 0`; a verification check that survived a command other
+  than the one that wrote it), so a family that degrades to its no-op form
+  fails instead of silently passing.
+- Verified against HEAD: `fast-check ^4.9.0` and the property-test conventions
+  are as the spec says. Three details were resolved against the code:
+  - The handshake has two wire shapes and they are not interchangeable.
+    `handleFreshConnect` writes `auth_ok` (`replay_source: "none"`) then
+    `ready`; `reconnectWriteReplay` (`serve.go:593`) writes `auth_ok` with the
+    tier then the missed events and **never a `ready`**, and
+    `reconnectPrecheck` returning false is what falls through to the full
+    ready. The epoch-1 fixtures record exactly that: `fresh-connect.json` is
+    `auth_ok(none)` → `ready` → …, `resume-replay.json` is `auth_ok(buffer)` →
+    `presence` → `chat_message` → `presence`, with no `ready` anywhere. The
+    model drives both shapes, and `ready` never travels without the `auth_ok`
+    that precedes it on the wire (Codex P2 on #1455).
+  - The design's `RegisterNow` has no client-side symbol — it is the server's
+    hub registration, and the client-visible effect is the
+    ready-snapshot/queued-frame redelivery the OC-0328 and OC-0242 guards
+    handle.
+  - The design's "aborted voice attempt" is reachable from the connection
+    layer through the stale `voice_leave` guard in the dispatcher
+    (OC-0031/OC-0033/OC-0311), not through `LiveKitSession`'s join
+    generations, which need a real LiveKit room.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
