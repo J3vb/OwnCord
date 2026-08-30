@@ -72,6 +72,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// ── composition roots and tools ───────────────────────────────────────
 	// B3-3 moved the process composition root out of main.go: internal/app
 	// owns the handle from open to close, and main.go no longer imports db.
+	"internal/app/app.go":         {"boundary", "", "the App holds the handle for its lifetime; no calls"},
 	"internal/app/database.go":    {"boundary", "", "opens the handle, migrates, clears stale state at boot"},
 	"internal/app/maintenance.go": {"boundary", "", "periodic worker: expired sessions, backups, orphan attachments"},
 	"internal/app/persistence.go": {"boundary", "", "event persister, audit writer and the boot seq seed own the handle"},

@@ -9,9 +9,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// runInitTelemetry initialises OpenTelemetry and returns the shutdown step
-// run defers. Extracted from run.
-func runInitTelemetry(log *slog.Logger, cfg *config.Config) func() {
+// initTelemetry initialises OpenTelemetry and returns the shutdown step
+// stop step the telemetry stage registers with App.Close.
+func initTelemetry(log *slog.Logger, cfg *config.Config) func() {
 	// Init can return (nil, err) when the otel build-tag skeleton hasn't been
 	// finished wiring to the upstream SDK. Normalise to a no-op shutdown so
 	// the deferred closure never calls a nil function.

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,8 +14,8 @@ import (
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".
-// It stays in package main because that is the symbol the Makefile and
-// release.yml name; app.Run takes it as a parameter.
+// It stays in package main because that is the symbol the Makefile,
+// release.yml and the Dockerfile name; app.Deps carries it into the process.
 var version = "dev"
 
 func main() {
@@ -34,11 +35,12 @@ func main() {
 	// that tees log records to both stdout and the ring buffer.
 	logBuf := admin.NewRingBuffer(2000)
 	// levelVar controls both handlers' thresholds. It starts at INFO (the
-	// zero value) so early-startup logs are captured, then app.Run raises or
-	// lowers it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded. The ring
-	// buffer shares it rather than hard-wiring DEBUG: with both sinks gated,
-	// Enabled returns false for suppressed levels and every gated Debug call
-	// across the server becomes a no-op instead of formatting a ring entry.
+	// zero value) so early-startup logs are captured, then app.LoadConfig
+	// raises or lowers it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded.
+	// The ring buffer shares it rather than hard-wiring DEBUG: with both
+	// sinks gated, Enabled returns false for suppressed levels and every
+	// gated Debug call across the server becomes a no-op instead of
+	// formatting a ring entry.
 	levelVar := new(slog.LevelVar)
 	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
 	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, levelVar)
@@ -62,7 +64,7 @@ func main() {
 		os.Exit(0)
 	})
 
-	err := app.Run(version, log, logBuf, levelVar, rc)
+	err := runServer(log, logBuf, levelVar, rc)
 	rc.Disarm()
 
 	// Perform the handoff even when the lifecycle returned an error: a
@@ -78,4 +80,20 @@ func main() {
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// runServer is the whole server lifecycle: load the configuration main's log
+// sinks and restart coordinator are wired against, build the App around it,
+// and run until it stops and has closed every stage it started. Split out of
+// main() only so the restart handoff above runs on every return path.
+func runServer(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *app.RestartCoordinator) error {
+	cfg, err := app.LoadConfig(log, levelVar, rc)
+	if err != nil {
+		return err
+	}
+	a, err := app.New(cfg, app.Deps{Version: version, Log: log, LogBuf: logBuf, Restart: rc})
+	if err != nil {
+		return err
+	}
+	return a.Run(context.Background())
 }

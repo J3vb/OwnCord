@@ -10,9 +10,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
-// runInitPlugins constructs the plugin runtime, returning nil when plugins
-// are disabled or failed to start. Extracted from run.
-func runInitPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) *plugin.Registry {
+// initPlugins constructs the plugin runtime, returning nil when plugins
+// are disabled or failed to start.
+func initPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) *plugin.Registry {
 	var pluginRegistry *plugin.Registry
 	if cfg.Plugins.Enabled {
 		registry, plugErr := plugin.NewRegistry(plugin.Config{
@@ -35,15 +35,16 @@ func runInitPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config,
 	return pluginRegistry
 }
 
-// runClosePlugins shuts the plugin runtime down. Registered by run as a defer
-// only once the registry exists, so a nil registry is the disabled case and
-// has nothing to close. Extracted from run.
-func runClosePlugins(registry *plugin.Registry) {
+// closePlugins shuts the plugin runtime down. A nil registry is the disabled
+// case and has nothing to close. ctx is App.Close's shutdown budget: the 5s
+// cap here is this step's own share of it, not a fresh root, so a wedged
+// plugin cannot push teardown past the budget the operator was told about.
+func closePlugins(ctx context.Context, registry *plugin.Registry) {
 	if registry == nil {
 		return
 	}
 
-	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	closeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_ = registry.Close(closeCtx)
 }

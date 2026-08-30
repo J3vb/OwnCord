@@ -47,7 +47,7 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 	leakOpt := goleak.IgnoreCurrent()
 
 	rc := NewRestartCoordinator(time.Hour, nil)
-	if err := Run("test", log, logBuf, levelVar, rc); err == nil {
+	if err := runApp(log, logBuf, levelVar, rc); err == nil {
 		t.Fatal("expected Run to return an error for an out-of-range port")
 	}
 	if _, requested := rc.Requested(); requested {
@@ -262,8 +262,8 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 	// scheme is in effect (raw 1..N pre-fix, or a seeded floor post-fix). ---
 	hubOld := ws.NewHub(database, limiter, nil)
 	go hubOld.Run()
-	if persister, prunerDone := runStartEventPersistence(ctx, log, cfg, hubOld, database); persister != nil || prunerDone != nil {
-		t.Fatalf("runStartEventPersistence with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
+	if persister, prunerDone := startEventPersister(ctx, log, cfg, hubOld, database); persister != nil || prunerDone != nil {
+		t.Fatalf("startEventPersister with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
 	}
 	for range 40 {
 		hubOld.BroadcastToAll([]byte(`{"type":"broadcast"}`))
@@ -278,8 +278,8 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 	hubNew := ws.NewHub(database, limiter, nil)
 	go hubNew.Run()
 	defer hubNew.Stop()
-	if persister, prunerDone := runStartEventPersistence(ctx, log, cfg, hubNew, database); persister != nil || prunerDone != nil {
-		t.Fatalf("runStartEventPersistence with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
+	if persister, prunerDone := startEventPersister(ctx, log, cfg, hubNew, database); persister != nil || prunerDone != nil {
+		t.Fatalf("startEventPersister with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
 	}
 
 	// Other clients reconnect first and push hub B's own new epoch forward by

@@ -12,9 +12,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// runStartACME starts the ACME HTTP-01 challenge server when Let's Encrypt
-// is configured, and returns nil otherwise. Extracted from run.
-func runStartACME(log *slog.Logger, httpHandler http.Handler) *http.Server {
+// startACMEServer starts the ACME HTTP-01 challenge server when Let's Encrypt
+// is configured, and returns nil otherwise. The acme stage; the http stage
+// below owns shutting both servers down, in the order the drain requires.
+func startACMEServer(log *slog.Logger, httpHandler http.Handler) *http.Server {
 	var acmeSrv *http.Server
 	if httpHandler != nil {
 		acmeSrv = &http.Server{
@@ -34,9 +35,10 @@ func runStartACME(log *slog.Logger, httpHandler http.Handler) *http.Server {
 	return acmeSrv
 }
 
-// runServeAndWait starts the listener and blocks until it fails or a
-// shutdown or restart signal arrives. Extracted from run.
-func runServeAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator, srv *http.Server, tlsCfg *tls.Config, addr, version string) error {
+// serveAndWait starts the listener and blocks until it fails or a
+// shutdown or restart signal arrives. App.serve calls it after every stage
+// is up.
+func serveAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator, srv *http.Server, tlsCfg *tls.Config, addr, version string) error {
 	// Start serving in a goroutine.
 	serveErr := make(chan error, 1)
 	go func() {
@@ -71,10 +73,10 @@ func runServeAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinat
 	return nil
 }
 
-// runShutdownServers performs the ordered graceful shutdown: the ACME
+// shutdownServers performs the ordered graceful shutdown: the ACME
 // server, then in-flight HTTP handlers, then the WebSocket hub. Extracted
 // from run.
-func runShutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv *http.Server, hub *ws.Hub) error {
+func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv *http.Server, hub *ws.Hub) error {
 	if acmeSrv != nil {
 		if err := acmeSrv.Shutdown(shutdownCtx); err != nil {
 			log.Warn("ACME HTTP server shutdown error", "error", err)

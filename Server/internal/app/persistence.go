@@ -12,14 +12,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// runStartEventPersistence starts the event persister and pruner, returning
-// both as (nil, nil) when event persistence is disabled. Extracted from run.
+// startEventPersister starts the event persister and pruner, returning
+// both as (nil, nil) when event persistence is disabled.
 //
 // seedHubReplayState runs unconditionally (whenever hub is non-nil), NOT
 // gated on cfg.EventPersistence.Enabled: it seeds the hub's seq counter from
 // a persisted floor even in ring-buffer-only mode, which is what closes
 // OC-0210 — see its doc comment.
-func runStartEventPersistence(bgCtx context.Context, log *slog.Logger, cfg *config.Config, hub *ws.Hub, database *db.DB) (*ws.EventPersister, <-chan struct{}) {
+func startEventPersister(bgCtx context.Context, log *slog.Logger, cfg *config.Config, hub *ws.Hub, database *db.DB) (*ws.EventPersister, <-chan struct{}) {
 	if hub == nil {
 		return nil, nil
 	}
@@ -47,16 +47,16 @@ func runStartEventPersistence(bgCtx context.Context, log *slog.Logger, cfg *conf
 	return persister, prunerDone
 }
 
-// runStopEventPersistence drains the event persister and pruner. Registered by
-// run as a defer unconditionally, so a nil persister is the disabled case and
-// must leave bgCtx alone — the LIFO backstop in run cancels it instead.
-// Extracted from run.
-func runStopEventPersistence(log *slog.Logger, bgCancel context.CancelFunc, persister *ws.EventPersister, prunerDone <-chan struct{}) {
+// stopEventPersister drains the event persister and pruner. Registered
+// unconditionally, so a nil persister is the disabled case and must leave
+// bgCtx alone — Run's backstop close step cancels it instead. ctx is
+// App.Close's shutdown budget; the 5s cap is this step's share of it.
+func stopEventPersister(ctx context.Context, log *slog.Logger, bgCancel context.CancelFunc, persister *ws.EventPersister, prunerDone <-chan struct{}) {
 	if persister == nil {
 		return
 	}
 
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()
 	persister.Stop(stopCtx)
 	// Cancel the shared background context and JOIN the pruner before
@@ -71,8 +71,12 @@ func runStopEventPersistence(log *slog.Logger, bgCancel context.CancelFunc, pers
 	}
 }
 
-// runStartAuditWriter installs the async audit writer. Extracted from run.
-func runStartAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
+// newAuditWriter installs the async audit writer: audit-log INSERTs move off
+// the request path, and a background goroutine batches the writes. Paths that
+// never install a writer — the token CLI, tests — keep the synchronous
+// behaviour. It starts after the database opens, so App.Close drains its
+// queue while the handle is still live.
+func newAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	auditWriter := db.NewAuditWriter(database, 1024, 50, 100*time.Millisecond)
 	auditWriter.Start(bgCtx)
 	database.SetAuditWriter(auditWriter)
@@ -80,9 +84,10 @@ func runStartAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter
 	return auditWriter
 }
 
-// runStopAuditWriter drains the async audit writer. Extracted from run.
-func runStopAuditWriter(auditWriter *db.AuditWriter) {
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+// stopAuditWriter drains the async audit writer, within its share of
+// App.Close's shutdown budget.
+func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
+	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()
 	auditWriter.Stop(stopCtx)
 }

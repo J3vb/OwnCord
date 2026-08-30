@@ -10,9 +10,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
-// runRemoveOldBinary deletes the binary a previous self-update left behind.
-// Extracted from run.
-func runRemoveOldBinary(log *slog.Logger) {
+// removeOldBinary deletes the binary a previous self-update left behind.
+// The data-dir stage's first act, before anything is opened.
+func removeOldBinary(log *slog.Logger) {
 	// Clean up old binary from a previous update. Bounded retry: in spawn
 	// mode the predecessor spawns this process as its very last act, so for
 	// the first few hundred milliseconds it may not have fully exited — and
@@ -45,9 +45,11 @@ func runRemoveOldBinary(log *slog.Logger) {
 	}
 }
 
-// runLoadConfig loads the on-disk configuration, applies its logging level
-// and resolves the restart handoff mode. Extracted from run.
-func runLoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinator) (*config.Config, error) {
+// LoadConfig loads the on-disk configuration, applies its logging level
+// and resolves the restart handoff mode. main() calls it before app.New:
+// the level applies to main's own log sinks, and the mode is read back from
+// the coordinator after Run returns.
+func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinator) (*config.Config, error) {
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
@@ -70,9 +72,9 @@ func runLoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordin
 	return cfg, nil
 }
 
-// runPrepareDataDir creates the configured data directory and warns when the
-// volumes the server writes to are low on free space. Extracted from run.
-func runPrepareDataDir(log *slog.Logger, cfg *config.Config) error {
+// prepareDataDir creates the configured data directory and warns when the
+// volumes the server writes to are low on free space. The data-dir stage.
+func prepareDataDir(log *slog.Logger, cfg *config.Config) error {
 	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}

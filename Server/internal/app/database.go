@@ -10,9 +10,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// runOpenDatabase validates the configured backend and opens the database.
-// Extracted from run.
-func runOpenDatabase(cfg *config.Config) (*db.DB, error) {
+// openDatabase validates the configured backend and opens the database.
+// The database stage; App.startDatabase registers its close before
+// migrating, so a migration failure still releases the handle.
+func openDatabase(cfg *config.Config) (*db.DB, error) {
 	// SQLite is the only supported backend; the unfinished Postgres
 	// scaffolding (stubbed query layer, never wired into the runtime) was
 	// removed rather than completed.
@@ -28,10 +29,10 @@ func runOpenDatabase(cfg *config.Config) (*db.DB, error) {
 	return database, nil
 }
 
-// runInitDatabase points the admin panel at the live database, runs the
+// initDatabase points the admin panel at the live database, runs the
 // migrations and clears state left over from a previous run. Extracted from
 // run.
-func runInitDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *RestartCoordinator) error {
+func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *RestartCoordinator) error {
 	// The admin "Restore backup" handler needs the real database file path:
 	// without this, it falls back to a hardcoded "data/chatserver.db" and
 	// silently no-ops on any server with a configured database.path.

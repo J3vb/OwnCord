@@ -11,9 +11,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// runStartMaintenance starts the periodic maintenance loop and returns the
-// stop step run defers. Extracted from run.
-func runStartMaintenance(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) func() {
+// startMaintenanceLoop starts the periodic maintenance loop and returns the
+// stop step the maintenance stage registers with App.Close.
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) func() {
 	// Periodically purge expired sessions and orphaned attachments.
 	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if fileStorageErr != nil {
@@ -22,7 +22,7 @@ func runStartMaintenance(bgCtx context.Context, log *slog.Logger, cfg *config.Co
 
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	go runMaintenanceLoop(bgCtx, log, database, fileStorage, stopMaintenance, maintenanceDone)
+	go maintenanceLoop(bgCtx, log, database, fileStorage, stopMaintenance, maintenanceDone)
 
 	return func() {
 		// Backstop for early returns below (see hub.GracefulStop defer above),
@@ -38,9 +38,9 @@ func runStartMaintenance(bgCtx context.Context, log *slog.Logger, cfg *config.Co
 	}
 }
 
-// runMaintenanceLoop is the periodic maintenance goroutine started by
-// runStartMaintenance. Extracted from run.
-func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, stopMaintenance, maintenanceDone chan struct{}) {
+// maintenanceLoop is the periodic maintenance goroutine started by
+// startMaintenanceLoop.
+func maintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage, stopMaintenance, maintenanceDone chan struct{}) {
 	defer close(maintenanceDone)
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
@@ -57,7 +57,7 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB
 				continue
 			}
 
-			if runMaintenanceTick(bgCtx, log, database, fileStorage) {
+			if maintenanceTick(bgCtx, log, database, fileStorage) {
 				consecutiveFailures++
 			} else {
 				consecutiveFailures = 0
@@ -68,9 +68,9 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, database *db.DB
 	}
 }
 
-// runMaintenanceTick runs one maintenance pass and reports whether any step
-// of it failed. Extracted from run.
-func runMaintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage) bool {
+// maintenanceTick runs one maintenance pass and reports whether any step
+// of it failed.
+func maintenanceTick(bgCtx context.Context, log *slog.Logger, database *db.DB, fileStorage *storage.Storage) bool {
 	tickFailed := false
 	if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 		log.Warn("failed to delete expired sessions", "error", err)

@@ -205,7 +205,7 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 
 	rc := NewRestartCoordinator(time.Hour, nil)
 	runErr := make(chan error, 1)
-	go func() { runErr <- Run("test", log, logBuf, levelVar, rc) }()
+	go func() { runErr <- runApp(log, logBuf, levelVar, rc) }()
 
 	// Wait for the server to actually serve before requesting the restart.
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
