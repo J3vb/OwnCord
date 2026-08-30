@@ -12,7 +12,7 @@ after-state inventory), branch `feat/b3-2-auth-slice` off `dev` `71d867cb`
 [server-boundaries.md](../architecture/server-boundaries.md) §"Auth slice";
 [server.md](../architecture/server.md) §D4
 
-**Decision: DRAFT — awaiting the owner's signature (line at the end).**
+**Decision: ACCEPTED — 2026-08-30 by J3vb (repository owner).**
 
 HP-3 asks five questions. Each is answered below with the command that
 produces the evidence and what it printed on the measured tree, not with an
@@ -228,4 +228,7 @@ claim:
   gate;
 - that the error set is final — it is verbatim.
 
-**Signed:** \_\_\_\_ (repository owner), 2026-\_\_-\_\_ —
+**Signed:** J3vb (repository owner), 2026-08-30 — accepted as drafted. Since
+the measurement, B3-9 (PR #1454 = `123c0899`) closed the three pinned defects
+(OC-0376, OC-0377, OC-0378) and held the coverage floor (slice 405/440 =
+92.0%); nothing above changes. B3-3 may start.
