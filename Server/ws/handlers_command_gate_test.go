@@ -9,6 +9,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -156,7 +157,8 @@ func TestHandleChatCommandV2_BroadcastDeniedWithoutPostPermission(t *testing.T) 
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: mutedID}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T (%v)", result.Error, result.Error)
 	}
@@ -179,7 +181,8 @@ func TestHandleChatCommandV2_BroadcastUnknownChannel(t *testing.T) {
 
 	result := handleChatCommandV2(context.Background(), cmd, ClientInfo{UserID: ownerID}, deps)
 
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T (%v)", result.Error, result.Error)
 	}

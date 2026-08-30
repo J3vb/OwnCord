@@ -2,6 +2,7 @@ package ws
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -35,7 +36,8 @@ func TestResultWithError(t *testing.T) {
 	if r.Error == nil {
 		t.Fatal("expected non-nil Error")
 	}
-	ce, ok := r.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(r.Error, &ce)
 	if !ok {
 		t.Fatal("expected ClientError type")
 	}

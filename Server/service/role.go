@@ -124,7 +124,7 @@ func (s *RoleService) validateName(ctx context.Context, raw string, excludeID in
 	}
 	existing, err := s.st.GetRoleByName(ctx, name)
 	if err != nil {
-		return "", fmt.Errorf("%w: failed to check role name: %v", ErrInternal, err)
+		return "", fmt.Errorf("%w: failed to check role name: %w", ErrInternal, err)
 	}
 	if existing != nil && existing.ID != excludeID {
 		return "", fmt.Errorf("%w: a role named %q already exists", ErrBadRequest, existing.Name)
@@ -169,11 +169,11 @@ func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithM
 	}
 	roles, err := s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
 	counts, err := s.st.CountRoleMembers(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to count role members: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to count role members: %w", ErrInternal, err)
 	}
 	out := make([]RoleWithMembers, 0, len(roles))
 	for _, r := range roles {
@@ -216,7 +216,7 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 
 	existing, err := s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
 	if len(existing) >= maxRoles {
 		return nil, fmt.Errorf("%w: server already has the maximum of %d roles", ErrBadRequest, maxRoles)
@@ -259,7 +259,7 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 
 	role, err := s.st.CreateRole(ctx, name, color, perms, position)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to create role: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to create role: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_create", "role", role.ID,
@@ -281,7 +281,7 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	}
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: failed to fetch role: %v", ErrInternal, err)
+		return nil, false, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
 	}
 	if role == nil {
 		return nil, false, fmt.Errorf("%w: role not found", ErrNotFound)
@@ -321,7 +321,7 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		if position != role.Position {
 			existing, err := s.st.ListRoles(ctx)
 			if err != nil {
-				return nil, false, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+				return nil, false, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 			}
 			for _, rl := range existing {
 				if rl.ID != role.ID && rl.Position == position {
@@ -332,7 +332,7 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	}
 
 	if err := s.st.UpdateRole(ctx, role.ID, name, color, perms, position); err != nil {
-		return nil, false, fmt.Errorf("%w: failed to update role: %v", ErrInternal, err)
+		return nil, false, fmt.Errorf("%w: failed to update role: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_update", "role", role.ID,
@@ -361,7 +361,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 	}
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: failed to fetch role: %v", ErrInternal, err)
+		return nil, nil, nil, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
 	}
 	if role == nil {
 		return nil, nil, nil, fmt.Errorf("%w: role not found", ErrNotFound)
@@ -382,7 +382,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 
 	fallback, err = s.st.GetDefaultRole(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: failed to resolve the default role: %v", ErrInternal, err)
+		return nil, nil, nil, fmt.Errorf("%w: failed to resolve the default role: %w", ErrInternal, err)
 	}
 	if fallback == nil {
 		// Fail closed: without a fallback the members would be orphaned on a
@@ -392,7 +392,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 
 	movedUserIDs, err = s.st.DeleteRoleReassigning(ctx, role.ID, fallback.ID)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: failed to delete role: %v", ErrInternal, err)
+		return nil, nil, nil, fmt.Errorf("%w: failed to delete role: %w", ErrInternal, err)
 	}
 	// The members' cached masks are the deleted role's until this drops them.
 	if s.perms != nil {
@@ -426,7 +426,7 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 	}
 	roles, err := s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
 
 	manageable := make(map[int64]*db.Role, len(roles))
@@ -459,7 +459,7 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 		positions[id] = len(orderedIDs) - i
 	}
 	if err := s.st.SetRolePositions(ctx, positions); err != nil {
-		return nil, fmt.Errorf("%w: failed to reorder roles: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to reorder roles: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_reorder", "role", 0,
@@ -468,7 +468,7 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 
 	updated, err := s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
 	return updated, nil
 }

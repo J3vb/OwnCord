@@ -10,6 +10,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -108,7 +109,8 @@ func TestVoiceHandlersV2_RateLimited(t *testing.T) {
 
 			for i := range tt.limit {
 				res := tt.call(deps)
-				ce, ok := res.Error.(ClientError)
+				var ce ClientError
+				ok := errors.As(res.Error, &ce)
 				if !ok {
 					t.Fatalf("call %d: expected ClientError, got %v", i, res.Error)
 				}
@@ -118,7 +120,8 @@ func TestVoiceHandlersV2_RateLimited(t *testing.T) {
 			}
 
 			res := tt.call(deps)
-			ce, ok := res.Error.(ClientError)
+			var ce ClientError
+			ok := errors.As(res.Error, &ce)
 			if !ok {
 				t.Fatalf("expected ClientError past the budget, got %v", res.Error)
 			}

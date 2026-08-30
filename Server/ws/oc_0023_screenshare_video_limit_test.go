@@ -8,6 +8,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -97,7 +98,8 @@ func TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull(t *testing.T) {
 	if ssRes.Error == nil {
 		t.Fatal("voice_screenshare succeeded with the channel's single video slot already held by a camera publisher — VIDEO_LIMIT was never checked")
 	}
-	if ce, ok := ssRes.Error.(ClientError); !ok || ce.Code != ErrCodeVideoLimit {
+	var ce ClientError
+	if !errors.As(ssRes.Error, &ce) || ce.Code != ErrCodeVideoLimit {
 		t.Errorf("error = %+v, want ClientError{Code: %q}", ssRes.Error, ErrCodeVideoLimit)
 	}
 
@@ -140,7 +142,8 @@ func TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(t *testing.T) {
 	if camRes.Error == nil {
 		t.Fatal("voice_camera succeeded with the channel's single video slot already held by a screenshare publisher — the slot-count query ignores screenshare rows")
 	}
-	if ce, ok := camRes.Error.(ClientError); !ok || ce.Code != ErrCodeVideoLimit {
+	var ce ClientError
+	if !errors.As(camRes.Error, &ce) || ce.Code != ErrCodeVideoLimit {
 		t.Errorf("error = %+v, want ClientError{Code: %q}", camRes.Error, ErrCodeVideoLimit)
 	}
 

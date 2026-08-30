@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -130,7 +131,8 @@ func TestVoiceTokenRefreshV2_NotInVoice(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error for not in voice")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -152,7 +154,8 @@ func TestVoiceTokenRefreshV2_RateLimited(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected rate limit error")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -172,7 +175,8 @@ func TestVoiceTokenRefreshV2_TokenGenNil(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error for nil TokenGen")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -192,7 +196,8 @@ func TestVoiceTokenRefreshV2_GenerateTokenError(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error from GenerateToken failure")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}
@@ -294,7 +299,8 @@ func TestVoiceTokenRefreshV2_RevokedConnectVoiceRefusedAndEvicts(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("revoked CONNECT_VOICE must not mint a fresh SFU token")
 	}
-	ce, ok := result.Error.(ClientError)
+	var ce ClientError
+	ok := errors.As(result.Error, &ce)
 	if !ok {
 		t.Fatalf("expected ClientError, got %T", result.Error)
 	}

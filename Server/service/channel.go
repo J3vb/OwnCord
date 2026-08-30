@@ -253,7 +253,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
 	if err := permissions.CanAdmitSession(sub); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrForbidden, err)
+		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
 	}
 
 	// Mark channel as read. latestID == 0 (no undeleted messages) still

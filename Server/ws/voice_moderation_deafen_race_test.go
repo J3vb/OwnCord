@@ -20,6 +20,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -106,7 +107,8 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	if !hookRan {
 		t.Fatal("voiceModDeafenPreMuteRaceHook never fired — test setup is broken, not exercising the race window")
 	}
-	clientErr, ok := result.Error.(ClientError)
+	var clientErr ClientError
+	ok := errors.As(result.Error, &clientErr)
 	if !ok {
 		t.Fatalf("result error = %#v (%T), want a ClientError", result.Error, result.Error)
 	}
@@ -189,7 +191,8 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 	if !hookRan {
 		t.Fatal("voiceModDeafenPreMuteRaceHook never fired — test setup is broken, not exercising the race window")
 	}
-	clientErr, ok := result.Error.(ClientError)
+	var clientErr ClientError
+	ok := errors.As(result.Error, &clientErr)
 	if !ok {
 		t.Fatalf("result error = %#v (%T), want a ClientError", result.Error, result.Error)
 	}

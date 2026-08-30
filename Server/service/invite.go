@@ -50,7 +50,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 
 	code, err := s.st.CreateInvite(ctx, createdBy, maxUses, expiresAt)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to create invite: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to create invite: %w", ErrInternal, err)
 	}
 
 	// The invite is committed from here on: a request canceled during the
@@ -58,7 +58,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	tailCtx := context.WithoutCancel(ctx)
 	invite, err := s.st.GetInvite(tailCtx, code)
 	if err != nil || invite == nil {
-		return nil, fmt.Errorf("%w: failed to retrieve invite: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to retrieve invite: %w", ErrInternal, err)
 	}
 	// S-02: the row names the invite by id, never by code; the code is the
 	// credential.
@@ -71,7 +71,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	invites, err := s.st.ListInvites(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list invites: %v", ErrInternal, err)
+		return nil, fmt.Errorf("%w: failed to list invites: %w", ErrInternal, err)
 	}
 	return invites, nil
 }
@@ -83,7 +83,7 @@ func (s *InviteService) RevokeInvite(ctx context.Context, actorID int64, code st
 		return fmt.Errorf("%w: invite not found", ErrNotFound)
 	}
 	if err := s.st.RevokeInvite(ctx, code); err != nil {
-		return fmt.Errorf("%w: failed to revoke invite: %v", ErrInternal, err)
+		return fmt.Errorf("%w: failed to revoke invite: %w", ErrInternal, err)
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "invite_revoke", "invite", invite.ID, "")
 	return nil
