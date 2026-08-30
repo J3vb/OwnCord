@@ -30,7 +30,7 @@ func TestDBImportBoundary(t *testing.T) {
 		},
 		{
 			name: "listed file is allowed",
-			path: "api/auth_handler.go",
+			path: "api/middleware.go",
 			src:  "package api\n" + importDB + "\nvar _ *db.DB\n",
 			want: 0,
 		},

@@ -1,10 +1,9 @@
 package api
 
 import (
-	"math"
-	"sync/atomic"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
@@ -13,36 +12,18 @@ import (
 // Each constant defines either a request cap or a sliding-window duration used
 // by the per-endpoint rate limiters.
 
-// authRateScaleBits holds the security.auth_rate_limit_multiplier as float
-// bits. It scales the per-IP auth request caps and failure thresholds for
-// deployments where many users share one IP (office/school NAT) — the
-// compiled-in constants below assume roughly one person per address. Atomic
-// because tests construct multiple routers concurrently. Set via
-// setAuthRateScale in NewRouter; reads happen at mount time and on the login
-// failure-count path.
-var authRateScaleBits atomic.Uint64
-
-func init() { authRateScaleBits.Store(math.Float64bits(1.0)) }
+// The auth rate multiplier (security.auth_rate_limit_multiplier) lives in
+// auth (auth/ratescale.go) since B3-2, so the route mounts here and the login
+// failure accounting in service.AuthService read one value. These wrappers
+// keep the mount sites and api/constants_test.go unchanged.
 
 // setAuthRateScale clamps and installs the auth rate multiplier. Zero or
 // negative (unset config) means 1.0.
-func setAuthRateScale(m float64) {
-	if m <= 0 {
-		m = 1.0
-	}
-	m = math.Min(math.Max(m, 0.1), 100)
-	authRateScaleBits.Store(math.Float64bits(m))
-}
+func setAuthRateScale(m float64) { auth.SetRateScale(m) }
 
 // scaledAuthLimit applies the auth rate multiplier to a compiled-in limit,
 // never returning less than 1.
-func scaledAuthLimit(n int) int {
-	scaled := int(math.Round(float64(n) * math.Float64frombits(authRateScaleBits.Load())))
-	if scaled < 1 {
-		return 1
-	}
-	return scaled
-}
+func scaledAuthLimit(n int) int { return auth.ScaledLimit(n) }
 
 const (
 	// registerRateLimitPerMinute is the maximum registration attempts per IP per minute.
@@ -72,40 +53,6 @@ const (
 	// stays under this; it exists to bound abuse of the operator's Klipy quota.
 	gifRateLimitPerMinute = 30
 
-	// loginFailureThreshold is the number of failed login attempts (within
-	// loginFailureWindow) before the IP is locked out.
-	loginFailureThreshold = 9
-
-	// loginFailureWindow is the sliding window for counting login failures.
-	loginFailureWindow = 15 * time.Minute
-
-	// loginLockoutDuration is how long an IP is locked out after exceeding
-	// loginFailureThreshold.
-	loginLockoutDuration = 15 * time.Minute
-
-	// deleteAccountFailureThreshold is the number of wrong-password attempts
-	// before the per-user lockout kicks in.
-	deleteAccountFailureThreshold = 3
-
-	// deleteAccountFailureWindow is the sliding window for counting
-	// delete-account password failures.
-	deleteAccountFailureWindow = 15 * time.Minute
-
-	// deleteAccountLockoutDuration is how long the account-deletion endpoint
-	// is locked after exceeding deleteAccountFailureThreshold.
-	deleteAccountLockoutDuration = 15 * time.Minute
-
-	// totpFailureRateLimit is the maximum TOTP verification failures per user
-	// within totpFailureWindow before the user is rate-limited.
-	totpFailureRateLimit = 10
-
-	// totpFailureWindow is the sliding window for counting per-user TOTP failures.
-	totpFailureWindow = 15 * time.Minute
-
-	// partialAuthMaxFailures is the number of failed TOTP attempts on a single
-	// partial-auth challenge before it is revoked.
-	partialAuthMaxFailures = 5
-
 	// profilePasswordRateLimitPerMinute is the maximum password change attempts
 	// per IP per minute.
 	profilePasswordRateLimitPerMinute = 5
@@ -113,29 +60,6 @@ const (
 	// profileUpdateRateLimitPerMinute is the maximum profile update attempts
 	// per user per minute.
 	profileUpdateRateLimitPerMinute = 10
-
-	// loginUserFailureThreshold is the number of failed login attempts for a
-	// specific username (regardless of source IP) before the account is locked.
-	loginUserFailureThreshold = 9
-
-	// loginUserFailureWindow is the sliding window for per-username login failures.
-	loginUserFailureWindow = 15 * time.Minute
-
-	// loginUserLockoutDuration is how long a username is locked after exceeding
-	// loginUserFailureThreshold.
-	loginUserLockoutDuration = 15 * time.Minute
-
-	// pwConfirmFailureThreshold is the number of wrong-password attempts on
-	// password-confirmation endpoints before per-user lockout kicks in.
-	pwConfirmFailureThreshold = 3
-
-	// pwConfirmFailureWindow is the sliding window for per-user password
-	// confirmation failures.
-	pwConfirmFailureWindow = 15 * time.Minute
-
-	// pwConfirmLockoutDuration is how long password-confirmation endpoints are
-	// locked after exceeding pwConfirmFailureThreshold.
-	pwConfirmLockoutDuration = 15 * time.Minute
 
 	// uploadRateLimitPerMinute is the maximum file uploads per user per minute.
 	uploadRateLimitPerMinute = 10
@@ -149,12 +73,6 @@ const (
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
 
 const (
-	// partialAuthStoreTTL is the lifetime of a partial-auth (2FA) challenge token.
-	partialAuthStoreTTL = 10 * time.Minute
-
-	// pendingTOTPStoreTTL is the lifetime of a pending TOTP enrollment secret.
-	pendingTOTPStoreTTL = 10 * time.Minute
-
 	// rateLimiterCleanupInterval is how often stale rate-limiter entries are reaped.
 	rateLimiterCleanupInterval = 5 * time.Minute
 

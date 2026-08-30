@@ -56,7 +56,6 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/setup_wizard.go":           {"move", "auth", "BeginTx for the wizard; setup sub-family"},
 	"admin/types.go":                  {"adapter", "", "response DTOs; the one GetRoleByID moves with handlers_users"},
 	// ── api ───────────────────────────────────────────────────────────────
-	"api/auth_handler.go":    {"move", "auth", "B3-2 slice: register/login/logout/delete own the DB"},
 	"api/channel_handler.go": {"adapter", "", "response types only; service owns the calls"},
 	"api/dm_handler.go":      {"adapter", "", "DM response types + pure status helpers"},
 	"api/emoji_handler.go":   {"adapter", "", "Emoji/User types only"},
@@ -66,7 +65,6 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/plugins_handler.go": {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
 	"api/profile_handler.go": {"move", "upload", "avatar upload creates the attachment row"},
 	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction leaves in B3-3"},
-	"api/totp_handler.go":    {"move", "auth", "B3-2 slice: TOTP enrol/verify write the user row"},
 	"api/upload_handler.go":  {"move", "upload", "attachment access + a raw QueryRowContext"},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {"adapter", "", "db.User type in a helper signature"},

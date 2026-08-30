@@ -109,12 +109,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	getOnlineUsers = func() int { return hub.ClientCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
-	// Auth routes: register, login, logout, me. Mounted with the hub as the
-	// AuthBroadcaster so DELETE /api/v1/auth/account (self-service account
-	// deletion) fans out member_ban and force-disconnects the deleted user's
-	// own socket, exactly like the admin ban path does for the same
-	// anonymise-and-ban DB state.
-	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey, hub)
+	// Auth routes. The service is built after the hub, with the hub as its
+	// AuthBroadcaster, so DELETE /api/v1/auth/account fans out member_ban and
+	// force-disconnects the deleted user's own socket exactly like the admin
+	// ban path does for the same DB state. B3-3 moves this to internal/app.
+	MountAuthRoutes(r, service.NewAuthService(database, limiter, totpKey, hub), AuthMiddleware(database), limiter, cfg.Server.TrustedProxies)
 
 	routerPluginWiring(hub, pluginRegistry)
 

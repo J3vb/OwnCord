@@ -1,11 +1,11 @@
 package api_test
 
 // router_delete_account_broadcast_test.go pins the production wiring for
-// OC-0048: NewRouter (router.go) must pass the WS hub to MountAuthRoutes as
-// its optional AuthBroadcaster so self-service account deletion fans out
-// member_ban exactly like the admin ban path does. MountAuthRoutes is called
-// before the hub exists in router.go, so the only production call site used
-// to omit the broadcaster entirely — handleDeleteAccount's
+// OC-0048: NewRouter (router.go) must hand the WS hub to
+// service.NewAuthService as its AuthBroadcaster so self-service account
+// deletion fans out member_ban exactly like the admin ban path does. Auth
+// routes were once mounted before the hub existed in router.go, so the only
+// production call site used to omit the broadcaster entirely — handleDeleteAccount's
 // `if broadcaster != nil` guard was never taken outside tests that construct
 // their own fake broadcaster (see auth_handler_delete_broadcast_test.go,
 // which only proves the handler itself works when a broadcaster IS passed).
@@ -169,7 +169,7 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 
 	if !sawMemberBan {
 		t.Fatal("no member_ban WS broadcast for the deleted user observed on a second client — " +
-			"router.go's MountAuthRoutes call must pass the hub as the optional " +
-			"AuthBroadcaster (mount it after ws.NewHub, not before)")
+			"router.go must build service.NewAuthService with the hub as its " +
+			"AuthBroadcaster (after ws.NewHub, not before)")
 	}
 }

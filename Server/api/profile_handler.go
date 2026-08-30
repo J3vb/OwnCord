@@ -23,6 +23,48 @@ import (
 
 // ─── Request / Response types ────────────────────────────────────────────────
 
+// userResponse is the caller's own user record, the shape auth responses and
+// PATCH /users/me return. It lives beside the profile handler because this is
+// the file that still sees db.User; the auth handlers get it through
+// toUserResponse without naming db (B3-2).
+type userResponse struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar,omitempty"`
+	// DisplayName and About are always present (null = unset) so the settings
+	// form can tell "cleared" from "the server does not know this field".
+	DisplayName *string `json:"display_name"`
+	About       *string `json:"about"`
+	// CustomStatus is the user's own free-text status line.
+	CustomStatus *string `json:"custom_status"`
+	// Status is the user's own true status, invisible included. This response
+	// only ever describes the caller, so there is nothing to hide from them.
+	Status      string `json:"status"`
+	RoleID      int64  `json:"role_id"`
+	TOTPEnabled bool   `json:"totp_enabled"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// toUserResponse converts a db.User to the API response shape.
+func toUserResponse(u *db.User) *userResponse {
+	avatar := ""
+	if u.Avatar != nil {
+		avatar = *u.Avatar
+	}
+	return &userResponse{
+		ID:           u.ID,
+		Username:     u.Username,
+		Avatar:       avatar,
+		DisplayName:  u.DisplayName,
+		About:        u.About,
+		CustomStatus: u.CustomStatus,
+		Status:       u.Status,
+		RoleID:       u.RoleID,
+		TOTPEnabled:  u.TOTPSecret != nil,
+		CreatedAt:    u.CreatedAt,
+	}
+}
+
 // updateProfileRequest is the JSON body for PATCH /api/v1/users/me.
 // identity_public_key, when present, publishes the client's long-term E2EE
 // identity public key (F3 voice E2EE TOFU); omitted = leave unchanged.
@@ -392,8 +434,8 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		// Verify old password using constant-time bcrypt comparison.
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.OldPassword) {
-			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
-				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
+			if !limiter.Allow(failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow) {
+				limiter.Lockout(r.Context(), lockKey, service.PwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error: "FORBIDDEN", Message: "incorrect password",
