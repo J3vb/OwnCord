@@ -8,11 +8,13 @@
 #   OWNCORD_COVERAGE_FLOOR=/tmp/red.json bash scripts/coverage-floor.sh coverage.out
 #
 # The floor-file shape is fixed, because awk parses it - jq is not guaranteed on
-# the runners - and the parser fails closed (exit 2) rather than skipping an
-# entry it cannot see. Three rules: one "key": <number> entry per line; the
-# "exclude" array all on ONE line, because a Prettier-wrapped array would parse
-# as no exclusions at all; package names as module-relative directories with no
-# trailing slash ("cmd", not "cmd/").
+# the runners - and the parser fails closed (exit 2) rather than enforcing less
+# than the file says. Four rules: every line inside "packages" is one
+# "name": <number> entry, the number unquoted; all five core packages
+# (ws, service, permissions, auth, db) are present; the "exclude" array is all
+# on ONE line, because a Prettier-wrapped array would parse as no exclusions at
+# all; package names are module-relative directories with no trailing slash
+# ("cmd", not "cmd/").
 #   {"aggregate": <pct>, "exclude": ["db/dbgen", "cmd"],
 #    "packages": {"<pkg>": <pct>, ...}}
 # "exclude" prefixes are dropped before anything is counted. A percentage is
@@ -64,12 +66,16 @@ FNR == NR {                                       # pass 1: the floor file
     for (i = 4; i <= n; i += 2) if (a[i] != "") excl[++ne] = a[i]
     next
   }
-  line = $0
-  if (gsub(/"[^"]+"[ \t]*:[ \t]*[0-9]/, "", line) > 1) shapeerr = 1
-  if (match($0, /"[^"]+"[ \t]*:[ \t]*[0-9]/)) {
-    key = val = $0
-    sub(/^[^"]*"/, "", key); sub(/".*$/, "", key)
-    sub(/^[^:]*:[ \t]*/, "", val); sub(/[^0-9.].*$/, "", val)
+  entry = $0                                      # strip the block brace, comma
+  if (inpkg) sub(/[ \t]*[}].*$/, "", entry)
+  gsub(/^[ \t]+|[ \t]*,[ \t]*$|[ \t]+$/, "", entry)
+  ok = (entry ~ /^"[^"]+"[ \t]*:[ \t]*[0-9]+([.][0-9]+)?$/)
+  if (inpkg && entry != "" && !ok)
+    err = sprintf("floor file line %d is not a \"name\": <number> entry: %s", FNR, $0)
+  if (ok) {
+    key = val = entry
+    sub(/^"/, "", key); sub(/".*$/, "", key)
+    sub(/^[^:]*:[ \t]*/, "", val)
     if (key == "aggregate") { aggfloor = val + 0; haveagg = 1 }
     else if (inpkg) { pkgfloor[key] = val + 0; order[++np] = key }
   }
@@ -95,18 +101,24 @@ function check(name, c, t, fl,   tenths, under) { # figures compared in tenths
   return under
 }
 END {
+  if (err != "") {
+    print "coverage-floor: " err
+    exit 2
+  }
   if (sawexcl && ne == 0) {
     print "coverage-floor: \"exclude\" must be one single-line array, e.g. \"exclude\": [\"db/dbgen\", \"cmd\"]; a wrapped array parses as no exclusions"
     exit 2
   }
-  if (shapeerr) {
-    print "coverage-floor: the floor file needs one \"key\": <number> entry per line"
-    exit 2
-  }
-  if (!haveagg || np == 0 || tot == 0) {
+  if (!haveagg || tot == 0) {
     print "coverage-floor: floor file or coverage profile is empty/malformed"
     exit 2
   }
+  nc = split("ws service permissions auth db", core, " ")
+  for (i = 1; i <= nc; i++)
+    if (!(core[i] in pkgfloor)) {
+      print "coverage-floor: floor file has no floor for core package " core[i]
+      exit 2
+    }
   bad = check("aggregate", cov, tot, aggfloor)
   for (i = 1; i <= np; i++) {
     p = order[i]

@@ -712,9 +712,12 @@ baseline) in this section's evidence block.
   → `coverage-floor: FAIL ws 84.5% (floor 99.0%, 3181/3763 statements)`
   (exit 1). The parser also fails closed on a floor file it cannot read whole: a
   Prettier-wrapped `"exclude"` array exits 2 rather than silently excluding
-  nothing, and a package entry sharing the closing-brace line is enforced, not
-  dropped (`"ws": 99.0 }` → `FAIL ws 84.5% (floor 99.0%)`, exit 1). No control
-  file is committed.
+  nothing; a package entry sharing the closing-brace line is enforced, not
+  dropped (`"ws": 99.0 }` → `FAIL ws 84.5% (floor 99.0%)`, exit 1); a value that
+  is not an unquoted number exits 2 naming the line (`"auth": "90.8"` →
+  `floor file line 6 is not a "name": <number> entry`); and a floor file missing
+  any of the five core packages exits 2 naming it (`no floor for core package
+db`). No control file is committed.
 - GREEN: `bash scripts/coverage-floor.sh coverage.out` → exit 0, six lines, the
   first `coverage-floor: ok aggregate 79.1% (floor 79.1%, 11241/14194 statements)`
   and one `ok` line per core package.
