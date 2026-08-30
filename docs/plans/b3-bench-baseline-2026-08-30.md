@@ -10,7 +10,7 @@ cannot silently shorten the table.
 
 ## Provenance
 
-- Commit: `c7917fcc7e30e49b4baa0b3d084ded8395ccdbe7`
+- Commit: `ec8ef24a6e6ad96e09d208f6bc95777a203ec051`
 - Date (UTC): 2026-08-30
 - Toolchain: `go version go1.26.7 windows/amd64`
 - Platform: `windows/amd64`
@@ -33,6 +33,15 @@ go test -run '^$' -bench '^Benchmark(PermissionInvalidation|ReadStateWrite|Broad
 - `± n%` is benchstat's confidence range over the repeats. The
   allocation-heavy benchmarks carry the widest ranges; read a small movement in
   those as noise until a repeat says otherwise.
+- `go test ./...` runs the three packages' benchmark binaries concurrently
+  (`-p` defaults to GOMAXPROCS), so each package's figures are measured under
+  the others' load. A noise source the command shape B3-6 specifies accepts.
+- `BenchmarkPermissionInvalidation` runs against a bare hub with no
+  `PermissionService`, so every client's verdict is a live lookup. That is the
+  uncached worst case, not what a server with the 30 s permission cache pays.
+- Regenerating writes a NEW dated file. Replace the row in
+  `docs/plans/README.md` and delete the superseded document — only the newest
+  baseline is kept, so there is one number to compare against.
 
 ## benchstat
 
@@ -43,7 +52,7 @@ pkg: github.com/J3vb/OwnCord/Server/api
 cpu: AMD Ryzen 9 7950X3D 16-Core Processor
                    │ b3-baseline │
                    │   sec/op    │
-UploadAdmission-32   253.2n ± 4%
+UploadAdmission-32   260.9n ± 4%
 
                    │ b3-baseline │
                    │    B/op     │
@@ -54,13 +63,13 @@ UploadAdmission-32    56.00 ± 0%
 UploadAdmission-32    3.000 ± 0%
 
 pkg: github.com/J3vb/OwnCord/Server/service
-                  │ b3-baseline │
-                  │   sec/op    │
-ReadStateWrite-32   52.61µ ± 5%
+                  │ b3-baseline  │
+                  │    sec/op    │
+ReadStateWrite-32   54.59µ ± 12%
 
                   │ b3-baseline  │
                   │     B/op     │
-ReadStateWrite-32   5.597Ki ± 0%
+ReadStateWrite-32   5.599Ki ± 0%
 
                   │ b3-baseline │
                   │  allocs/op  │
@@ -69,11 +78,11 @@ ReadStateWrite-32    163.0 ± 0%
 pkg: github.com/J3vb/OwnCord/Server/ws
                           │ b3-baseline  │
                           │    sec/op    │
-ReconnectStorm-32           358.9µ ±  7%
-PermissionInvalidation-32   860.6µ ±  2%
-BroadcastFanout-32          3.480µ ±  3%
-ReplaySelection-32          16.26µ ± 32%
-geomean                     64.66µ
+ReconnectStorm-32           428.0µ ±  9%
+PermissionInvalidation-32   884.2µ ±  6%
+BroadcastFanout-32          3.390µ ±  1%
+ReplaySelection-32          14.82µ ± 14%
+geomean                     66.03µ
 
                           │ b3-baseline  │
                           │     B/op     │
