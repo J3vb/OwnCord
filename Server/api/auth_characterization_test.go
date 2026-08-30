@@ -824,18 +824,31 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 		}
 		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to verify two-factor code")
 	})
-	t.Run("session insert fails -> 500 and the challenge is consumed", func(t *testing.T) {
+	t.Run("session insert fails -> 500, the challenge and the code survive", func(t *testing.T) {
 		database, router, _, secret := setup(t)
 		pt := loginPartial(t, router, "two", "correctPass1", "", "")
 		failWrite(t, database, "INSERT", "sessions")
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
-		// known: the partial token was consumed before the session insert, so
-		// the user must repeat the password step after a transient store
-		// failure (ledger OC-0378). Pinned as-is; the code is also marked used.
+		code := totpCode(t, secret)
+		wantErr(t, verify(t, router, pt, code, ""), http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
+		// OC-0378 (fixed in B3-9): the verified second factor is not discarded
+		// by a store fault — the challenge is restored under the same partial
+		// token and the accepted code is released, so once the store is back
+		// the same token and the same code complete the login. (Restore alone
+		// would refuse the retry as a replay.)
 		if _, err := database.ExecContext(context.Background(), `DROP TRIGGER fault_insert_sessions`); err != nil {
 			t.Fatalf("drop trigger: %v", err)
 		}
-		wantErr(t, verify(t, router, pt, totpCode(t, secret), "203.0.113.2"), http.StatusUnauthorized, "UNAUTHORIZED", challengeGone)
+		rr := verify(t, router, pt, code, "203.0.113.2")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("retry status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var res struct {
+			Token       string `json:"token"`
+			Requires2FA bool   `json:"requires_2fa"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &res); err != nil || res.Token == "" || res.Requires2FA {
+			t.Fatalf("retry body = %s (err %v), want a session token", rr.Body.String(), err)
+		}
 	})
 	t.Run("per-user failure cap spans challenges -> 429 on the 11th attempt", func(t *testing.T) {
 		_, router, _, secret := setup(t)

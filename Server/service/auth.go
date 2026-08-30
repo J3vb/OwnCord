@@ -470,6 +470,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 // VerifyTOTP completes a challenge Login started and issues the session,
 // bound to the login request's device and IP rather than this one's.
 func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string) (*AuthResult, error) {
+	code = strings.TrimSpace(code)
 	challenge, ok := s.partial.Lookup(partialToken)
 	if !ok {
 		return nil, ErrTOTPChallengeInvalid
@@ -500,7 +501,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
+	if !auth.VerifyTOTPCodeOnce(secret, code, time.Now().UTC(), user.ID, s.usedCodes) {
 		// The attempt was already recorded atomically up-front via
 		// limiter.Allow; only the per-partial-token counter is advanced here.
 		s.partial.RegisterFailure(partialToken, partialAuthMaxFailures)
@@ -509,12 +510,22 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 
 	s.limiter.Reset(ctx, totpRateLimitKey)
 
-	if _, ok := s.partial.Consume(partialToken); !ok {
+	claimed, ok := s.partial.Consume(partialToken)
+	if !ok {
 		return nil, ErrTOTPChallengeInvalid
 	}
 
 	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
 	if err != nil {
+		// The second factor was verified; a store fault must not discard it
+		// (OC-0378). The claim stays atomic and first — two concurrent
+		// verifies can never both reach issueSession — so on failure put the
+		// challenge back under the same token (the client still holds it) and
+		// release the accepted code: the retry completes the login without
+		// another password step. Code first, then token, so a concurrent
+		// retry never finds a live token with a dead code.
+		s.usedCodes.Unmark(user.ID, code)
+		s.partial.Restore(partialToken, claimed)
 		return nil, ErrSessionIssue
 	}
 
