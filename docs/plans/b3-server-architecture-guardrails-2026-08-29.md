@@ -701,6 +701,36 @@ baseline) in this section's evidence block.
   200→213), which is why rows are keyed by `<dir>.<enclosing symbol>` and never
   by `file:line`; the hit count is unchanged at 21. No production code changed.
 
+#### Evidence — item 1 (coverage floor)
+
+- Branch `feat/b3-6-coverage-floor`; commits: `843dd6c6` feat(b3-6): coverage
+  floor — script, floors and CI step (S-06), plus the commit carrying this
+  block.
+- RED: `bash scripts/coverage-floor.sh --floor <99-aggregate.json> coverage.out`
+  → `coverage-floor: FAIL aggregate 79.1% (floor 99.0%, 11241/14194 statements)`
+  (exit 1); `bash scripts/coverage-floor.sh --floor <99-ws.json> coverage.out`
+  → `coverage-floor: FAIL ws 84.5% (floor 99.0%, 3181/3763 statements)`
+  (exit 1). Neither control file is committed.
+- GREEN: `bash scripts/coverage-floor.sh coverage.out` → exit 0, six lines, the
+  first `coverage-floor: ok aggregate 79.1% (floor 79.1%, 11241/14194 statements)`
+  and one `ok` line per core package.
+- Numbers (profile from `go test -race -timeout 20m ./... -coverprofile=coverage.out -cover`
+  at the merge base with `origin/dev`, `75d64dd4`; exclusions `db/dbgen`,
+  `cmd`): aggregate **79.1** (11241/14194), `auth` **90.8** (418/460), `db`
+  **79.4** (1738/2188), `permissions` **100.0** (94/94), `service` **67.8**
+  (1204/1775), `ws` **84.5** (3181/3763). The spec's starting aggregate of
+  74.6 is the B0 baseline at an older SHA; the ratchet rule applies to this PR,
+  so the committed floor is the measured 79.1.
+- Verified against HEAD: `ci.yml:73` matched the spec. The gate step is added
+  on the **ubuntu-latest** leg only — the profile is not identical on both legs
+  (OS-tagged files swap in and out; `ws` and `plugin` tests skip on Windows),
+  so a two-leg gate would not be deterministic. The figures above were measured
+  on Windows because no Linux toolchain is available on the authoring machine;
+  the Linux swaps analysed (`db/lockfile_windows.go` → `lockfile_unix.go`,
+  `ws/livekit_procattr_other.go` → `_linux.go`, plus three `ws` download tests
+  that only run on Linux) move every figure up or leave it unchanged, and the
+  PR's own CI run is the confirmation.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
