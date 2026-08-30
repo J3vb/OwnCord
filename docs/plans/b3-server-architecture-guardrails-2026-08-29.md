@@ -8,7 +8,8 @@ verified at `bf7b886d`
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
 B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
 (PR #1450 = `75d64dd4`); B3-9 merged 2026-08-30 (PR #1454 = `123c0899`;
-OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner — B3-3 next.
+OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner (PR #1461 =
+`52601114`); **B3-3 in progress 2026-08-30** on `feat/b3-3-lifecycle`.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
