@@ -9,6 +9,7 @@ Server/.env
 .claude/*
 !.claude/skills/
 !.claude/workflows/
+!.claude/rules/
 !.claude/settings.json
 CLAUDE.local.md
 .mcp.json
