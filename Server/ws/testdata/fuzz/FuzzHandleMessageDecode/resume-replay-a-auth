@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"req-1\",\"payload\":{\"active_channel_id\":1,\"last_seq\":1,\"token\":\"0123456789abcdef0123456789abcdef\"},\"type\":\"auth\"}")
