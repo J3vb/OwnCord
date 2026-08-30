@@ -478,12 +478,21 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
+	// Refuse an exhausted per-user budget before touching the store: the
+	// read-only Check costs nothing and charges nothing, so rotating source
+	// IPs cannot drive user reads and secret decryptions past the cap
+	// (Codex P2 on PR #1454). The atomic Allow below still records the
+	// attempt only once the store read succeeded (OC-0377).
+	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
+	if !s.limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		return nil, ErrTooManyAttempts
+	}
+
 	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
 	if err != nil {
 		return nil, err
 	}
 
-	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
 	// Atomically record this attempt and reject once the per-user failure cap
 	// is reached. Recording up-front — rather than a read-only Check now and
 	// Allow only on failure — closes a TOCTOU where many concurrent requests
@@ -514,6 +523,12 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 
 	claimed, ok := s.partial.Consume(partialToken)
 	if !ok {
+		// The claim lost: a concurrent verify consumed the challenge (or it
+		// expired) after this request marked its code. Release the code —
+		// if the winner is mid-recovery (Consume → issueSession failed →
+		// Restore), the restored token must not be stuck behind this mark
+		// until the authenticator rolls over (Codex P2 on PR #1454).
+		s.usedCodes.Unmark(user.ID, code)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
