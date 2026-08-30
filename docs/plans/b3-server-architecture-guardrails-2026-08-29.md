@@ -718,25 +718,39 @@ baseline) in this section's evidence block.
   `floor file line 6 is not a "name": <number> entry`); and a floor file missing
   any of the five core packages exits 2 naming it (`no floor for core package
 db`). No control file is committed.
-- GREEN: `bash scripts/coverage-floor.sh coverage.out` → exit 0, six lines, the
-  first `coverage-floor: ok aggregate 79.1% (floor 79.1%, 11241/14194 statements)`
-  and one `ok` line per core package.
-- Numbers (profile from `go test -race -timeout 20m ./... -coverprofile=coverage.out -cover`
-  at the merge base with `origin/dev`, `75d64dd4`; exclusions `db/dbgen`,
-  `cmd`): aggregate **79.1** (11241/14194), `auth` **90.8** (418/460), `db`
-  **79.4** (1738/2188), `permissions` **100.0** (94/94), `service` **67.8**
-  (1204/1775), `ws` **84.5** (3181/3763). The spec's starting aggregate of
-  74.6 is the B0 baseline at an older SHA; the ratchet rule applies to this PR,
-  so the committed floor is the measured 79.1.
-- Verified against HEAD: `ci.yml:73` matched the spec. The gate step is added
-  on the **ubuntu-latest** leg only — the profile is not identical on both legs
-  (OS-tagged files swap in and out; `ws` and `plugin` tests skip on Windows),
-  so a two-leg gate would not be deterministic. The figures above were measured
-  on Windows because no Linux toolchain is available on the authoring machine;
-  the Linux swaps analysed (`db/lockfile_windows.go` → `lockfile_unix.go`,
-  `ws/livekit_procattr_other.go` → `_linux.go`, plus three `ws` download tests
-  that only run on Linux) move every figure up or leave it unchanged, and the
-  PR's own CI run is the confirmation.
+- GREEN: the `Check coverage floor` step of CI run `33302062524` (ubuntu leg) →
+  exit 0, six lines, `coverage-floor: ok aggregate 79.9% (floor 79.9%,
+11344/14191 statements)` and one `ok` line per core package. The RED runs
+  above are local, against the Windows profile, which is why their measured
+  column reads 79.1/84.5 rather than the committed Linux floors.
+- Numbers. The committed floors are the **Linux** figures, measured by the gate
+  itself on the ubuntu leg of CI run `33302062524` (PR #1453) — the leg that
+  enforces them. The Windows column is the local measurement from
+  `go test -race -timeout 20m ./... -coverprofile=coverage.out -cover` at the
+  merge base with `origin/dev` (`75d64dd4`); exclusions `db/dbgen`, `cmd`.
+
+  | figure        | Linux (floor)          | Windows (local)    |
+  | ------------- | ---------------------- | ------------------ |
+  | aggregate     | **79.9** (11344/14191) | 79.1 (11241/14194) |
+  | `auth`        | **90.8** (418/460)     | 90.8 (418/460)     |
+  | `db`          | **79.3** (1738/2189)   | 79.4 (1738/2188)   |
+  | `permissions` | **100.0** (94/94)      | 100.0 (94/94)      |
+  | `service`     | **67.8** (1204/1775)   | 67.8 (1204/1775)   |
+  | `ws`          | **86.9** (3271/3763)   | 84.5 (3181/3763)   |
+
+  The two legs differ exactly where the pre-merge analysis said they would:
+  `ws` is higher on Linux because three `EnsureLiveKitBinary` tests and one
+  `harvest_s5` case skip on Windows, which lifts the aggregate with it, and
+  `db` is one statement larger on Linux (`lockfile_unix.go` has 11 statements
+  where `lockfile_windows.go` has 10), which costs it a tenth. `auth`,
+  `permissions` and `service` carry no OS-conditional code and are identical.
+  The spec's starting aggregate of 74.6 is the B0 baseline at an older SHA; the
+  ratchet rule applies to this PR, so the committed floor is the measured 79.9.
+
+- Verified against HEAD: `ci.yml:73` matched the spec. The gate step runs on the
+  **ubuntu-latest** leg only, and after the job's other test steps so a floor
+  miss does not hide them. Two legs would not be deterministic: the table above
+  is the measured proof that the profile is not the same on both.
 
 ## B3-7 — Alpha-shaped test dataset
 
