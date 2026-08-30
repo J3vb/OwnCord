@@ -60,6 +60,26 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
     fi
 fi
 
+# Any api/ or admin/ Go file, the migrations, the config or the generator
+# changed -> the regenerated docs index blocks must be part of the same commit.
+# The route trigger is deliberately the whole of api/ and admin/: routes are
+# registered in router.go, in the *_handler.go files, in client_update.go's
+# MountClientUpdateRoute, and in the admin package's own mux — naming files
+# individually is how this goes stale.
+#
+# Inlined like the two blocks above, and for the same reason: make is not on
+# PATH on a stock Windows box. -tags otel,wazero is the build the route index
+# is generated from; the tool refuses to run without it.
+if printf '%s\n' "$staged" | grep -qE '^Server/(api|admin)/.*\.go$|^Server/(migrations/|config/config\.go|cmd/gendocs/)'; then
+    if command -v go >/dev/null 2>&1; then
+        (cd Server && go run -tags otel,wazero ./cmd/gendocs \
+            && git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md) \
+            || fail "generated docs blocks are stale, or a config key is undocumented — if gendocs named keys above, document them in docs/server-configuration.md; otherwise run 'go run -tags otel,wazero ./cmd/gendocs' in Server/ and stage the result"
+    else
+        printf 'pre-commit: WARNING: go not installed; skipping the generated-docs check. CI will run it.\n' >&2
+    fi
+fi
+
 # Findings ledger changed -> it must still be valid. Unlike the two blocks
 # above there is nothing to diff: FINDINGS.md is not tracked (RL-07), so a
 # stale rendering cannot be committed. --check is the whole gate here, and it

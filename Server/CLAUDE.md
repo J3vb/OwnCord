@@ -14,6 +14,9 @@ prometheus.
   `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`),
   `cmd/dbinventory/` prints the `db`-importer table for
   `docs/architecture/server-boundaries.md` (exits 1 on an unlisted importer).
+  `cmd/gendocs/` rewrites the route, table and config-key index blocks in
+  `docs/` and must be run as `go run -tags otel,wazero ./cmd/gendocs`
+  (`make docs-verify` fails on drift).
   `scripts/` holds shell/JS tooling only; no Go entry point lives there
 - `admin/` web admin panel · `updater/` self-update + signature verification ·
   `plugin/` WASM plugin runtime (`-tags wazero`) · `telemetry/` OTel (`-tags otel`)

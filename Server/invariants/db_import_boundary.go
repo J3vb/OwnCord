@@ -73,6 +73,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"main.go":               {"boundary", "", "process composition root; B3-3 moves it to internal/app"},
 	"token_cli.go":          {"move", "auth", "API-token CLI duplicates admin/handlers_tokens.go"},
 	"cmd/seed/main.go":      {"boundary", "", "developer seeding tool owns its handle"},
+	"cmd/gendocs/main.go":   {"boundary", "", "docs generator migrates its own in-memory catalog"},
 	"plugin/pluginstore.go": {"adapter", "", "PluginRow type only; the store is injected"},
 	// ── ws ────────────────────────────────────────────────────────────────
 	"ws/client.go":           {"adapter", "", "db.User type on the connection"},

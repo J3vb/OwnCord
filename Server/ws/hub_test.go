@@ -17,7 +17,7 @@ import (
 
 // ─── test helpers ─────────────────────────────────────────────────────────────
 
-func openTestDB(t *testing.T) *db.DB {
+func openTestDB(t testing.TB) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -34,7 +34,7 @@ func openTestDB(t *testing.T) *db.DB {
 	return database
 }
 
-func newTestHub(t *testing.T) (*ws.Hub, *db.DB) {
+func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openTestDB(t)
 	limiter := auth.NewRateLimiter()
@@ -43,7 +43,7 @@ func newTestHub(t *testing.T) (*ws.Hub, *db.DB) {
 }
 
 // seedTestUser inserts a Member-role user and returns its ID.
-func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
+func seedTestUser(t testing.TB, database *db.DB, username string) int64 {
 	t.Helper()
 	id, err := database.CreateUser(context.Background(), username, "hash", 4)
 	if err != nil {
@@ -54,7 +54,7 @@ func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
 
 // seedOwnerUser inserts an Owner-role user and returns the full *db.User.
 // Owner role (id=1) has all permissions (0x7FFFFFFF), so it passes all checks.
-func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
+func seedOwnerUser(t testing.TB, database *db.DB, username string) *db.User {
 	t.Helper()
 	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
 	if err != nil {
@@ -68,7 +68,7 @@ func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
 }
 
 // seedTestChannel inserts a channel and returns its ID.
-func seedTestChannel(t *testing.T, database *db.DB, name string) int64 {
+func seedTestChannel(t testing.TB, database *db.DB, name string) int64 {
 	t.Helper()
 	id, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
 	if err != nil {

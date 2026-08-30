@@ -764,6 +764,520 @@ db`). No control file is committed.
   miss does not hide them. Two legs would not be deterministic: the table above
   is the measured proof that the profile is not the same on both.
 
+#### Evidence — item 4 (client connection model test)
+
+- Branch `feat/b3-6-client-model-test`; commits: `7b2dc055`
+  `test(b3-6): client connection model test — fc.commands over the real stack`,
+  plus this evidence block.
+- File: `Client/tests/unit/connection.model.test.ts` (test only; no
+  `Client/src/` change, so B7's rule holds). System under test is the real
+  `createWsClient()` + `wireDispatcher()` + the real stores; only the Tauri
+  IPC wire (shared `tests/unit/helpers/ws-mocks.ts`) and the LiveKit /
+  notification / toast / identity leaves are mocked, as in `dispatcher.test.ts`.
+- Commands: `Connect` (fresh → `auth_ok(none)` + `ready`; resume → `auth_ok`
+  - the replayed events, no `ready`), `Disconnect`, `RegisterNow`,
+    `Receive(id, seq)`, `Supersede(channel, stale|live)`, `Resync(dropPeer)`,
+    `Logout`.
+- Invariants (checked after every command): (1) no duplicate message ids and
+  the store holds exactly the ids delivered; (2) the seq watermark ws.ts
+  declares in the auth frame is monotonic except at the modelled epoch resets
+  (`replay_source: "none"`, logout); (3) a verified peer never flips to
+  unverified — only a real departure clears it; (4) a teardown frame for a
+  superseded attempt never tears down the newer session.
+- RED (each control reverted before commit):
+  - ids — model pushes every received id without deduping →
+    `npx vitest run tests/unit/connection.model.test.ts` →
+    `Counterexample: [Connect,Receive(id=2,seq=0),Receive(id=2,seq=0)]`,
+    `expected [ 2 ] to deeply equal [ 2, 2 ]`
+  - seq — model takes each frame's seq verbatim instead of `max` →
+    `Counterexample: [Connect,Receive(id=1,seq=1),Receive(id=1,seq=0),Disconnect,Connect]`,
+    `expected 1 to be +0`
+  - verified — model keeps a peer the resync roster dropped →
+    `Counterexample: [Connect,Supersede(channel=10,live),Resync(dropPeer=true)]`,
+    `expected [] to deeply equal [ 3 ]`
+  - aborted attempt — stale teardown retargeted at the live channel →
+    `Counterexample: [Connect,Supersede(channel=10,stale)]`,
+    `expected null to be 10`
+  - resume replay — resume handshake reverted to `auth_ok` + `ready` with no
+    replayed events (the pre-Codex-P2 shape) →
+    `Counterexample: [Connect,Receive(id=1,seq=1),Disconnect,Connect]`,
+    `expected [ 1 ] to include 2`, plus
+    `invariant family "resumeReplay" was never exercised`
+- GREEN: `npx vitest run tests/unit/connection.model.test.ts` →
+  `Test Files 1 passed (1) / Tests 2 passed (2)`; `npm test` →
+  `Test Files 194 passed (194) / Tests 5275 passed (5275)`.
+- Numbers: seed `20260830` (a non-integer `OWNCORD_MODEL_SEED` override
+  throws rather than reaching fast-check), `numRuns` 150, `maxCommands` 30,
+  `size: "large"` → ~2.2k generated commands and ~1080 invariant checks per
+  run of the file; 120 ms of test time, 0.83–0.92 s wall for the file. The
+  full client suite measured 10.8 s and 11.9 s on two runs of the same tree,
+  so its run-to-run spread is larger than this file's whole cost and no
+  meaningful delta can be quoted. A second test asserts every invariant family
+  was actually reached, counting only the non-trivial case for each (a resume
+  declaring `last_seq > 0`; a verification check that survived a command other
+  than the one that wrote it), so a family that degrades to its no-op form
+  fails instead of silently passing.
+- Verified against HEAD: `fast-check ^4.9.0` and the property-test conventions
+  are as the spec says. Three details were resolved against the code:
+  - The handshake has two wire shapes and they are not interchangeable.
+    `handleFreshConnect` writes `auth_ok` (`replay_source: "none"`) then
+    `ready`; `reconnectWriteReplay` (`serve.go:593`) writes `auth_ok` with the
+    tier then the missed events and **never a `ready`**, and
+    `reconnectPrecheck` returning false is what falls through to the full
+    ready. The epoch-1 fixtures record exactly that: `fresh-connect.json` is
+    `auth_ok(none)` → `ready` → …, `resume-replay.json` is `auth_ok(buffer)` →
+    `presence` → `chat_message` → `presence`, with no `ready` anywhere. The
+    model drives both shapes, and `ready` never travels without the `auth_ok`
+    that precedes it on the wire (Codex P2 on #1455).
+  - The design's `RegisterNow` has no client-side symbol — it is the server's
+    hub registration, and the client-visible effect is the
+    ready-snapshot/queued-frame redelivery the OC-0328 and OC-0242 guards
+    handle.
+  - The design's "aborted voice attempt" is reachable from the connection
+    layer through the stale `voice_leave` guard in the dispatcher
+    (OC-0031/OC-0033/OC-0311), not through `LiveKitSession`'s join
+    generations, which need a real LiveKit room.
+
+#### Evidence — item 9 (machine-readable contract drift)
+
+- Branch `feat/b3-6-contract-drift` from `dev` `75d64dd4`; commits: `f5f467ed`
+  feat(b3-6): contract drift — generated route, table and config-key indexes
+  (tool, three blocks, wiring), plus this evidence commit.
+- The drift check is `make docs-verify`, which reduces to
+  `go run ./cmd/gendocs` then `git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md`, both from `Server/`. `make` is not on PATH on this machine, so the three controls below ran that pair directly; `node scripts/run.mjs --list` shows `check:server` running exactly those two steps.
+- RED (a), a stale committed block — one row deleted from the route index and
+  staged, then the pair above: the diff puts the deleted `GET /api/v1/health`
+  row back and `git diff --exit-code` exits 1.
+- RED (b), a route added without regenerating — a throwaway
+  `r.Get("/gendocs-red-proof", handleInfo(cfg))` in `api/router.go`, then the
+  pair: the header line goes from "111 routes." to "112 routes." and a
+  `GET /api/v1/gendocs-red-proof` row appears; exit 1.
+- RED (c), a config key documented nowhere — the hand-written `voice.quality`
+  row removed from `docs/server-configuration.md`, then `go run ./cmd/gendocs`
+  alone: `gendocs: config index: 1 config key(s) are documented nowhere under "## Config Key Reference" in ../docs/server-configuration.md … voice.quality`, exit status 1, and no document written.
+- GREEN, all three controls reverted (`git status` clean): the same pair exits
+  0; `npx prettier --check .` → "All matched files use Prettier code style!";
+  `.githooks/pre-commit` run by hand over the staged change → exit 0 with the
+  generator's own log lines in its output.
+- Numbers: **121 routes** (`chi.Walk`; the floor of 100 and the admin-route
+  guard are carried over from the absence contract, the latter tightened to
+  require a real `/admin/api/` subroute so the `/admin/*` mount catch-alls
+  cannot satisfy it alone), **32 tables**, **56 config keys**, **0 undocumented keys at HEAD** — the hand-written reference
+  already named every koanf tag, so no documentation fixes were needed.
+  Generated blocks: three, adding 134 + 45 + 67 lines to their documents.
+  Output is byte-identical across two consecutive runs.
+- Verified against HEAD: the plan's pointer to `docs/deployment.md` is wrong —
+  that document has no configuration table; the reference table is
+  `docs/server-configuration.md` "## Config Key Reference", and the key index
+  went there. `sqlc` exposes no catalog at HEAD (`Server/sqlc.yaml` declares no
+  plugins and no vet rules; its schema source is `migrations/`), so the
+  migrated in-memory schema is the catalog: `db.Open(":memory:")` plus
+  `db.Migrate`, then `sqlite_master` and `pragma_table_info`. `schema_versions`
+  is **included** rather than excluded, along with `sqlite_sequence` and the
+  FTS5 shadow tables behind `messages_fts` — they are what the migrations
+  create, and a change to any of them is a schema change worth seeing in the
+  diff. The route index is generated from the **`otel,wazero` build**, not the
+  default one: `/metrics` mounts only when `telemetry.PrometheusHandler()`
+  returns non-nil (`api/router.go:431-437`), which needs `-tags otel` and
+  telemetry enabled at runtime, so the tool calls `telemetry.Init` the way
+  `main.go` does with the Prometheus exporter and every invocation passes
+  `-tags otel,wazero` (Makefile, `run.mjs`, the hook, the block header lines,
+  the `CLAUDE.md` row; `ci.yml` inherits it through `make docs-verify`). The
+  tool refuses to run when that handler is absent, so the default build cannot
+  quietly generate a short index. Nothing under `Server/api` or `Server/admin`
+  carries a build constraint, so `wazero` adds and removes no route; it rides
+  along so one build serves the repository. The `sqlite_stat*` tables are
+  **excluded**: `db.Migrate` runs `ANALYZE`
+  after applying the migrations, so they carry planner statistics rather than
+  schema, and `sqlite_stat4` exists only because the current
+  `modernc.org/sqlite` build has STAT4 — including them would fail this drift
+  check on an unrelated driver bump. `cmd/gendocs/main.go` imports `db` for that catalog, so it takes a
+  `boundary` row in `DBImportAllow` and `server-boundaries.md` was regenerated
+  with it (50 importers, was 49); the dbinventory block is otherwise untouched
+  and still has no automated drift check of its own.
+
+#### Evidence — item 5 (fuzz seeds)
+
+- Branch `feat/b3-6-fuzz-seeds`; commits: `aee0b2b` test(b3-6): fuzz seeds —
+  epoch-1 corpora for every target, protocol + predicate-parity fuzz targets,
+  plus the commit adding this block
+- RED: `go test ./ws -run FuzzHandleMessageDecode -v`, with
+  `handleMessageDecode` temporarily returning `false` for a valid `chat_send`
+  envelope → `--- FAIL: FuzzHandleMessageDecode/chat-send-fanout-a-chat_send`
+  (`ok = false, but json.Unmarshal into an envelope succeeds`). 3 failures,
+  all three fixture-derived corpus entries; **0 of the 22 hand-written
+  `f.Add` seeds caught it** — the corpus is what covers the real wire.
+  Second control: `CanViewChannel` letting an administrator see an archived
+  channel → `--- FAIL: FuzzPredicateParity/ready-owner-voice-archived`
+  (`= <nil>, want channel is archived`) plus 30 seeds. Both reverted.
+- GREEN: `go test ./api ./auth ./db ./permissions ./plugin ./service ./storage ./ws -run Fuzz -v`
+  → 20 `--- PASS`, corpus entries listed by fixture name
+  (`FuzzHandleMessageDecode/voice-join-e2ee-leave-a-voice_e2ee_offer`, …).
+  Full gates: 4 build variants, `go vet ./...`, `go test -race ./...`,
+  `go test -tags deadlock -count=10 -timeout=40m ./ws/`, `golangci-lint run`
+  (0 issues), `npm run check:docs`. **`-timeout` matters there:** ten
+  sequential `ws` runs under the deadlock tag take ~592 s, inside Go's default
+  600 s only on an otherwise-idle box — a run competing with other `go test`
+  work was killed at 601.393 s, a wall-clock artifact and not a lock-ordering
+  failure. Anything that raises `-count` on this package must raise
+  `-timeout` with it.
+- Numbers: **17 → 21** `Fuzz*` targets; **3 → 21** with a committed corpus;
+  **6 → 114** corpus files (**108 added**). Per target: HandleMessageDecode 17,
+  CommandPayloads 25 (the 15 distinct `c2s` command frames of the 11 epoch-1
+  journeys, placeholders concretised, plus a minimal valid payload for each of
+  the 10 command types no journey exercises), AuthPayload 2,
+  PredicateParity 12, ValidateFileType 6,
+  SanitizeFTSQuery / EffectivePerms / EffectiveChannelPerms / ParseMentionTokens
+  4 each, SanitizeUploadFilename +4 (2 → 6), ValidateAvatarURL /
+  ValidateDisplayName / ValidateUsername / ValidateRelativePath /
+  ValidateShortcode / SanitizeFilename / ParseParticipantIdentity /
+  ParseRoomChannelID 3 each, ValidatePasswordStrength 2. Replay cost: every
+  target ≤ **0.02 s** (`FuzzSanitizeFTSQuery`, which runs each entry through a
+  real FTS5 `MATCH`); every other ≤ 0.01 s. 30 s of `-fuzz` on each of the
+  three new targets found nothing (1.09 M, 0.74 M and 34.9 M execs); a 20 s
+  pass over each previously corpus-less target is written up in the item's
+  report, which is also where anything it turned up is recorded.
+- `make fuzz` was red at HEAD on `FuzzParseMentionTokens`, which still asserted
+  the Unicode fold (`strings.ToLower`) that OC-0131 replaced with
+  `db.LowerASCII` in `parseMentionTokens` — a stale assertion in the target,
+  not a production defect. Before: `FAIL … spelling "Ł" is not lowercased`
+  after 66,255 execs (3.69 s, empty corpus and cleared fuzz cache). After the
+  one-line swap, the same 30 s `-fuzz` run on a cleared cache is `PASS` at
+  1,159,227 execs, and the corpus replay stays green.
+- Verified against HEAD: the item's four pointers were all stale, and each was
+  resolved rather than followed. (1) `ws/messages.go` holds only outbound
+  builders plus `parseChannelID`, so "protocol parsing" is
+  `handleMessageDecode` (`ws/handlers.go`) for the envelope and
+  `commandConstructors` (`ws/command.go`) for the payloads; every constructor
+  in that map is a pure `func(userID, reqID, raw)`, so `FuzzCommandPayloads`
+  reaches them directly — no hub, no DB, better than the fallback the brief
+  allowed. The table registers **26** constructors and all **26** are now
+  seeded: 15 come from the journeys, 10 have a minimal valid corpus payload
+  because no journey exercises them, and
+  `TestCommandPayloadSeedsCoverEveryConstructor` fails if a newly registered
+  command arrives without one (RED: removing
+  `FuzzCommandPayloads/voice-mod-kick-target` fails the test with
+  `1 of 26 … have no seed or corpus entry: [voice_mod_kick]`).
+  `auth` is **not** in the
+  table — `authenticateConn` (`ws/serve_auth.go:40`) decodes it before the hub
+  knows the client — so its entries moved to their own headless target,
+  `FuzzAuthPayload`, which pins that no numeric handshake field accepts a value
+  its Go type cannot hold (a `last_seq` of `-1` wrapping to 2^64-1 would let a
+  reconnecting client skip its whole replay). That decode is inline behind a
+  live socket read and a session lookup, so the target mirrors the struct and
+  says so rather than changing production to expose it; 30 s of `-fuzz` on it
+  found nothing (1.37 M execs). (2) `permissions.Subject` has no wire form, so there is
+  nothing to round-trip; `FuzzPredicateParity` is the honest reading —
+  every B2-5 predicate against the raw two-layer bit formula written out
+  longhand, plus the two definitional identities (`CanAdmitSession` ≡
+  `CanViewChannel`, `CanType` ≡ `CanSendMessage`). Writing the formula out
+  surfaced one ordering worth stating: `Subject.Has` applies the Administrator
+  bypass **before** the zero-permission refusal, so an administrator holds the
+  empty mask while `HasPerm(_, 0)` is false. Parity is the target's purpose, so
+  the oracle keeps that ordering and
+  `TestSubjectHasZeroPermIsAdminBypassed` records the divergence as observed
+  behaviour. **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
+  is called from `permissions/predicates.go` (five fixed masks) and from
+  `Checker.HasChannelPerm` / `HasChannelPermBatch`; every leaf caller across
+  `api/`, `service/` and `ws/` names a `permissions.*` constant or an OR of
+  two. The only variable-forwarding chains are `ws/deps.go`
+  (`requirePerm`/`hasPerm`), `service/permission.go` and
+  `checker.go:156`, and their callers are all named constants — the one
+  table-driven site, `ws/voice_controls.go:148`, has exactly two rows
+  (`UseVideo`, `ShareScreen`). Both `RequireChannelAccess` overloads have no
+  production caller at all. No production change was made. (3) There is no pure upload
+  admission function at HEAD — `handleUpload` inlines `MaxBytesReader`,
+  `ParseMultipartForm`, `DetectContentType` and `store.Save` — so no
+  `FuzzUploadAdmission` was created (it would have needed production code);
+  upload admission is covered by corpora for `FuzzValidateFileType` (6 real
+  magic headers) and `FuzzSanitizeUploadFilename` (+4 attachment names).
+  (4) There is no recovery-token parser: backup codes exist only as
+  `[]string{}` in `totp_handler.go`'s response, and
+  `(*PartialAuthStore).Consume` is a mutex-guarded map lookup with an expiry
+  check, not a parse — skipped, and no file under `auth/`, `service/` or
+  `api/auth_*` was touched.
+
+#### Evidence — item 8 (Docker smoke nightly on `dev`)
+
+- Branch `feat/b3-6-docker-smoke-nightly`. Code commit: `3f27447e` feat(b3-6):
+  nightly docker smoke on dev — its own workflow, plus a timeout on ci.yml's
+  verify job. A temporary commit added a `push:` trigger so the proof run
+  below could happen at all — neither of the file's real triggers can fire
+  before it is on the default branch — and was dropped once the run was
+  recorded.
+- **Deviation from this item's text, and why.** The item says `ci.yml` gains
+  the `schedule:` trigger and that the job is deliberately "not moved to its
+  own workflow file". It is moved. Scoping a schedule inside `ci.yml` means
+  skipping the other jobs with a job-level `if:`, and **a skipped job still
+  writes a check run** — observed on `main`'s tip, where
+  `Tauri Full Build (${{ matrix.os }})` reports `conclusion: skipped` beside
+  the green required contexts (`gh api repos/J3vb/OwnCord/commits/main/check-runs`).
+  A scheduled run is attached to the **default branch's tip SHA** whatever it
+  later checks out, so each nightly would stamp `skipped` onto `main`'s tip
+  under seven of the twelve `contexts` in `b0-dev-branch-protection.sh`:
+  Client Static Checks, Client Unit Tests, Rust Unit Tests, Repository
+  Hygiene, Docs & Ledger Consistency, Client E2E (Playwright), Client E2E
+  (parity subset, blocking). `scripts/verify-gate-evidence.mjs:45-61` keeps
+  the latest attempt per name and treats `skipped` as not-success, and
+  `release.yml`'s `gate-evidence` job runs it on the tagged SHA and gates
+  every build and publish job — so a release cut from a `main` tip that had
+  sat through one nightly would be refused, for a reason that has nothing to
+  do with that commit. `nightly-docker-smoke.yml`'s single job matches no
+  required context, so it cannot overwrite gate evidence, and `ci.yml`'s job
+  selection is untouched.
+  (`server-build-test` would have escaped: a skipped matrix job reports under
+  the unexpanded name, which is not a required context. `admin-e2e` is not
+  required, and the three `Analyze` contexts come from CodeQL default setup.)
+- **When the nightly actually starts.** A scheduled workflow only ever runs
+  from the default branch, so this file does nothing on `dev`: the first
+  nightly fires after it reaches `main` at the next release merge. Until
+  then, `workflow_dispatch` is the only way to run it.
+- Contents: `on: schedule` (`0 3 * * *`) + `workflow_dispatch`; a
+  `concurrency` group with `cancel-in-progress: true`;
+  `permissions: contents: read`; one job, `nightly-docker-smoke`, with
+  `timeout-minutes: 20`; `actions/checkout` on the same pinned SHA `ci.yml`
+  uses, with `ref: dev`, since a schedule reads the file from `main`; a
+  "Print checked-out revision" step logging `github.event_name`,
+  `github.ref` and `git rev-parse HEAD`; then the buildx, build and
+  `Server/scripts/docker-smoke.sh` steps of `server-docker-build`, verbatim.
+  Both jobs carry a one-line keep-in-sync comment naming the other.
+- Numbers: `ci.yml` +3 lines (a two-line comment and `timeout-minutes: 20`);
+  `nightly-docker-smoke.yml` 68 lines; the shared buildx/build/smoke steps
+  diff clean between the two files, ignoring comments.
+- GREEN: `npx prettier --check` on both workflows → "All matched files use
+  Prettier code style!"; `actionlint` on all five workflows → clean;
+  `node scripts/check-workflow-guards.mjs` →
+  `4 guard(s) present in 1 metered workflow(s)`, and its `--selftest` → all
+  assertions pass;
+  `npm run check:docs` → passed; `node scripts/run.mjs --list` → picks the new
+  workflow up in the actionlint file list, which is built from `git ls-files`.
+- Proof, observed: run `33301623322`
+  (https://github.com/J3vb/OwnCord/actions/runs/33301623322), workflow
+  "Nightly Docker Smoke", fired by the temporary push trigger that was dropped
+  from the branch afterwards. "Print checked-out revision" logged
+  `event=push ref=refs/heads/feat/b3-6-docker-smoke-nightly`, and
+  `git rev-parse HEAD` printed `75d64dd412b6e81a19ae0cb2e09ecfc84d6f644e` —
+  `origin/dev`'s tip (`75d64dd4`) at the time of the run, not the branch's,
+  which is the whole point of `ref: dev`. Build and boot-smoke green. Re-read
+  it with
+  `gh run view 33301623322 --log | grep -A2 "Print checked-out revision"`.
+- The one behavioural difference from `ci.yml`'s job: a scheduled run has
+  `github.ref = refs/heads/main`, so the buildx `type=gha` cache is scoped to
+  the default branch while the layers written into it come from `dev`'s tree.
+  The cache is content-addressed, so a layer is only ever reused where its
+  content matches — the mismatch costs cache hits, never correctness.
+- A red nightly is the repository owner's: GitHub emails a scheduled
+  workflow's failure to the account that owns it. No new process, just where
+  it lands.
+- Verified against HEAD: the item states "`concurrency` and `timeout-minutes`
+  are already present (B1-7's guard check enforces both)". Only `concurrency`
+  was. `scripts/check-workflow-guards.mjs` audits only the workflows in
+  `METERED`, which is `[".github/workflows/claude.yml"]` — it never looked at
+  `ci.yml` — and `server-docker-build` was one of seven jobs of eleven there
+  with no `timeout-minutes`, so it inherited GitHub's 360-minute default.
+  Hence the one-line `ci.yml` change; the new workflow declares its own.
+
+#### Evidence — items 2 + 3 (hub simulation + fault-injected transport)
+
+- Branch `feat/b3-6-hub-sim`; commits: 3c5d75f8 `test(b3-6): seeded hub
+simulation and fault-injected transport (items 2 and 3)`, 932b5d6b the docs
+  commit carrying this block, and the review-fix commit `fix(b3-6): hub sim
+— deterministic topic limiter for exact replay, a floor on the step mix,
+auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
+  its own SHA is in the PR, not here).
+- Oracle (the doc comment of `Server/ws/hub_sim_test.go`, written before the
+  driver): I1 per-connection strictly increasing `seq`, never on the high or
+  low queue; I2 a live connection yields exactly the seqs allocated for its
+  audience, in order — nothing missing, extra or twice — with the unread count
+  checked after every step; I3 a resume from watermark W is replayed exactly
+  `{s in (W, S] : channel 0 or READ-allowed}` where S is the hub seq at the
+  instant `registerNow` ran (atomic with the snapshot under `seqMu`) and every
+  audience seq above S arrives live; I4 `h.seq` advances only for a frame that
+  reached the ring; I5 an evicted W is refused a replay and registered as the
+  full-ready fallback; I6 a replaced socket's late teardown reports
+  `replaced=true`. The one narrowing: frames the dying socket still held above
+  W are delivered again by the replay — a cross-connection duplicate the
+  max(seq) ack makes by design — and the oracle allows exactly that.
+- RED (a): inverted the I2 head check →
+  `hub simulation: seed 1 step 28: I2: c3 conn 2: expected seq 4 next, got 4 (owed [4 6 8 9])`
+  plus the replay line, on 20/20 seeds.
+- RED (b): `OWNCORD_SIM_SEED=1 OWNCORD_SIM_STEPS=200 go test -race -count=1 -run '^TestHubSimulation$' ./ws/`
+  → `seed 1 step 28: I2: c3 conn 2: expected seq 4 next, got 4` — the same
+  step, the same frame.
+- RED (c): `FaultSchedule{Drop: 1}` (silent, no tail cut) on the resumed
+  connection's wire →
+  `seed 1 step 121: I2: c6 conn 3: owed [45 46 47 48 49] but only 0 unread frame(s) remain (W=44)`
+  on 20/20 seeds. With `DropTail` instead, the same drop is a socket death and
+  correctly invisible: the client resumes from W and the replay repairs it.
+- RED (d, extra): replay snapshot and `registerNow` outside one `seqMu`
+  section with a 1 ms gap →
+  `seed 1 step 100: I2: c3 conn 3 holds 33 unread frame(s) but is owed 34`
+  on 19/20 seeds — the registerNow-gap class `hub_register_race_test.go` pins,
+  found by the generated orderings rather than a hand-written interleaving.
+- GREEN: `go test -race -count=1 -run '^TestHubSimulation$' ./ws/` →
+  `ok github.com/J3vb/OwnCord/Server/ws 2.258s`.
+- Exact replay (review fix): the topic limiter is frozen to a per-channel
+  count (`FreezeTopicLimiterForTest`), the racing burst is aimed only at the
+  resuming client's own audience, its frames are pulled into the wire at
+  attach time, and a resume within the burst's reach of the ring's eviction
+  boundary is not raced — so every figure on the stats line is a pure
+  function of the seed. Proof, three runs of
+  `OWNCORD_SIM_SEED=1 OWNCORD_SIM_STEPS=10000 go test -race -count=1 -v -run '^TestHubSimulation$' ./ws/`:
+  `seed 1: 10000 steps, seq 4500, map[bursts:508 channel:300 cut:142 dm:1285 fallback:751 fresh:22 global:1975 kicked:38 recipients:940 resume:710 shed:1630]`
+  three times, byte-identical. What still varies between runs is the
+  scheduler's interleaving inside a racing reconnect step — how many of the
+  racing seqs land in the replay burst rather than the live queue (420, 424
+  and 425 in earlier runs) and how many resumes are observed overlapping a
+  broadcast at all (`raced`), both printed on a second line — so a model
+  defect that depends on that split replays only probabilistically; run the
+  seed with `-count`.
+- Floor (review fix, Codex P2 on #1458): `TestHubSimulation` aggregates the
+  per-seed stats and requires `global`, `channel`, `recipients`, `dm`,
+  `resume`, `bursts` (a resume that got a replay with a burst requested),
+  `fallback`, `fresh`, `cut` and `kicked` each ≥ 1 across the default run —
+  every one a function of the seed — plus `raced`, a resume where a
+  broadcast allocated a seq while the registration goroutine had not yet
+  been observed to return. That overlap is the scheduler's, so `raced` lives
+  on the second (scheduler-decided) line, not the stats line, and is floored
+  only in aggregate across the 20 seeds: the default run has 179 bursts and
+  178–179 of them were observed overlapping in three measured runs
+  (registerNow makes two slog syscalls before the goroutine can return), so
+  an all-miss run is a scheduler or lock change, not luck. Skipped, with a
+  log line, for `OWNCORD_SIM_SEED` or fewer than 20 seeds; totals logged.
+  RED: reconnect weight set to 0 →
+  `hub simulation: "resume" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`
+  (and `bursts`, `fallback`, `fresh`); goroutine joined before the burst →
+  `hub simulation: "raced" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`;
+  both restored.
+- Numbers: 8 clients, 3 channels, ring 48, normal queue 12; default 20 seeds ×
+  200 steps in 2.3 s under `-race` (CI budget: under 10 s); `make sim` = 20 ×
+  10,000 steps in 16.5 s (18 s wall with compile) under `-race`; per seed at 200 steps ≈ 13
+  buffer resumes, 5 evicted-ring fallbacks, 12 fresh reconnects, 4 wire cuts,
+  1–3 overflow kicks on about half the seeds, ~105 seqs; at 10,000 steps per
+  seed ≈ 4,500 seqs, 700 resumes, 750 fallbacks, 140 cuts, 40 kicks, 300
+  channel frames allocated and ≈1,630 shed by the frozen limiter;
+  `BenchmarkReconnectStorm-32` 1590 ops, 702,410 ns/op for 50 resumes (≈14 µs
+  each), 608,031 B/op, 954 allocs/op. Gates on the fix commit: `go vet ./...`
+  clean; `go test -race ./ws/` → `ok 119.767s`;
+  `go test -tags deadlock -count=10 -timeout 60m ./ws/` → `ok 586.646s`;
+  `golangci-lint run` → 0 issues; `npm run check:docs` passed; prettier
+  clean. (Before the fix: the four build variants clean, deadlock ×10
+  `ok 594.098s`, `go test -race ./...` every package ok.)
+- Not simulated (the driver's five steps only): hub-originated frames —
+  `hub.Run()` is never started, the driver is the sole allocator; tier
+  selection is always "buffer", so the db tier, `mustFullResync` and
+  visibility resyncs never interleave with a resume; `c.allowed` is the
+  driver's own map (every text channel plus synthetic DM ids), not
+  `computeAllowedChannels`, so permission variance is out of scope
+  (`hub_register_test.go` covers the denial branch); there is no `writePump`,
+  so I1's high/low-queue check is vacuous today — nothing in the step mix
+  emits a priority frame; no voice supersession, no concurrent allocators.
+- Epoch harness: no use added. `TestEpoch1Fixtures` reads real sockets with
+  expects interleaved across two connections, so a lag would wait for frames
+  the journey has not produced yet (a deadlock) and any drop, duplicate or
+  reorder changes the frame list the fixture pins; only the identity schedule
+  is harmless, and that proves nothing. `NewFaultConnForTest` stays exported
+  for item 4's client model and for a network-pattern proxy if one is needed.
+- Verified against HEAD: there is no ack message — the only ack is `last_seq`
+  on the next auth frame — so the simulation's ack step is the client reading
+  frames and advancing max(seq); the headless pattern expresses
+  reconnect-transfer faithfully because `reconnectRegister` (the snapshot and
+  `registerNow` under one `seqMu` section) is exported as-is, not
+  re-implemented, and the fresh/fallback paths call the same `registerNow`
+  handleFreshConnect does; no production file changed
+  (`newTestHub`/`openTestDB`/`seedOwnerUser`/`seedTestChannel`/`seedTestUser`
+  in `hub_test.go` now take `testing.TB` so the benchmark can share them). The
+  shared rules' `go test -tags deadlock -count=10 ./ws/` overruns `go test`'s
+  default 10-minute timeout on a 16-core desktop (601 s, "test timed out
+  after 10m0s" with a goroutine dump that is not a detector hit); the gate
+  needs `-timeout 60m`.
+
+#### Evidence — item 6 (benchmarks and baselines)
+
+- Branch `feat/b3-6-benchmarks`, rebased onto `feat/b3-6-hub-sim` tip
+  `84568330` so `BenchmarkReconnectStorm` is on the base; commits: 2b313730
+  `test(b3-6): benchmarks and the bench-baseline script (item 6)`, ec8ef24a
+  `docs(b3-6): recorded bench baseline 2026-08-30 and the item 6 evidence
+block`, plus the review-fix commit carrying this text (its own SHA is in the
+  PR, not here).
+- The six, one `_test.go` per package touched: `PermissionInvalidation`,
+  `BroadcastFanout`, `ReplaySelection`, `ReconnectStorm` (`ws/hub_bench_test.go`),
+  `ReadStateWrite` (`service/readstate_bench_test.go`), `UploadAdmission`
+  (`api/upload_bench_test.go`). Each drives a real entry point —
+  `RefreshChannelVisibility`, `deliverBroadcast`, `EventRingBuffer.EventsSince`,
+  `reconnectRegister`, `ChannelService.HandleChannelFocus`,
+  `sanitizeUploadFilename` + `storage.ValidateFileType` — with setup outside the
+  timer and `b.ReportAllocs()`.
+- RED (guard 1, the name is gone): `BenchmarkReplaySelection` renamed to
+  `BenchmarkReplaySelectionRenamed`, then
+  `BENCH_COUNT=1 ./scripts/bench-baseline.sh` →
+  `bench-baseline: expected benchmark(s) missing from the run: ReplaySelection`
+  / `renamed or deleted. Restore the name, or edit EXPECTED in` /
+  `scripts/bench-baseline.sh on purpose. No baseline written.`, exit 1 and no
+  file written. Name restored.
+- RED (guard 2, the row is gone but the name is not): `quietLogs(b)` removed
+  from `BenchmarkReconnectStorm` so its result line is corrupted by the hub's
+  own log output, then `BENCH_COUNT=1 ./scripts/bench-baseline.sh` → guard 1
+  passes (the raw line still starts with `BenchmarkReconnectStorm-`), benchstat
+  warns `parsing iteration count: invalid syntax` and exits 0, and guard 2
+  fires: `bench-baseline: benchstat produced no row for: ReconnectStorm` /
+  `the benchmark ran but its result line was unparseable —` / `No baseline
+written.`, exit 1. The committed baseline's checksum was unchanged across the
+  run. Restored.
+- RED (no truncation on a render failure): the benchstat pin temporarily set to
+  `v0.0.0-00010101000000-000000000000`, then
+  `BENCH_COUNT=1 ./scripts/bench-baseline.sh` →
+  `go: golang.org/x/perf/cmd/benchstat@…: invalid version: unknown revision
+000000000000`, exit 1, and the committed baseline unchanged (4593 bytes, same
+  md5 before and after). The document renders into the temp directory and is
+  `mv`-ed onto its path only after both guards pass. Pin restored.
+- GREEN (guardrail): `./scripts/bench-baseline.sh` →
+  `bench-baseline: wrote ../docs/plans/b3-bench-baseline-2026-08-30.md`,
+  64 s wall at `-count=6` — inside the ~5 minute budget the item sets.
+- GREEN (smoke): `go test -run '^$' -bench '^Benchmark(PermissionInvalidation|ReadStateWrite|BroadcastFanout|ReplaySelection|UploadAdmission|ReconnectStorm)$' -benchmem -benchtime=1x ./...`
+  → all six ran, one iteration each: `BenchmarkUploadAdmission-32 1 5600 ns/op`,
+  `BenchmarkReadStateWrite-32 1 145300 ns/op`,
+  `BenchmarkReconnectStorm-32 1 347200 ns/op`,
+  `BenchmarkPermissionInvalidation-32 1 947800 ns/op`,
+  `BenchmarkBroadcastFanout-32 1 5500 ns/op`,
+  `BenchmarkReplaySelection-32 1 4000 ns/op`.
+- Numbers — benchstat medians over `-count=6` at ec8ef24a, go1.26.7
+  windows/amd64, Ryzen 9 7950X3D. Full table in
+  [b3-bench-baseline-2026-08-30](b3-bench-baseline-2026-08-30.md):
+
+| Benchmark              | sec/op       | B/op    | allocs/op |
+| ---------------------- | ------------ | ------- | --------- |
+| PermissionInvalidation | 884.2µ ± 6%  | 121.0Ki | 3601      |
+| ReconnectStorm         | 428.0µ ± 9%  | 592.2Ki | 952       |
+| ReadStateWrite         | 54.59µ ± 12% | 5.599Ki | 163       |
+| ReplaySelection        | 14.82µ ± 14% | 31.35Ki | 10        |
+| BroadcastFanout        | 3.390µ ± 1%  | 992.0   | 2         |
+| UploadAdmission        | 260.9n ± 4%  | 56.00   | 3         |
+
+- Verified against HEAD: (a) `BenchmarkReconnectStorm` is on the base, so the
+  expected set is six, as the item's base note allows. (b) `golang.org/x/perf`
+  publishes no semver tags — `proxy.golang.org/golang.org/x/perf/@v/list` is
+  empty — so the pin is the newest resolvable version, the pseudo-version
+  `v0.0.0-20260825160852-19be9d8e6c70`, run through `go run` and deliberately
+  absent from `go.mod`. (c) `newTestHub` already took `testing.TB`; the three
+  `service` seed helpers the read-state benchmark reuses (`newTestDB`,
+  `seedRole`, `seedChannel`) took `*testing.T` and were widened to `testing.TB`,
+  which every existing caller still satisfies — no production file changed.
+  (d) `go test` prints a benchmark's name and padding _before_ running it, so
+  the hub's per-registration `INFO` line landed inside the result line and
+  benchstat dropped three of the six from the table without failing; the
+  benchmarks now point the default logger at `io.Discard` for their duration
+  (`quietLogs`), which is the one line added to the hub-simulation item's
+  `BenchmarkReconnectStorm`. (e) `HandleChannelFocus` skips a no-op read-state
+  write, so a repeated focus by one user measures the skip; the benchmark
+  focuses a distinct pre-seeded user per iteration to stay on the write branch.
+  (f) Review round 1: the document is rendered into the temp directory and
+  `mv`-ed onto its path only after both guards pass, so a benchstat failure can
+  no longer truncate the committed baseline; and the expected-name loop runs a
+  second time over the rendered table, because a result line corrupted from
+  inside the benchmark still starts with the benchmark's name and so satisfies
+  the raw-output guard while benchstat silently drops the row.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
@@ -1001,5 +1515,9 @@ appended to the HP-3 scorecard as a dated "B3 exit" section the owner signs.
 - **Check the PR is still open before pushing a review fix** (HP-2 obs #97).
 - **`make` is not on PATH on Windows**; `npm run check:server` runs the same
   steps. `go test -tags deadlock -count=10 ./ws/` after every `ws` move.
+- **Ten deadlock passes overrun `go test`'s default 10-minute timeout** (B3-6
+  items 2+3): write it as `go test -tags deadlock -count=10 -timeout 60m ./ws/`.
+  A "test timed out after 10m0s" goroutine dump is the timeout, not a
+  detector hit.
 - **`check:docs` counts.** `docs/plans/README.md` is watched; the register's
   row count and the ledger's status counts must agree with it.
