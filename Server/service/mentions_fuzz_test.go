@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // fuzzSpellingRe mirrors the token charset mentionTokenRe captures: letters,
@@ -71,8 +73,12 @@ func FuzzParseMentionTokens(f *testing.F) {
 				if strings.Contains(sp, "@") {
 					t.Fatalf("spelling %q retained an '@' -- address-shaped text leaked a mention (content %q)", sp, content)
 				}
-				if sp != strings.ToLower(sp) {
-					t.Fatalf("spelling %q is not lowercased", sp)
+				// db.LowerASCII, not strings.ToLower: parseMentionTokens folds
+				// ASCII only, because usernames.username is COLLATE NOCASE and a
+				// Unicode fold would desync the token from
+				// GetUserIDsByUsernames' equally ASCII-folded map key (OC-0131).
+				if sp != db.LowerASCII(sp) {
+					t.Fatalf("spelling %q is not ASCII-lowercased", sp)
 				}
 				if !fuzzSpellingRe.MatchString(sp) {
 					t.Fatalf("spelling %q outside the token charset (content %q)", sp, content)

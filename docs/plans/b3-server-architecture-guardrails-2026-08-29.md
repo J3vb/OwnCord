@@ -935,6 +935,13 @@ db`). No control file is committed.
   three new targets found nothing (1.09 M, 0.74 M and 34.9 M execs); a 20 s
   pass over each previously corpus-less target is written up in the item's
   report, which is also where anything it turned up is recorded.
+- `make fuzz` was red at HEAD on `FuzzParseMentionTokens`, which still asserted
+  the Unicode fold (`strings.ToLower`) that OC-0131 replaced with
+  `db.LowerASCII` in `parseMentionTokens` — a stale assertion in the target,
+  not a production defect. Before: `FAIL … spelling "Ł" is not lowercased`
+  after 66,255 execs (3.69 s, empty corpus and cleared fuzz cache). After the
+  one-line swap, the same 30 s `-fuzz` run on a cleared cache is `PASS` at
+  1,159,227 execs, and the corpus replay stays green.
 - Verified against HEAD: the item's four pointers were all stale, and each was
   resolved rather than followed. (1) `ws/messages.go` holds only outbound
   builders plus `parseChannelID`, so "protocol parsing" is
