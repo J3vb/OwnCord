@@ -176,22 +176,26 @@ func TestHubSimulation(t *testing.T) {
 	total := map[string]int{}
 	for _, seed := range seeds {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-			stats, racing := runHubSim(t, seed, steps)
-			for k, v := range stats {
+			for k, v := range runHubSim(t, seed, steps) {
 				total[k] += v
 			}
-			total["racing-in-replay"] += racing
 		})
 	}
 	// The floor: every load-bearing transition must have happened at least
 	// once across the run, or a constant change (weights, ring, queue, wire
 	// schedule) could turn the simulation into no-ops with CI still green.
-	// Calibrated for the default seed count; a single-seed replay or a
-	// shorter seed list skips it.
-	if t.Failed() || os.Getenv("OWNCORD_SIM_SEED") != "" || len(seeds) < simDefaultSeeds {
+	// Every key is a function of the seed ("raced" is a resume that got a
+	// replay while a burst ran; how many racing seqs landed inside the burst
+	// is the scheduler's and is only printed). Calibrated for the default
+	// seed count; a single-seed replay or a shorter seed list skips it.
+	if t.Failed() {
 		return
 	}
-	for _, k := range []string{"global", "channel", "recipients", "dm", "resume", "fallback", "fresh", "cut", "kicked", "racing-in-replay"} {
+	if os.Getenv("OWNCORD_SIM_SEED") != "" || len(seeds) < simDefaultSeeds {
+		t.Logf("hub simulation: floor skipped — OWNCORD_SIM_SEED=%q, %d seed(s) (calibrated for %d)", os.Getenv("OWNCORD_SIM_SEED"), len(seeds), simDefaultSeeds)
+		return
+	}
+	for _, k := range []string{"global", "channel", "recipients", "dm", "resume", "raced", "fallback", "fresh", "cut", "kicked"} {
 		if total[k] == 0 {
 			t.Errorf("hub simulation: %q never happened across %d seeds x %d steps — the step mix no longer reaches it", k, len(seeds), steps)
 		}
@@ -231,7 +235,7 @@ func simDMChannel(i, j int) int64 {
 	return 1000 + int64(min(i, j))*simClients + int64(max(i, j))
 }
 
-func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, racing int) {
+func runHubSim(t *testing.T, seed uint64, steps int) map[string]int {
 	hub, database := newTestHub(t)
 	hub.ConfigureReplay(simRing, 0)
 	hub.FreezeTopicLimiterForTest()
@@ -284,7 +288,7 @@ func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, raci
 	}
 	t.Logf("seed %d: %d steps, seq %d, %v", seed, steps, hub.SeqForTest(), s.stats)
 	t.Logf("seed %d: %d racing seq(s) landed inside a replay burst (interleaving-dependent, kept off the stats line)", seed, s.racing)
-	return s.stats, s.racing
+	return s.stats
 }
 
 func (s *sim) pick(weights []int) int {
@@ -570,6 +574,9 @@ func (s *sim) reconnect(c *simClient) {
 	if ok {
 		owed = s.checkReplay(c, events, s0, racing)
 		s.stats["resume"]++
+		if burst > 0 {
+			s.stats["raced"]++
+		}
 	} else {
 		if s.hub.ReplayBuffer().EventsSinceFiltered(c.w, c.allowed) != nil {
 			s.failf("I5: c%d: replay refused although the ring (oldest %d) covers W=%d", c.idx, s.hub.ReplayBuffer().OldestSeq(), c.w)

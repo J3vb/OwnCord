@@ -1131,12 +1131,14 @@ auth-frame-wins under transfer, wire-seed mixing` (it carries this text, so
   depends on that split replays only probabilistically; run the seed with
   `-count`.
 - Floor (review fix): `TestHubSimulation` aggregates the per-seed stats and
-  requires `global`, `channel`, `recipients`, `dm`, `resume`, `fallback`,
-  `fresh`, `cut`, `kicked` and `racing-in-replay` each ≥ 1 across the default
-  run (skipped for `OWNCORD_SIM_SEED` or fewer than 20 seeds). RED: reconnect
-  weight set to 0 →
+  requires `global`, `channel`, `recipients`, `dm`, `resume`, `raced` (a
+  resume that got a replay while a burst ran), `fallback`, `fresh`, `cut` and
+  `kicked` each ≥ 1 across the default run — every key a function of the
+  seed; the scheduler-decided racing-in-replay count is printed, not floored.
+  Skipped, with a log line, for `OWNCORD_SIM_SEED` or fewer than 20 seeds.
+  RED: reconnect weight set to 0 →
   `hub simulation: "resume" never happened across 20 seeds x 200 steps — the step mix no longer reaches it`
-  (and `fallback`, `fresh`, `racing-in-replay`); restored.
+  (and `raced`, `fallback`, `fresh`); restored.
 - Numbers: 8 clients, 3 channels, ring 48, normal queue 12; default 20 seeds ×
   200 steps in 2.3 s under `-race` (CI budget: under 10 s); `make sim` = 20 ×
   10,000 steps in 16.5 s (18 s wall with compile) under `-race`; per seed at 200 steps ≈ 13
