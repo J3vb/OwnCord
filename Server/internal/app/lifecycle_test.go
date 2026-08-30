@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -25,13 +25,13 @@ import (
 // hub.GracefulStop() (the only caller of LiveKitProcess.Stop(), and what
 // closes the hub's dispatch goroutine) is a plain statement reached only on
 // the graceful-shutdown path. The serve-error branch — `case err :=
-// <-serveErr: ... return fmt.Errorf(...)` — returns from run() before ever
+// <-serveErr: ... return fmt.Errorf(...)` — returns from Run before ever
 // reaching it, so the hub's `go hub.Run()` dispatch goroutine (started by
 // api.NewRouter) is left running, and in production the companion
 // livekit-server process it owns is left running with it.
 //
 // An out-of-range port fails the first listen attempt with an error that
-// isAddrInUse does not recognize, so run() takes the servErr branch
+// isAddrInUse does not recognize, so Run takes the servErr branch
 // immediately instead of retrying for ~10s.
 func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 	t.Chdir(t.TempDir())
@@ -46,19 +46,19 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 
 	leakOpt := goleak.IgnoreCurrent()
 
-	rc := newRestartCoordinator(time.Hour, nil)
-	if err := run(log, logBuf, levelVar, rc); err == nil {
-		t.Fatal("expected run() to return an error for an out-of-range port")
+	rc := NewRestartCoordinator(time.Hour, nil)
+	if err := Run("test", log, logBuf, levelVar, rc); err == nil {
+		t.Fatal("expected Run to return an error for an out-of-range port")
 	}
 	if _, requested := rc.Requested(); requested {
 		t.Error("no restart was requested, but the coordinator reports one")
 	}
 
 	// hub.Run's dispatch goroutine only exits once hub.stop is closed, which
-	// only happens inside hub.GracefulStop(). If run() returned without
+	// only happens inside hub.GracefulStop(). If Run returned without
 	// calling it, this goroutine is still alive here.
 	if err := goleak.Find(leakOpt); err != nil {
-		t.Fatalf("hub dispatch goroutine (and, in production, its LiveKit process) leaked after run() returned early: %v", err)
+		t.Fatalf("hub dispatch goroutine (and, in production, its LiveKit process) leaked after Run returned early: %v", err)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 //
 // This seeds a DB with a contiguous run of persisted events (simulating a
 // prior boot that reached seq 520), then calls seedHubReplayState exactly as
-// run() does, then reconnects a client with last_seq=500 (<= the restored
+// Run does, then reconnects a client with last_seq=500 (<= the restored
 // max) and asserts the resume is forced onto the full-ready tier. Before the
 // fix, last_seq=500 converges via the ordinary DB cold-tier replay instead
 // (the persisted run 501..520 is contiguous and complete), silently proving
@@ -119,7 +119,7 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	// The exact startup call run() makes once event persistence is enabled —
+	// The exact startup call Run makes once event persistence is enabled —
 	// no ring-buffer events are pushed, so a resuming client's replay can
 	// only be satisfied via the DB cold tier or forced full.
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
