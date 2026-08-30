@@ -7,8 +7,8 @@ verified at `bf7b886d`
 **Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
 B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
-(PR #1450 = `75d64dd4`); B3-9 done 2026-08-30 (PR #1454 to `dev`, squash SHA
-recorded at merge; OC-0323 rides B3-8).
+(PR #1450 = `75d64dd4`); B3-9 merged 2026-08-30 (PR #1454 = `123c0899`;
+OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner — B3-3 next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -38,7 +38,7 @@ surface to it.
 | **B3-0** | Boundary inventory: every upper-layer `db` import with a disposition; hub lifecycle; before-graph — **DONE 2026-08-29 (PR #1448)**                                      | 1–2 days | B3-6, B3-7                                                       |
 | **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**                                       | 1 day    | B3-6, B3-7                                                       |
 | **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral — **DONE 2026-08-30 (PR #1450)**                                                | 2–3 days | B3-6, B3-7                                                       |
-| **HP-3** | First vertical-slice review — scorecard                                                                                                                                 | —        | —                                                                |
+| **HP-3** | First vertical-slice review — scorecard — **ACCEPTED 2026-08-30** ([hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md))                                        | —        | —                                                                |
 | **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                                                     | 1–2 days | B3-4                                                             |
 | **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                                                        | 1 day    | after B3-3                                                       |
 | **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                                                         | 2–3 days | after B3-3/B3-4                                                  |
@@ -1343,7 +1343,7 @@ Any of the six that cannot land in B3 is re-tagged in HP-3's scorecard with
 the reason.
 
 **Evidence, 2026-08-30** — branch `fix/b3-9-findings` from `dev` `75d64dd4`;
-PR #1454 to `dev` (squash SHA recorded at merge). Five of the six findings
+PR #1454 to `dev`, merged 2026-08-30 as `123c0899`. Five of the six findings
 land here; **OC-0323 is not in this PR** — it rides B3-8's message/read-state
 family (the fix is a shared read-state query, the family's own
 characterization file is the right home) and stays `open`, low, tagged B3.
