@@ -3,7 +3,6 @@ package invariants
 import (
 	"go/ast"
 	"go/token"
-	"strconv"
 )
 
 // syncutilLocksID is the rule's stable id. It is a const, not a field read
@@ -37,7 +36,7 @@ var syncutilLocks = Rule{
 func checkSyncutilLocks(f *ast.File, fset *token.FileSet, rel string) []Violation {
 	var out []Violation
 
-	names, dotImports := syncImportNames(f)
+	names, dotImports := importNames(f, "sync")
 
 	for _, imp := range dotImports {
 		out = append(out, Violation{
@@ -77,29 +76,4 @@ func checkSyncutilLocks(f *ast.File, fset *token.FileSet, rel string) []Violatio
 	})
 
 	return out
-}
-
-// syncImportNames returns the local identifiers this file binds to the
-// "sync" import path (its name, or an alias), and separately every dot-import
-// of "sync" (import . "sync"), which binds no identifier at all.
-func syncImportNames(f *ast.File) (names map[string]bool, dotImports []*ast.ImportSpec) {
-	names = make(map[string]bool)
-	for _, imp := range f.Imports {
-		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || p != "sync" {
-			continue
-		}
-		switch {
-		case imp.Name == nil:
-			names["sync"] = true
-		case imp.Name.Name == "_":
-			// Blank import: no identifier is bound, so sync.Mutex cannot be
-			// spelled at all.
-		case imp.Name.Name == ".":
-			dotImports = append(dotImports, imp)
-		default:
-			names[imp.Name.Name] = true
-		}
-	}
-	return names, dotImports
 }

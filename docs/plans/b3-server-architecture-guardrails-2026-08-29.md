@@ -660,6 +660,47 @@ each item is its own PR so none blocks another. Nothing here edits
 Exit: each item green in CI on its own PR; the numbers (floor, seeds, bench
 baseline) in this section's evidence block.
 
+#### Evidence — item 7 (`authz-chokepoint`)
+
+- Branch `feat/b3-6-authz-chokepoint`; commits: `2f4d18fa` `feat(b3-6): authz-chokepoint rule — raw permission checks route through the B2-5 predicates`, plus this evidence commit
+- RED: a temporary `permissions.HasPerm(0, permissions.ReadMessages)` inside
+  `api/diagnostics_handler.go`'s `isPrivateIP`, then
+  `cd Server && go test -count=1 ./invariants/` →
+  `api/diagnostics_handler.go:89: [authz-chokepoint] raw permissions.HasPerm decides authorization at the call site; … or add an AuthzResidueAllow entry for api.isPrivateIP with a class and a reason`.
+  Probe reverted (`git checkout -- api/diagnostics_handler.go`, `git status` clean).
+- RED (allowlist, both directions): a bogus row →
+  `TestAuthzResidueAllowIsLive … AuthzResidueAllow["ws.(*Hub).movedBehindAPredicate"] no longer performs a raw permission check — delete the row`;
+  deleting the real `ws.(*Hub).readyVisibleChannels` row →
+  `TestServerInvariants … ws/serve_ready.go:169: [authz-chokepoint] raw permissions.HasAdmin …`.
+  Every row is load-bearing, and `TestAuthzResidueAllowIsLive` proves all 19 at
+  once on every run.
+- GREEN: `cd Server && go test -count=1 ./invariants/` → `ok github.com/J3vb/OwnCord/Server/invariants`
+- RED (Codex P2 on #1451 — a row must not exempt the whole function): a second
+  `permissions.HasAdmin` inside `api/serveFileAuthorize` →
+  `api/upload_handler.go:405: … the residue row binds 1 call(s) of HasAdmin here, found 2`;
+  swapping that call to `permissions.HasPerm` →
+  `api/upload_handler.go:404: … binds 0 call(s) of HasPerm here, found 1`;
+  setting the row to `HasAdmin: 2` →
+  `TestAuthzResidueAllowIsLive … binds map[HasAdmin:2] but the tree has map[HasAdmin:1]`.
+  All three restored.
+- Numbers: allowlist **19 rows / 21 bound calls**, which is HP-2 question 5's
+  21 code hits exactly — re-measured at `dev` `75d64dd4`, zero hits outside its
+  five classes and zero unclassified. A row binds symbol **and** helper **and**
+  count, so the residue cannot grow inside an allowlisted function; 18 rows bind
+  one call, `service.(*MessageService).mentionReaders` binds three
+  (`EffectivePerms` 1, `HasAdmin` 2). By helper: `HasAdmin` 13,
+  `HasServerPerm` 6, `HasAnyPerm` 1, `EffectivePerms` 1. Classes:
+  `server-scoped` 6, `admin-short-circuit` 6, `admin-perimeter` 5,
+  `bulk-reader-walk` 3 (one symbol), `base-bit-rejection` 1. Six flagged call
+  targets (`HasPerm`, `HasAnyPerm`, `HasServerPerm`, `HasAdmin`,
+  `EffectivePerms`, `EffectiveChannelPerms`) — the whole exported surface of
+  `permissions.go` except `Name`. Registry is now three rules.
+- Verified against HEAD: the plan's "`Rules = []Rule{syncutilLocks}` … one
+  rule" predates B3-0; `authz-chokepoint` is the third, not the second. The
+  residue table's line numbers had moved (B3-2 shifted `api/middleware.go`
+  200→213), which is why rows are keyed by `<dir>.<enclosing symbol>` and never
+  by `file:line`; the hit count is unchanged at 21. No production code changed.
+
 ## B3-7 — Alpha-shaped test dataset
 
 Roadmap workstream 12. Beside the slice.
