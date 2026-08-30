@@ -7,23 +7,43 @@
 #   bash scripts/coverage-floor.sh --floor /tmp/red.json coverage.out
 #   OWNCORD_COVERAGE_FLOOR=/tmp/red.json bash scripts/coverage-floor.sh coverage.out
 #
-# The floor-file shape is fixed, because awk parses it — jq is not guaranteed on
-# the runners. Keep one entry per line, "exclude" on a single line, and package
-# names as module-relative directories with no trailing slash:
+# The floor-file shape is fixed, because awk parses it - jq is not guaranteed on
+# the runners - and the parser fails closed (exit 2) rather than skipping an
+# entry it cannot see. Three rules: one "key": <number> entry per line; the
+# "exclude" array all on ONE line, because a Prettier-wrapped array would parse
+# as no exclusions at all; package names as module-relative directories with no
+# trailing slash ("cmd", not "cmd/").
 #   {"aggregate": <pct>, "exclude": ["db/dbgen", "cmd"],
 #    "packages": {"<pkg>": <pct>, ...}}
 # "exclude" prefixes are dropped before anything is counted. A percentage is
 # covered/total statements truncated to one decimal, so what this prints is
-# exactly what the floor file records. [ \t] rather than [[:space:]] below: the
-# ubuntu runner's awk may be mawk.
+# exactly what the floor file records. LC_ALL=C and [ \t] rather than
+# [[:space:]]: the ubuntu runner's awk may be mawk.
 set -euo pipefail
+export LC_ALL=C
+
+usage() {
+  echo "usage: coverage-floor.sh [--floor <file>] [<coverage profile>]" >&2
+  exit 2
+}
 
 floor="${OWNCORD_COVERAGE_FLOOR:-coverage-floor.json}"
-if [ "${1:-}" = "--floor" ]; then
-  floor="${2:?--floor needs a path}"
-  shift 2
-fi
-profile="${1:-coverage.out}"
+profile=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --floor)
+      floor="${2:?--floor needs a path}"
+      shift 2
+      ;;
+    -*) usage ;;
+    *)
+      [ -z "$profile" ] || usage
+      profile="$1"
+      shift
+      ;;
+  esac
+done
+profile="${profile:-coverage.out}"
 
 for f in "$floor" "$profile"; do
   [ -f "$f" ] || {
@@ -34,19 +54,26 @@ done
 
 awk '
 FNR == NR {                                       # pass 1: the floor file
-  if ($0 ~ /"packages"[ \t]*:/) { inpkg = 1; next }
-  if (inpkg && $0 ~ /}/) inpkg = 0
+  if ($0 ~ /"packages"[ \t]*:/) {
+    inpkg = 1
+    sub(/^.*"packages"[ \t]*:[ \t]*[{]/, "")      # keep any entry on this line
+  }
   if ($0 ~ /"exclude"[ \t]*:/) {
+    sawexcl = 1
     n = split($0, a, "\"")
     for (i = 4; i <= n; i += 2) if (a[i] != "") excl[++ne] = a[i]
     next
   }
-  if (!match($0, /"[^"]+"[ \t]*:[ \t]*[0-9]/)) next
-  key = val = $0
-  sub(/^[^"]*"/, "", key); sub(/".*$/, "", key)
-  sub(/^[^:]*:[ \t]*/, "", val); sub(/[^0-9.].*$/, "", val)
-  if (key == "aggregate") { aggfloor = val + 0; haveagg = 1 }
-  else if (inpkg) { pkgfloor[key] = val + 0; order[++np] = key }
+  line = $0
+  if (gsub(/"[^"]+"[ \t]*:[ \t]*[0-9]/, "", line) > 1) shapeerr = 1
+  if (match($0, /"[^"]+"[ \t]*:[ \t]*[0-9]/)) {
+    key = val = $0
+    sub(/^[^"]*"/, "", key); sub(/".*$/, "", key)
+    sub(/^[^:]*:[ \t]*/, "", val); sub(/[^0-9.].*$/, "", val)
+    if (key == "aggregate") { aggfloor = val + 0; haveagg = 1 }
+    else if (inpkg) { pkgfloor[key] = val + 0; order[++np] = key }
+  }
+  if (inpkg && $0 ~ /}/) inpkg = 0                # close AFTER parsing the line
   next
 }
 /^mode:/ { next }
@@ -68,6 +95,14 @@ function check(name, c, t, fl,   tenths, under) { # figures compared in tenths
   return under
 }
 END {
+  if (sawexcl && ne == 0) {
+    print "coverage-floor: \"exclude\" must be one single-line array, e.g. \"exclude\": [\"db/dbgen\", \"cmd\"]; a wrapped array parses as no exclusions"
+    exit 2
+  }
+  if (shapeerr) {
+    print "coverage-floor: the floor file needs one \"key\": <number> entry per line"
+    exit 2
+  }
   if (!haveagg || np == 0 || tot == 0) {
     print "coverage-floor: floor file or coverage profile is empty/malformed"
     exit 2

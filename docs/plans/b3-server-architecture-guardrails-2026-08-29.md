@@ -704,13 +704,17 @@ baseline) in this section's evidence block.
 #### Evidence — item 1 (coverage floor)
 
 - Branch `feat/b3-6-coverage-floor`; commits: `843dd6c6` feat(b3-6): coverage
-  floor — script, floors and CI step (S-06), plus the commit carrying this
-  block.
+  floor — script, floors and CI step (S-06), the commit carrying this block, and
+  the review-fix commit that follows them on this branch.
 - RED: `bash scripts/coverage-floor.sh --floor <99-aggregate.json> coverage.out`
   → `coverage-floor: FAIL aggregate 79.1% (floor 99.0%, 11241/14194 statements)`
   (exit 1); `bash scripts/coverage-floor.sh --floor <99-ws.json> coverage.out`
   → `coverage-floor: FAIL ws 84.5% (floor 99.0%, 3181/3763 statements)`
-  (exit 1). Neither control file is committed.
+  (exit 1). The parser also fails closed on a floor file it cannot read whole: a
+  Prettier-wrapped `"exclude"` array exits 2 rather than silently excluding
+  nothing, and a package entry sharing the closing-brace line is enforced, not
+  dropped (`"ws": 99.0 }` → `FAIL ws 84.5% (floor 99.0%)`, exit 1). No control
+  file is committed.
 - GREEN: `bash scripts/coverage-floor.sh coverage.out` → exit 0, six lines, the
   first `coverage-floor: ok aggregate 79.1% (floor 79.1%, 11241/14194 statements)`
   and one `ok` line per core package.

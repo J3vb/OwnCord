@@ -56,8 +56,9 @@ prometheus.
 
 `coverage-floor.json` holds the aggregate floor and one floor per core package
 (`ws`, `service`, `permissions`, `auth`, `db`); `db/dbgen` and `cmd/` are
-excluded there because they are generated or entry points. CI checks it on the
-Linux leg after the race/coverage test step. Locally, from `Server/`:
+excluded there because they are generated or entry points, and an exclusion is
+spelled without a trailing slash (`cmd`, not `cmd/`). CI checks it on the Linux
+leg, after the test steps that share the job. Locally, from `Server/`:
 
 ```bash
 go test -race ./... -coverprofile=coverage.out -cover
