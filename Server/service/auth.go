@@ -1,6 +1,19 @@
 package service
 
-import "github.com/J3vb/OwnCord/Server/db"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
+)
+
+// ─── Collaborators and shapes ────────────────────────────────────────────────
 
 // AuthBroadcaster is how the auth slice tells connected WebSocket clients that
 // an account is gone. Satisfied by *ws.Hub, which already implements
@@ -56,4 +69,786 @@ type AuthResult struct {
 type TOTPChangeResult struct {
 	SessionsRevoked int64
 	Warning         string
+}
+
+// ─── Limits ──────────────────────────────────────────────────────────────────
+//
+// Moved from api/constants.go with the orchestration that reads them (B3-2).
+
+const (
+	// loginFailureThreshold is the number of failed login attempts (within
+	// loginFailureWindow) before the IP is locked out.
+	loginFailureThreshold = 9
+
+	// loginFailureWindow is the sliding window for counting login failures.
+	loginFailureWindow = 15 * time.Minute
+
+	// loginLockoutDuration is how long an IP is locked out after exceeding
+	// loginFailureThreshold.
+	loginLockoutDuration = 15 * time.Minute
+
+	// loginUserFailureThreshold is the number of failed login attempts for a
+	// specific username (regardless of source IP) before the account is locked.
+	loginUserFailureThreshold = 9
+
+	// loginUserFailureWindow is the sliding window for per-username login failures.
+	loginUserFailureWindow = 15 * time.Minute
+
+	// loginUserLockoutDuration is how long a username is locked after exceeding
+	// loginUserFailureThreshold.
+	loginUserLockoutDuration = 15 * time.Minute
+
+	// deleteAccountFailureThreshold is the number of wrong-password attempts
+	// before the per-user lockout kicks in.
+	deleteAccountFailureThreshold = 3
+
+	// deleteAccountFailureWindow is the sliding window for counting
+	// delete-account password failures.
+	deleteAccountFailureWindow = 15 * time.Minute
+
+	// deleteAccountLockoutDuration is how long the account-deletion endpoint
+	// is locked after exceeding deleteAccountFailureThreshold.
+	deleteAccountLockoutDuration = 15 * time.Minute
+
+	// totpFailureRateLimit is the maximum TOTP verification failures per user
+	// within totpFailureWindow before the user is rate-limited.
+	totpFailureRateLimit = 10
+
+	// totpFailureWindow is the sliding window for counting per-user TOTP failures.
+	totpFailureWindow = 15 * time.Minute
+
+	// partialAuthMaxFailures is the number of failed TOTP attempts on a single
+	// partial-auth challenge before it is revoked.
+	partialAuthMaxFailures = 5
+
+	// partialAuthStoreTTL is the lifetime of a partial-auth (2FA) challenge token.
+	partialAuthStoreTTL = 10 * time.Minute
+
+	// pendingTOTPStoreTTL is the lifetime of a pending TOTP enrollment secret.
+	pendingTOTPStoreTTL = 10 * time.Minute
+)
+
+// The password-confirmation lockout is shared with the change-password route
+// (api/profile_handler.go, the user family in B3-8), so one key space
+// ("pw_confirm_fail", "pw_confirm_lock") and one budget cover every route
+// that asks for the current password.
+const (
+	// PwConfirmFailureThreshold is the number of wrong-password attempts on
+	// password-confirmation endpoints before per-user lockout kicks in.
+	PwConfirmFailureThreshold = 3
+
+	// PwConfirmFailureWindow is the sliding window for per-user password
+	// confirmation failures.
+	PwConfirmFailureWindow = 15 * time.Minute
+
+	// PwConfirmLockoutDuration is how long password-confirmation endpoints are
+	// locked after exceeding PwConfirmFailureThreshold.
+	PwConfirmLockoutDuration = 15 * time.Minute
+)
+
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+// Category sentinels the transport maps to a status and code. ErrRateLimited,
+// ErrForbidden, ErrBadRequest, ErrConflict and ErrInternal are the shared set
+// in message.go; these two are what auth adds.
+var (
+	// ErrUnauthorized is a credential or challenge that does not authenticate
+	// (401). Deliberately generic: the enumeration guard depends on every
+	// failed login looking the same.
+	ErrUnauthorized = errors.New("unauthorized")
+	// ErrInvalidInput is a request the auth routes refuse as INVALID_INPUT
+	// (400) — the password-confirmation refusals.
+	ErrInvalidInput = errors.New("invalid input")
+)
+
+// authError is one refusal the auth slice can return. Error() is the exact
+// public message the pre-B3-2 handler wrote — B3-1's characterization rows
+// pin it byte for byte — and Is reports the category sentinel the transport
+// maps to a status and code, so errors.Is matches both the named value and
+// its category.
+type authError struct {
+	kind error
+	msg  string
+}
+
+func (e *authError) Error() string        { return e.msg }
+func (e *authError) Is(target error) bool { return target == e.kind }
+
+// Every refusal below is returned bare, never wrapped around the cause: the
+// transport echoes Error() to the client, and the cause (a database error, a
+// decrypt failure) is logged here instead.
+var (
+	// Registration.
+	ErrRegistrationPolicyUnavailable = &authError{ErrInternal, "failed to load registration policy"}
+	ErrRegistrationClosed            = &authError{ErrForbidden, "registration is currently closed"}
+	ErrRegistrationRequires2FA       = &authError{ErrForbidden, "registration is unavailable while two-factor authentication is required"}
+	ErrPasswordHash                  = &authError{ErrInternal, "failed to process registration"}
+	// ErrRegistrationRejected is the generic register refusal: an unknown,
+	// used-up or expired invite and a taken username share it so the response
+	// reveals neither. The transport writes it as 400 INVALID_CREDENTIALS.
+	ErrRegistrationRejected = &authError{ErrBadRequest, "invalid invite or credentials"}
+	ErrRegistrationFailed   = &authError{ErrInternal, "registration failed — please try again"}
+	ErrSessionIssue         = &authError{ErrInternal, "failed to create session"}
+	ErrRegisteredUserFetch  = &authError{ErrInternal, "registration succeeded but user fetch failed"}
+
+	// Login.
+	ErrLockedOut             = &authError{ErrRateLimited, "account temporarily locked due to too many failed attempts"}
+	ErrLoginUnavailable      = &authError{ErrInternal, "login temporarily unavailable"}
+	ErrInvalidCredentials    = &authError{ErrUnauthorized, "invalid credentials"}
+	ErrBanned                = &authError{ErrForbidden, "your account has been suspended"}
+	ErrAuthPolicyUnavailable = &authError{ErrInternal, "failed to load authentication policy"}
+	ErrTOTPChallengeStart    = &authError{ErrInternal, "failed to start two-factor challenge"}
+	ErrRequire2FA            = &authError{ErrForbidden, "two-factor authentication must be enabled on this account before login"}
+
+	// Logout.
+	ErrLogoutFailed = &authError{ErrInternal, "failed to logout"}
+
+	// Password confirmation (account deletion and TOTP management).
+	ErrTooManyAttempts            = &authError{ErrRateLimited, "too many failed attempts, try again later"}
+	ErrPasswordRequired           = &authError{ErrInvalidInput, "password is required"}
+	ErrIncorrectPassword          = &authError{ErrInvalidInput, "incorrect password"}
+	ErrPasswordConfirmationFailed = &authError{ErrInvalidInput, "password confirmation failed"}
+
+	// Account deletion.
+	ErrLastAdmin           = &authError{ErrForbidden, "cannot delete the last admin account"}
+	ErrDeleteAccountFailed = &authError{ErrInternal, "failed to delete account"}
+
+	// Second factor.
+	ErrTOTPChallengeInvalid = &authError{ErrUnauthorized, "invalid or expired two-factor challenge"}
+	ErrTOTPSecretUnreadable = &authError{ErrInternal, "failed to verify two-factor code"}
+	ErrTOTPCodeInvalid      = &authError{ErrUnauthorized, "invalid two-factor code"}
+	// ErrTOTPAlreadyEnabled is written by the transport as 409
+	// TOTP_ALREADY_ENABLED, not the generic CONFLICT code.
+	ErrTOTPAlreadyEnabled   = &authError{ErrConflict, "disable 2FA before re-enabling"}
+	ErrTOTPSecretGenerate   = &authError{ErrInternal, "failed to generate two-factor secret"}
+	ErrNoPendingTOTP        = &authError{ErrBadRequest, "no pending two-factor enrollment found"}
+	ErrTOTPEnableFailed     = &authError{ErrInternal, "failed to enable two-factor authentication"}
+	ErrTOTPRequiredByServer = &authError{ErrForbidden, "two-factor authentication is required for this server"}
+	ErrTOTPDisableFailed    = &authError{ErrInternal, "failed to disable two-factor authentication"}
+)
+
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+// AuthService owns the auth slice's orchestration: the lockout and
+// enumeration guards, the password and second-factor checks, session issue
+// and revoke, the audit writes and the member_ban broadcast on self-deletion.
+// Persistence stays in db behind Store. B3-2 moved every line here verbatim
+// from api/auth_handler.go and api/totp_handler.go at 71d867cb; B3-1's
+// characterization rows pin the behaviour.
+type AuthService struct {
+	st          Store
+	limiter     *auth.RateLimiter
+	partial     *auth.PartialAuthStore
+	pending     *auth.PendingTOTPStore
+	usedCodes   *auth.UsedTOTPCodeStore
+	totpKey     []byte
+	broadcaster AuthBroadcaster
+}
+
+// NewAuthService wires the auth slice. limiter is the shared auth rate
+// limiter (lockouts are keyed inside it); totpKey is the AES-256 key that
+// encrypts TOTP secrets at rest; broadcaster may be nil. The three in-memory
+// stores — partial-login challenges, pending TOTP enrolments, used TOTP
+// codes — are created here with the fixed TTLs the route mount used to own.
+func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
+	return &AuthService{
+		st:          st,
+		limiter:     limiter,
+		partial:     auth.NewPartialAuthStore(partialAuthStoreTTL),
+		pending:     auth.NewPendingTOTPStore(pendingTOTPStoreTTL),
+		usedCodes:   auth.NewUsedTOTPCodeStore(),
+		totpKey:     totpKey,
+		broadcaster: broadcaster,
+	}
+}
+
+// RegistrationPolicy reports whether registration is currently permitted. It
+// runs before the transport reads any credential: a closed server refuses
+// even a malformed body with the policy's 403.
+func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
+	registrationOpen, err := s.registrationOpen(ctx)
+	if err != nil {
+		return ErrRegistrationPolicyUnavailable
+	}
+	if !registrationOpen {
+		return ErrRegistrationClosed
+	}
+
+	require2FA, err := s.require2FAEnabled(ctx)
+	if err != nil {
+		return ErrRegistrationPolicyUnavailable
+	}
+	if require2FA {
+		return ErrRegistrationRequires2FA
+	}
+	return nil
+}
+
+// Register consumes the invite, creates the account and issues a session.
+func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResult, error) {
+	// Hash password before consuming the invite so that a hashing failure
+	// does not burn a valid invite code.
+	hash, err := auth.HashPassword(in.Password)
+	if err != nil {
+		return nil, ErrPasswordHash
+	}
+
+	// Atomically consume the invite and create the user so failed
+	// registrations do not burn a valid invite code.
+	uid, err := s.st.CreateUserWithInvite(ctx, in.Username, hash, int(permissions.MemberRoleID), in.InviteCode)
+	if err != nil {
+		// UNIQUE constraint violation → duplicate username → 400.
+		// Any other DB error → 500.
+		switch {
+		case db.IsUniqueConstraintError(err):
+			return nil, ErrRegistrationRejected
+		case errors.Is(err, db.ErrNotFound):
+			return nil, ErrRegistrationRejected
+		default:
+			slog.Error("CreateUserWithInvite failed", "err", err, "username", in.Username)
+			return nil, ErrRegistrationFailed
+		}
+	}
+
+	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
+		"new account created via invite")
+
+	// Issue session.
+	token, err := issueSession(ctx, s.st, uid, in.Device, in.IP)
+	if err != nil {
+		return nil, ErrSessionIssue
+	}
+
+	user, err := s.st.GetUserByID(ctx, uid)
+	if err != nil || user == nil {
+		slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
+		return nil, ErrRegisteredUserFetch
+	}
+	return &AuthResult{Token: token, User: user}, nil
+}
+
+// Login runs the lockout gates and the constant-time password check, then
+// issues a session or, for an enrolled account, starts a two-factor
+// challenge.
+func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, error) {
+	user, err := s.authenticate(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	if auth.IsEffectivelyBanned(user) {
+		slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", in.IP)
+		db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "login_blocked_banned", "user", user.ID,
+			"banned user attempted login from "+in.IP)
+		return nil, ErrBanned
+	}
+
+	require2FA, err := s.require2FAEnabled(ctx)
+	if err != nil {
+		return nil, ErrAuthPolicyUnavailable
+	}
+	if user.TOTPSecret != nil {
+		partialToken, err := s.partial.Issue(user.ID, in.Device, in.IP)
+		if err != nil {
+			return nil, ErrTOTPChallengeStart
+		}
+		return &AuthResult{PartialToken: partialToken, Requires2FA: true}, nil
+	}
+	if require2FA {
+		return nil, ErrRequire2FA
+	}
+
+	// Issue session.
+	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
+	if err != nil {
+		return nil, ErrSessionIssue
+	}
+
+	// Don't set status to "online" here — the WebSocket connection in
+	// serve.go does that when the user actually connects. Setting it here
+	// would leave the user permanently "online" if they never open a WS
+	// connection or if the client crashes before connecting.
+	slog.Info("user logged in", "username", user.Username, "user_id", user.ID, "ip", in.IP)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "user_login", "user", user.ID,
+		"logged in from "+in.IP)
+	return &AuthResult{Token: token, User: user}, nil
+}
+
+// authenticate runs the lockout gates, the constant-time password compare and
+// the failure accounting for one login attempt, returning the authenticated
+// user or the refusal.
+func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User, error) {
+	// Check per-IP lockout first.
+	lockKey := "login_lock:" + in.IP
+	if s.limiter.IsLockedOut(lockKey) {
+		return nil, ErrLockedOut
+	}
+
+	// BUG-110: Also check per-username lockout to prevent distributed brute force.
+	// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
+	// NOCASE) before keying the lockout, so case variants of one account
+	// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
+	unameKey := strings.ToLower(in.Username)
+	userLockKey := "login_user_lock:" + unameKey
+	if s.limiter.IsLockedOut(userLockKey) {
+		return nil, ErrLockedOut
+	}
+
+	// Constant-time lookup: always attempt bcrypt compare even when user
+	// does not exist to prevent timing-based username enumeration.
+	user, err := s.st.GetUserByUsername(ctx, in.Username)
+
+	// Distinguish DB errors from authentication failures. DB errors
+	// should NOT increment the rate limiter — otherwise a transient
+	// DB outage would lock out legitimate users.
+	if err != nil && user == nil {
+		// Could be a real DB error or simply "user not found".
+		// GetUserByUsername returns (nil, nil) for not-found, so a
+		// non-nil error here is a genuine DB failure.
+		slog.Error("login: GetUserByUsername failed", "err", err, "ip", in.IP)
+		return nil, ErrLoginUnavailable
+	}
+
+	failKey := "login_fail:" + in.IP
+	userFailKey := "login_user_fail:" + unameKey
+	// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
+	// read-only IsLockedOut gates above are check-then-act: N concurrent
+	// requests all pass them before any failure is recorded below, so the
+	// per-username cap — the only cross-IP brute-force defence — bound
+	// only sequential attackers. Allow records the attempt under the
+	// limiter's lock, capping a concurrent burst at the same budget a
+	// sequential attacker gets. Sized at threshold+1 so the sequential
+	// accepted-input set is unchanged: failures 1–10 still land, the 10th
+	// still trips the lockout (via the Check below), and a correct
+	// password on attempt 10 still succeeds — successful logins reset
+	// both counters. The reservation sits after the DB-error return above
+	// so a transient DB outage still does not consume attempts.
+	// Deliberately NOT auth.ScaledLimit for the per-username budget: that cap
+	// is keyed per USER and is the only cross-IP brute-force defence, so
+	// scaling it with the shared-NAT multiplier would hand a distributed
+	// attacker more guesses (api/constants_test.go pins this call site).
+	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
+		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+		return nil, ErrLockedOut
+	}
+	// Always run the password check — with an empty hash when the user does
+	// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
+	// empty hash, so bcrypt executes on every path and response time stays
+	// constant, preventing timing-based username enumeration. (A `user == nil
+	// || CheckPassword(...)` short-circuit would skip bcrypt entirely for
+	// unknown usernames, reintroducing the timing side-channel.)
+	storedHash := ""
+	if user != nil {
+		storedHash = user.PasswordHash
+	}
+	if !auth.CheckPassword(storedHash, in.Password) {
+		// The attempt was already recorded atomically up-front (F3); here
+		// only decide the lockouts, at the same boundary as before: the
+		// 10th in-window failure locks the key. Check is read-only, so
+		// the reservation is not double-counted.
+		if !s.limiter.Check(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
+			s.limiter.Lockout(ctx, lockKey, loginLockoutDuration)
+		}
+		// BUG-110: per-username lockout on threshold.
+		if !s.limiter.Check(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+			s.limiter.Lockout(ctx, userLockKey, loginUserLockoutDuration)
+		}
+		slog.Info("login failed", "ip", in.IP, "username_len", len(in.Username))
+		return nil, ErrInvalidCredentials
+	}
+
+	// Reset failure counters on success.
+	s.limiter.Reset(ctx, failKey)
+	s.limiter.Reset(ctx, userFailKey)
+	return user, nil
+}
+
+// VerifyTOTP completes a challenge Login started and issues the session,
+// bound to the login request's device and IP rather than this one's.
+func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string) (*AuthResult, error) {
+	challenge, ok := s.partial.Lookup(partialToken)
+	if !ok {
+		return nil, ErrTOTPChallengeInvalid
+	}
+
+	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
+	// Atomically record this attempt and reject once the per-user failure cap
+	// is reached. Recording up-front — rather than a read-only Check now and
+	// Allow only on failure — closes a TOCTOU where many concurrent requests
+	// reusing one valid partial token all pass the read-only check before any
+	// failure is recorded, defeating the per-user brute-force cap (the only
+	// cross-IP defence). A successful verification resets the counter below,
+	// so legitimate retries are not penalised.
+	// Deliberately NOT auth.ScaledLimit: this cap is keyed per USER, and it
+	// is the only cross-IP brute-force defence on TOTP codes. The
+	// multiplier exists for shared-NAT per-IP limits; scaling a per-user
+	// threshold with it would hand a distributed attacker more guesses.
+	// Mirrors loginUserFailureThreshold staying unscaled in authenticate.
+	if !s.limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		return nil, ErrTooManyAttempts
+	}
+
+	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
+		// The attempt was already recorded atomically up-front via
+		// limiter.Allow; only the per-partial-token counter is advanced here.
+		s.partial.RegisterFailure(partialToken, partialAuthMaxFailures)
+		return nil, ErrTOTPCodeInvalid
+	}
+
+	s.limiter.Reset(ctx, totpRateLimitKey)
+
+	if _, ok := s.partial.Consume(partialToken); !ok {
+		return nil, ErrTOTPChallengeInvalid
+	}
+
+	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
+	if err != nil {
+		return nil, ErrSessionIssue
+	}
+
+	slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "totp_verified", "user", user.ID,
+		"two-factor verification completed from "+challenge.IP)
+	return &AuthResult{Token: token, User: user}, nil
+}
+
+// challengeSecret resolves the user behind a partial-auth challenge and
+// returns their decrypted TOTP secret.
+func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
+	user, err := s.st.GetUserByID(ctx, challengeUserID)
+	if err != nil || user == nil || user.TOTPSecret == nil {
+		return nil, "", ErrTOTPChallengeInvalid
+	}
+
+	// A ban can land inside the partial-token window; the login path
+	// refuses banned users right after the password compare, so the
+	// second factor must refuse them too.
+	if auth.IsEffectivelyBanned(user) {
+		return nil, "", ErrBanned
+	}
+
+	secret, decErr := auth.DecryptTOTPSecret(s.totpKey, *user.TOTPSecret)
+	if decErr != nil {
+		slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
+		return nil, "", ErrTOTPSecretUnreadable
+	}
+
+	return user, secret, nil
+}
+
+// Logout revokes p.Session server-side and clears the custom status. p.Session
+// must be non-nil: the transport answers an API-token principal with 401
+// before calling.
+func (s *AuthService) Logout(ctx context.Context, p Principal) error {
+	sess := p.Session
+	if sess == nil {
+		return errors.New("logout: principal has no session")
+	}
+
+	// The client clears its token optimistically — once logout reaches the
+	// server, the revocation must not die with a dropped connection.
+	if err := s.st.DeleteSession(context.WithoutCancel(ctx), sess.TokenHash); err != nil {
+		return ErrLogoutFailed
+	}
+
+	// A custom status is a "what I am doing right now" note. Leaving it
+	// standing after the user signed out states something about them that
+	// is no longer true, so logout clears it — unlike the chosen presence
+	// status, which is a preference and deliberately survives.
+	if err := s.st.UpdateUserCustomStatus(context.WithoutCancel(ctx), sess.UserID, nil); err != nil {
+		slog.Warn("failed to clear custom status on logout", "user_id", sess.UserID, "err", err)
+	}
+
+	slog.Info("user logged out", "user_id", sess.UserID)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, sess.UserID, "user_logout", "user", sess.UserID, "")
+	return nil
+}
+
+// DeleteAccount confirms the password, anonymises and bans the account and
+// broadcasts member_ban. Progressive lockout mirrors login: 3 failures →
+// 15-min lock. ip is only logged and audited.
+func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, ip string) error {
+	user := p.User
+
+	// Per-user lockout to prevent password brute-force on this destructive endpoint.
+	lockKey := auth.Key("delete_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return ErrTooManyAttempts
+	}
+
+	if password == "" {
+		return ErrPasswordRequired
+	}
+
+	// Verify the supplied password matches the stored hash.
+	failKey := auth.Key("delete_fail", user.ID)
+	if !auth.CheckPassword(user.PasswordHash, password) {
+		if !s.limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
+			s.limiter.Lockout(ctx, lockKey, deleteAccountLockoutDuration)
+		}
+		return ErrIncorrectPassword
+	}
+	s.limiter.Reset(ctx, failKey)
+
+	if err := s.st.DeleteAccount(ctx, user.ID); err != nil {
+		if errors.Is(err, db.ErrLastAdmin) {
+			return ErrLastAdmin
+		}
+		slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
+		return ErrDeleteAccountFailed
+	}
+
+	slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "account_deleted", "user", user.ID,
+		"account self-deleted from "+ip)
+
+	// DeleteAccount left the row in exactly the state an admin ban does
+	// (anonymised, banned, sessions revoked) — broadcast the same event so
+	// every other connected client drops the deleted user immediately
+	// instead of keeping their pre-deletion username until it reconnects.
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastMemberBan(user.ID)
+	}
+	return nil
+}
+
+// EnableTOTP confirms the password and stages a pending secret; the returned
+// URI is the enrolment payload for the authenticator app.
+func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (string, error) {
+	user := p.User
+
+	// BUG-111: Per-user lockout for password confirmation.
+	lockKey := auth.Key("pw_confirm_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return "", ErrTooManyAttempts
+	}
+
+	if user.TOTPSecret != nil && *user.TOTPSecret != "" {
+		return "", ErrTOTPAlreadyEnabled
+	}
+
+	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
+		return "", err
+	}
+
+	secret, err := auth.GenerateTOTPSecret()
+	if err != nil {
+		return "", ErrTOTPSecretGenerate
+	}
+
+	s.pending.Put(user.ID, secret)
+	return auth.BuildTOTPURI(user.Username, secret, "OwnCord"), nil
+}
+
+// ConfirmTOTP verifies code against the pending secret, persists it and
+// revokes the caller's other sessions.
+func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, code string) (*TOTPChangeResult, error) {
+	user := p.User
+
+	// BUG-111: Per-user lockout for password confirmation.
+	lockKey := auth.Key("pw_confirm_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return nil, ErrTooManyAttempts
+	}
+
+	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
+		return nil, err
+	}
+
+	secret, ok := s.pending.Lookup(user.ID)
+	if !ok {
+		return nil, ErrNoPendingTOTP
+	}
+
+	if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
+		return nil, ErrTOTPCodeInvalid
+	}
+
+	encryptedSecret, encErr := auth.EncryptTOTPSecret(s.totpKey, secret)
+	if encErr != nil {
+		slog.Error("failed to encrypt TOTP secret", "user_id", user.ID, "error", encErr)
+		return nil, ErrTOTPEnableFailed
+	}
+
+	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, &encryptedSecret); err != nil {
+		return nil, ErrTOTPEnableFailed
+	}
+	s.pending.Delete(user.ID)
+
+	// Security tail of the 2FA change: once the secret update committed,
+	// revoking the other sessions must not be aborted by a dead request.
+	tailCtx := context.WithoutCancel(ctx)
+	revoked, revokeFailed := s.revokeOtherSessionsAfterAuthChange(tailCtx, user.ID, keepSessionID(p), "totp enable")
+
+	slog.Info("totp enabled", "user_id", user.ID)
+	db.WriteAudit(tailCtx, s.st, user.ID, "totp_enabled", "user", user.ID,
+		"two-factor authentication enrolled")
+
+	res := &TOTPChangeResult{SessionsRevoked: revoked}
+	if revokeFailed {
+		// Partial success: 2FA IS enabled; only revoking the other
+		// sessions failed. A 5xx here would be a lie — the state change
+		// already committed — so mirror the ChangePassword contract
+		// (api/profile_handler.go) and report 200 with an explicit warning
+		// instead of a silent, unqualified 204.
+		res.Warning = "two-factor authentication enabled, but other sessions could not be revoked; revoke them from the sessions list"
+	}
+	return res, nil
+}
+
+// DisableTOTP confirms the password, refuses while the server requires 2FA,
+// clears the secret and revokes the caller's other sessions.
+func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
+	user := p.User
+
+	// BUG-111: Per-user lockout for password confirmation.
+	lockKey := auth.Key("pw_confirm_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return nil, ErrTooManyAttempts
+	}
+
+	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
+		return nil, err
+	}
+
+	require2FA, err := s.require2FAEnabled(ctx)
+	if err != nil {
+		return nil, ErrAuthPolicyUnavailable
+	}
+	if require2FA {
+		return nil, ErrTOTPRequiredByServer
+	}
+
+	s.pending.Delete(user.ID)
+	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
+		return nil, ErrTOTPDisableFailed
+	}
+
+	// Security tail of the 2FA change: once the secret update committed,
+	// revoking the other sessions must not be aborted by a dead request.
+	tailCtx := context.WithoutCancel(ctx)
+	revoked, revokeFailed := s.revokeOtherSessionsAfterAuthChange(tailCtx, user.ID, keepSessionID(p), "totp disable")
+
+	slog.Info("totp disabled", "user_id", user.ID)
+	db.WriteAudit(tailCtx, s.st, user.ID, "totp_disabled", "user", user.ID,
+		"two-factor authentication disabled")
+
+	res := &TOTPChangeResult{SessionsRevoked: revoked}
+	if revokeFailed {
+		// Partial success: 2FA IS disabled; only revoking the other
+		// sessions failed. A 5xx here would be a lie — the state change
+		// already committed — so mirror the ChangePassword contract
+		// (api/profile_handler.go) and report 200 with an explicit warning
+		// instead of a silent, unqualified 204.
+		res.Warning = "two-factor authentication disabled, but other sessions could not be revoked; revoke them from the sessions list"
+	}
+	return res, nil
+}
+
+// confirmPassword is the password-confirmation step the TOTP routes share: a
+// missing or wrong password counts against the per-user pw_confirm budget
+// and trips the lockout on the threshold; a correct one resets the counter.
+func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, password, lockKey string) error {
+	failKey := auth.Key("pw_confirm_fail", user.ID)
+	if err := requirePasswordConfirmation(user, password); err != nil {
+		if !s.limiter.Allow(failKey, PwConfirmFailureThreshold, PwConfirmFailureWindow) {
+			s.limiter.Lockout(ctx, lockKey, PwConfirmLockoutDuration)
+		}
+		return err
+	}
+	s.limiter.Reset(ctx, failKey)
+	return nil
+}
+
+// keepSessionID is the session a 2FA state change keeps alive. BUG-108: an
+// API-token principal has a nil session; keep=0 matches no row, so every
+// login session is revoked — same semantics as change-password.
+func keepSessionID(p Principal) int64 {
+	if p.Session != nil {
+		return p.Session.ID
+	}
+	return 0
+}
+
+// revokeOtherSessionsAfterAuthChange revokes every session for userID except
+// keepSessionID as the security tail of a committed 2FA state change. It
+// mirrors UserService.ChangePassword (service/user.go:262-274): a failure is
+// logged and retried once (bounded compensating retry for transient write
+// contention); if the retry also fails, revoked reports what did succeed and
+// failed is true so the caller can report a partial success instead of
+// silently claiming the other sessions were revoked when they were not.
+func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
+	revoked, err := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
+	if err != nil {
+		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)
+		revokedRetry, retryErr := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
+		if retryErr != nil {
+			slog.Error("DeleteOtherSessions retry after "+action, "err", retryErr, "user_id", userID)
+			return revoked, true
+		}
+		revoked += revokedRetry
+	}
+	if revoked > 0 {
+		slog.Info("revoked other sessions after "+action, "user_id", userID, "revoked", revoked)
+	}
+	return revoked, false
+}
+
+// ─── Helpers moved from api/auth_handler.go ──────────────────────────────────
+
+func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+	token, err := auth.GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	if _, err := st.CreateSession(ctx, userID, auth.HashToken(token), device, ip); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
+	return getBooleanSetting(ctx, s.st, "require_2fa", false)
+}
+
+func (s *AuthService) registrationOpen(ctx context.Context) (bool, error) {
+	return getBooleanSetting(ctx, s.st, "registration_open", true)
+}
+
+func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
+	value, err := st.GetSetting(ctx, key)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return defaultValue, nil
+		}
+		return false, err
+	}
+	return parseBooleanSettingValue(value)
+}
+
+func parseBooleanSettingValue(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true, nil
+	case "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean setting value %q", value)
+	}
+}
+
+func requirePasswordConfirmation(user *db.User, password string) error {
+	if password == "" {
+		return ErrPasswordRequired
+	}
+	if !auth.CheckPassword(user.PasswordHash, password) {
+		return ErrPasswordConfirmationFailed
+	}
+	return nil
 }
