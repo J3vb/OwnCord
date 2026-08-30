@@ -2,14 +2,19 @@ package ws
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// Inbound protocol parsing, fuzzed at the two seams a hostile client can
-// reach: the envelope every frame arrives in, and the per-command payload
-// decoders the envelope's type selects.
+// Inbound protocol parsing, fuzzed at the three seams a hostile client can
+// reach: the envelope every frame arrives in, the per-command payload decoders
+// the envelope's type selects, and the auth frame — which is decoded before
+// any of that, by authenticateConn.
 //
 // messages.go is almost entirely OUTBOUND builders — parseChannelID is its
 // only inbound decoder — so "protocol parsing" is handleMessageDecode
@@ -20,12 +25,16 @@ import (
 // The committed corpus under testdata/fuzz/ is generated from
 // protocol/fixtures/epoch-1: every distinct c2s frame of the recorded
 // journeys, with the transcript's placeholders (<id:string>, <seq:number>,
-// <token:string>, <id:number>) replaced by concrete values. A plain
-// `go test ./ws` replays it, so CI's fuzz replay covers the real wire and not
-// only the hand-written shapes seeded below.
+// <token:string>, <id:number>) replaced by concrete values, named for the
+// journey that owns the frame. A plain `go test ./ws` replays it, so CI's fuzz
+// replay covers the real wire and not only the hand-written shapes seeded
+// below. Ten command types appear in no journey; their entries carry a minimal
+// valid payload instead, and TestCommandPayloadSeedsCoverEveryConstructor
+// fails if a newly registered command arrives without one.
 
-// envelopeLogFieldCap mirrors the cap handleMessageDecode applies to the
-// client-controlled type and id before they reach a log line.
+// envelopeLogFieldCap mirrors the unnamed 64 at handlers.go:190 and :194 — the
+// cap handleMessageDecode applies to the client-controlled type and id before
+// they reach a log line. Changing it there must change it here.
 const envelopeLogFieldCap = 64
 
 func capLogField(s string) string {
@@ -79,6 +88,9 @@ func FuzzHandleMessageDecode(f *testing.F) {
 
 		env, msgType, reqID, ok := hub.handleMessageDecode(c, raw)
 
+		// The probe restates the implementation, so it only pins that the
+		// accept/reject split stays a plain envelope unmarshal; the cap, the
+		// invalid counter and the round-trip below are the load-bearing checks.
 		var probe envelope
 		wantOK := json.Unmarshal(raw, &probe) == nil
 		if ok != wantOK {
@@ -163,30 +175,7 @@ func FuzzCommandPayloads(f *testing.F) {
 		fuzzReqID  = "req-fuzz"
 	)
 
-	seeds := []struct {
-		msgType string
-		payload string
-	}{
-		{MsgTypePing, `{}`},
-		{MsgTypeChatSend, `{"channel_id":1,"content":"hello"}`},
-		{MsgTypeChatSend, `{"channel_id":"1","content":"","attachments":[],"reply_to":null}`},
-		{MsgTypeChatSend, `{"channel_id":1,"user_id":999,"content":"spoof"}`},
-		{MsgTypeChatEdit, `{"message_id":1,"content":"edited"}`},
-		{MsgTypeChatDelete, `{"message_id":1}`},
-		{MsgTypeTypingStart, `{"channel_id":0}`},
-		{MsgTypeMarkRead, `{"channel_id":-1}`},
-		{MsgTypeChannelFocus, `{"channel_id":1.5}`},
-		{MsgTypeReactionAdd, `{"message_id":1,"emoji":"x"}`},
-		{MsgTypeVoiceJoin, `{"channel_id":9223372036854775808}`},
-		{MsgTypeVoiceLeave, `garbage-not-json`},
-		{MsgTypeVoiceModMute, `{"channel_id":1,"user_id":2,"muted":true}`},
-		{MsgTypeVoiceModMove, `{"user_id":2,"to_channel_id":0}`},
-		{MsgTypeChatCommand, `{"channel_id":1,"command":"   ","args":[]}`},
-		{MsgTypeVoiceE2EEOffer, `{"target_user_id":2,"encrypted_key":"AA==","iv":"AA=="}`},
-		{"not_a_command", `{}`},
-		{"", ``},
-	}
-	for _, s := range seeds {
+	for _, s := range commandPayloadSeeds {
 		f.Add(s.msgType, []byte(s.payload))
 	}
 
@@ -219,6 +208,203 @@ func FuzzCommandPayloads(f *testing.F) {
 		}
 		if !reflect.DeepEqual(cmd, again) {
 			t.Fatalf("%s(%q) is not deterministic: %#v then %#v", msgType, payload, cmd, again)
+		}
+	})
+}
+
+// commandPayloadSeeds is FuzzCommandPayloads' hand-written seed list: the
+// adversarial shapes. The valid per-command payloads live in the committed
+// corpus, so both halves are checked by
+// TestCommandPayloadSeedsCoverEveryConstructor.
+var commandPayloadSeeds = []struct {
+	msgType string
+	payload string
+}{
+	{MsgTypePing, `{}`},
+	{MsgTypeChatSend, `{"channel_id":1,"content":"hello"}`},
+	{MsgTypeChatSend, `{"channel_id":"1","content":"","attachments":[],"reply_to":null}`},
+	{MsgTypeChatSend, `{"channel_id":1,"user_id":999,"content":"spoof"}`},
+	{MsgTypeChatEdit, `{"message_id":1,"content":"edited"}`},
+	{MsgTypeChatDelete, `{"message_id":1}`},
+	{MsgTypeTypingStart, `{"channel_id":0}`},
+	{MsgTypeMarkRead, `{"channel_id":-1}`},
+	{MsgTypeChannelFocus, `{"channel_id":1.5}`},
+	{MsgTypeReactionAdd, `{"message_id":1,"emoji":"x"}`},
+	{MsgTypeVoiceJoin, `{"channel_id":9223372036854775808}`},
+	{MsgTypeVoiceLeave, `garbage-not-json`},
+	{MsgTypeVoiceModMute, `{"channel_id":1,"user_id":2,"muted":true}`},
+	{MsgTypeVoiceModMove, `{"user_id":2,"to_channel_id":0}`},
+	{MsgTypeChatCommand, `{"channel_id":1,"command":"   ","args":[]}`},
+	{MsgTypeVoiceE2EEOffer, `{"target_user_id":2,"encrypted_key":"AA==","iv":"AA=="}`},
+	{"not_a_command", `{}`},
+	{"", ``},
+}
+
+// corpusFirstString returns the first string(...) argument of every committed
+// corpus entry for target — for FuzzCommandPayloads that is the message type.
+func corpusFirstString(t *testing.T, target string) []string {
+	t.Helper()
+	dir := filepath.Join("testdata", "fuzz", target)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading corpus dir %s: %v", dir, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("reading corpus entry %s: %v", e.Name(), err)
+		}
+		for line := range strings.SplitSeq(string(body), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "string(") || !strings.HasSuffix(line, ")") {
+				continue
+			}
+			v, uerr := strconv.Unquote(line[len("string(") : len(line)-1])
+			if uerr != nil {
+				t.Fatalf("corpus entry %s: cannot unquote %s: %v", e.Name(), line, uerr)
+			}
+			out = append(out, v)
+			break
+		}
+	}
+	return out
+}
+
+// TestCommandPayloadSeedsCoverEveryConstructor is the guardrail that keeps the
+// corpus honest: registering a command in commandConstructors without a seed
+// leaves its decoder reachable only if the fuzzer guesses the type string,
+// which is not coverage. Ten of the 26 constructors appear in no epoch-1
+// journey, so their corpus entries carry a minimal valid payload instead.
+func TestCommandPayloadSeedsCoverEveryConstructor(t *testing.T) {
+	seeded := make(map[string]bool, len(commandConstructors))
+	for _, s := range commandPayloadSeeds {
+		seeded[s.msgType] = true
+	}
+	for _, typ := range corpusFirstString(t, "FuzzCommandPayloads") {
+		seeded[typ] = true
+	}
+
+	var missing []string
+	for typ := range commandConstructors {
+		if !seeded[typ] {
+			missing = append(missing, typ)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf("%d of %d command constructors have no seed or corpus entry: %v\n"+
+			"add one to commandPayloadSeeds or to testdata/fuzz/FuzzCommandPayloads/",
+			len(missing), len(commandConstructors), missing)
+	}
+
+	// The reverse direction: a seed for a type nothing registers is dead
+	// weight, and usually a rename that left the corpus behind. The two
+	// deliberate negatives are the unregistered-type path itself.
+	for typ := range seeded {
+		if typ == "" || typ == "not_a_command" {
+			continue
+		}
+		if _, ok := commandConstructors[typ]; !ok {
+			t.Errorf("seed/corpus entry for %q, which is not a registered command", typ)
+		}
+	}
+}
+
+// authPayloadMirror mirrors the anonymous struct authenticateConn decodes the
+// auth payload into (serve_auth.go:44). auth is deliberately NOT in
+// commandConstructors — the handshake runs before the hub knows the client —
+// and that decode is inline behind a live websocket read and a session lookup,
+// so it cannot be called headlessly. Factoring it out would be a production
+// change, which this item may not make; mirroring it is the smallest reachable
+// parse, and this comment is the drift warning that buys.
+type authPayloadMirror struct {
+	Token           string `json:"token"`
+	LastSeq         uint64 `json:"last_seq"`
+	ActiveChannelID int64  `json:"active_channel_id"`
+	Epoch           int    `json:"epoch"`
+}
+
+// FuzzAuthPayload drives the handshake frame: envelope, the auth type gate,
+// and the payload decode. The property worth fuzzing is that none of the three
+// numeric fields a client controls can take a value its Go type cannot hold —
+// a last_seq of -1 silently becoming 2^64-1 would let a reconnecting client
+// skip its entire replay — and that the token the handshake goes on to hash is
+// the string the JSON actually carried.
+func FuzzAuthPayload(f *testing.F) {
+	seeds := []string{
+		`{"type":"auth","payload":{"token":"t","last_seq":0}}`,
+		`{"type":"auth","payload":{"token":"t","last_seq":-1}}`,
+		`{"type":"auth","payload":{"token":"t","last_seq":18446744073709551616}}`,
+		`{"type":"auth","payload":{"token":"t","last_seq":1.5}}`,
+		`{"type":"auth","payload":{"token":"t","active_channel_id":9223372036854775808}}`,
+		`{"type":"auth","payload":{"token":"t","epoch":-1}}`,
+		`{"type":"auth","payload":{"token":"t","epoch":2}}`,
+		`{"type":"auth","payload":{"token":"t","epoch":99999999999999999999}}`,
+		`{"type":"auth","payload":{"token":""}}`,
+		`{"type":"auth","payload":{"token":null}}`,
+		`{"type":"auth","payload":{"token":"a","token":"b"}}`,
+		`{"type":"auth","payload":[]}`,
+		`{"type":"auth"}`,
+		`{"type":"AUTH","payload":{"token":"t"}}`,
+		`{"type":"ping","payload":{"token":"t"}}`,
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+
+	numeric := []struct {
+		key  string
+		fits func(string) error
+	}{
+		{"last_seq", func(s string) error { _, err := strconv.ParseUint(s, 10, 64); return err }},
+		{"active_channel_id", func(s string) error { _, err := strconv.ParseInt(s, 10, 64); return err }},
+		{"epoch", func(s string) error { _, err := strconv.Atoi(s); return err }},
+	}
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var env envelope
+		if json.Unmarshal(raw, &env) != nil {
+			return
+		}
+		if env.Type != MsgTypeAuth {
+			return // serve_auth.go:40 closes the connection before this parse
+		}
+
+		var p authPayloadMirror
+		structErr := json.Unmarshal(env.Payload, &p)
+
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(env.Payload, &fields) != nil {
+			if structErr == nil {
+				t.Fatalf("auth payload %q is not a JSON object, yet decoding it into the handshake struct succeeded", env.Payload)
+			}
+			return
+		}
+
+		for _, n := range numeric {
+			rawField, ok := fields[n.key]
+			if !ok {
+				continue
+			}
+			var num json.Number
+			if json.Unmarshal(rawField, &num) != nil {
+				continue // not a JSON number; the struct decode rejects it too
+			}
+			if n.fits(string(num)) != nil && structErr == nil {
+				t.Fatalf("auth payload %q: %s = %s does not fit its field type, yet the handshake decode succeeded as %+v", env.Payload, n.key, num, p)
+			}
+		}
+
+		if structErr != nil {
+			return
+		}
+		var wantToken string
+		if json.Unmarshal(fields["token"], &wantToken) == nil && wantToken != p.Token {
+			t.Fatalf("auth payload %q: token is %q through the handshake struct but %q decoded on its own", env.Payload, p.Token, wantToken)
 		}
 	})
 }

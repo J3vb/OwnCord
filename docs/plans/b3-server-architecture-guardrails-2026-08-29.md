@@ -921,10 +921,12 @@ db`). No control file is committed.
   work was killed at 601.393 s, a wall-clock artifact and not a lock-ordering
   failure. Anything that raises `-count` on this package must raise
   `-timeout` with it.
-- Numbers: **17 → 20** `Fuzz*` targets; **3 → 20** with a committed corpus;
-  **6 → 104** corpus files (**98 added**). Per target: HandleMessageDecode 17,
-  CommandPayloads 17 (every distinct `c2s` frame of the 11 epoch-1 journeys,
-  placeholders concretised), PredicateParity 12, ValidateFileType 6,
+- Numbers: **17 → 21** `Fuzz*` targets; **3 → 21** with a committed corpus;
+  **6 → 114** corpus files (**108 added**). Per target: HandleMessageDecode 17,
+  CommandPayloads 25 (the 15 distinct `c2s` command frames of the 11 epoch-1
+  journeys, placeholders concretised, plus a minimal valid payload for each of
+  the 10 command types no journey exercises), AuthPayload 2,
+  PredicateParity 12, ValidateFileType 6,
   SanitizeFTSQuery / EffectivePerms / EffectiveChannelPerms / ParseMentionTokens
   4 each, SanitizeUploadFilename +4 (2 → 6), ValidateAvatarURL /
   ValidateDisplayName / ValidateUsername / ValidateRelativePath /
@@ -948,8 +950,23 @@ db`). No control file is committed.
   `handleMessageDecode` (`ws/handlers.go`) for the envelope and
   `commandConstructors` (`ws/command.go`) for the payloads; every constructor
   in that map is a pure `func(userID, reqID, raw)`, so `FuzzCommandPayloads`
-  reaches all 24 of them directly — no hub, no DB, better than the fallback
-  the brief allowed. (2) `permissions.Subject` has no wire form, so there is
+  reaches them directly — no hub, no DB, better than the fallback the brief
+  allowed. The table registers **26** constructors and all **26** are now
+  seeded: 15 come from the journeys, 10 have a minimal valid corpus payload
+  because no journey exercises them, and
+  `TestCommandPayloadSeedsCoverEveryConstructor` fails if a newly registered
+  command arrives without one (RED: removing
+  `FuzzCommandPayloads/voice-mod-kick-target` fails the test with
+  `1 of 26 … have no seed or corpus entry: [voice_mod_kick]`).
+  `auth` is **not** in the
+  table — `authenticateConn` (`ws/serve_auth.go:40`) decodes it before the hub
+  knows the client — so its entries moved to their own headless target,
+  `FuzzAuthPayload`, which pins that no numeric handshake field accepts a value
+  its Go type cannot hold (a `last_seq` of `-1` wrapping to 2^64-1 would let a
+  reconnecting client skip its whole replay). That decode is inline behind a
+  live socket read and a session lookup, so the target mirrors the struct and
+  says so rather than changing production to expose it; 30 s of `-fuzz` on it
+  found nothing (1.37 M execs). (2) `permissions.Subject` has no wire form, so there is
   nothing to round-trip; `FuzzPredicateParity` is the honest reading —
   every B2-5 predicate against the raw two-layer bit formula written out
   longhand, plus the two definitional identities (`CanAdmitSession` ≡

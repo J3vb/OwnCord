@@ -1,3 +1,0 @@
-go test fuzz v1
-string("auth")
-[]byte("{\"last_seq\":1,\"token\":\"0123456789abcdef0123456789abcdef\"}")
