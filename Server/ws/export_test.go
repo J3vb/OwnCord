@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -473,3 +474,87 @@ func (h *Hub) BroadcastVoiceEventForTest(channelID int64, msg []byte) {
 // MaxColdReplayForTest exposes the cold-tier replay row cap so tests can seed
 // exactly enough events to hit it.
 const MaxColdReplayForTest = maxColdReplay
+
+// ─── hub simulation helpers (hub_sim_test.go, B3-6) ────────────────────────
+
+// NewSimClientForTest builds a headless client the way newClient does for a
+// real socket — separate normal/high/low queues and a resume watermark — minus
+// the conn. channelID is the auth-frame active_channel_id handleReconnect
+// promotes after checking it against the allowed set (0 = none).
+func NewSimClientForTest(hub *Hub, user *db.User, channelID int64, lastSeq uint64, send, sendHigh, sendLow chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		ctx:       context.Background(),
+		userID:    user.ID,
+		user:      user,
+		channelID: channelID,
+		lastSeq:   lastSeq,
+		send:      send,
+		sendHigh:  sendHigh,
+		sendLow:   sendLow,
+	}
+}
+
+// DeliverBroadcastForTest runs deliverBroadcast synchronously on the caller's
+// goroutine — the dispatch loop's critical section without the dispatch loop —
+// and returns the seq it allocated, or 0 when the topic limiter shed the
+// frame. A non-nil recipients selects the visibility-filtered branch
+// (voice_state's path). The seq is read off h.seq before and after, so it is
+// exact only while the caller is the sole allocator, which the simulation
+// guarantees.
+func (h *Hub) DeliverBroadcastForTest(channelID int64, recipients []int64, msg []byte) uint64 {
+	before := atomic.LoadUint64(&h.seq)
+	h.deliverBroadcast(broadcastMsg{channelID: channelID, recipients: recipients, msg: msg})
+	if after := atomic.LoadUint64(&h.seq); after != before {
+		return after
+	}
+	return 0
+}
+
+// SendSequencedToUsersForTest exposes sendSequencedToUsers (the sequenced DM
+// path) and returns the seq it allocated, under the same sole-allocator caveat
+// as DeliverBroadcastForTest.
+func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg []byte) uint64 {
+	before := atomic.LoadUint64(&h.seq)
+	h.sendSequencedToUsers(channelID, userIDs, msg)
+	if after := atomic.LoadUint64(&h.seq); after != before {
+		return after
+	}
+	return 0
+}
+
+// ReconnectRegisterForTest exposes reconnectRegister's buffer-tier path: the
+// replay snapshot and registerNow inside ONE h.seqMu critical section, exactly
+// as handleReconnect runs it. ok=false means the ring no longer covers lastSeq
+// and production would fall through to a full ready.
+func (h *Hub) ReconnectRegisterForTest(c *Client, lastSeq uint64, allowed map[int64]bool) ([][]byte, bool) {
+	return h.reconnectRegister(context.Background(), c, lastSeq, allowed, "buffer", nil, 0)
+}
+
+// UnregisterNowForTest exposes unregisterNow; the return is its "replaced"
+// verdict (true when a newer connection holds the slot).
+func (h *Hub) UnregisterNowForTest(c *Client) bool {
+	return h.unregisterNow(c)
+}
+
+// SeqForTest reads the hub's monotonic seq counter.
+func (h *Hub) SeqForTest() uint64 {
+	return atomic.LoadUint64(&h.seq)
+}
+
+// IsSendClosedForTest exposes Client.isSendClosed.
+func IsSendClosedForTest(c *Client) bool {
+	return c.isSendClosed()
+}
+
+// CloseSendForTest exposes Client.closeSend, the pump teardown's last step.
+func CloseSendForTest(c *Client) {
+	c.closeSend()
+}
+
+// NewFaultConnForTest builds the fault-injecting frame transport of
+// faultconn_test.go over preface (delivered first, e.g. a replay burst) and
+// then in (a client's outbound queue; nil for a preface-only source).
+func NewFaultConnForTest(seed uint64, sched FaultSchedule, preface [][]byte, in <-chan []byte) *FaultConn {
+	return newFaultConn(seed, sched, preface, in)
+}
