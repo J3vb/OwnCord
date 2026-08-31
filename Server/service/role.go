@@ -40,9 +40,10 @@ const (
 	// maxRoleNameLen bounds the name so a role label cannot be used to blow up
 	// every member list and permission modal that renders it.
 	maxRoleNameLen = 32
-	// maxRoles bounds how many roles a server can hold. Reorder normalizes
-	// positions into 1..N strictly below the actor, so N must stay well under
-	// the owner position (100) for the hierarchy to remain expressible.
+	// maxRoles bounds how many roles a server can hold. Reorder spreads
+	// positions proportionally through the range strictly below the actor, so N
+	// must stay under the owner position (100) for every role to get a distinct
+	// slot and for the hierarchy to remain expressible.
 	maxRoles = 64
 )
 
@@ -485,22 +486,31 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 		return nil, fmt.Errorf("%w: too many roles to place below your own rank", ErrBadRequest)
 	}
 
-	// Spread the roles through the range below the actor rather than compacting
-	// them into a gapless block. CreateRole's default placement takes the
-	// highest free slot below the actor, and an N…1 block leaves none: one
-	// reorder used to wedge role creation permanently for every manager below
-	// the owner, and the refusal it produced told the admin to "reorder
-	// existing roles first", which re-compacted to the same block (OC-0374).
+	// Spread the roles evenly through the whole range below the actor rather
+	// than compacting them into a gapless block. CreateRole's default placement
+	// takes the highest free slot below the actor, and an N…1 block leaves
+	// none: one reorder used to wedge role creation permanently for every
+	// manager below the owner, and the refusal it produced told the admin to
+	// "reorder existing roles first", which re-compacted to the same block
+	// (OC-0374).
 	//
-	// The stride is the largest that still fits every role strictly below the
-	// actor, so it is stable under repeated reorders and reordering the default
-	// four roles under the owner reproduces their shipped 80/60/40/20 spacing.
-	// len(orderedIDs) < actor.Position is already established above, so the
-	// stride is at least 1 and the highest position stays below the actor's.
-	stride := max(actor.Position/(len(orderedIDs)+1), 1)
+	// Each role takes its proportional share of the range — the k-th from the
+	// bottom lands at k/(N+1) of the actor's position — rather than a fixed
+	// stride below the actor. A fixed stride is the same thing while the range
+	// is wide, but its integer division collapses to 1 once N approaches the
+	// actor's position: with 50 roles under the owner it re-compacted to 50…1
+	// and stranded every free slot from 51 up, leaving the defect in place for
+	// exactly the servers with the most roles to manage. Proportional spacing
+	// uses the whole range instead (50 roles land on 98, 96, … 2), and for the
+	// counts a normal server has it is identical: four roles under the owner
+	// still reproduce their shipped 80/60/40/20.
+	//
+	// len(orderedIDs) < actor.Position is already established above, so
+	// actor.Position/(N+1) >= 1: the positions are strictly decreasing,
+	// distinct, at least 1, and all strictly below the actor's own.
 	positions := make(map[int64]int, len(orderedIDs))
 	for i, id := range orderedIDs {
-		positions[id] = (len(orderedIDs) - i) * stride
+		positions[id] = actor.Position * (len(orderedIDs) - i) / (len(orderedIDs) + 1)
 	}
 	if err := s.st.SetRolePositions(ctx, positions); err != nil {
 		return nil, fmt.Errorf("%w: failed to reorder roles: %w", ErrInternal, err)

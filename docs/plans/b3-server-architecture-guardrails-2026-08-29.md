@@ -1964,7 +1964,17 @@ rank — reorder existing roles first`. Two existing tests asserted the
   `admin/handlers_roles_test.go`'s `TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts`)
   and are re-pinned to the spread with the finding cited — a mandated
   contract change, not a weakened assertion. The ledger's own suggested
-  fix is the same stride, arrived at independently.
+  fix is the same stride, arrived at independently — but a stride is not
+  enough, which Codex's review caught: `actor.Position / (N+1)` collapses to
+  1 once N approaches the actor's position, so a server with 50 roles under
+  the owner still compacted to 50…1 and stranded every slot from 51 up,
+  leaving the defect exactly where a big hierarchy needs it fixed. The
+  spacing is proportional instead — the k-th role from the bottom lands at
+  `actor.Position * k / (N+1)`, using the whole range (50 roles land on
+  98, 96, … 2). Identical for the counts a normal server has, so both
+  re-pins below stand unchanged; `TestReorderRoles_SpreadsAcrossTheWholeRangeAtHighRoleCounts`
+  pins the high-count case and fails against the stride version with
+  `highest managed position = 50 with 50 roles`.
 - **The reads.** `handlers_roles.go` held the last two. The pre-update
   `GetRoleByID` existed only to compare names for the rename fan-out and
   duplicated a row `UpdateRole` already reads: `UpdateRole` now returns a
