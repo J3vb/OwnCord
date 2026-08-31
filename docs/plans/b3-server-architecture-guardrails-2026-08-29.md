@@ -896,6 +896,35 @@ delivery and backpressure — the latter satisfied by what
   PR decides what else moves), `serve.go` 230 → 183, `hub.go` 616 → 585,
   `hub_visibility.go` 487.
 
+**Evidence — split PR 4 of the series, 2026-08-31** — branch
+`feat/b3-5-ws-split-4` from `dev` `70875a3f` (split PR 3's squash).
+Responsibility 7 (voice leftovers) plus the presence coalescer split
+that responsibility 6's size target needed:
+
+- **Move 6** — `broadcastVoiceEvent`, `broadcastVoiceEventWithLeaver`
+  (from `hub_broadcast.go`) and `VoiceSessionCount` (from `hub.go`) →
+  the existing `voice_broadcast.go`, beside the voice rate-limit and
+  quality tables (76 lines out, 77 in). Residue: one `context` import.
+  Gate: `-tags deadlock -count=10 ./ws/` ok 648.9 s, `-race` ok 228.5 s.
+- **Move 7** — the presence coalescer (`pendingPresence`,
+  `QueuePresence`, `dropQueuedPresenceAndBroadcast`,
+  `presenceCoalesceWindow`, `presenceFlushRaceHook`,
+  `flushPresenceQueue`, `BroadcastPresence`) → new `hub_presence.go`, in
+  source order (145 lines out, 153 in). Residue: scaffolding plus
+  duplicates of two imports the source keeps (`time`, `db`). Presence is
+  not one of the plan's seven responsibilities; the cut is what brings
+  `hub_broadcast.go` to its < 500 exit figure while keeping it pure
+  delivery and backpressure, and the coalescer is a coherent family of
+  its own. Gate results in the PR's test plan.
+- **Inventory**: `voice_broadcast.go` needs no row (no `db` use);
+  `hub_presence.go` is an `adapter` row — its only `db` use is the pure
+  `BroadcastStatus` helper, the doc's own example (17 → 18 `adapter`);
+  `hub_broadcast.go`'s reason drops the presence half.
+- **Sizes**: `hub_broadcast.go` 632 → **424 (< 500 exit target met)**,
+  `hub.go` 585 → 572 (< 400 still open — the finisher PR moves
+  construction/options and the replay-limit accessor), `voice_broadcast.go`
+  38 → 115, `hub_presence.go` 153.
+
 ## B3-6 — Permanent guardrails
 
 Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;
