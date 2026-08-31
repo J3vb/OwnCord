@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -319,6 +321,30 @@ func (d *DB) SetSetting(ctx context.Context, key, value string) error {
 		Value: value,
 	}); err != nil {
 		return fmt.Errorf("SetSetting: %w", err)
+	}
+	return nil
+}
+
+// ApplySettings upserts every key→value pair in one transaction, so a
+// mid-loop failure leaves no partial update behind. Keys are applied in
+// sorted order for deterministic behaviour under test.
+func (d *DB) ApplySettings(ctx context.Context, updates map[string]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ApplySettings: begin: %w", err)
+	}
+	q := d.q.WithTx(tx)
+	for _, key := range slices.Sorted(maps.Keys(updates)) {
+		if err := q.SetSetting(ctx, dbgen.SetSettingParams{Key: key, Value: updates[key]}); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("ApplySettings: %s: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ApplySettings: commit: %w", err)
 	}
 	return nil
 }
