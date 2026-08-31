@@ -632,8 +632,6 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 	return row.LastMessageID, row.MentionCount, true, nil
 }
 
-// UpdateReadState upserts the read state for a user in a channel and clears
-// its mention badge — marking a channel read consumes its mentions.
 // MarkChannelReadAtLatest marks the channel read at whatever its newest
 // message is when the statement runs, rather than at an id the caller read
 // moments earlier.
@@ -659,6 +657,15 @@ func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int6
 	return nil
 }
 
+// UpdateReadState upserts the read state for a user in a channel at the id the
+// caller names, and clears its mention badge — marking a channel read consumes
+// its mentions.
+//
+// It is for a caller that already holds the exact id it means, which since
+// OC-0323 means the send path advancing the sender past their own message.
+// A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
+// the id it would pass here is a snapshot, and clearing mentions against a
+// stale one destroys any raised in the meantime.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
 	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,

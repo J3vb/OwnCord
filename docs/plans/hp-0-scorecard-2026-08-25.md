@@ -64,31 +64,32 @@ Nothing here is a B1 blocker.
 **No confirmed issue blocks B1.**
 
 Open ledger, re-verified 2026-08-29; counts re-derived 2026-08-31 after B3-9
-(PR #1454) closed `OC-0345`, `OC-0346`, `OC-0376`, `OC-0377`, `OC-0378` and
-the 2026-08-31 post-merge audit recorded `OC-0379` fixed on arrival:
+(PR #1454) closed `OC-0345`, `OC-0346`, `OC-0376`, `OC-0377`, `OC-0378`, the
+2026-08-31 post-merge audit recorded `OC-0379` fixed on arrival, and B3-8's
+message/read-state family closed `OC-0323`, `OC-0357` and `OC-0358`:
 
 | Status    | Count   |
 | --------- | ------- |
-| fixed     | 321     |
-| open      | **54**  |
+| fixed     | 324     |
+| open      | **51**  |
 | declined  | 3       |
 | duplicate | 1       |
 | **total** | **379** |
 
-Of the 54 open records:
+Of the 51 open records:
 
-- **1 high, 12 medium, 41 low. Zero critical.** The high is `OC-0350`, an
+- **1 high, 12 medium, 38 low. Zero critical.** The high is `OC-0350`, an
   admin-panel login defect raised by the 2026-08-29 hunt and not yet phased.
-- Three hunts: 27 from `general-2026-08-22-b`, 26 from `general-2026-08-29`,
+- Three hunts: 26 from `general-2026-08-22-b`, 24 from `general-2026-08-29`,
   1 from `b2-1-fixture-capture-2026-08-28`. The three
   `b3-1-auth-characterization-2026-08-29` records (defects the auth
   characterization rows pinned as-is) were fixed in B3-9 on 2026-08-30.
-- **53 of the 54 resolve to a live `file:line`** — 0 dead paths across all 378
-  records, re-checked 2026-08-29; the five B3-9 closed were live then and are
-  fixed now. `OC-0323` is the exception: its line drifted past end of file
-  when B2 work shortened `Server/service/channel.go`, so it needs re-pointing
-  before it is fixed (B3-8, with the message/read-state family).
-- 33 sit under `Client/`, 21 under `Server/`.
+- **All 51 resolve to a live `file:line`** — 0 dead paths, re-checked
+  2026-08-29; the five B3-9 closed were live then and are fixed now.
+  `OC-0323` used to be the exception (its line had drifted past end of file
+  when B2 work shortened `Server/service/channel.go`); it is fixed, so the
+  exception is gone rather than carried.
+- 33 sit under `Client/`, 18 under `Server/`.
 - **None of the 2026-08-22 records is assigned to B1**; their register phases
   span B2–B10. The 2026-08-29 records are not yet phased in the register.
 

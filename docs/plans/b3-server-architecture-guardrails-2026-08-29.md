@@ -1863,6 +1863,56 @@ fixture half the `ws` suite builds) or deferring to the B3 exit:
   are satisfied by the same handle); `TestNewHub_RequiredCollaborators`
   gains the Readers refusal case.
 
+**Evidence — message/read-state family, 2026-08-31** — branch
+`feat/b3-8-message-family` from `dev` `227ae08c`. Like invite, this family
+is **inventory-vacuous**: no `move` row names `message` or `read-state`,
+because the message paths went behind `MessageService` before B3 began and
+what remains in `db/` is the persistence layer itself. What the family
+does carry is the three ledger findings the plan assigned to it, and they
+are its whole content. Each is the same shape — a guard one sibling writer
+already had and this one lacked:
+
+- **OC-0323** (the one the B3 exit gate names). `mark_read`/`channel_focus`
+  read the channel's newest message id and wrote it back two round trips
+  later with `mention_count = 0`, so a mention raised in that window was
+  wiped while `last_message_id` still pointed behind the mentioning
+  message: an unread mention with no badge, and nothing that recomputes
+  one. `db.MarkChannelReadAtLatest` computes the watermark inside the
+  writer statement, so a message committed before it is covered by
+  `last_message_id`, and one committed after it finds
+  `IncrementMentionCounts`' own `last_message_id < msgID` guard true.
+  Both are single-writer statements, which is what makes the pair atomic.
+  `UpdateReadState` stays for the send path, which already holds the exact
+  id it means. The ledger's suggested fix is this query, arrived at
+  independently.
+- **OC-0357.** `sanitizeFTSQuery` dropped every separator except `-`
+  instead of folding it to a space. `messages_fts` tokenizes on those
+  separators — `user_id` is indexed as `user` and `id` — so dropping the
+  underscore asked for `userid`, which exists nowhere in the index: any
+  query containing `_`, `.`, `@`, `/`, an apostrophe or a colon silently
+  matched nothing. Every non-alphanumeric rune folds to a space now, which
+  is both what the index expects and what keeps FTS5's operator grammar
+  inert; a new test drives ten operator strings through and requires each
+  to be harmless rather than merely unmatched.
+- **OC-0358.** `EditMessage`'s UPDATE was keyed on id alone, so an edit
+  racing a delete rewrote a tombstone and reported success — the caller
+  then broadcast `chat_edited` for a message every client had already
+  replaced. It carries `AND deleted = 0` now, the guard OC-0284 gave
+  `SoftDeleteMessage` and `SetMessagePinned`, and the losing edit surfaces
+  as `ErrNotFound`.
+- **Revert-proofs**, all three mechanical: OC-0323 with the write pointed
+  back at a snapshot (`read state is (last_message_id=3, mention_count=0):
+the mention for message 4 was cleared`); OC-0357 and OC-0358 red before
+  the fix (`SearchMessages("user_id") found nothing`; `EditMessage on a
+deleted row: err = <nil>, want ErrNotFound … Content:resurrected
+Deleted:true`).
+- **Generated code**: one new sqlc query and one guard added to an
+  existing one, regenerated through the `db-change` skill;
+  `make sqlc-verify` clean on the committed tree. No migration.
+- **Inventory**: unchanged, as expected for a family with no rows — the
+  fixes live inside `db/` and `service/`, the two layers that may import
+  `db` freely.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".
