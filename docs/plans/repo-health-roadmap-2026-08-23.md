@@ -336,7 +336,10 @@ the structural review.
   matrix runs on the pull-request head, and `strict: true` makes the squash
   commit's tree the tree that matrix tested.
   `scripts/verify-integration-tree.sh` proves it per squash SHA;
-  `verify-gate-evidence.mjs --selftest` pins the strict flag. _(Reworded
+  `verify-gate-evidence.mjs --selftest` pins the strict flag in the recorded
+  configuration (`b0-dev-branch-protection.sh`, the apply artifact — GitHub's
+  live setting is admin-scoped and unreadable from CI; out-of-band drift
+  surfaces as a failed tree-identity check at the next milestone run). _(Reworded
   2026-08-31, owner decision — previously "exact-SHA CI", which dev pushes
   never ran; PR-head evidence with enforced tree identity is the accepted
   form.)_
