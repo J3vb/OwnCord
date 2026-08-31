@@ -273,11 +273,25 @@ func TestTheLoadTest(t *testing.T) {
 	// holds, and how long that drain takes scales with the runner. A fixed 5s
 	// budget failed on a slow windows-latest -race runner (the whole package
 	// ran 74% slower than usual) while the workers themselves had finished
-	// fine — so bound the settle by the same "only a genuine hang takes this
-	// long" limit the workers use. waitFor returns the moment the count
-	// matches, so a healthy run pays nothing extra.
-	waitFor(t, overallTimeout, func() bool { return hub.ClientCount() == numAnchors },
-		"churned clients to fully unregister")
+	// fine, and a flat overallTimeout bound then failed on an even slower one
+	// (the package at 450s against a ~235s baseline) — so the settle is
+	// progress-aware: a count still falling is a starved-but-healthy drain and
+	// gets more time, and only a count that sits still for overallTimeout is
+	// treated as a genuine hang. The bug this assertion guards still fails: a
+	// dropped Unregister leaves the count stalled above numAnchors. A healthy
+	// run pays nothing extra.
+	settleLow := hub.ClientCount()
+	stalledSince := time.Now()
+	for hub.ClientCount() != numAnchors {
+		if n := hub.ClientCount(); n < settleLow {
+			settleLow, stalledSince = n, time.Now()
+		}
+		if time.Since(stalledSince) > overallTimeout {
+			t.Fatalf("churned clients did not fully unregister: ClientCount stuck at %d (want %d) for %v",
+				settleLow, numAnchors, overallTimeout)
+		}
+		time.Sleep(waitPoll)
+	}
 	if got := hub.ClientCount(); got != numAnchors {
 		t.Errorf("ClientCount = %d after churn settled, want %d (anchors only)", got, numAnchors)
 	}
