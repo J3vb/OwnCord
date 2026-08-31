@@ -173,3 +173,9 @@ func parseSettingsPatchBool(value string) (bool, error) {
 		return false, fmt.Errorf("invalid boolean value %q", value)
 	}
 }
+
+// AuditLog returns a page of the audit trail — the settings/audit family
+// owns the read the admin panel's log view uses.
+func (s *SettingsService) AuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error) {
+	return s.st.GetAuditLog(ctx, limit, offset)
+}

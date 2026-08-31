@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Channel Permission Override Handlers ────────────────────────────────────
@@ -19,29 +20,13 @@ import (
 // enforced by ListVisibleChannels, the WS ready payload, and the per-message
 // permission checks.
 
-// getPermChannel loads the channel for an override request and writes the
-// appropriate error response when it is missing or a DM. Returns nil when a
+// getPermChannel resolves the channel for an override request through the
+// one S-04 policy (service.ChannelService.ResolveGuildChannel): a DM id
+// answers exactly like a missing id, so this surface no longer confirms
+// which ids are private conversations (A-2026-08-02). Returns nil when a
 // response has already been written.
-func getPermChannel(database *db.DB, w http.ResponseWriter, r *http.Request) *db.Channel {
-	id, err := pathInt64(r, "id")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
-		return nil
-	}
-	ch, err := database.GetChannel(r.Context(), id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
-		return nil
-	}
-	if ch == nil {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
-		return nil
-	}
-	if ch.Type == "dm" {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "DM channels do not support permission overrides")
-		return nil
-	}
-	return ch
+func getPermChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
+	return resolveGuildChannel(channels, w, r)
 }
 
 // channelPermissionsResponse is the JSON shape for GET .../permissions.
@@ -55,9 +40,9 @@ type channelPermissionsResponse struct {
 	Users     []db.ChannelUserOverride `json:"users"`
 }
 
-func handleGetChannelPermissions(database *db.DB) http.HandlerFunc {
+func handleGetChannelPermissions(database *db.DB, channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch := getPermChannel(database, w, r)
+		ch := getPermChannel(channels, w, r)
 		if ch == nil {
 			return
 		}
@@ -101,9 +86,9 @@ func requireGrantableOverride(actorRole *db.Role, allow, deny int64) error {
 	return nil
 }
 
-func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handlePutChannelPermission(database *db.DB, channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch := getPermChannel(database, w, r)
+		ch := getPermChannel(channels, w, r)
 		if ch == nil {
 			return
 		}
@@ -199,9 +184,9 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 	}
 }
 
-func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handleDeleteChannelPermission(database *db.DB, channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch := getPermChannel(database, w, r)
+		ch := getPermChannel(channels, w, r)
 		if ch == nil {
 			return
 		}
@@ -337,9 +322,9 @@ func requireManageableUser(database *db.DB, w http.ResponseWriter, r *http.Reque
 	return true
 }
 
-func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handlePutChannelUserPermission(database *db.DB, channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch := getPermChannel(database, w, r)
+		ch := getPermChannel(channels, w, r)
 		if ch == nil {
 			return
 		}
@@ -411,9 +396,9 @@ func handlePutChannelUserPermission(database *db.DB, hub HubBroadcaster, permInv
 	}
 }
 
-func handleDeleteChannelUserPermission(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handleDeleteChannelUserPermission(database *db.DB, channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch := getPermChannel(database, w, r)
+		ch := getPermChannel(channels, w, r)
 		if ch == nil {
 			return
 		}

@@ -34,7 +34,7 @@ func TestAdminAPI_PatchRole_MemberLookupFailureBlanketInvalidates(t *testing.T) 
 		service.NewPermissionService(database, permissions.NewChecker(database)),
 	)
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
-		newTestModService(database), roleSvc, newTestSettingsService(database))
+		newTestModService(database), roleSvc, newTestSettingsService(database), newTestChannelService(database))
 	token := createAdminUser(t, database)
 
 	// Strip the seeded Member role down to READ_MESSAGES — a permissions

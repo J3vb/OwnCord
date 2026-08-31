@@ -42,7 +42,7 @@ func TestAdminAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

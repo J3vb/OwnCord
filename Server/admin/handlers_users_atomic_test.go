@@ -18,7 +18,7 @@ import (
 func TestAdminAPI_PatchUser_RefusedRoleChangeDoesNotLeaveBanCommitted(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 
 	// Moderator: BAN_MEMBERS (and everything below bit 20), but not
 	// MANAGE_ROLES (bit 24) — moderatorMask is perm_gates_test.go's constant

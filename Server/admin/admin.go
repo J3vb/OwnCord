@@ -23,11 +23,11 @@ var staticFiles embed.FS
 //
 //	/api/*  — admin REST API (all require a moderation permission; see NewAdminAPI)
 //	/*      — embedded static files (SPA; index.html for unknown paths)
-func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, opts ...SetupOptions) http.Handler {
+func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, channels *service.ChannelService, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
 	// Admin REST API mounted at /api
-	r.Mount("/api", NewAdminAPI(database, version, hub, u, logBuf, allowedOrigins, permInvalidator, mod, roles, settings, opts...))
+	r.Mount("/api", NewAdminAPI(database, version, hub, u, logBuf, allowedOrigins, permInvalidator, mod, roles, settings, channels, opts...))
 
 	// Static files — serve from the "static" sub-tree of the embedded FS.
 	// The //go:embed static directive in this package embeds as "static/…",

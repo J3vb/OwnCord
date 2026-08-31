@@ -29,7 +29,7 @@ func TestSetupLimiter_ReapsStaleEntries(t *testing.T) {
 	defer restoreHook()
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 
 	if limiter == nil {
 		t.Fatal("setup limiter was not captured — CaptureSetupLimiter hook not wired into NewAdminAPI")

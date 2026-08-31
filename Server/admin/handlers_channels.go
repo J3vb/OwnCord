@@ -1,84 +1,61 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"log/slog"
+	"errors"
 	"math"
 	"net/http"
-	"slices"
-	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel Type Validation ─────────────────────────────────────────────────
-
-// validChannelTypes is the set of channel types a create request may name.
-// A channel's CATEGORY deliberately constrains nothing: categories are free
-// text, and pinning "only voice channels live under a category whose name
-// matches 'Voice Channels'" made every other category name a second-class one —
-// a voice channel could not be created under "Gaming", and renaming the
-// category silently changed what could be created there. Grouping is a display
-// concern (the client groups by whatever category a channel carries), so the
-// server validates the type alone.
-var validChannelTypes = []string{"text", "voice", "announcement"}
-
-// validateChannelType returns an error message when the type is not one of the
-// three real channel types, or an empty string when it is.
-func validateChannelType(channelType string) string {
-	if slices.Contains(validChannelTypes, channelType) {
-		return ""
-	}
-	return "type must be one of text, voice, announcement"
-}
-
 // ─── Channel Handlers ────────────────────────────────────────────────────────
+//
+// Thin adapters over service.ChannelService (B3-8 channel family): the S-03
+// name/topic/category contract, the type whitelist, the numeric bounds, the
+// audit rows and the delete ordering all live in the service. The handlers
+// decode, resolve through the one S-04 policy, delegate, and fan out to the
+// hub from the rows the service returns.
 
-// getAdminChannel loads the channel targeted by an admin channel mutation and
-// writes the error response when it is missing — or when it is a DM. DMs and
-// group DMs share the channels table and id space with guild channels, but
-// they belong to their participants, not to MANAGE_CHANNELS holders: listing,
-// renaming or deleting one from the admin surface would leak or destroy a
-// private conversation (A-2026-08-02). A DM id answers 404 rather than 403 so
-// the surface does not confirm which ids are private conversations. Returns
-// nil when a response has already been written.
-func getAdminChannel(database *db.DB, w http.ResponseWriter, r *http.Request) *db.Channel {
+// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel — the
+// one non-DM resolution policy (S-04) — to this surface: a missing channel
+// and a DM id answer an identical 404 (A-2026-08-02). Returns nil when a
+// response has already been written.
+func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	id, err := pathInt64(r, "id")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
 		return nil
 	}
-	ch, err := database.GetChannel(r.Context(), id)
+	ch, err := channels.ResolveGuildChannel(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
-		return nil
-	}
-	if ch == nil || ch.Type == "dm" {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
+		writeChannelErr(w, err)
 		return nil
 	}
 	return ch
 }
 
-func handleListChannels(database *db.DB) http.HandlerFunc {
+// writeChannelErr maps ChannelService errors onto admin API responses.
+// Validation failures answer INVALID_INPUT with the service's own message —
+// the S-03 contract's wording is the response body.
+func writeChannelErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "channel not found")
+	case errors.Is(err, service.ErrBadRequest):
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel action failed")
+	}
+}
+
+func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channels, err := database.ListChannels(r.Context())
+		guildChannels, err := channels.AdminListChannels(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
 			return
-		}
-		// The admin surface manages guild channels. DM rows live in the same
-		// table but are private conversations — enumerating them here exposed
-		// ids and user-chosen group names to any MANAGE_CHANNELS holder
-		// (A-2026-08-02). Filtered in Go because the sqlc ListChannels query is
-		// shared with the ready path, which applies its own visibility rules.
-		guildChannels := make([]db.Channel, 0, len(channels))
-		for i := range channels {
-			if channels[i].Type != "dm" {
-				guildChannels = append(guildChannels, channels[i])
-			}
 		}
 		writeJSON(w, http.StatusOK, guildChannels)
 	}
@@ -94,13 +71,11 @@ type createChannelRequest struct {
 }
 
 // createChannelPostCommitHook, when non-nil, runs synchronously right after
-// handleCreateChannel's AdminCreateChannel commit, before the post-commit
-// re-read and hub fan-out — the create-side twin of
-// patchChannelPostCommitHook, so tests can land a caller cancellation in that
-// exact window (OC-0158) instead of relying on wall-clock timing.
+// the create commit, before the post-commit re-read and hub fan-out — so
+// tests can land a caller cancellation in that exact window (OC-0158).
 var createChannelPostCommitHook func()
 
-func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createChannelRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -108,66 +83,23 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		if strings.TrimSpace(req.Name) == "" {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "name is required")
-			return
-		}
-		if req.Type == "" {
-			req.Type = "text"
-		}
-
-		if msg := validateChannelType(req.Type); msg != "" {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
-			return
-		}
-
-		id, err := database.AdminCreateChannel(r.Context(), req.Name, req.Type, req.Category, req.Topic, req.Position)
+		ch, err := channels.AdminCreateChannel(r.Context(), actorFromContext(r), service.AdminChannelCreate{
+			Name:     req.Name,
+			Type:     req.Type,
+			Category: req.Category,
+			Topic:    req.Topic,
+			Position: req.Position,
+		}, createChannelPostCommitHook)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create channel")
+			writeChannelErr(w, err)
 			return
 		}
-
-		// From here on the row has already committed. If the admin's browser
-		// goes away in this window (tab close, navigation, network blip),
-		// r.Context() cancels, and a GetChannel re-read that still used it
-		// would fail with context.Canceled — 500ing while leaving a durably
-		// created channel unbroadcast, so no connected client learns about it
-		// until it reconnects (OC-0158). Run the rest of the handler on an
-		// uncancellable tail, matching handlePatchChannel and
-		// handleDeleteChannel.
-		tail := context.WithoutCancel(r.Context())
-
-		if createChannelPostCommitHook != nil {
-			createChannelPostCommitHook()
-		}
-
-		ch, err := database.GetChannel(tail, id)
-		if err != nil || ch == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch created channel")
-			return
-		}
-		actor := actorFromContext(r)
-		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
-		db.WriteAudit(tail, database, actor, "channel_create", "channel", id,
-			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)
 		}
 		writeJSON(w, http.StatusCreated, ch)
 	}
 }
-
-// Bounds for the numeric channel settings a PATCH may set.
-//
-// They are validated here rather than left to the database because SQLite
-// would happily store a slow mode of six years or a user limit of -3, and the
-// only place that would surface is a client rendering nonsense. The values
-// match what the clients offer: Discord's 6-hour slow-mode ceiling, and a
-// two-digit voice capacity (0 = unlimited in both voice cases).
-const (
-	maxSlowModeSeconds = 21600
-	maxVoiceLimit      = 99
-)
 
 // updateChannelRequest is the JSON body for PATCH /admin/api/channels/{id}.
 type updateChannelRequest struct {
@@ -186,52 +118,16 @@ type updateChannelRequest struct {
 	VoiceMaxVideo int `json:"voice_max_video"`
 }
 
-// validate reports the first out-of-range numeric field, or "" when the
-// request is acceptable. Negative values are rejected rather than clamped: a
-// caller sending -1 meant something, and silently storing 0 would hide it.
-func (r updateChannelRequest) validate() string {
-	switch {
-	case strings.TrimSpace(r.Name) == "":
-		return "name is required"
-	case r.SlowMode < 0 || r.SlowMode > maxSlowModeSeconds:
-		return fmt.Sprintf("slow_mode must be between 0 and %d seconds", maxSlowModeSeconds)
-	case r.VoiceMaxUsers < 0 || r.VoiceMaxUsers > maxVoiceLimit:
-		return fmt.Sprintf("voice_max_users must be between 0 and %d", maxVoiceLimit)
-	case r.VoiceMaxVideo < 0 || r.VoiceMaxVideo > maxVoiceLimit:
-		return fmt.Sprintf("voice_max_video must be between 0 and %d", maxVoiceLimit)
-	}
-	return ""
-}
-
-// nsfwAuditSuffix names an NSFW transition in the audit detail, or returns ""
-// when the flag did not move. An age-gate flag flipping is the one part of a
-// channel edit an operator may need to answer for later, and "updated #foo"
-// alone would not record it.
-func nsfwAuditSuffix(before, after bool) string {
-	if before == after {
-		return ""
-	}
-	if after {
-		return " (marked NSFW)"
-	}
-	return " (unmarked NSFW)"
-}
-
-// patchChannelPostCommitHook, when non-nil, runs synchronously right after
-// handlePatchChannel's AdminUpdateChannel commit, before the post-commit
-// re-read and hub fan-out. It exists so tests can deterministically simulate
-// a caller cancellation (browser tab close, network blip) landing in that
-// exact window — the race OC-0158 is about — instead of relying on
-// wall-clock timing to hit it.
+// patchChannelPostCommitHook mirrors createChannelPostCommitHook for the
+// update path's post-commit window (OC-0158).
 var patchChannelPostCommitHook func()
 
-func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		existing := getAdminChannel(database, w, r)
+		existing := resolveGuildChannel(channels, w, r)
 		if existing == nil {
 			return
 		}
-		id := existing.ID
 
 		// Start from existing values so a partial body is safe.
 		req := updateChannelRequest{
@@ -250,67 +146,32 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		if msg := req.validate(); msg != "" {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
-			return
-		}
-
-		if err := database.AdminUpdateChannel(r.Context(), id, db.ChannelUpdate{
+		updated, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
 			Name:          req.Name,
 			Topic:         req.Topic,
-			Category:      strings.TrimSpace(req.Category),
+			Category:      req.Category,
 			SlowMode:      req.SlowMode,
 			Position:      req.Position,
 			Archived:      req.Archived,
 			NSFW:          req.NSFW,
 			VoiceMaxUsers: req.VoiceMaxUsers,
 			VoiceMaxVideo: req.VoiceMaxVideo,
-		}); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update channel")
+		}, patchChannelPostCommitHook)
+		if err != nil {
+			writeChannelErr(w, err)
 			return
 		}
 
-		// From here on the update has already committed. If the admin's
-		// browser goes away in this window (tab close, navigation, network
-		// blip), r.Context() cancels, and a GetChannel re-read that still
-		// used it would fail with context.Canceled — 500ing while leaving
-		// the commit (including a fresh archived=1) unbroadcast, its voice
-		// eviction and visibility fan-out skipped, and every connected
-		// client still showing the stale state until it reconnects
-		// (OC-0158). Run the rest of the handler on an uncancellable tail,
-		// matching handleDeleteChannel's delCtx (OC-0010).
-		tail := context.WithoutCancel(r.Context())
-
-		if patchChannelPostCommitHook != nil {
-			patchChannelPostCommitHook()
-		}
-
-		actor := actorFromContext(r)
-		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name, "nsfw", req.NSFW)
-		db.WriteAudit(tail, database, actor, "channel_update", "channel", id,
-			fmt.Sprintf("updated #%s%s", req.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW)))
-
-		updated, err := database.GetChannel(tail, id)
-		if err != nil || updated == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated channel")
-			return
-		}
 		if hub != nil {
 			hub.BroadcastChannelUpdate(updated)
 			// Archiving/unarchiving changes who sees the channel, not just its
 			// metadata — send targeted channel_create/channel_delete so
-			// connected clients re-sync without a reconnect.
+			// connected clients re-sync without a reconnect. Archiving also
+			// hides a voice channel the way deleting does, so live
+			// participants are evicted first, matching the delete ordering.
 			if existing.Archived != updated.Archived {
-				// Archiving hides a voice channel the same way deleting it
-				// does — nobody can see it or reach it afterward — so live
-				// participants must be evicted the same way handleDeleteChannel
-				// evicts them, or they keep their DB row, VoiceTopic
-				// subscription and LiveKit session in a room nothing shows.
-				// Order matches handleDeleteChannel: evict before the
-				// visibility change so a voice_leave lands on clients that
-				// still have the channel subscribed.
 				if !existing.Archived && updated.Archived {
-					hub.CleanupVoiceForChannel(id)
+					hub.CleanupVoiceForChannel(existing.ID)
 				}
 				hub.RefreshChannelVisibility(updated)
 			}
@@ -319,89 +180,42 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	}
 }
 
-func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		existing := getAdminChannel(database, w, r)
+		existing := resolveGuildChannel(channels, w, r)
 		if existing == nil {
 			return
 		}
-		id := existing.ID
 
-		// Mark the channel archived BEFORE evicting participants, mirroring the
-		// archive path (handlePatchChannel): CleanupVoiceForChannel snapshots
-		// voice participants ONCE, up front, so a voice_join racing this delete
-		// could otherwise read the still-live channel row, pass the archived
-		// gate (ws/voice_join.go), and insert a voice_states row after the
-		// snapshot but before AdminDeleteChannel's cascade — leaving that
-		// joiner's hub-side voice state and LiveKit session orphaned with no
-		// DB row left for any sweep to find (OC-0035). Persisting archived=1
-		// first makes voice_join's existing archived check refuse that join
-		// outright, the same way it already refuses one racing an archive.
-		if !existing.Archived {
-			if err := database.AdminUpdateChannel(r.Context(), id, db.ChannelUpdate{
-				Name:          existing.Name,
-				Topic:         existing.Topic,
-				Category:      existing.Category,
-				SlowMode:      existing.SlowMode,
-				Position:      existing.Position,
-				Archived:      true,
-				NSFW:          existing.NSFW,
-				VoiceMaxUsers: existing.VoiceMaxUsers,
-				VoiceMaxVideo: existing.VoiceMaxVideo,
-			}); err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
-				return
-			}
-		}
-
-		// Evict voice participants BEFORE deleting the row: the voice_states
-		// FK cascade wipes the rows the cleanup reads, and the stale sweeper
-		// cannot recover participants of a channel that no longer exists.
+		var evict func(int64)
 		if hub != nil {
-			hub.CleanupVoiceForChannel(id)
+			evict = hub.CleanupVoiceForChannel
 		}
-
-		// From here on the archive (and, if it ran, the voice eviction)
-		// already committed. If the admin's browser goes away in this window
-		// (tab close, navigation, network blip), r.Context() cancels, and an
-		// AdminDeleteChannel that still used it would fail with
-		// context.Canceled — 500ing while leaving the channel silently
-		// archived, unbroadcast and unaudited (OC-0010). Run the rest of the
-		// delete on an uncancellable tail, matching the repo's convention
-		// for other durable side effects (totp_handler.go, service/user.go).
-		delCtx := context.WithoutCancel(r.Context())
-		if err := database.AdminDeleteChannel(delCtx, id); err != nil {
-			// A genuine failure here (not caller cancellation, which delCtx
-			// already absorbs) still leaves the archive committed — tell
+		archivedRow, err := channels.AdminDeleteChannel(r.Context(), actorFromContext(r), existing, evict)
+		if err != nil {
+			// The service archived the channel before the delete failed — tell
 			// connected clients about the state that did change instead of
-			// leaving them stuck seeing a live channel that now 403s on
-			// every read and write.
-			if hub != nil && !existing.Archived {
-				if archived, gErr := database.GetChannel(delCtx, id); gErr == nil && archived != nil {
-					hub.BroadcastChannelUpdate(archived)
-					hub.RefreshChannelVisibility(archived)
-				}
+			// leaving them stuck on a live channel that now 403s everywhere.
+			if hub != nil && archivedRow != nil {
+				hub.BroadcastChannelUpdate(archivedRow)
+				hub.RefreshChannelVisibility(archivedRow)
 			}
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
+			writeChannelErr(w, err)
 			return
 		}
-		actor := actorFromContext(r)
-		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
-		db.WriteAudit(delCtx, database, actor, "channel_delete", "channel", id,
-			fmt.Sprintf("deleted #%s", existing.Name))
 		if hub != nil {
-			hub.BroadcastChannelDelete(id)
+			hub.BroadcastChannelDelete(existing.ID)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func handleGetAuditLog(database *db.DB) http.HandlerFunc {
+func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 
-		entries, err := database.GetAuditLog(r.Context(), limit, offset)
+		entries, err := settings.AuditLog(r.Context(), limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return

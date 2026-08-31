@@ -1754,6 +1754,44 @@ squash). The B3-2 pattern:
   (admin 16 → 15); dispositions 28/18/15 → 24/18/17 move/adapter/boundary
   (tool summary, re-derived).
 
+**Evidence — channel family part 1 of 3, 2026-08-31** — branch
+`feat/b3-8-channel-family` from `dev` `63c87df8` (family 1's squash). The
+channel family is the largest (seven `move` rows spanning admin and the
+hub's read paths), so it lands as three reviewable PRs — the same
+reviewability rationale B3-5's two-responsibility cap recorded — part 1
+here (S-03 + S-04 + admin CRUD), part 2 the override CRUD, part 3 the
+`ws` read rows:
+
+- **S-03, test-first**: one rune/normalization contract for channel
+  name/topic/category in `service.cleanChannelMeta` —
+  `cleanTextBounded` like every sidebar-rendered field, bounds counted
+  in runes (pinned with multibyte names at the service seam AND the
+  admin surface), name 100 = `MaxGroupDMNameLen` (now a checked fact,
+  `TestChannelMeta_SharesTheGroupDMNameCap`), topic 1024 (the client's
+  own input cap), category 100. The admin surface previously enforced
+  no length at all.
+- **S-04, test-first**: `ResolveGuildChannel` is the one non-DM
+  resolution policy; `TestS04_DMAndMissingChannelAnswerIdentically` was
+  written RED against the permissions path's 400 "DM channels do not
+  support permission overrides" — which confirmed exactly what the
+  channels path's 404 conceals (A-2026-08-02) — and is GREEN with both
+  resolvers delegating. The two old tests pinning that 400 are
+  re-pinned to the corrected contract.
+- **Service**: `ChannelService` gains the admin CRUD with its audit
+  rows, OC-0158 post-commit tails and the OC-0035
+  archive-before-eviction delete ordering (pinned by a callback
+  observing archived=1 mid-delete); the audit-log page read joins
+  `SettingsService.AuditLog` (settings/audit family owns it).
+- **Allowlist diff**: `admin/handlers_channels.go` `move` → type-only
+  `adapter`; `admin/handlers_channel_perms.go` keeps `move` (override
+  CRUD) with resolution via the service. 24 → 23 `move`,
+  18 → 19 `adapter`; channel `move` targets 7 → 6.
+- **Characterization**: the existing `TestCreateChannel_*` /
+  `TestPatchChannel_*` admin rows stayed green through the extraction
+  (byte-identical bodies via `%.0w`-wrapped service errors);
+  `service/channel_admin_test.go` and the `s03_`/`s04_` surface files
+  are the family's new pins.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

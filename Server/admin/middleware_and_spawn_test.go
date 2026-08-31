@@ -289,7 +289,7 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 // role_id has been set to a nonexistent value returns 401.
 func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	uid, err := database.CreateUser(context.Background(), "noroleuser", "$2a$12$x", 1)
 	if err != nil {
@@ -351,7 +351,7 @@ func TestHandleGetStats_DBError(t *testing.T) {
 // when the database query fails.
 func TestHandleListChannels_DBError(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := handleListChannels(database)
+	handler := handleListChannels(service.NewChannelService(database, service.NewPermissionService(database, nil)))
 
 	_ = database.Close()
 
@@ -402,7 +402,7 @@ func TestHandleSetupStatus_DBError(t *testing.T) {
 // when the database query fails.
 func TestHandleGetAuditLog_DBError(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := handleGetAuditLog(database)
+	handler := handleGetAuditLog(service.NewSettingsService(database))
 
 	_ = database.Close()
 

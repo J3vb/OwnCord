@@ -40,7 +40,7 @@ func wizardRunningCfg() *config.Config {
 func wizardHandler(t *testing.T, database *db.DB, cfgPath string, restarted chan string) http.Handler {
 	t.Helper()
 	t.Cleanup(admin.ResetRestartState)
-	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database),
+	return admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database),
 		admin.SetupOptions{
 			ConfigPath: cfgPath,
 			RunningCfg: wizardRunningCfg(),
