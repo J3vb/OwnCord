@@ -486,37 +486,6 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 	})
 }
 
-// bumpVisibilityWatermark ratchets visibilityChangeSeq up to the current seq,
-// never down. All three writers (RefreshChannelVisibility,
-// revokeUnreadableChannels, DMChannelOpenEvent in emit.go) must go through
-// this instead of a plain Store: a plain Store(Load(&h.seq)) lets a writer
-// that read an older h.seq — e.g. one that spent time in a per-topic DB loop
-// — finish and overwrite a concurrently stored higher watermark with its
-// stale value, silently regressing the forced-full-resync boundary mustFullResync
-// depends on being monotonic. Mirrors SeedSeq's CAS-max pattern.
-func (h *Hub) bumpVisibilityWatermark() {
-	for {
-		cur := h.visibilityChangeSeq.Load()
-		next := atomic.LoadUint64(&h.seq)
-		if next <= cur {
-			return
-		}
-		if h.visibilityChangeSeq.CompareAndSwap(cur, next) {
-			return
-		}
-	}
-}
-
-// MarkVisibilityChanged bumps the visibility watermark. It is the exported
-// entry point REST handlers (api.markDMVisibilityChanged, reached via a
-// dmVisibilityMarker type assertion) use to force the same full-resync
-// guarantee for an unsequenced, targeted DM event that the WS-side emitter of
-// the same event (emit.go DMChannelOpenEvent) already gets via
-// bumpVisibilityWatermark directly.
-func (h *Hub) MarkVisibilityChanged() {
-	h.bumpVisibilityWatermark()
-}
-
 // IsUserConnected returns true if a client with the given userID is already
 // registered in the hub. Safe to call from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {
