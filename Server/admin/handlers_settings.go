@@ -1,31 +1,31 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"strings"
 
-	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Settings Handlers ──────────────────────────────────────────────────────
+//
+// Thin adapters over service.SettingsService (B3-8 settings/audit family):
+// the whitelist, boolean normalization, require_2fa preconditions, atomic
+// apply and audit rows all live in the service.
 
-func handleGetSettings(database *db.DB) http.HandlerFunc {
+func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		settings, err := database.GetAllSettings(r.Context())
+		all, err := settings.List(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get settings")
 			return
 		}
-		writeJSON(w, http.StatusOK, settings)
+		writeJSON(w, http.StatusOK, all)
 	}
 }
 
-func handlePatchSettings(database *db.DB) http.HandlerFunc {
+func handlePatchSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var updates map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
@@ -33,144 +33,15 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate all keys against the whitelist before writing anything so
-		// the operation is atomic from the caller's perspective.
-		for key := range updates {
-			if _, ok := allowedSettingKeys[key]; !ok {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
-					fmt.Sprintf("unknown setting key: %q", key))
-				return
-			}
-		}
-
-		normalizedUpdates, err := normalizeSettingUpdates(updates)
-		if err != nil {
+		all, err := settings.Patch(r.Context(), actorFromContext(r), updates)
+		if errors.Is(err, service.ErrBadRequest) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
-
-		if err := validateRequire2FAUpdate(r.Context(), database, normalizedUpdates); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-			return
-		}
-
-		actor := actorFromContext(r)
-
-		// Apply all settings atomically so a mid-loop failure doesn't leave
-		// partial updates.
-		tx, err := database.BeginTx(r.Context(), nil)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start transaction")
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update settings")
 			return
 		}
-		for key, value := range normalizedUpdates {
-			if _, txErr := tx.ExecContext(r.Context(),
-				`INSERT INTO settings (key, value) VALUES (?, ?)
-				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-				key, value,
-			); txErr != nil {
-				_ = tx.Rollback()
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update setting: "+key)
-				return
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to commit settings")
-			return
-		}
-		for key := range normalizedUpdates {
-			slog.Info("setting changed", "actor_id", actor, "key", key)
-			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "setting_change", "setting", 0,
-				fmt.Sprintf("%s updated", key))
-		}
-
-		settings, err := database.GetAllSettings(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch settings")
-			return
-		}
-		writeJSON(w, http.StatusOK, settings)
-	}
-}
-
-func normalizeSettingUpdates(updates map[string]string) (map[string]string, error) {
-	normalized := make(map[string]string, len(updates))
-	for key, value := range updates {
-		normalized[key] = value
-		switch key {
-		case "require_2fa", "registration_open":
-			parsed, err := parseBooleanSettingValue(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", key, err)
-			}
-			if parsed {
-				normalized[key] = "1"
-			} else {
-				normalized[key] = "0"
-			}
-		}
-	}
-	return normalized, nil
-}
-
-func validateRequire2FAUpdate(ctx context.Context, database *db.DB, updates map[string]string) error {
-	targetRequire2FA, err := targetBoolSetting(ctx, database, updates, "require_2fa")
-	if err != nil {
-		return err
-	}
-	if !targetRequire2FA {
-		return nil
-	}
-
-	registrationOpen, err := targetBoolSetting(ctx, database, updates, "registration_open")
-	if err != nil {
-		return err
-	}
-	if registrationOpen {
-		return fmt.Errorf("require_2fa cannot be enabled while registration is open")
-	}
-
-	// The enrollment count only matters when this request is actually turning
-	// require_2fa on. Without this guard, an unrelated PATCH (motd, server
-	// name, backup settings, ...) inherits require_2fa's *current* value via
-	// targetBoolSetting's DB fallback and gets rejected by a precondition
-	// about a value it never touches — wedging the whole settings page once
-	// any non-banned user without TOTP exists.
-	if _, changingRequire2FA := updates["require_2fa"]; !changingRequire2FA {
-		return nil
-	}
-
-	count, err := database.CountUsersWithoutTOTP(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to validate 2FA enrollment")
-	}
-	if count > 0 {
-		return fmt.Errorf("require_2fa cannot be enabled until all users have 2FA enabled")
-	}
-	return nil
-}
-
-func targetBoolSetting(ctx context.Context, database *db.DB, updates map[string]string, key string) (bool, error) {
-	if value, ok := updates[key]; ok {
-		return parseBooleanSettingValue(value)
-	}
-	value, err := database.GetSetting(ctx, key)
-	if errors.Is(err, db.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return parseBooleanSettingValue(value)
-}
-
-func parseBooleanSettingValue(value string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true":
-		return true, nil
-	case "0", "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean value %q", value)
+		writeJSON(w, http.StatusOK, all)
 	}
 }

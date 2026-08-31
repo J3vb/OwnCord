@@ -131,7 +131,7 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 	t.Setenv("OWNCORD_CONTAINER", "0")
 	database := openAdminTestDB(t)
 	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	cases := []struct {
@@ -165,7 +165,7 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 // POST /backups/{name}/restore refuses the same way — before any disk I/O.
 func TestRestoreBackup_Conflict409(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	admin.ForceRestartState(false) // restart pending
@@ -190,7 +190,7 @@ func TestRestoreBackup_Conflict409(t *testing.T) {
 func TestRestore_CloseFailure_StillMarksPendingAndRequestsRestart(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")

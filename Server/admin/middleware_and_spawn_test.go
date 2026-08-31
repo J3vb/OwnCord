@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/service"
 	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -287,7 +289,7 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 // role_id has been set to a nonexistent value returns 401.
 func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil)
 
 	uid, err := database.CreateUser(context.Background(), "noroleuser", "$2a$12$x", 1)
 	if err != nil {
@@ -366,7 +368,7 @@ func TestHandleListChannels_DBError(t *testing.T) {
 // when the database query fails.
 func TestHandleGetSettings_DBError(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := handleGetSettings(database)
+	handler := handleGetSettings(service.NewSettingsService(database))
 
 	_ = database.Close()
 
