@@ -332,7 +332,14 @@ the structural review.
   reviewable and active path references are complete.
 - Generated sources and analysis artifacts have explicit reproducible owners.
 - The protocol schema generates and verifies both consumers from the root.
-- Every dev integration commit has exact-SHA CI.
+- Every dev integration commit carries full-matrix evidence: the required
+  matrix runs on the pull-request head, and `strict: true` makes the squash
+  commit's tree the tree that matrix tested.
+  `scripts/verify-integration-tree.sh` proves it per squash SHA;
+  `verify-gate-evidence.mjs --selftest` pins the strict flag. _(Reworded
+  2026-08-31, owner decision — previously "exact-SHA CI", which dev pushes
+  never ran; PR-head evidence with enforced tree identity is the accepted
+  form.)_
 - Issues, Discussions, pull requests, and private security reporting match the
   approved community model.
 - Full B0 evidence remains green after the migration.
@@ -344,7 +351,8 @@ the structural review.
 - root-command output and direct server-command parity;
 - docs link checker and repository lint results;
 - generated-source drift check;
-- exact-SHA workflow and protected-release evidence.
+- identical-tree integration evidence (see the exit gate) and
+  protected-release evidence.
 
 ### Safe parallelism
 
@@ -408,7 +416,9 @@ service expansion. Security details remain in private review.
 
 - Clients from epochs N, N-1, and N-2 pass the server compatibility matrix;
   N-3 fails safely and actionably. The server-bundled browser client matches
-  the server epoch rather than becoming an independent generation.
+  the server epoch rather than becoming an independent generation. _(HP-2
+  accepted this condition at the slim one-epoch scope — owner decision
+  2026-08-29, formalized 2026-08-31 in BPR-032 as amended.)_
 - Protocol and update metadata changes are generated, documented, and
   downgrade-tested.
 - Effective permission and resource-existence sibling cases have parity tests.
@@ -757,10 +767,11 @@ service.
 15. _(added 2026-08-28)_ R-09: the exact-SHA gate already runs at tag time
     (the `gate-evidence` job in `release.yml`, B1-7); `environment: release`
     lands in B2-0. B6 rehearses one tag against both before HP-6.
-16. _(added 2026-08-28)_ Add the browser-hosting flag to
-    `GET /api/v1/server-info` (defined in B2-2) alongside workstream 6's
-    default-off hosting switch, so one endpoint answers "what is this
-    server, and is the browser client on".
+16. _(added 2026-08-28; amended 2026-08-31)_ Add `GET /api/v1/server-info`
+    with the browser-hosting flag alongside workstream 6's default-off
+    hosting switch, so one endpoint answers "what is this server, and is
+    the browser client on". B2-2's slim decision (2026-08-29) dropped the
+    endpoint from B2 — this workstream introduces it, it does not extend it.
 
 Public IP certificates are feasible only for eligible stable public addresses
 and currently require short-lived certificate handling. Private or reserved IP
@@ -852,9 +863,10 @@ without regressing the current application.
 13. _(added 2026-08-28)_ Delete the two Rust commands nothing invokes,
     `probe_credential_store` and `ptt_get_key`
     ([platform-contracts.md](../architecture/platform-contracts.md)).
-14. _(added 2026-08-28)_ Workstream 8 consumes B2's
-    `protocol_epoch_unsupported` frame and `GET /api/v1/server-info`; it
-    defines no new contract.
+14. _(added 2026-08-28; amended 2026-08-31)_ Workstream 8 consumes B2's
+    `protocol_epoch_unsupported` frame and the `GET /api/v1/server-info`
+    endpoint B6 workstream 16 adds (B2-2 shipped without it); it defines no
+    new contract.
 15. _(added 2026-08-28)_ Re-run Stryker (C-16) before workstream 6 decomposes
     modules, so the mutation baseline is honest.
 16. _(added 2026-08-29)_ Workstreams 1–3, 6 and 7 execute from
@@ -948,8 +960,9 @@ behavior.
     LAN/offline path uses publicly trusted or local-CA certificates only —
     never a TOFU shim ([platform-contracts.md](../architecture/platform-contracts.md),
     hard case one).
-12. _(added 2026-08-28)_ The browser client reads `GET /api/v1/server-info`
-    (B2-2, flag from B6) for the hosting flag and epoch; no separate
+12. _(added 2026-08-28; amended 2026-08-31)_ The browser client reads
+    `GET /api/v1/server-info` (endpoint and flag from B6 workstream 16 —
+    B2-2 shipped without it) for the hosting flag and epoch; no separate
     discovery endpoint.
 
 Service workers, camera/microphone, Web Push, and screen capture require secure
@@ -1108,7 +1121,10 @@ re-verifies every BPR.
 4. Test in-place upgrade from representative 1.2.0-alpha data, attachments,
    configuration, credentials, and client settings, plus rollback within the
    declared boundary.
-5. Re-run protocol epochs N, N-1, and N-2 plus actionable N-3 rejection.
+5. Re-run the accepted protocol epochs plus actionable out-of-window
+   rejection — the slim scope of the 2026-08-29 B2-2 decision (BPR-032 as
+   amended 2026-08-31); the matrix widens only if a later epoch bump
+   reintroduces a window.
 6. Re-run the full Windows x64/ARM64 and Linux x64/ARM64 desktop matrix, server
    artifacts, multi-architecture Docker, browser engines, Android
    phone/tablet, and iPhone/iPad matrix.
@@ -1130,6 +1146,12 @@ re-verifies every BPR.
     written. Exempt `main` from `cancel-in-progress` before the count starts.
 14. _(added 2026-08-28)_ The 14-day soak runs on named hosts: the owner's LAN
     self-hosted instance and one Docker instance.
+15. _(added 2026-08-31)_ Record BPR-051's non-developer comprehension read on
+    the R-08 release scorecard: a non-developer reads `docs/trust-model.md`
+    §"The short answer" and their answer to "who can read my messages?" fills
+    the HP-2 Q3 blanks (and the B2-7 evidence block — both must agree).
+    Owner decision 2026-08-31: tracked as a release-gate row so a missing
+    reader blocks the beta, not B3–B9 work.
 
 ### Hold point HP-10 — Human go/no-go
 
