@@ -58,20 +58,22 @@ func (s *SettingsService) Setting(ctx context.Context, key string) (string, erro
 // written unless every key passes.
 func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[string]string) (map[string]string, error) {
 	// Validate all keys against the whitelist before writing anything so the
-	// operation is atomic from the caller's perspective.
+	// operation is atomic from the caller's perspective. The %.0w verb wraps
+	// ErrBadRequest without adding its text: the admin surface's response
+	// bodies are pinned to exactly these messages, prefix-free.
 	for key := range updates {
 		if _, ok := allowedSettingKeys[key]; !ok {
-			return nil, fmt.Errorf("%w: unknown setting key: %q", ErrBadRequest, key)
+			return nil, fmt.Errorf("unknown setting key: %q%.0w", key, ErrBadRequest)
 		}
 	}
 
 	normalized, err := normalizeSettingUpdates(updates)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, err.Error())
+		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
 	}
 
 	if err := s.validateRequire2FAUpdate(ctx, normalized); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, err.Error())
+		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
 	}
 
 	if err := s.st.ApplySettings(ctx, normalized); err != nil {
