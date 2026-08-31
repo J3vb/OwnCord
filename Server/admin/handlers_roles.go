@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -88,7 +87,7 @@ func handleListRoles(roles *service.RoleService) http.HandlerFunc {
 	}
 }
 
-func handleCreateRole(database *db.DB, hub HubBroadcaster, roles *service.RoleService) http.HandlerFunc {
+func handleCreateRole(hub HubBroadcaster, roles *service.RoleService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if roles == nil {
 			roleServiceUnavailable(w)
@@ -106,12 +105,12 @@ func handleCreateRole(database *db.DB, hub HubBroadcaster, roles *service.RoleSe
 		}
 		// A brand-new role has no members, so nothing's cached mask changed and
 		// no channel changed visibility — only the role list itself moved.
-		broadcastRoles(r, database, hub)
+		broadcastRoles(r, roles, hub)
 		writeJSON(w, http.StatusCreated, role)
 	}
 }
 
-func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, roles *service.RoleService) http.HandlerFunc {
+func handlePatchRole(hub HubBroadcaster, permInvalidator PermissionInvalidator, roles *service.RoleService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if roles == nil {
 			roleServiceUnavailable(w)
@@ -134,31 +133,25 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		// a missing one is a stale grant).
 		affected, affectedOK := roles.AffectedUserIDs(r.Context(), id)
 
-		// The pre-update name is read the same way, so a rename can be
-		// detected below even though UpdateRole itself only reports whether
-		// permissions changed.
-		before, beforeErr := database.GetRoleByID(r.Context(), id)
-
-		role, permsChanged, err := roles.UpdateRole(r.Context(), actorFromContext(r), id, req.toInput())
+		role, res, err := roles.UpdateRole(r.Context(), actorFromContext(r), id, req.toInput())
 		if err != nil {
 			writeRoleErr(w, err)
 			return
 		}
 
-		// Clients key a member's role by NAME, not id (member_update /
-		// ready carry a role name string). A rename alone leaves every
-		// member of the role holding a name that no longer resolves against
-		// the post-rename role list — they lose their role color, member-list
-		// group and permission-gated affordances until they reconnect. A
-		// member_update per affected user re-keys them, exactly like a role
-		// delete's fallback move already does.
-		if beforeErr == nil && before != nil && before.Name != role.Name && affectedOK && hub != nil {
+		// A rename re-keys every member of the role: clients hold a role name
+		// string, not an id, so without a member_update each they lose their
+		// role color, member-list group and permission-gated affordances until
+		// they reconnect — exactly like a role delete's fallback move already
+		// does. RoleUpdateResult reports the rename from the pre-update row the
+		// service already read, so this handler re-reads nothing.
+		if res.Renamed && affectedOK && hub != nil {
 			for _, uid := range affected {
 				hub.BroadcastMemberUpdate(uid, role.Name)
 			}
 		}
 
-		if permsChanged {
+		if res.PermsChanged {
 			if affectedOK {
 				invalidateUsers(permInvalidator, affected)
 			} else if permInvalidator != nil {
@@ -173,12 +166,12 @@ func handlePatchRole(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 				hub.RefreshAllChannelVisibility()
 			}
 		}
-		broadcastRoles(r, database, hub)
+		broadcastRoles(r, roles, hub)
 		writeJSON(w, http.StatusOK, role)
 	}
 }
 
-func handleDeleteRole(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, roles *service.RoleService) http.HandlerFunc {
+func handleDeleteRole(hub HubBroadcaster, permInvalidator PermissionInvalidator, roles *service.RoleService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if roles == nil {
 			roleServiceUnavailable(w)
@@ -208,7 +201,7 @@ func handleDeleteRole(database *db.DB, hub HubBroadcaster, permInvalidator Permi
 			}
 			hub.RefreshAllChannelVisibility()
 		}
-		broadcastRoles(r, database, hub)
+		broadcastRoles(r, roles, hub)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -262,11 +255,11 @@ func invalidateUsers(permInvalidator PermissionInvalidator, userIDs []int64) {
 // fired) -- context.WithoutCancel detaches the re-read from that, matching
 // broadcastEmojiSet in api/emoji_handler.go and broadcastDMOpen in
 // api/dm_handler.go.
-func broadcastRoles(r *http.Request, database *db.DB, hub HubBroadcaster) {
-	if hub == nil || database == nil {
+func broadcastRoles(r *http.Request, roles *service.RoleService, hub HubBroadcaster) {
+	if hub == nil || roles == nil {
 		return
 	}
-	list, err := database.ListRoles(context.WithoutCancel(r.Context()))
+	list, err := roles.AllRoles(context.WithoutCancel(r.Context()))
 	if err != nil {
 		// The mutation already committed; clients converge on their next
 		// reconnect rather than seeing a failed request.

@@ -8487,13 +8487,18 @@
       "why": "ReorderRoles normalizes the manageable roles to positions N, N-1, … 1 with no gaps and never 0, while CreateRole's default placement (role.go:249-254) only accepts a strictly-positive unoccupied slot below the actor. After a single reorder there is no such slot for any actor below the owner, so role creation fails permanently — and the error it returns tells the admin to \"reorder existing roles first\", which re-compacts to the same dense block and cannot help.",
       "repro": "Default install: Owner 100, Admin 80, Moderator 60, Member 40. (1) As the Owner, click one reorder arrow on the admin Roles page (Server/admin/static/index.html:1291 moveRole → PATCH /roles/reorder). ReorderRoles writes Admin=3, Moderator=2, Member=1; Owner stays at 100. (2) Sign in as the Admin (now position 3, holds MANAGE_ROLES) and POST /roles with no `position` field. taken={100,3,2,1}; the loop at role.go:249 steps 2 → 1 → 0 and the call returns ErrBadRequest \"no free position below your rank — reorder existing roles first\". (3) Reorder as the Admin: its one manageable role goes back to position 1, so step 2 fails identically — forever. The Moderator at position 2 is in the same state. Through the panel it is worse: the Create Role modal prefills Math.max(0, myPosition()-1) (index.html:1310), which post-compaction is always an occupied slot, so the explicit-position path returns \"position N is already used by another role\" and the omitted-position path returns the message above; UpdateRole's position change (role.go:321-331) is dead for the same reason.",
       "evidence": "role.go:457-460\n\tpositions := make(map[int64]int, len(orderedIDs))\n\tfor i, id := range orderedIDs {\n\t\tpositions[id] = len(orderedIDs) - i\n\t}\n\nrole.go:248-254\n\t} else {\n\t\tfor position > 0 && taken[position] {\n\t\t\tposition--\n\t\t}\n\t\tif position <= 0 {\n\t\t\treturn nil, fmt.Errorf(\"%w: no free position below your rank — reorder existing roles first\", ErrBadRequest)\n\t\t}\n\nServer/service/role_test.go:505 TestReorderRoles_NormalizesPositions already locks the compaction (Admin→4, Helper→3, Moderator→2, Member→1); no test covers CreateRole after a reorder.",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-29",
       "hunt": "general-2026-08-29",
       "lens": "explore-3",
       "suggestedFix": "Preserve gaps in the single shared normalizer instead of guarding each caller: in ReorderRoles (Server/service/role.go:457-460) space the slots under the actor, e.g. stride := actor.Position / (len(orderedIDs) + 1) (>=1) and positions[id] = (len(orderedIDs) - i) * stride. That keeps every position unique, strictly below actor.Position, and in the same order, while leaving free slots for CreateRole's default placement. TestReorderRoles_NormalizesPositions must be updated to assert ordering/uniqueness/below-actor rather than the literal 4,3,2,1 values.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fix": {
+        "commit": "3d165e7",
+        "test": "Server/service/role_reorder_spacing_test.go",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0375",

@@ -270,14 +270,14 @@ func TestUpdateRole_PartialBodyLeavesOtherFields(t *testing.T) {
 		t.Fatalf("CreateRole: %v", err)
 	}
 
-	updated, permsChanged, err := svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
+	updated, res, err := svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
 		Name: new("Support Team"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
-	if permsChanged {
-		t.Error("permsChanged must be false when the body omits permissions")
+	if res.PermsChanged {
+		t.Error("PermsChanged must be false when the body omits permissions")
 	}
 	if updated.Name != "Support Team" {
 		t.Errorf("name = %q", updated.Name)
@@ -297,26 +297,91 @@ func TestUpdateRole_ReportsPermissionChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
-	_, permsChanged, err := svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
+	_, res, err := svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
 		Permissions: new(permissions.ReadMessages),
 	})
 	if err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
-	if !permsChanged {
-		t.Error("permsChanged should be true when the mask moves")
+	if !res.PermsChanged {
+		t.Error("PermsChanged should be true when the mask moves")
 	}
 	// Re-applying the same mask is not a change.
-	_, permsChanged, err = svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
+	_, res, err = svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
 		Permissions: new(permissions.ReadMessages),
 	})
 	if err != nil {
 		t.Fatalf("UpdateRole idempotent: %v", err)
 	}
-	if permsChanged {
-		t.Error("permsChanged should be false when the mask is unchanged")
+	if res.PermsChanged {
+		t.Error("PermsChanged should be false when the mask is unchanged")
 	}
 	assertAudit(t, database, "role_update")
+}
+
+// The rename flag is what tells the admin handler to re-key every member of the
+// role (clients hold a role NAME, not an id). It comes from the pre-update row
+// this service already reads, so the handler no longer re-reads it itself.
+func TestUpdateRole_ReportsRename(t *testing.T) {
+	svc, _ := newRoleCRUDService(t)
+	ctx := context.Background()
+
+	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	_, res, err := svc.UpdateRole(ctx, 1, created.ID, RoleInput{Name: new("Robots")})
+	if err != nil {
+		t.Fatalf("UpdateRole rename: %v", err)
+	}
+	if !res.Renamed {
+		t.Error("Renamed should be true when the name moves")
+	}
+
+	// Re-stating the same name is not a rename, and neither is a change to
+	// something else entirely.
+	_, res, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Name: new("Robots")})
+	if err != nil {
+		t.Fatalf("UpdateRole idempotent rename: %v", err)
+	}
+	if res.Renamed {
+		t.Error("Renamed should be false when the name is unchanged")
+	}
+	_, res, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Color: new("#101010")})
+	if err != nil {
+		t.Fatalf("UpdateRole color: %v", err)
+	}
+	if res.Renamed || res.PermsChanged {
+		t.Errorf("a color-only change reported %+v, want neither flag", res)
+	}
+}
+
+// AllRoles is the unscoped list the roles_update broadcast ships — every role,
+// no actor filtering, no member counts.
+func TestAllRoles_IsUnscopedAndOrdered(t *testing.T) {
+	svc, database := newRoleCRUDService(t)
+	ctx := context.Background()
+
+	roles, err := svc.AllRoles(ctx)
+	if err != nil {
+		t.Fatalf("AllRoles: %v", err)
+	}
+	stored, err := database.ListRoles(ctx)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	if len(roles) != len(stored) {
+		t.Fatalf("AllRoles returned %d roles, want every one of the %d stored", len(roles), len(stored))
+	}
+	// Highest position first, the order the ready payload and the broadcast
+	// both expect.
+	for i := 1; i < len(roles); i++ {
+		if roles[i-1].Position < roles[i].Position {
+			t.Errorf("roles are not ordered by descending position: %d before %d",
+				roles[i-1].Position, roles[i].Position)
+		}
+	}
 }
 
 func TestUpdateRole_HierarchyAndGrantRules(t *testing.T) {
@@ -520,12 +585,17 @@ func TestReorderRoles_NormalizesPositions(t *testing.T) {
 		t.Fatalf("ReorderRoles: %v", err)
 	}
 
+	// Spread, not compacted: the four roles take the largest stride that still
+	// fits them all below the owner's 100, which for four roles is 20 — the
+	// shipped default spacing. This used to be a gapless 4/3/2/1 block, which
+	// left no free slot for any manager below the owner to create a role in
+	// (OC-0374); role_reorder_spacing_test.go pins that consequence directly.
 	want := map[int64]int{
 		permissions.OwnerRoleID:     100, // untouched, still above everything
-		permissions.AdminRoleID:     4,
-		extra.ID:                    3,
-		permissions.ModeratorRoleID: 2,
-		permissions.MemberRoleID:    1,
+		permissions.AdminRoleID:     80,
+		extra.ID:                    60,
+		permissions.ModeratorRoleID: 40,
+		permissions.MemberRoleID:    20,
 	}
 	for _, r := range updated {
 		if got := want[r.ID]; r.Position != got {
