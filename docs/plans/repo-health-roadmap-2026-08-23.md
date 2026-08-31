@@ -336,10 +336,18 @@ the structural review.
   matrix runs on the pull-request head, and `strict: true` makes the squash
   commit's tree the tree that matrix tested.
   `scripts/verify-integration-tree.sh` proves it per squash SHA;
-  `verify-gate-evidence.mjs --selftest` pins the strict flag. _(Reworded
+  `verify-gate-evidence.mjs --selftest` pins the strict flag in the recorded
+  configuration (`b0-dev-branch-protection.sh`, the apply artifact). GitHub's
+  live setting is admin-scoped and unreadable from CI, so nothing here
+  detects a flipped live flag as such: what the milestone tree-identity run
+  detects is any stale merge such a flip has let land — after the fact, and
+  only if one lands. Closing that window is an owner action, not a check:
+  the owner re-runs `b0-dev-branch-protection.sh` at each hold point, which
+  reasserts the recorded configuration over any live drift. _(Reworded
   2026-08-31, owner decision — previously "exact-SHA CI", which dev pushes
   never ran; PR-head evidence with enforced tree identity is the accepted
-  form.)_
+  form. Precision and the reapply step added the same day, from Codex's P1
+  on the follow-up PR.)_
 - Issues, Discussions, pull requests, and private security reporting match the
   approved community model.
 - Full B0 evidence remains green after the migration.
