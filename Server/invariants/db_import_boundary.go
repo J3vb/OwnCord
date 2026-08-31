@@ -95,6 +95,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_broadcast.go":    {"move", "channel", "visibility refresh reads channels, roles, users"},
 	"ws/hub_sweep.go":        {"move", "voice", "stale-voice sweep reads and leaves"},
 	"ws/messages.go":         {"adapter", "", "wire types + pure status helpers"},
+	"ws/replay.go":           {"move", "connection", "reconnect replay selection and delivery; serve.go's row split with its code in B3-5"},
 	"ws/serve.go":            {"move", "connection", "connect/disconnect lifecycle; B3-5 splits it by family first"},
 	"ws/serve_auth.go":       {"move", "auth", "handshake auth: session, user and role lookups, connect audit, failed-handshake teardown"},
 	"ws/serve_pumps.go":      {"move", "user", "MarkUserDisconnected on pump exit"},

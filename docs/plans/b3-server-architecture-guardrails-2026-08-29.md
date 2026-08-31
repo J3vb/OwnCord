@@ -830,6 +830,43 @@ rename and the purity proof is the normalised line-diff per move:
   half of each pair was empty (no identifier changed), so each move is one
   commit.
 
+**Evidence — split PR 2 of the series, 2026-08-31** — branch
+`feat/b3-5-ws-split-2` from `dev` `1d1804ce` (split PR 1's squash).
+Responsibilities 3 and 4 (replay selection and delivery, registry and
+supersession); both destinations are new files, so the purity residue is
+each file's scaffolding plus any import the source keeps:
+
+- **Move 3** — `handleReconnect`, `reconnectPrecheck`,
+  `reconnectSelectReplay`, `reconnectVetColdTail`, `reconnectRegister`,
+  `reconnectWriteReplay`, `liveVoiceEventsSince`, and the replay-only
+  `maxColdReplay` const (cut from `serve.go`'s shared const block) →
+  new `replay.go` (474 lines out, 486 in). Residue: scaffolding
+  (`package`/`import (`/`const (` openers) plus duplicates of the four
+  imports `serve.go` retains (`context`, `log/slog`, `db`, `websocket`);
+  `sync/atomic` and `telemetry` moved outright. Gate: `-tags deadlock
+-count=10 ./ws/` ok 629.3 s, `-race` ok 202.2 s.
+- **Move 4** — `Register`, `Unregister`, `registerNow`, `unregisterNow`,
+  `shouldMarkOffline` → new `hub_registry.go` (250 lines out, 253 in).
+  Residue: the package line and a `log/slog` import. `clientEvent` stays
+  in `hub.go` — `Run`'s dispatch loop owns the channel. Gate: recorded in
+  the PR's test plan.
+- **Deviation from the plan's letter**: the plan named `registry.go` as the
+  destination, but that file holds the message-type `HandlerRegistry` — a
+  different registry; growing it would conflate the two, so the connection
+  registry gets its own `hub_registry.go`.
+- **Inventory**: `replay.go` gains a `DBImportAllow` row (`move`,
+  `connection`) — a split of `serve.go`'s row, type-only (the family's
+  actual calls stayed with the shared helpers in `serve.go`); the registry
+  family makes no `db` use, so `hub_registry.go` needs no row. The
+  boundaries doc's ratchet sentence now says it is the `db` surface, not
+  the row count, that only shrinks (26 → 27 `move` rows with zero new
+  calls).
+- **Sizes**: `serve.go` 230 (exit target < 500 met), `replay.go` 486,
+  `hub.go` 866 → 616 (exit target < 400 still open — the settings cache,
+  lifecycle and stats surfaces remain for later PRs), `hub_registry.go`
+  253, `hub_broadcast.go` 1032 (untouched; visibility and backpressure are
+  the next responsibilities).
+
 ## B3-6 — Permanent guardrails
 
 Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;
