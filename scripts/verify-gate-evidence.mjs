@@ -36,6 +36,25 @@ export function requiredContexts(scriptSrc) {
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
 
+// The identical-tree evidence model (G-03 as amended 2026-08-31) leans on
+// required_status_checks.strict: with strict off, a PR that is behind dev can
+// be squash-merged into a tree no CI run ever saw, and the PR-head evidence
+// this gate trusts stops describing what actually landed. strict: true is what
+// makes "the required matrix ran on the merged tree" a construction rather
+// than a habit — scripts/verify-integration-tree.sh spot-proves it per squash
+// SHA — so losing the flag must fail on a pull request, not in a later audit.
+export function strictUpToDate(scriptSrc) {
+  const block = scriptSrc.match(/"required_status_checks"\s*:\s*\{([\s\S]*?)\}/);
+  if (!block) {
+    throw new Error(`no "required_status_checks" object found in ${PROTECTION_SCRIPT}`);
+  }
+  const strict = block[1].match(/"strict"\s*:\s*(true|false)/);
+  if (!strict) {
+    throw new Error(`no "strict" key found under required_status_checks in ${PROTECTION_SCRIPT}`);
+  }
+  return strict[1] === "true";
+}
+
 // checkRuns is the API's check_runs array, already collected across pages.
 // Returns the reasons this commit is not releasable; empty means it is.
 export function evaluate(required, checkRuns) {
@@ -137,6 +156,18 @@ function selftest() {
   assert(
     real.includes("Server Build & Test (ubuntu-latest)"),
     "an ampersand name survives parsing",
+  );
+  assert(
+    strictUpToDate(readFileSync(join(ROOT, PROTECTION_SCRIPT), "utf8")),
+    "strict: true is pinned — identical-tree integration evidence relies on it",
+  );
+  assert(
+    strictUpToDate('"required_status_checks": { "strict": true, "contexts": ["A"] }'),
+    "strict true parses",
+  );
+  assert(
+    !strictUpToDate('"required_status_checks": { "strict": false, "contexts": ["A"] }'),
+    "strict false is detected, not glossed as true",
   );
 
   const req = ["A", "B"];
