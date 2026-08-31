@@ -731,6 +731,48 @@ has one call site to change.
 Exit: no required collaborator can be omitted after construction; the
 `-tags deadlock` pass still green. One PR.
 
+**Evidence, 2026-08-31** — branch `feat/b3-4-hub-options` from `dev`
+`e524f28b`. `ws.NewHub(opts HubOptions) (*Hub, error)`; the setter table's
+dispositions, decided by what each setter's own implementation said rather
+than by the plan's guesses:
+
+- **Options, setters deleted** — the four wired-before-`Run` knobs, every
+  one already guarded by `rejectIfRunning` (construction-phase wiring
+  pretending to be mutable state): `SetLiveKit`, `SetLiveKitProcess`,
+  `SetPluginRegistry`, `ConfigureReplay`. `rejectIfRunning` itself died
+  with them — no half-state remains to guard. The plan left
+  `SetLiveKitProcess` "depends on whether the supervised process can
+  restart": it cannot — the restart path relaunches the whole app
+  (`internal/app/restart.go`), nothing re-sets a process on a live hub —
+  so it is an option, validated: a process without a client is refused
+  (`TestHub_LiveKitProcessRequiresClient`).
+- **Setters kept, each with its why in the doc comment** —
+  `SetEventPersister` / `SetEventStore` / `SetPluginEventSink` are atomic
+  hot-swaps that `internal/app` wires one lifecycle stage after `Run`
+  starts (the persister cannot exist before the hub; the sink consumes the
+  built hub's broadcaster), and `SetPendingVoiceModFlags` is per-user
+  runtime state.
+- **Required and validated**: `DB` and `Limiter` (`Services` stays
+  optional — nil is the degraded fixture half the `ws` suite builds, and
+  forcing a real service layer would change which handler paths the frozen
+  tests take). RED history: before this change
+  `ws.NewHub(nil, nil, nil)` succeeded — `api`'s LiveKit-proxy tests built
+  exactly that hub — and the first missing-collaborator failure was a
+  later panic. `TestNewHub_RequiredCollaborators` pins the refusals;
+  the api fixture is now `newBareHub`, which must supply a real database.
+- **Single production call site**: `internal/app.StartRuntime` builds the
+  LiveKit client/process first (`buildVoice`), passes everything through
+  `HubOptions`, and starts the supervised process only once the hub holds
+  it (OC-0019 ordering preserved); construction failure is now a
+  `startHub` error instead of a later panic. `cmd/gendocs` follows the
+  same shape.
+- **Test migration**: `newTestHub` / `newTestHubDeps` / `newTestHubWith`
+  (`ws/testhub_internal_test.go`, `ws/testhub_ext_test.go`) keep the
+  pre-B3-4 call shape at ~76 sites across both `ws` package namespaces;
+  the eighteen former setter call sites construct with options.
+- Pre-squash SHAs recorded at merge time in the PR (squash hides
+  structure); gate results in the PR's test plan.
+
 ## B3-5 — `ws` in-package split (S-08)
 
 Roadmap workstream 9; supplement Phase 3 item 3. After B3-3/B3-4.

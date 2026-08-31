@@ -68,7 +68,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 

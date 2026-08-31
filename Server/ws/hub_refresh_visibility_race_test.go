@@ -44,7 +44,7 @@ func TestRefreshChannelVisibility_ReconnectDuringFanOutActsOnLiveClient(t *testi
 
 	// Bare hub (svc=nil): h.perms is nil, so RefreshChannelVisibility takes the
 	// GetUserByID+GetRoleByID branch this test targets.
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {

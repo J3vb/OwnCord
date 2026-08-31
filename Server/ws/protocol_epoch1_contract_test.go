@@ -357,7 +357,6 @@ func newEpochRig(t *testing.T, journey string) *epochRig {
 	}
 
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, service.New(database, limiter))
 
 	// A LiveKit client so voice_join clears the "voice not configured" guard.
 	// The join token is minted locally; no LiveKit process is contacted.
@@ -369,7 +368,10 @@ func newEpochRig(t *testing.T, journey string) *epochRig {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newTestHubWith(t, ws.HubOptions{
+		DB: database, Limiter: limiter,
+		Services: service.New(database, limiter), LiveKit: lk,
+	})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

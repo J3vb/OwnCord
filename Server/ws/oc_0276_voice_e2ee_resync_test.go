@@ -28,7 +28,7 @@ import (
 
 func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	database := newTeardownTestDB(t)
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	const (
 		chanID = int64(500)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"log/slog"
 	"net/url"
 
@@ -13,16 +14,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// StartRuntime builds the collaborators the hub and the router share, applies
-// every pre-Run hub setter, and starts the hub's dispatch goroutine.
+// StartRuntime builds the collaborators the hub and the router share,
+// constructs the hub with everything it must hold before Run (B3-4:
+// HubOptions replaced the pre-Run setters), and starts the dispatch
+// goroutine.
 //
-// Before B3-3 this lived inside api.NewRouter (the ws.NewHub call at
-// router.go:106 and the plugin and LiveKit setters at :325-360), while
-// main.go set the event persister and the event store after NewRouter
-// returned — two owners of one hub, with nothing checking that the required
-// collaborators were present before Run started. There is one owner now, and
-// one place B3-4 has to change when the required setters become validated
-// constructor options.
+// Before B3-3 this lived inside api.NewRouter, while main.go set the event
+// persister and store after NewRouter returned — two owners of one hub, with
+// nothing checking that the required collaborators were present before Run
+// started. B3-3 collapsed the owners to one; B3-4 moved the pre-Run wiring
+// into ws.NewHub itself, which now refuses to construct without its required
+// collaborators, so an incomplete hub is a startup error here rather than a
+// later panic.
 //
 // The limiter and the service layer are built here rather than in the router
 // because the hub needs the SAME instances: the limiter persists auth
@@ -32,75 +35,81 @@ import (
 // It starts the hub, so every caller must stop it — App.Close does, through
 // the "hub" close step; api's tests rely on the goleak ignore for
 // ws.(*Hub).Run.func1 exactly as they did when NewRouter started it.
-func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry) api.Runtime {
+func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry) (api.Runtime, error) {
 	// Lockouts are persisted to the database so they survive restarts (M2).
 	limiter := auth.NewPersistentRateLimiter(database)
 	// Service layer — centralises business logic for REST and WS handlers.
 	// *db.DB satisfies service.Store directly.
 	svc := service.New(database, limiter)
 
+	lk, proc, voiceEnabled := buildVoice(cfg)
+
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware.
-	hub := ws.NewHub(database, limiter, svc)
-	// Replay budget knobs must land before hub.Run starts (below).
-	hub.ConfigureReplay(cfg.EventPersistence.ReplayRingSize, cfg.EventPersistence.ReplayColdLimit)
+	hub, err := ws.NewHub(ws.HubOptions{
+		DB:       database,
+		Limiter:  limiter,
+		Services: svc,
+		// nil pluginRegistry means plugins are disabled; the hub no-ops.
+		PluginRegistry: pluginRegistry,
+		LiveKit:        lk,
+		LiveKitProcess: proc,
+		// Replay budget knobs land at construction — the dispatch loop
+		// reads the ring unlocked.
+		ReplayRingSize:  cfg.EventPersistence.ReplayRingSize,
+		ReplayColdLimit: cfg.EventPersistence.ReplayColdLimit,
+	})
+	if err != nil {
+		return api.Runtime{}, fmt.Errorf("app: building hub: %w", err)
+	}
 
-	wirePlugins(hub, pluginRegistry)
-	voiceEnabled := startVoice(cfg, hub)
-
-	go hub.Run()
-
-	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}
-}
-
-// wirePlugins wires the plugin registry and its event sink into the hub.
-// Moved from api.routerPluginWiring.
-func wirePlugins(hub *ws.Hub, pluginRegistry *plugin.Registry) {
-	// Phase C Step 9 — wire plugin registry and event sink into the hub.
-	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.
+	// The plugin event sink consumes the built hub's broadcaster, so it is
+	// the surviving two-phase wire (moved from api.routerPluginWiring).
 	if pluginRegistry != nil {
-		hub.SetPluginRegistry(pluginRegistry)
 		sink := pluginRegistry.Sink()
 		sink.SetBroadcaster(hub.BroadcastToChannel)
 		hub.SetPluginEventSink(sink)
 	}
+
+	// Start the supervised LiveKit process only once the hub holds it
+	// (OC-0019): the voice_join guard must be able to fail closed via
+	// IsRunning() == false the moment Start fails, never see a half-wired
+	// hub with a running process it does not know about.
+	if proc != nil {
+		if startErr := proc.Start(); startErr != nil {
+			slog.Error("failed to start LiveKit process", "error", startErr)
+		}
+	}
+
+	go hub.Run()
+
+	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
 }
 
-// startVoice creates the LiveKit client and, when OwnCord manages the
-// companion process, starts it — the construction half of what
-// api.routerVoiceRoutes did before B3-3. It reports whether voice is
+// buildVoice creates the LiveKit client and, when OwnCord manages the
+// companion process, the process manager — construction only; StartRuntime
+// starts the process after the hub holds it. It reports whether voice is
 // configured; the webhook, LiveKit health and signalling-proxy routes are
-// still mounted by the router, on exactly that condition (the `lkErr == nil`
+// still mounted by the router on exactly that condition (the `lkErr == nil`
 // guard, now api.Runtime.VoiceEnabled).
-func startVoice(cfg *config.Config, hub *ws.Hub) bool {
+func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool) {
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
 	if lkErr != nil {
 		slog.Warn("failed to create LiveKit client, voice disabled", "error", lkErr)
-		return false
+		return nil, nil, false
 	}
-	hub.SetLiveKit(lk)
 
-	// Optionally start a companion LiveKit process — either from a
+	// Optionally build a companion LiveKit process — either from a
 	// configured binary or via checksum-verified auto-download (the
-	// download happens in the background inside Start).
+	// download happens in the background inside Start). The hub keeps the
+	// process even if Start() later fails (OC-0019): its only hub consumer
+	// is the voice_join guard (`h.lkProcess != nil && !h.lkProcess.IsRunning()`),
+	// which reads a nil process as "LiveKit is externally managed, don't
+	// check". OwnCord being told to manage LiveKit and failing to launch it
+	// must fail joins closed via IsRunning() == false, not wave them
+	// through with no SFU running.
 	if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
-		proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
-		// Register the process with the hub BEFORE calling Start(), and
-		// keep it registered even if Start() fails (OC-0019). The only
-		// consumer of h.lkProcess is the voice_join guard
-		// (`h.lkProcess != nil && !h.lkProcess.IsRunning()`), which reads
-		// a nil process as "LiveKit is externally managed, don't check".
-		// That is the wrong reading here: OwnCord was told to manage
-		// LiveKit and failed to launch it, so joins must fail closed via
-		// IsRunning() == false, not be waved through with no SFU
-		// running. IsRunning() is false for a proc whose Start() never
-		// got as far as spawning cmd, and Hub.Stop's lkProcess.Stop() is
-		// safe to call on a never-started proc.
-		hub.SetLiveKitProcess(proc)
-		if startErr := proc.Start(); startErr != nil {
-			slog.Error("failed to start LiveKit process", "error", startErr)
-		}
-		return true
+		return lk, ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
 	}
 
 	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
@@ -113,5 +122,5 @@ func startVoice(cfg *config.Config, hub *ws.Hub) bool {
 			"add the LiveKit server's IP to livekit_webhook_allowed_cidrs or webhooks will be silently dropped",
 			"livekit_host", lkHost)
 	}
-	return true
+	return lk, nil, true
 }

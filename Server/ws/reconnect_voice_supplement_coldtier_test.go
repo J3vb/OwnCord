@@ -25,8 +25,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestLiveVoiceEventsSince_ColdTierCapHit_DegradesToNil(t *testing.T) {
@@ -49,9 +47,8 @@ func TestLiveVoiceEventsSince_ColdTierCapHit_DegradesToNil(t *testing.T) {
 		}
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHubWith(t, HubOptions{DB: database, ReplayColdLimit: coldCap})
 	hub.SetEventStore(database)
-	hub.ConfigureReplay(0, coldCap) // must run before Run(); this test never calls Run()
 
 	// Ring buffer is untouched (nothing pushed), so EventsSinceFiltered
 	// returns nil and liveVoiceEventsSince must fall through to the cold tier.
@@ -85,9 +82,8 @@ func TestLiveVoiceEventsSince_ColdTierExactCap_ReturnsCompleteWindow(t *testing.
 		}
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHubWith(t, HubOptions{DB: database, ReplayColdLimit: coldCap})
 	hub.SetEventStore(database)
-	hub.ConfigureReplay(0, coldCap) // must run before Run(); this test never calls Run()
 
 	got := hub.liveVoiceEventsSince(ctx, 0, chID)
 	if len(got) != len(types) {

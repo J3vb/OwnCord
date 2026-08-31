@@ -80,7 +80,7 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 2048))
 	h.clients[uid] = c
 
@@ -135,7 +135,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	t.Cleanup(h.Stop) // ends the background leave retries the blocked delete spawns
 	lk, err := NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "harvest-key",

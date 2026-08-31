@@ -158,7 +158,7 @@ func TestComputeAllowedChannels_DMLookupErrorIsFatal(t *testing.T) {
 
 	userID, _ := database.CreateUser(context.Background(), "dm-lookup-err", "hash", 1)
 	user, _ := database.GetUserByID(context.Background(), userID)
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// Fault-inject exactly the DM lookup; the earlier role/channel lookups
 	// keep working.
@@ -236,7 +236,7 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 	if err := database.UpdateUserStatus(context.Background(), userID, "online"); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// Old connection A holds the slot; B replaces it (registerNow kicks A);
 	// A's readPump defer runs while B holds the slot → teardown skipped.

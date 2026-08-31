@@ -43,7 +43,7 @@ func TestPermCache_RoleChangeInvalidationIsImmediate(t *testing.T) {
 	database := openHandlerDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
@@ -103,7 +103,7 @@ func TestPermCache_SecondCheckServedFromCache(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	store := &countingStore{Store: database}
 	svc := service.New(store, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 

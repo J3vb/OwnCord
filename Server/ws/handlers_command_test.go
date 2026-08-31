@@ -12,15 +12,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// compile-time check that SetPluginRegistry is exported.
-var _ = (*ws.Hub)(nil)
+// The registry arrives via HubOptions since B3-4; these tests wire it at
+// construction.
 
 // ─── chat_command dispatch via HandleMessageForTest ───────────────────────────
 
 // TestChatCommand_NoRegistry returns an error when no plugin registry is wired.
 func TestChatCommand_NoRegistry_ReturnsError(t *testing.T) {
-	hub, database := newTestHub(t)
-	_ = database
+	hub, _ := newTestHub(t)
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, 1, send)
 	hub.Register(c)
@@ -53,17 +52,16 @@ func TestChatCommand_NoRegistry_ReturnsError(t *testing.T) {
 // TestChatCommand_UnknownCommand returns an error when the registry has no
 // plugin owning the command.
 func TestChatCommand_UnknownCommand_ReturnsError(t *testing.T) {
-	hub, database := newTestHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-	hub.Register(c)
-	defer hub.Unregister(c)
-
+	database := openTestDB(t)
 	reg, err := plugin.NewRegistry(plugin.Config{Store: database})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	hub.SetPluginRegistry(reg)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, PluginRegistry: reg})
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+	hub.Register(c)
+	defer hub.Unregister(c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_command",
@@ -117,17 +115,16 @@ func TestChatCommand_MalformedPayload_ReturnsBadRequest(t *testing.T) {
 // running DispatchCommand (and therefore the plugin's WASM invocation) once
 // per frame with no cap.
 func TestChatCommand_RateLimited_ReturnsError(t *testing.T) {
-	hub, database := newTestHub(t)
-	send := make(chan []byte, 32)
-	c := ws.NewTestClient(hub, 1, send)
-	hub.Register(c)
-	defer hub.Unregister(c)
-
+	database := openTestDB(t)
 	reg, err := plugin.NewRegistry(plugin.Config{Store: database})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	hub.SetPluginRegistry(reg)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, PluginRegistry: reg})
+	send := make(chan []byte, 32)
+	c := ws.NewTestClient(hub, 1, send)
+	hub.Register(c)
+	defer hub.Unregister(c)
 
 	sawRateLimited := false
 	for i := range 20 {

@@ -116,7 +116,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.setVoiceState(chID, "tok")
 	h.clients[uid] = c
@@ -170,7 +170,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	survivor := NewTestClient(h, survivorUID, make(chan []byte, 8))
 	survivor.setVoiceState(chID, "tok-survivor")
 	h.clients[survivorUID] = survivor
@@ -225,7 +225,7 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	h.clients[uid] = c
 	c.setVoiceState(chA, "tok-a")

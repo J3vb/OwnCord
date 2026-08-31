@@ -79,7 +79,7 @@ func newHandlerHub(t *testing.T) (*ws.Hub, *db.DB) {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

@@ -123,7 +123,7 @@ func TestChannelReadAudience_GetChannelErrorDeniesEveryone(t *testing.T) {
 	uid := seedHarvestVoiceUser(t, database, "audience-chan-err")
 	chID := mustCreateVoiceChannel(t, database, "audience-room")
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
 
 	// Precondition: the role scan really does grant this user READ on this
@@ -157,7 +157,7 @@ func TestChannelReadAudience_DMParticipantsErrorDeniesEveryone(t *testing.T) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	for _, uid := range []int64{alice, bob, mallory} {
 		h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
 	}

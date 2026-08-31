@@ -25,7 +25,7 @@ func TestHandleMessageSessionRecheck_TransientDBErrorDoesNotKick(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.tokenHash = tokenHash
 	// Put the client one message away from the periodic recheck boundary, so

@@ -16,7 +16,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 func seedVisibilityUser(t *testing.T, database *db.DB, username string, roleID int) *db.User {
@@ -51,7 +50,7 @@ func sortedKeys(m map[int64]bool) []int64 {
 func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	svc := service.New(database, limiter)
 
 	// Seed one channel of each server type plus a dm channel (never visible).
@@ -177,7 +176,7 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 func TestChannelVisibility_UserOverrideAgreement(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	svc := service.New(database, limiter)
 
 	openID, err := database.CreateChannel(context.Background(), "open", "text", "", "", 0)
