@@ -566,19 +566,6 @@ func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, o
 	return persisted, dropped, flushes, errs, true
 }
 
-// VoiceSessionCount returns the number of clients currently in a voice channel.
-func (h *Hub) VoiceSessionCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	count := 0
-	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
-			count++
-		}
-	}
-	return count
-}
-
 // topicRateLimitPerSecond is the default maximum messages per second for any
 // single channel topic. Prevents a busy channel from saturating the broadcast
 // loop and starving other channels.
