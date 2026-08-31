@@ -84,16 +84,18 @@ jobs:
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
       # only COMPILES the otel/wazero variants; the tests behind those tags
-      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go) ran
-      # nowhere until this step. Scoped to the two packages that carry tagged
-      # files — every other package is tag-invariant and already covered by the
-      # race run above. One leg is enough; no -race (the runtime under the tag
-      # is the concern, not new concurrency).
+      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go,
+      # api/recoverer_otel_test.go — the OC-0346 panic-log test, which this
+      # step never executed until ./api/... was added) ran nowhere until this
+      # step. Scoped to the packages that carry tagged files — every other
+      # package is tag-invariant and already covered by the race run above.
+      # One leg is enough; no -race (the runtime under the tag is the concern,
+      # not new concurrency).
       - name: Run tag-gated tests (-tags wazero, -tags otel)
         if: matrix.os == 'ubuntu-latest'
         run: |
           go test -tags wazero -count=1 ./plugin/...
-          go test -tags otel -count=1 ./telemetry/...
+          go test -tags otel -count=1 ./telemetry/... ./api/...
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
