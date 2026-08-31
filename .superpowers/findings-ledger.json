@@ -1,5 +1,5 @@
 {
-  "nextId": 379,
+  "nextId": 380,
   "findings": [
     {
       "id": "OC-0001",
@@ -8563,6 +8563,28 @@
       "fix": {
         "commit": "be37d7ee",
         "test": "Server/api/auth_characterization_test.go, Server/auth/totp_test.go",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0379",
+      "title": "ownerOnlyMiddleware still re-read the role adminAuthMiddleware had already resolved — OC-0345's fix kept the redundant query and the 503 branch that existed only to serve it",
+      "file": "Server/admin/middleware.go",
+      "line": 130,
+      "severity": "low",
+      "why": "OC-0345's title named two defects: the redundant GetRoleByID and the transient-fault-as-403 collapse. Its fix (PR #1454) repaired only the error mapping — deliberately, per its own suggestedFix, to avoid touching the two tests that injected only adminUserKey — so the owner gate still issued a second role read on every owner-only request and carried a private 503 path whose only job was that read's failures. The register's closure evidence for OC-0345 ('Reuse the authenticated context…') was half-met, and the function's doc comment claimed to avoid the redundant query it performed.",
+      "repro": "Verified at dev 7abdd941 by the 2026-08-31 post-merge audit: middleware.go:130 ran database.GetRoleByID inside ownerOnlyMiddleware while adminAuthMiddleware had stored the same principal's *db.Role under adminRoleKey (:90) and requirePerm (:104) already consumed it query-free. The nine owner-only routes in Server/admin/api.go paid the extra read; a roles-table fault on it produced the gate's own 503 although the perimeter had just proven the database healthy on the same request.",
+      "evidence": "RED first: TestOwnerOnlyMiddleware_NoSecondRoleLookup (role in context, roles table renamed away) failed 503 against the old middleware — the second lookup, observed. GREEN after: the gate consumes adminRoleKey (missing role fails closed as 401, exactly requirePerm's contract; position below Owner stays 403), the query and its 503 branch are deleted, and the signature drops *db.DB at all nine call sites, so reintroducing a lookup is a compile-visible change. Revert-proof: restoring the old middleware body fails the build at api.go:150.",
+      "status": "fixed",
+      "found": "2026-08-31",
+      "hunt": "postmerge-audit-2026-08-31",
+      "lens": "audit",
+      "confidence": "high",
+      "finder": "claude",
+      "fixed": "2026-08-31",
+      "fix": {
+        "commit": "bcdc0ef3",
+        "test": "Server/admin/middleware_and_spawn_test.go",
         "revertProof": "pass"
       }
     }
