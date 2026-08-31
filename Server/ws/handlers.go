@@ -133,7 +133,7 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 	c.mu.Unlock()
 
 	if shouldCheck && c.tokenHash != "" {
-		result, dbErr := h.db.GetSessionWithBanStatus(c.ctx, c.tokenHash)
+		result, dbErr := h.readers.Dispatch.GetSessionWithBanStatus(c.ctx, c.tokenHash)
 		if dbErr != nil {
 			// A failed read says nothing about this session's validity —
 			// kicking the client on a transient DB error (SQLITE_BUSY, an
@@ -282,7 +282,7 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 	// unwinding on error would turn any DB hiccup into a silently dead
 	// message stream with no error frame sent to the client; subjectFor and
 	// the DM lookup both report a failure instead of collapsing it.
-	ch, chErr := h.db.GetChannel(c.ctx, newChID)
+	ch, chErr := h.readers.Dispatch.GetChannel(c.ctx, newChID)
 	if chErr != nil {
 		return
 	}
@@ -293,7 +293,7 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		}
 		sub.Channel = channelRef(ch)
 		if ch.Type == "dm" {
-			ok, dmErr := h.db.IsDMParticipant(c.ctx, c.userID, newChID)
+			ok, dmErr := h.readers.Dispatch.IsDMParticipant(c.ctx, c.userID, newChID)
 			if dmErr != nil {
 				return
 			}
@@ -328,7 +328,7 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 // invalidation hooks, and the sweep runs once a minute for only the clients
 // currently in voice, so the uncached cost is negligible.
 func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64) bool {
-	role, err := h.db.GetRoleForUser(ctx, c.userID)
+	role, err := h.readers.Dispatch.GetRoleForUser(ctx, c.userID)
 	if err != nil || role == nil {
 		return false
 	}

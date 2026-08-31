@@ -40,6 +40,12 @@ type HubOptions struct {
 	// Services.Settings; test helpers default it over the test database.
 	Settings SettingsReader
 
+	// Readers is required: the hub's snapshot, visibility, member-payload
+	// and dispatch reads go through these seams (readers.go) instead of the
+	// raw handle. Production wires DBReaders; test helpers default it over
+	// the test database.
+	Readers HubReaders
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -76,6 +82,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if opts.Settings == nil {
 		return nil, errors.New("ws: HubOptions.Settings is required (the settings cache reads through it)")
 	}
+	if !opts.Readers.complete() {
+		return nil, errors.New("ws: HubOptions.Readers is required in full (the hub reads through its seams)")
+	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
 		return nil, errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
@@ -98,6 +107,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		db:              database,
 		limiter:         limiter,
 		settings:        settingsReader,
+		readers:         opts.Readers,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),

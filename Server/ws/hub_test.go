@@ -695,7 +695,10 @@ func TestNewHub_RequiredCollaborators(t *testing.T) {
 		t.Fatal("NewHub without a Settings reader must error")
 	}
 	settings := service.NewSettingsService(database)
-	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, ReplayRingSize: -1}); err == nil {
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings}); err == nil {
+		t.Fatal("NewHub without the reader seams must error")
+	}
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), ReplayRingSize: -1}); err == nil {
 		t.Fatal("NewHub with a negative replay ring must error")
 	}
 }

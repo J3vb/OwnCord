@@ -64,7 +64,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
 	var ref permissions.ChannelRef
 	if h.db != nil {
-		ch, err := h.db.GetChannel(ctx, channelID)
+		ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 		if err != nil {
 			// Fail closed: an unresolvable channel must not fall through to
 			// the role scan, which would treat it as a readable non-DM channel.
@@ -123,7 +123,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // channelReadAudienceImpl; the reason a DM must not fall through to the role
 // scan is on the call site.
 func (h *Hub) channelReadAudienceDM(ctx context.Context, channelID int64, userIDs []int64) []int64 {
-	participantIDs, err := h.db.GetDMParticipantIDs(ctx, channelID)
+	participantIDs, err := h.readers.Visibility.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
 		slog.Error("ws: channelReadAudience GetDMParticipantIDs failed, denying",
 			"channel_id", channelID, "err", err)
@@ -290,7 +290,7 @@ func (h *Hub) RefreshAllChannelVisibility() {
 		return
 	}
 	ctx := context.Background()
-	channels, err := h.db.ListChannels(ctx)
+	channels, err := h.readers.Visibility.ListChannels(ctx)
 	if err != nil {
 		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
 		return
@@ -338,7 +338,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	// c.user is a connect-time snapshot and the role just changed, so resolve
 	// the current user — and through it the current role — from the DB.
 	var allowed map[int64]bool
-	user, err := h.db.GetUserByID(ctx, userID)
+	user, err := h.readers.Visibility.GetUserByID(ctx, userID)
 	if err == nil && user != nil {
 		// Same predicate as the ready payload and reconnect replay filtering.
 		allowed, err = h.computeAllowedChannels(ctx, h.db, user)
@@ -372,7 +372,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		// computeAllowedChannels failed) is missing from allowed even though
 		// its subscription is still legitimate. Never revoke a DM topic here;
 		// on a lookup error close the socket rather than guess.
-		ch, chErr := h.db.GetChannel(ctx, chID)
+		ch, chErr := h.readers.Visibility.GetChannel(ctx, chID)
 		if chErr != nil {
 			slog.Warn("hub: role change channel lookup failed, closing socket",
 				"user_id", userID, "channel_id", chID, "err", chErr)
@@ -415,7 +415,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 // permissions.Checker predicate shared with buildReady and REST
 // ListVisibleChannels, so replay-buffer filtering can never drift from the
 // ready payload's visible channels.
-func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user *db.User) (map[int64]bool, error) {
+func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityReader, user *db.User) (map[int64]bool, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)

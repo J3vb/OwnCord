@@ -202,13 +202,13 @@ func (h *Hub) BroadcastMemberBan(userID int64) {
 // pins that at compile time. (OC-0058)
 func (h *Hub) BroadcastMemberUnban(userID int64) {
 	ctx := context.Background()
-	user, err := h.db.GetUserByID(ctx, userID)
+	user, err := h.readers.Members.GetUserByID(ctx, userID)
 	if err != nil || user == nil {
 		slog.Error("hub: BroadcastMemberUnban GetUserByID failed", "user_id", userID, "err", err)
 		return
 	}
 	roleName := ""
-	if role, err := h.db.GetRoleForUser(ctx, userID); err == nil && role != nil {
+	if role, err := h.readers.Members.GetRoleForUser(ctx, userID); err == nil && role != nil {
 		roleName = role.Name
 	}
 	// The ban disconnected them and reconnecting was refused while banned,

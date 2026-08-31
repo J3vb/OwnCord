@@ -1826,6 +1826,43 @@ override CRUD's policy moves behind the service:
   family's admin rows are done — only the five `ws` read rows (part 3)
   remain.
 
+**Evidence — channel family part 3 of 3, 2026-08-31** — branch
+`feat/b3-8-channel-family-3` from `dev` `d5f88266` (part 2's squash). The
+hub's read paths lose their direct handle calls behind consumer-side
+seams — the owner chose the SettingsReader pattern over making
+`HubOptions.Services` required (which would have rewired the degraded
+fixture half the `ws` suite builds) or deferring to the B3 exit:
+
+- **Seams** (`ws/readers.go`): `VisibilityReader`, `ReadySnapshotReader`,
+  `MemberPayloadReader`, `DispatchReader`, `StaleVoiceCleaner` — one per
+  concern, each naming exactly the reads its consumer may make (the
+  stale-voice pair is deliberately separate: the write does not belong on
+  a snapshot seam). `HubOptions.Readers` is required and validated;
+  production wires `DBReaders(database)` at the composition root; the
+  test helpers default it over the test database, so no test changed
+  semantics. `applyConnectStatus`'s status write stays on the raw handle
+  (connection family, not a read).
+- **Service seam sharpened in passing**: `service.RequireDMNotBlocked`
+  took the full `Store`; it now takes its own three-read `DMBlockReader`
+  (`IsGroupDM`, `GetDMRecipient`, `IsEitherBlocked`), which the ws
+  `DispatchReader` carries — both packages state their real contracts.
+- **Measurement honesty**: seam calls run through interface fields the
+  syntactic walker cannot see, so the five rows are type-only by
+  construction — the boundaries doc's caveat paragraph now names the
+  seams as the deliberate instance of that shape, and each row's reason
+  names its seam. The seam interfaces, not the walker, are the
+  authoritative read list for those files; later B3-8 families narrow
+  individual seams onto their services without touching the consumers.
+- **Allowlist diff**: `deps.go`, `handlers.go`, `hub_broadcast.go`,
+  `hub_visibility.go`, `serve_ready.go` all `move` → seam-named
+  `adapter`; `readers.go` added as a type-only `adapter` row. **The
+  channel family is complete** — `channel` disappears from the move
+  targets: 22 → 17 `move`, 20 → 26 `adapter`.
+- **Characterization**: no behavior change anywhere — the frozen
+  `TestEpoch1Fixtures` and the whole `ws` suite run unchanged (the seams
+  are satisfied by the same handle); `TestNewHub_RequiredCollaborators`
+  gains the Readers refusal case.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".
