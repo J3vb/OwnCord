@@ -29,8 +29,17 @@ func TestS03_AdminChannelWritesFollowTheContract(t *testing.T) {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
 		var resp map[string]string
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil && resp["error"] != "INVALID_INPUT" {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if resp["error"] != "INVALID_INPUT" {
 			t.Errorf("error code = %q, want INVALID_INPUT", resp["error"])
+		}
+		// The body is the validation text alone — no rendered sentinel prefix
+		// ("bad request: ..."), the contract a review caught the prefixed
+		// wraps breaking.
+		if want := "name must be at most 100 characters"; resp["message"] != want {
+			t.Errorf("message = %q, want %q", resp["message"], want)
 		}
 	})
 

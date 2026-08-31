@@ -50,22 +50,35 @@ type ChannelMeta struct {
 // bound by runes, and require a non-empty name. Every violation is
 // ErrBadRequest with the field's own message.
 func cleanChannelMeta(name, topic, category string) (ChannelMeta, error) {
-	cleanName, err := cleanTextBounded(name, MaxChannelNameLen, "name")
+	cleanName, err := cleanChannelField(name, MaxChannelNameLen, "name")
 	if err != nil {
 		return ChannelMeta{}, err
 	}
 	if cleanName == "" {
-		return ChannelMeta{}, fmt.Errorf("%w: name is required", ErrBadRequest)
+		return ChannelMeta{}, fmt.Errorf("name is required%.0w", ErrBadRequest)
 	}
-	cleanTopic, err := cleanTextBounded(topic, MaxChannelTopicLen, "topic")
+	cleanTopic, err := cleanChannelField(topic, MaxChannelTopicLen, "topic")
 	if err != nil {
 		return ChannelMeta{}, err
 	}
-	cleanCategory, err := cleanTextBounded(category, MaxChannelCategoryLen, "category")
+	cleanCategory, err := cleanChannelField(category, MaxChannelCategoryLen, "category")
 	if err != nil {
 		return ChannelMeta{}, err
 	}
 	return ChannelMeta{Name: cleanName, Topic: cleanTopic, Category: cleanCategory}, nil
+}
+
+// cleanChannelField is cleanTextBounded with the admin channel surface's
+// prefix-free error contract: the response body is exactly the validation
+// text, so the sentinel is wrapped with %.0w instead of rendered (the same
+// scheme the settings service uses; a review caught the prefixed form
+// leaking "bad request: ..." into the admin UI).
+func cleanChannelField(v string, maxRunes int, field string) (string, error) {
+	cleaned, err := cleanTextBounded(v, maxRunes, field)
+	if err != nil {
+		return "", fmt.Errorf("%s must be at most %d characters%.0w", field, maxRunes, ErrBadRequest)
+	}
+	return cleaned, nil
 }
 
 // ─── S-04: the one non-DM resolution policy ──────────────────────────────────
@@ -79,7 +92,7 @@ func cleanChannelMeta(name, topic, category string) (ChannelMeta, error) {
 // path can grow its own policy again (S-04).
 func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db.Channel, error) {
 	if id <= 0 {
-		return nil, fmt.Errorf("%w: invalid channel id", ErrBadRequest)
+		return nil, fmt.Errorf("invalid channel id%.0w", ErrBadRequest)
 	}
 	ch, err := s.st.GetChannel(ctx, id)
 	if err != nil {
@@ -130,7 +143,7 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 		req.Type = "text"
 	}
 	if !slices.Contains(validChannelTypes, req.Type) {
-		return nil, fmt.Errorf("%w: type must be one of text, voice, announcement", ErrBadRequest)
+		return nil, fmt.Errorf("type must be one of text, voice, announcement%.0w", ErrBadRequest)
 	}
 	meta, err := cleanChannelMeta(req.Name, req.Topic, req.Category)
 	if err != nil {
@@ -191,11 +204,11 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	}
 	switch {
 	case req.SlowMode < 0 || req.SlowMode > maxSlowModeSeconds:
-		return nil, fmt.Errorf("%w: slow_mode must be between 0 and %d seconds", ErrBadRequest, maxSlowModeSeconds)
+		return nil, fmt.Errorf("slow_mode must be between 0 and %d seconds%.0w", maxSlowModeSeconds, ErrBadRequest)
 	case req.VoiceMaxUsers < 0 || req.VoiceMaxUsers > maxVoiceLimit:
-		return nil, fmt.Errorf("%w: voice_max_users must be between 0 and %d", ErrBadRequest, maxVoiceLimit)
+		return nil, fmt.Errorf("voice_max_users must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
 	case req.VoiceMaxVideo < 0 || req.VoiceMaxVideo > maxVoiceLimit:
-		return nil, fmt.Errorf("%w: voice_max_video must be between 0 and %d", ErrBadRequest, maxVoiceLimit)
+		return nil, fmt.Errorf("voice_max_video must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
 	}
 
 	if err := s.st.AdminUpdateChannel(ctx, existing.ID, db.ChannelUpdate{
