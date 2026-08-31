@@ -867,6 +867,35 @@ each file's scaffolding plus any import the source keeps:
   253, `hub_broadcast.go` 1032 (untouched; visibility and backpressure are
   the next responsibilities).
 
+**Evidence — split PR 3 of the series, 2026-08-31** — branch
+`feat/b3-5-ws-split-3` from `dev` `f9258ef8` (split PR 2's squash).
+Responsibilities 5 and 6 (visibility and permission refresh; broadcast
+delivery and backpressure — the latter satisfied by what
+`hub_broadcast.go` keeps once visibility leaves):
+
+- **Move 5** — one pure-move commit gathers the visibility responsibility
+  from the three files it was spread across into the new
+  `hub_visibility.go` (478 lines out, 487 in): the `channelReadAudience`
+  family, `RefreshChannelVisibility`, `refreshChannelVisibilityCanSend`,
+  `RefreshAllChannelVisibility` and `revokeUnreadableChannels` from
+  `hub_broadcast.go`; `computeAllowedChannels` from `serve.go` (flagged
+  for this move in split PR 1); `bumpVisibilityWatermark` and
+  `MarkVisibilityChanged` from `hub.go`. Residue: the new file's
+  scaffolding plus duplicates of five imports the sources keep; the
+  `permissions` import moved outright (out of `hub_broadcast.go` and
+  `serve.go`, into the new file). Gate results in the PR's test plan.
+- **Audience placement**: the `channelReadAudience` family rides with
+  visibility, not delivery — it is permission-derived recipient
+  resolution, the same rule set `computeAllowedChannels` and the ready
+  filter share; delivery consumes its output.
+- **Inventory**: `hub_visibility.go` gains a `DBImportAllow` row
+  (`move`, `channel`); `hub_broadcast.go`'s row shrinks to the
+  member/presence payload reads (27 → 28 `move` rows, zero new calls).
+- **Sizes**: `hub_broadcast.go` 1032 → 632 (< 500 at exit still open —
+  the presence queue and typed event wrappers remain; the voice-leftover
+  PR decides what else moves), `serve.go` 230 → 183, `hub.go` 616 → 585,
+  `hub_visibility.go` 487.
+
 ## B3-6 — Permanent guardrails
 
 Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;
