@@ -1792,6 +1792,40 @@ here (S-03 + S-04 + admin CRUD), part 2 the override CRUD, part 3 the
   `service/channel_admin_test.go` and the `s03_`/`s04_` surface files
   are the family's new pins.
 
+**Evidence — channel family part 2 of 3, 2026-08-31** — branch
+`feat/b3-8-channel-family-2` from `dev` `c0ede584` (part 1's squash). The
+override CRUD's policy moves behind the service:
+
+- **Service**: `service/channel_perms.go` — the union escalation guard
+  (`requireGrantableChannelOverride`, deliberately stricter than
+  role.go's `requireGrantable`: clearing an existing deny is a grant, so
+  the guard runs against the union of written and existing bits), both
+  hierarchy rules (role strictly below the actor; a per-user override
+  may not target a member ranked at or above), mask clamping to defined
+  bits, the write/clear/audit sequences, and the invalidation scope
+  (role-holders with the full-flush fail-safe; the one target user for
+  the per-user layer). `Store` gains the six override CRUD methods.
+- **Handlers**: the four mutation handlers and the GET become thin
+  (decode → delegate → invalidate-then-refresh from the returned
+  `OverrideResult`); the shared preamble is one helper. Error bodies
+  stay prefix-free via `%.0w`.
+- **Chokepoint residue**: the two `HasAdmin` rows
+  (`admin.requireGrantableOverride`, `admin.requireManageableUser`)
+  moved to their service symbols with the code
+  (`service.requireGrantableChannelOverride`,
+  `service.(*ChannelService).resolveOverrideUser`) — an entry relocating
+  with its function, not growth.
+- **Characterization**: all twenty-plus existing
+  `Test{Get,Put,Delete}Channel*Permission_*` surface rows — escalation,
+  the zero-mask union case, hierarchy on both layers, mask clamping,
+  unknown targets, invalidation and audits — stayed green untouched
+  through the extraction; `service/channel_perms_test.go` covers the
+  seam itself (and what the `service` coverage floor demands).
+- **Allowlist diff**: `admin/handlers_channel_perms.go` `move` →
+  type-only `adapter`; 23 → 22 `move`, 19 → 20 `adapter`. The channel
+  family's admin rows are done — only the five `ws` read rows (part 3)
+  remain.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

@@ -119,13 +119,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Post("/channels", handleCreateChannel(channels, hub))
 			r.Patch("/channels/{id}", handlePatchChannel(channels, hub))
 			r.Delete("/channels/{id}", handleDeleteChannel(channels, hub))
-			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(database, channels))
-			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(database, channels, hub, permInvalidator))
-			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(database, channels, hub, permInvalidator))
+			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(channels))
+			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(channels, hub, permInvalidator))
+			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(channels, hub, permInvalidator))
 			// Per-user overrides — the last layer of the resolution order,
 			// gated on the same MANAGE_CHANNELS bit as the role layer.
-			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(database, channels, hub, permInvalidator))
-			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(database, channels, hub, permInvalidator))
+			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels, hub, permInvalidator))
+			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels, hub, permInvalidator))
 		})
 
 		// Role CRUD. MANAGE_ROLES gates the group; RoleService additionally
