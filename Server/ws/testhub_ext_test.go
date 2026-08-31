@@ -28,6 +28,9 @@ func newTestHubWith(tb testing.TB, opts ws.HubOptions) *ws.Hub {
 	if opts.Limiter == nil {
 		opts.Limiter = auth.NewRateLimiter()
 	}
+	if opts.Settings == nil && opts.DB != nil {
+		opts.Settings = service.NewSettingsService(opts.DB)
+	}
 	h, err := ws.NewHub(opts)
 	if err != nil {
 		tb.Fatalf("ws.NewHub: %v", err)
