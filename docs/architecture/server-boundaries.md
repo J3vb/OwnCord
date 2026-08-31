@@ -23,12 +23,15 @@ adapter row, its only `db` use the pure `BroadcastStatus` helper;
 `hub_broadcast.go`'s row is down to the member payload reads); 2026-08-31
 (B3-5, finisher PR) — the first table, on `feat/b3-5-ws-split-5`
 (`hub.go`'s `GetSetting` calls left with the settings cache for
-`hub_settings.go`, which reads the handle through the `h.db` field and so
-imports nothing — its calls are visible in this prose, not as a table row,
-because rows track importers; `hub.go` and the new `hub_options.go` are
-type-only `boundary` rows holding/validating the handle. The disposition
-counts were also re-derived from the tool's summary: `boundary` had been
-stale at 12 since the seed-profile row landed).
+`hub_settings.go`; that file's persistence runs through the `h.db` field,
+which needs no import, so it **pins** the `db` import — a documented
+`var _ *db.DB` — to stay on the rule's and this table's books: the rule
+and rows track importers, and a field-calling file without the pin would
+be invisible to both, which a review flagged on the finisher PR. `hub.go`
+and the new `hub_options.go` are type-only `boundary` rows
+holding/validating the handle. The disposition counts were also
+re-derived from the tool's summary: `boundary` had been stale at 12
+since the seed-profile row landed).
 **Owner:** the B3 plan,
 [plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
@@ -46,7 +49,7 @@ happens to that use — one of four dispositions from the
 
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
-| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   27 |
+| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   28 |
 | `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   18 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   15 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
@@ -58,9 +61,10 @@ file stopped importing `db`. The `db` surface only shrinks — B3-2 deleted the
 two auth handler rows (28 → 26 `move`), B3-8 deletes a family's rows as it
 moves. A B3-5 file split can spread one row's code across two rows without
 adding any new `db` use (`serve.go` → `replay.go`, then the visibility
-gather into `hub_visibility.go`: 26 → 28 `move` rows while the calls behind
-them only moved; the finisher then turned `hub.go` type-only, 28 → 27), so
-it is the surface, not the row count, that ratchets.
+gather into `hub_visibility.go`; the finisher turned `hub.go` type-only
+while `hub_settings.go` took its `move` row — 26 → 28 `move` across the
+series with the calls behind them only moved), so it is the surface, not
+the row count, that ratchets.
 
 ## How the measurement works
 
@@ -140,6 +144,7 @@ which is a row worth reading, and none exists today.
 | `ws/hub_broadcast.go`             | `Channel×2` `Emoji` `Role`                                                                                                   | —                                                         | `GetRoleForUser` `GetUserByID`                                                                                                                                                                                                                                                         | calls     | move        | channel      | member broadcast payloads read the user and role they announce                                    |
 | `ws/hub_options.go`               | `DB`                                                                                                                         | —                                                         | —                                                                                                                                                                                                                                                                                      | type-only | boundary    | —            | construction validates and stores the handle; no calls                                            |
 | `ws/hub_presence.go`              | —                                                                                                                            | `BroadcastStatus()`                                       | —                                                                                                                                                                                                                                                                                      | calls     | adapter     | —            | presence coalescer; pure BroadcastStatus helper and the MemberSummary shape                       |
+| `ws/hub_settings.go`              | `DB`                                                                                                                         | —                                                         | `GetSetting×2`                                                                                                                                                                                                                                                                         | calls     | move        | settings-ops | settings cache reads server name and MOTD through h.db; import pinned so the rule sees it         |
 | `ws/hub_sweep.go`                 | `User`                                                                                                                       | —                                                         | `GetAllVoiceStates` `GetChannel` `GetChannelVoiceStates` `GetSessionsWithBanStatusBatch` `LeaveVoiceChannelIfMatch×2`                                                                                                                                                                  | calls     | move        | voice        | stale-voice sweep reads and leaves                                                                |
 | `ws/hub_visibility.go`            | `Channel×2` `ChannelOverride` `DB` `User`                                                                                    | —                                                         | `GetChannel×2` `GetChannelOverridesFor` `GetDMParticipantIDs` `GetRoleByID` `GetUserByID` `GetUserDMChannelIDs` `ListChannels×2`                                                                                                                                                       | calls     | move        | channel      | visibility and audience resolution reads channels, overrides, participants, users                 |
 | `ws/messages.go`                  | `Channel×4` `DMChannelInfo×2` `DMUser×2` `Emoji` `Role×3` `User×2` `VoiceState`                                              | `BroadcastStatus()` `StatusForViewer()`                   | —                                                                                                                                                                                                                                                                                      | calls     | adapter     | —            | wire types + pure status helpers                                                                  |
@@ -151,8 +156,8 @@ which is a row worth reading, and none exists today.
 | `ws/voice_join.go`                | `Channel×3` `ChannelOverride` `VoiceState×5`                                                                                 | `ErrChannelFull`                                          | `GetChannel×2` `GetChannelOverridesFor` `GetChannelVoiceStates` `GetRoleForUser` `GetVoiceState×6` `JoinVoiceChannel` `JoinVoiceChannelIfCapacity` `LeaveVoiceChannelIfMatch` `SetVoiceServerDeafen` `SetVoiceServerMute`                                                              | calls     | move        | voice        | voice state reads and writes                                                                      |
 | `ws/voice_moderation.go`          | `Role` `VoiceState×3`                                                                                                        | `WriteAudit()`                                            | `CountChannelVoiceUsers` `GetChannel×2` `GetRoleForUser` `GetVoiceState×2` `SetVoiceServerDeafen×2` `SetVoiceServerMute×2`                                                                                                                                                             | calls     | move        | voice        | mute/deafen/move persist voice state                                                              |
 
-60 files import `db` outside `db/` and `service/` (. 1, admin 16, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 21); 21 are type-only; 0 unlisted.
-Dispositions: adapter 18, boundary 15, move 27. Move targets: auth 7, channel 7, connection 2, role 1, settings-ops 3, upload 2, user 2, voice 3.
+61 files import `db` outside `db/` and `service/` (. 1, admin 16, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 22); 21 are type-only; 0 unlisted.
+Dispositions: adapter 18, boundary 15, move 28. Move targets: auth 7, channel 7, connection 2, role 1, settings-ops 4, upload 2, user 2, voice 3.
 
 <!-- dbinventory:end -->
 

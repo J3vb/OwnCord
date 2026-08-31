@@ -939,11 +939,14 @@ that responsibility 6's size target needed:
 - **Inventory**: `hub.go`'s `GetSetting` calls left with the settings
   cache, so its row turns type-only `boundary` (the handle the families
   read through); `hub_options.go` is a type-only `boundary` row
-  (validates and stores the handle); `hub_settings.go` reads through the
-  `h.db` field and imports nothing, so it carries no row — the boundaries
-  doc's header records that wrinkle, and the disposition counts were
-  re-derived from the tool's summary (`boundary` had been stale at 12
-  since the seed-profile row landed).
+  (validates and stores the handle). `hub_settings.go` reads through the
+  `h.db` field, which needs no import — Codex's P2 on the finisher PR
+  caught that this made the settings-ops item invisible to the
+  import-tracking rule and table — so the file pins the `db` import
+  (a documented `var _ *db.DB`) and keeps its `move`/`settings-ops` row,
+  `GetSetting×2` visible. The disposition counts were re-derived from
+  the tool's summary (`boundary` had been stale at 12 since the
+  seed-profile row landed).
 
 **B3-5 exit.** All seven responsibilities relocated across five squash
 merges — #1472 (handshake auth; fresh-connect), #1473 (replay; registry),

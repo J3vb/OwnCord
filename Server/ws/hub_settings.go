@@ -3,7 +3,15 @@ package ws
 import (
 	"context"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
+
+// The db-import-boundary rule and the boundaries-doc inventory track files by
+// their db import. This file's persistence runs through the h.db field, which
+// needs no import — so the import is pinned here deliberately, keeping the
+// settings-ops reads on the inventory's books instead of invisible to it.
+var _ *db.DB
 
 // getCachedSettings returns server_name and motd, refreshing the cache if stale.
 func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {

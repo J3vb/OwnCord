@@ -95,6 +95,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_options.go":      {"boundary", "", "construction validates and stores the handle; no calls"},
 	"ws/hub_broadcast.go":    {"move", "channel", "member broadcast payloads read the user and role they announce"},
 	"ws/hub_presence.go":     {"adapter", "", "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
+	"ws/hub_settings.go":     {"move", "settings-ops", "settings cache reads server name and MOTD through h.db; import pinned so the rule sees it"},
 	"ws/hub_visibility.go":   {"move", "channel", "visibility and audience resolution reads channels, overrides, participants, users"},
 	"ws/hub_sweep.go":        {"move", "voice", "stale-voice sweep reads and leaves"},
 	"ws/messages.go":         {"adapter", "", "wire types + pure status helpers"},
