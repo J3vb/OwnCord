@@ -41,8 +41,8 @@ var DBImportAllow = map[string]DBImportEntry{
 	// ── admin ─────────────────────────────────────────────────────────────
 	"admin/admin.go":                  {"boundary", "", "holds the handle for the admin mux; no calls"},
 	"admin/api.go":                    {"boundary", "", "passes the handle to handlers; no calls"},
-	"admin/backup_maintenance.go":     {"move", "settings-ops", "BackupToSafe, integrity check, settings reads"},
-	"admin/handlers_backup.go":        {"move", "settings-ops", "backup trigger and download; raw SQLDb for VACUUM INTO"},
+	"admin/backup_maintenance.go":     {"boundary", "", "scheduled backup mechanics on the maintenance tick; settings via the service"},
+	"admin/handlers_backup.go":        {"boundary", "", "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap"},
 	"admin/handlers_channel_perms.go": {"move", "channel", "override CRUD decides permission policy in the handler"},
 	"admin/handlers_channels.go":      {"move", "channel", "channel CRUD + audit"},
 	"admin/handlers_roles.go":         {"move", "role", "two reads; service/role.go already owns the writes"},
