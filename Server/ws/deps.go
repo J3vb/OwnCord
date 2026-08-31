@@ -129,7 +129,7 @@ type VoiceDeps struct {
 // through to the live path because the cache's boolean cannot express the
 // INTERNAL-vs-FORBIDDEN distinction above — denials are the rare case, so the
 // extra lookups only happen when the check is about to fail anyway.
-func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64, label string) *Result {
+func requirePerm(ctx context.Context, database DispatchReader, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64, label string) *Result {
 	if permSvc != nil && permSvc.HasChannelPerm(ctx, userID, channelID, perm) {
 		return nil
 	}
@@ -165,7 +165,7 @@ func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checke
 // PermissionService the answer comes from its per-user cache (false on any
 // lookup failure, same fail-closed posture as the live path); without one it
 // falls back to per-call DB lookups.
-func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) bool {
+func hasPerm(ctx context.Context, database DispatchReader, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID, perm int64) bool {
 	if permSvc != nil {
 		return permSvc.HasChannelPerm(ctx, userID, channelID, perm)
 	}
@@ -189,7 +189,7 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, p
 // caller like applySetChannelID's post-Subscribe revalidation (OC-0266) can
 // tell a transient read failure from a denial; a missing role row is the
 // zero Subject, which every predicate refuses.
-func subjectFor(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {
+func subjectFor(ctx context.Context, database DispatchReader, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {
 	if permSvc != nil {
 		return permSvc.Subject(ctx, userID, channelID)
 	}
@@ -217,7 +217,7 @@ func (h *Hub) subjectFor(ctx context.Context, userID, channelID int64) (permissi
 // (dm_participants rows are membership, not permission, state and are never
 // cached). An error is a lookup failure, never a denial; callers decide
 // whether that fails closed.
-func channelSubject(ctx context.Context, database *db.DB, perms *permissions.Checker, permSvc *service.PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
+func channelSubject(ctx context.Context, database DispatchReader, perms *permissions.Checker, permSvc *service.PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
 	sub, err := subjectFor(ctx, database, perms, permSvc, userID, ch.ID)
 	if err != nil {
 		return permissions.Subject{}, err

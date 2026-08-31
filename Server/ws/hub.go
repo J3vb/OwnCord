@@ -123,6 +123,10 @@ type Hub struct {
 	// the B3-8 settings family owns the underlying reads.
 	settings SettingsReader
 
+	// readers are the hub's remaining read seams (readers.go): snapshot,
+	// visibility, member payloads, dispatch, stale-voice cleanup.
+	readers HubReaders
+
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string

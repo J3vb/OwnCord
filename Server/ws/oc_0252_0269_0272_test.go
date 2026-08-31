@@ -67,7 +67,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 	// registered — exactly the state handleFreshConnect calls this in.
 	c := NewTestClient(h, uid, make(chan []byte, 32))
 
-	h.freshConnectCleanStaleVoice(ctx, database, c, vs)
+	h.freshConnectCleanStaleVoice(ctx, c, vs)
 
 	if got := old.getVoiceChID(); got != 0 {
 		t.Errorf("old client's in-memory voiceChID = %d, want 0 (cleared alongside the DB row)", got)

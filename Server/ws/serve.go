@@ -82,7 +82,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) h
 			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", c.userID, "last_seq", lastSeq)
 		}
 
-		if err := hub.handleFreshConnect(ctx, conn, c, database); err != nil {
+		if err := hub.handleFreshConnect(ctx, conn, c); err != nil {
 			return
 		}
 
@@ -115,7 +115,7 @@ var freshConnectPreRegisterRaceHook func()
 // registerNow, while c is still invisible to every other goroutine, so the
 // plain field writes are safe. Fail closed: callers must not proceed on the
 // stale snapshot when the re-read fails.
-func (h *Hub) refreshUserSnapshot(ctx context.Context, database *db.DB, c *Client) error {
+func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader, c *Client) error {
 	user, err := database.GetUserByID(ctx, c.userID)
 	if err != nil {
 		return fmt.Errorf("refreshUserSnapshot GetUserByID: %w", err)

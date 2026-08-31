@@ -161,7 +161,7 @@ func permOverride(o db.ChannelOverride) permissions.ChannelOverride {
 // readyVisibleChannels resolves the channels the user may see for the ready
 // payload, returning the per-channel override map it fetched alongside them so
 // buildReady can reuse it for the can_send affordance without a second query.
-func (h *Hub) readyVisibleChannels(ctx context.Context, database *db.DB, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
+func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
 	// filtering (computeAllowedChannels). The overrides map is fetched once and
@@ -241,7 +241,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 // readyDMChannels loads the user's open DM channels and reconciles them with
 // the rest of the ready payload: mention counts from unreadMap, and the same
 // presence rule presentableMembers applies to the members array.
-func (h *Hub) readyDMChannels(ctx context.Context, database *db.DB, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
+func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
@@ -268,7 +268,7 @@ func (h *Hub) readyDMChannels(ctx context.Context, database *db.DB, userID int64
 
 // readyVoiceStates gathers the voice states the ready payload may expose to
 // this user. A collect failure is non-fatal, so this returns no error.
-func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []db.Channel, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
+func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, channels []db.Channel, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
 	// Collect voice states, filtered to visible channels (BUG-095) plus the
 	// user's own open DM channels — mirroring computeAllowedChannels, which
 	// layers DM IDs onto the same checker result for reconnect replay
@@ -312,7 +312,7 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database *db.DB, channels []
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
+func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -372,19 +372,22 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 
 // collectAllVoiceStates gathers voice states across all channels in a single
 // query, replacing the previous N+1 per-channel pattern.
-func collectAllVoiceStates(ctx context.Context, database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
+func collectAllVoiceStates(ctx context.Context, database ReadySnapshotReader, _ []db.Channel) ([]db.VoiceState, error) {
 	return database.GetAllVoiceStates(ctx)
 }
 
-func (h *Hub) handleFreshConnect(
-	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB,
-) error {
+func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
+	// The configured seam, never a caller-supplied handle: binding here is what
+	// lets a service-backed or instrumented Ready reader actually intercept the
+	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
+	// h.readers.StaleVoice.
+	database := h.readers.Ready
 	// Clean stale voice state BEFORE building ready and registering.
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
-	if vs, err := database.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
-		h.freshConnectCleanStaleVoice(ctx, database, c, vs)
+	if vs, err := h.readers.StaleVoice.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
+		h.freshConnectCleanStaleVoice(ctx, c, vs)
 	}
 
 	// c.user is the auth-time snapshot — re-read it so the ready payload and
@@ -465,7 +468,7 @@ func (h *Hub) handleFreshConnect(
 
 	// Settle the session's status before buildReady reads the member list, so
 	// the ready payload and the presence broadcast below cannot disagree.
-	applyConnectStatus(ctx, database, c)
+	applyConnectStatus(ctx, h.db, c)
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
@@ -501,7 +504,7 @@ func (h *Hub) handleFreshConnect(
 // freshConnectCleanStaleVoice removes the voice state left behind by this
 // user's previous session, unless that session is the still-registered
 // connection this one is about to inherit from.
-func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, database *db.DB, c *Client, vs *db.VoiceState) {
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db.VoiceState) {
 	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
 	// the still-registered old connection's live voice state into this
 	// client. Deleting the DB row here — and the LiveKit participant,
@@ -518,7 +521,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, database *db.DB, 
 	}
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
-	if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+	if _, delErr := h.readers.StaleVoice.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
 	// The DB row is gone, but the still-registered OLD *Client (if any) is

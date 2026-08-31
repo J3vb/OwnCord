@@ -40,6 +40,12 @@ type HubOptions struct {
 	// Services.Settings; test helpers default it over the test database.
 	Settings SettingsReader
 
+	// Readers is required: the hub's snapshot, visibility, member-payload
+	// and dispatch reads go through these seams (readers.go) instead of the
+	// raw handle. Production wires DBReaders; test helpers default it over
+	// the test database.
+	Readers HubReaders
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -66,21 +72,33 @@ type HubOptions struct {
 // silently refused setter call. It also initializes the settings cache from
 // the database. If opts.Services is non-nil, V2 handlers receive service
 // references for business logic delegation.
-func NewHub(opts HubOptions) (*Hub, error) {
+// validateHubOptions is NewHub's required-collaborator gate, split out so
+// the constructor body stays within the function-length lint bound.
+func validateHubOptions(opts HubOptions) error {
 	if opts.DB == nil {
-		return nil, errors.New("ws: HubOptions.DB is required (every dispatch path reads it)")
+		return errors.New("ws: HubOptions.DB is required (every dispatch path reads it)")
 	}
 	if opts.Limiter == nil {
-		return nil, errors.New("ws: HubOptions.Limiter is required (handler deps capture it at registration)")
+		return errors.New("ws: HubOptions.Limiter is required (handler deps capture it at registration)")
 	}
 	if opts.Settings == nil {
-		return nil, errors.New("ws: HubOptions.Settings is required (the settings cache reads through it)")
+		return errors.New("ws: HubOptions.Settings is required (the settings cache reads through it)")
+	}
+	if !opts.Readers.complete() {
+		return errors.New("ws: HubOptions.Readers is required in full (the hub reads through its seams)")
 	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
-		return nil, errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
+		return errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
 	if opts.ReplayRingSize < 0 || opts.ReplayColdLimit < 0 {
-		return nil, fmt.Errorf("ws: negative replay budget (ring %d, cold %d)", opts.ReplayRingSize, opts.ReplayColdLimit)
+		return fmt.Errorf("ws: negative replay budget (ring %d, cold %d)", opts.ReplayRingSize, opts.ReplayColdLimit)
+	}
+	return nil
+}
+
+func NewHub(opts HubOptions) (*Hub, error) {
+	if err := validateHubOptions(opts); err != nil {
+		return nil, err
 	}
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
@@ -98,6 +116,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		db:              database,
 		limiter:         limiter,
 		settings:        settingsReader,
+		readers:         opts.Readers,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),

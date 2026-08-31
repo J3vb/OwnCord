@@ -31,6 +31,9 @@ func newTestHubWith(tb testing.TB, opts ws.HubOptions) *ws.Hub {
 	if opts.Settings == nil && opts.DB != nil {
 		opts.Settings = service.NewSettingsService(opts.DB)
 	}
+	if opts.Readers == (ws.HubReaders{}) && opts.DB != nil {
+		opts.Readers = ws.DBReaders(opts.DB)
+	}
 	h, err := ws.NewHub(opts)
 	if err != nil {
 		tb.Fatalf("ws.NewHub: %v", err)

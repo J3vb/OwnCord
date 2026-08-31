@@ -50,6 +50,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		Limiter:  limiter,
 		Services: svc,
 		Settings: svc.Settings,
+		Readers:  ws.DBReaders(database),
 		// nil pluginRegistry means plugins are disabled; the hub no-ops.
 		PluginRegistry: pluginRegistry,
 		LiveKit:        lk,

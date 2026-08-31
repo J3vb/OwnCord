@@ -116,7 +116,7 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 	}
 
 	limiter := auth.NewRateLimiter()
-	hub, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database)})
+	hub, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database)})
 	if hubErr != nil {
 		t.Fatalf("ws.NewHub: %v", hubErr)
 	}
@@ -264,7 +264,7 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 	// last_seq ends up as whatever the 40th broadcast's real seq turns out to
 	// be — captured dynamically so this test holds regardless of what value
 	// scheme is in effect (raw 1..N pre-fix, or a seeded floor post-fix). ---
-	hubOld, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database)})
+	hubOld, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database)})
 	if hubErr != nil {
 		t.Fatalf("ws.NewHub: %v", hubErr)
 	}
@@ -282,7 +282,7 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 
 	// --- Restart: hub B is a brand-new process-equivalent hub, same disabled
 	// config, same (in-memory but never touched by persistence) database. ---
-	hubNew, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database)})
+	hubNew, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database)})
 	if hubErr != nil {
 		t.Fatalf("ws.NewHub: %v", hubErr)
 	}

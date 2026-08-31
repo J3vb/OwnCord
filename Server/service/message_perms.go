@@ -152,12 +152,22 @@ func requireChannelWritable(ch *db.Channel) error {
 	return fmt.Errorf("%w: channel is archived", ErrForbidden)
 }
 
+// DMBlockReader is the narrow read set the block check needs — Store
+// satisfies it, and so do consumer-side seams (ws.DispatchReader) that
+// carry just these three reads.
+type DMBlockReader interface {
+	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
+	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
+	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+}
+
 // RequireDMNotBlocked is the exported form of requireDMNotBlocked so callers
 // outside the service package (voice join/token-refresh, ws/voice_join.go)
 // can share this single block-check implementation — same group-DM exemption,
 // same "lookup failure is not a block" posture — instead of reimplementing it
-// against the raw DB. st only needs to be a Store; *db.DB satisfies it.
-func RequireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+// against the raw DB. st only needs to be a DMBlockReader; *db.DB and Store
+// both satisfy it.
+func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	return requireDMNotBlocked(ctx, st, userID, channelID)
 }
 
@@ -187,7 +197,7 @@ func RequireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64)
 // them reading different conversations under the same name. Blocks are instead
 // enforced when the group is *created* (DMService.CreateGroupDM), where the
 // question "may these two be in a room together" still has one answer.
-func requireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+func requireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {
 		return nil
