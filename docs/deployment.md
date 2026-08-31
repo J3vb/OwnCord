@@ -99,6 +99,12 @@ docker compose up -d
 
 The named volume is preserved — no data loss.
 
+Upgrade rehearsals do not need a donated production database:
+`Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` is a committed, anonymised,
+alpha.4-schema dataset shaped like a month-old server (see the README beside
+it), and `Server/db/alpha_snapshot_test.go` proves on every test run that the
+current migrations still apply to it cleanly.
+
 **Upgrade the server before the clients.** Desktop clients fetch updates from
 the server they connect to, and the server only offers releases whose protocol
 epoch it can speak itself (`docs/protocol.md`, Compatibility). A release that
