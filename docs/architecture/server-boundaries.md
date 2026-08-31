@@ -85,7 +85,7 @@ happens to that use — one of four dispositions from the
 
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
-| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   15 |
+| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   14 |
 | `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   28 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   17 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
@@ -101,8 +101,10 @@ gather into `hub_visibility.go`; the finisher turned `hub.go` type-only
 while `hub_settings.go` took its `move` row — 26 → 28 `move` across the
 series with the calls behind them only moved), so it is the surface, not
 the row count, that ratchets. B3-8 then took it down: settings/audit
-(28 → 24), the channel family's three parts (24 → 17) and the upload
-family (17 → 15).
+(28 → 24), the channel family's three parts (24 → 17), the upload family
+(17 → 15), and the role family, whose single row is **deleted** rather
+than downgraded because `admin/handlers_roles.go` stopped importing `db`
+entirely (15 → 14) — the first file to leave the table since B3-2.
 
 ## How the measurement works
 
@@ -142,7 +144,6 @@ those files may read.
 | `admin/handlers_backup.go`        | `DB×5`                                                                                                                                     | `CheckBackupIntegrity()×2` `WriteAudit()×2`               | `BackupToSafe×2` `Close` `LogAudit` `SQLDb`                                                                                                                                                                               | calls     | boundary    | —          | backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap               |
 | `admin/handlers_channel_perms.go` | `Channel×3` `ChannelRoleOverride×2` `ChannelUserOverride×2` `Role`                                                                         | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | override response shapes; the service owns the policy and the calls                                          |
 | `admin/handlers_channels.go`      | `Channel`                                                                                                                                  | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | db.Channel in the resolver and response shapes; the service owns the calls                                   |
-| `admin/handlers_roles.go`         | `DB×4`                                                                                                                                     | —                                                         | `GetRoleByID` `ListRoles`                                                                                                                                                                                                 | calls     | move        | role       | two reads; service/role.go already owns the writes                                                           |
 | `admin/handlers_tokens.go`        | `DB×3` `User`                                                                                                                              | `WriteAudit()×2`                                          | `CreateAPIToken` `GetOwnerUser` `GetUserByUsername` `ListAPITokens` `RevokeAPIToken`                                                                                                                                      | calls     | move        | auth       | API-token CRUD duplicated in token_cli.go                                                                    |
 | `admin/handlers_users.go`         | `DB×4` `Role` `User`                                                                                                                       | —                                                         | `GetServerStats` `GetUserByID×2` `ListAllUsers`                                                                                                                                                                           | calls     | move        | user       | user list, stats, lookups                                                                                    |
 | `admin/helpers.go`                | `Role×2` `User`                                                                                                                            | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | Role/User types in response helpers                                                                          |
@@ -197,8 +198,8 @@ those files may read.
 | `ws/voice_join.go`                | `Channel×3` `ChannelOverride` `VoiceState×5`                                                                                               | `ErrChannelFull`                                          | `GetChannel×2` `GetChannelOverridesFor` `GetChannelVoiceStates` `GetRoleForUser` `GetVoiceState×6` `JoinVoiceChannel` `JoinVoiceChannelIfCapacity` `LeaveVoiceChannelIfMatch` `SetVoiceServerDeafen` `SetVoiceServerMute` | calls     | move        | voice      | voice state reads and writes                                                                                 |
 | `ws/voice_moderation.go`          | `Role` `VoiceState×3`                                                                                                                      | `WriteAudit()`                                            | `CountChannelVoiceUsers` `GetChannel×2` `GetRoleForUser` `GetVoiceState×2` `SetVoiceServerDeafen×2` `SetVoiceServerMute×2`                                                                                                | calls     | move        | voice      | mute/deafen/move persist voice state                                                                         |
 
-60 files import `db` outside `db/` and `service/` (. 1, admin 15, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 22); 30 are type-only; 0 unlisted.
-Dispositions: adapter 28, boundary 17, move 15. Move targets: auth 7, connection 2, role 1, user 2, voice 3.
+59 files import `db` outside `db/` and `service/` (. 1, admin 14, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 22); 30 are type-only; 0 unlisted.
+Dispositions: adapter 28, boundary 17, move 14. Move targets: auth 7, connection 2, user 2, voice 3.
 
 <!-- dbinventory:end -->
 

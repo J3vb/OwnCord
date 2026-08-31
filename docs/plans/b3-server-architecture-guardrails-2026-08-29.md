@@ -1940,6 +1940,62 @@ above the domain layer:
   does not count (CI runs no `-coverpkg`), which is why a db method reached
   only from `service` needs a db-package test of its own.
 
+**Evidence — role family, 2026-08-31** — branch `feat/b3-8-role-family`
+from `dev` `227ae08c`, synced onto `18deb38` (the upload family) before
+merge. One inventory row and one ledger finding, and the
+row is the first since B3-2 to be **deleted** rather than downgraded:
+
+- **OC-0374, test-first.** `ReorderRoles` wrote the manageable roles to
+  positions N, N-1, … 1 — a gapless block ending at 1 — while
+  `CreateRole`'s default placement takes the highest free slot strictly
+  below the actor. After a single reorder no such slot existed for any
+  actor below the owner, so role creation failed permanently, and the
+  refusal told the admin to "reorder existing roles first", which
+  re-compacted to the same block. Positions are now spread with the
+  largest stride that still fits every role below the actor
+  (`actor.Position / (len(orderedIDs)+1)`, at least 1), which keeps the
+  order and the uniqueness, is stable under repeated reorders, and makes
+  reordering the default four under the owner reproduce their shipped
+  80/60/40/20. RED first, both rows of
+  `service/role_reorder_spacing_test.go` against the unfixed code:
+  `CreateRole after a reorder: bad request: no free position below your
+rank — reorder existing roles first`. Two existing tests asserted the
+  dense block (`service/role_test.go`'s `TestReorderRoles_NormalizesPositions`,
+  `admin/handlers_roles_test.go`'s `TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts`)
+  and are re-pinned to the spread with the finding cited — a mandated
+  contract change, not a weakened assertion. The ledger's own suggested
+  fix is the same stride, arrived at independently — but a stride is not
+  enough, which Codex's review caught: `actor.Position / (N+1)` collapses to
+  1 once N approaches the actor's position, so a server with 50 roles under
+  the owner still compacted to 50…1 and stranded every slot from 51 up,
+  leaving the defect exactly where a big hierarchy needs it fixed. The
+  spacing is proportional instead — the k-th role from the bottom lands at
+  `actor.Position * k / (N+1)`, using the whole range (50 roles land on
+  98, 96, … 2). Identical for the counts a normal server has, so both
+  re-pins below stand unchanged; `TestReorderRoles_SpreadsAcrossTheWholeRangeAtHighRoleCounts`
+  pins the high-count case and fails against the stride version with
+  `highest managed position = 50 with 50 roles`.
+- **The reads.** `handlers_roles.go` held the last two. The pre-update
+  `GetRoleByID` existed only to compare names for the rename fan-out and
+  duplicated a row `UpdateRole` already reads: `UpdateRole` now returns a
+  `RoleUpdateResult` (`PermsChanged`, `Renamed`), so the handler asks for
+  nothing extra and **one query disappears** rather than moving. The
+  `broadcastRoles` list reads through `RoleService.AllRoles`, the
+  unscoped list the `roles_update` fan-out ships; `ListRoles` stays the
+  actor-scoped panel view and the two are deliberately not
+  interchangeable.
+- **Allowlist diff**: `admin/handlers_roles.go` stops importing `db`
+  altogether, so its row is deleted — `role` leaves the move targets and
+  the table loses a file: 60 → 59 importers, 15 → 14 `move` (measured after
+  merging the upload family, which landed as #1481 while this branch was
+  open and took the count 17 → 15 itself). Remaining targets: auth 7,
+  connection 2, voice 3, user 2 — every one of them outside the family list
+  B3-8 set out, which is the B3 exit question, not this PR's.
+- **Characterization**: the admin role suite is the family's
+  characterization file and every assertion stands except the one the
+  finding mandates; `service/role_test.go` gains the `Renamed` and
+  `AllRoles` rows.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

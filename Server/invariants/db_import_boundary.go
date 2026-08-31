@@ -45,7 +45,6 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/handlers_backup.go":        {"boundary", "", "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap"},
 	"admin/handlers_channel_perms.go": {"adapter", "", "override response shapes; the service owns the policy and the calls"},
 	"admin/handlers_channels.go":      {"adapter", "", "db.Channel in the resolver and response shapes; the service owns the calls"},
-	"admin/handlers_roles.go":         {"move", "role", "two reads; service/role.go already owns the writes"},
 	"admin/handlers_tokens.go":        {"move", "auth", "API-token CRUD duplicated in token_cli.go"},
 	"admin/handlers_users.go":         {"move", "user", "user list, stats, lookups"},
 	"admin/helpers.go":                {"adapter", "", "Role/User types in response helpers"},

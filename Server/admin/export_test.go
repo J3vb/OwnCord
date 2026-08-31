@@ -11,14 +11,15 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // BroadcastRolesForTest exposes broadcastRoles for external tests. It builds
 // a bare *http.Request carrying ctx, since broadcastRoles's only use of its
 // *http.Request argument is r.Context().
-func BroadcastRolesForTest(ctx context.Context, database *db.DB, hub HubBroadcaster) {
+func BroadcastRolesForTest(ctx context.Context, roles *service.RoleService, hub HubBroadcaster) {
 	r := httptest.NewRequest(http.MethodPost, "/roles", nil).WithContext(ctx)
-	broadcastRoles(r, database, hub)
+	broadcastRoles(r, roles, hub)
 }
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
