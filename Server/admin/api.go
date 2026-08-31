@@ -143,7 +143,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		})
 
 		r.With(requirePerm(permissions.ViewAuditLog)).
-			Get("/audit-log", handleGetAuditLog(database))
+			Get("/audit-log", handleGetAuditLog(settings))
 		// API tokens — Owner-only. Minting a network-reachable, revocation-
 		// surviving bearer credential is gated like backups/updates.
 		r.Get("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

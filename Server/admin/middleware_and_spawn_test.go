@@ -402,7 +402,7 @@ func TestHandleSetupStatus_DBError(t *testing.T) {
 // when the database query fails.
 func TestHandleGetAuditLog_DBError(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := handleGetAuditLog(database)
+	handler := handleGetAuditLog(service.NewSettingsService(database))
 
 	_ = database.Close()
 

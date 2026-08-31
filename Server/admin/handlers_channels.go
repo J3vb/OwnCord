@@ -210,12 +210,12 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 	}
 }
 
-func handleGetAuditLog(database *db.DB) http.HandlerFunc {
+func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 
-		entries, err := database.GetAuditLog(r.Context(), limit, offset)
+		entries, err := settings.AuditLog(r.Context(), limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return
