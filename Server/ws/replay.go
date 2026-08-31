@@ -484,3 +484,13 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 	}
 	return filtered
 }
+
+// maxColdReplayLimit returns the effective persisted-replay cap. The budget
+// arrives via HubOptions (B3-4): the dispatch loop reads replayBuf unlocked,
+// so the ring is sized exactly once, at construction.
+func (h *Hub) maxColdReplayLimit() int {
+	if h.coldReplayLimit > 0 {
+		return h.coldReplayLimit
+	}
+	return maxColdReplay
+}
