@@ -138,38 +138,42 @@ CREATE TABLE IF NOT EXISTS invites (
 // ─── ownerOnlyMiddleware whitebox tests ──────────────────────────────────────
 
 // TestOwnerOnlyMiddleware_NoUserInContext verifies that ownerOnlyMiddleware
-// returns 401 when there is no user stored in the request context.
+// returns 401 when the request context carries no authenticated principal —
+// simulates a call bypassing adminAuthMiddleware, which is what stores the
+// role the gate consumes.
 func TestOwnerOnlyMiddleware_NoUserInContext(t *testing.T) {
-	database := openWhiteboxTestDB(t)
-
 	reached := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := ownerOnlyMiddleware(database, next)
+	handler := ownerOnlyMiddleware(next)
 
-	// Request with NO user in context — simulates a call bypassing adminAuthMiddleware.
 	req := httptest.NewRequest(http.MethodPost, "/backup", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if reached {
-		t.Error("next handler was reached despite missing user in context")
+		t.Error("next handler was reached despite an unauthenticated context")
 	}
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
 	}
 }
 
-// TestOwnerOnlyMiddleware_RoleNotFound verifies that ownerOnlyMiddleware
-// returns 403 when the user's role_id does not exist in the database.
-func TestOwnerOnlyMiddleware_RoleNotFound(t *testing.T) {
+// TestOwnerOnlyMiddleware_UserWithoutRoleInContext verifies the gate fails
+// closed as 401 when the context carries a user but no role. Through the full
+// stack this cannot happen — adminAuthMiddleware stores both or refuses the
+// request (a genuinely missing role is its 401, a role read fault its 503) —
+// so a half-populated context means the perimeter did not run, and the gate
+// must treat that as unauthenticated rather than consult the database itself.
+// (The pre-OC-0379 middleware answered this shape by re-reading the role; the
+// old TestOwnerOnlyMiddleware_RoleNotFound covered that lookup's miss, a
+// branch that no longer exists.)
+func TestOwnerOnlyMiddleware_UserWithoutRoleInContext(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	// Create a user initially with a valid role, then mutate role_id to a
-	// nonexistent value (disabling FK checks temporarily so SQLite allows it).
 	uid, err := database.CreateUser(context.Background(), "orphanuser", "$2a$12$x", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -179,45 +183,60 @@ func TestOwnerOnlyMiddleware_RoleNotFound(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	// Disable FK enforcement, update role_id, re-enable.
-	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
-		t.Fatalf("disable FK: %v", err)
-	}
-	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
-		t.Fatalf("UPDATE role_id: %v", err)
-	}
-	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
-		t.Fatalf("re-enable FK: %v", err)
-	}
-	user.RoleID = 9999 // mirror the DB value in our in-memory struct
-
 	reached := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := ownerOnlyMiddleware(database, next)
+	handler := ownerOnlyMiddleware(next)
 
-	// Inject user into context as adminAuthMiddleware would.
+	// User injected, role deliberately absent.
 	ctx := context.WithValue(context.Background(), adminUserKey, user)
 	req := httptest.NewRequest(http.MethodPost, "/backup", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if reached {
-		t.Error("next handler was reached despite missing role")
+		t.Error("next handler was reached despite no role in context")
 	}
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (role not found)", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (no role in context is unauthenticated)", w.Code)
 	}
 
 	var resp map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp["error"] != "FORBIDDEN" {
-		t.Errorf("error = %q, want FORBIDDEN", resp["error"])
+	if resp["error"] != "UNAUTHORIZED" {
+		t.Errorf("error = %q, want UNAUTHORIZED", resp["error"])
+	}
+}
+
+// TestOwnerOnlyMiddleware_BelowOwnerForbidden verifies a role below the Owner
+// position is refused with 403 "owner role required". The role comes straight
+// from the context — the middleware reads nothing else, so a plain struct is
+// the whole setup.
+func TestOwnerOnlyMiddleware_BelowOwnerForbidden(t *testing.T) {
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := ownerOnlyMiddleware(next)
+
+	mod := &db.Role{ID: 2, Name: "Moderator", Position: 50}
+	ctx := context.WithValue(context.Background(), adminRoleKey, mod)
+	req := httptest.NewRequest(http.MethodPost, "/backup", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if reached {
+		t.Error("next handler was reached for a below-owner role")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (owner role required)", w.Code)
 	}
 }
 
@@ -234,6 +253,10 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
+	role, err := database.GetRoleByID(context.Background(), user.RoleID)
+	if err != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
 
 	reached := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,9 +264,11 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := ownerOnlyMiddleware(database, next)
+	handler := ownerOnlyMiddleware(next)
 
+	// Both keys, as adminAuthMiddleware stores them.
 	ctx := context.WithValue(context.Background(), adminUserKey, user)
+	ctx = context.WithValue(ctx, adminRoleKey, role)
 	req := httptest.NewRequest(http.MethodPost, "/backup", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -523,16 +548,26 @@ func TestSpawnDetached_CommandConstruction(t *testing.T) {
 	}
 }
 
-// TestOwnerOnlyMiddleware_RoleLookupFailureIs503 pins OC-0345: a database
-// fault on the owner gate's role read is an outage, not a missing role, so the
-// Owner must get 503 SERVICE_UNAVAILABLE — never the 403 "role not found" a
-// genuinely absent role earns. Whitebox on purpose: through the full stack
-// adminAuthMiddleware reads the role first and would answer its own 503, so
-// the branch under test would never run.
-func TestOwnerOnlyMiddleware_RoleLookupFailureIs503(t *testing.T) {
+// TestOwnerOnlyMiddleware_RoleLookupFailureIs503 pinned OC-0345's 503 mapping
+// on the owner gate's own role read. OC-0379 removed that read entirely — the
+// gate consumes adminRoleKey and issues no query, so the branch this test
+// exercised no longer exists in any form. The 503-on-read-fault contract it
+// protected still holds where the one remaining role read lives: the
+// perimeter's default branch in adminAuthMiddleware (middleware.go), covered
+// by its own tests. TestOwnerOnlyMiddleware_NoSecondRoleLookup below is the
+// replacement pin: it renames the roles table away and requires the owner
+// path to succeed anyway.
+
+// TestOwnerOnlyMiddleware_NoSecondRoleLookup pins OC-0379 (OC-0345's residue):
+// the owner gate consumes the role adminAuthMiddleware already resolved into
+// the request context and performs no role read of its own. The roles table is
+// renamed away exactly as the OC-0345 fault test did — if the middleware still
+// issues a role query, that query fails and the request cannot reach 200, so
+// this test is red for as long as the second lookup exists.
+func TestOwnerOnlyMiddleware_NoSecondRoleLookup(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser(context.Background(), "ownerfault", "$2a$12$x", 1)
+	uid, err := database.CreateUser(context.Background(), "ownerctx", "$2a$12$x", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -540,7 +575,11 @@ func TestOwnerOnlyMiddleware_RoleLookupFailureIs503(t *testing.T) {
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
-	// Every query against roles now fails with a non-sentinel error.
+	role, err := database.GetRoleByID(context.Background(), user.RoleID)
+	if err != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+	// After this, any role read fails: the only way to 200 is the context role.
 	if _, err := database.ExecContext(context.Background(), `ALTER TABLE roles RENAME TO roles_gone`); err != nil {
 		t.Fatalf("hide roles: %v", err)
 	}
@@ -550,24 +589,18 @@ func TestOwnerOnlyMiddleware_RoleLookupFailureIs503(t *testing.T) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := ownerOnlyMiddleware(database, next)
+	handler := ownerOnlyMiddleware(next)
 
 	ctx := context.WithValue(context.Background(), adminUserKey, user)
+	ctx = context.WithValue(ctx, adminRoleKey, role)
 	req := httptest.NewRequest(http.MethodPost, "/backup", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if reached {
-		t.Error("next handler was reached although the role could not be read")
+	if !reached {
+		t.Error("next handler was not reached: the owner gate performed a role lookup instead of consuming the context role")
 	}
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503 (a role read fault is not a missing role)", w.Code)
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp["error"] != "SERVICE_UNAVAILABLE" {
-		t.Errorf("error = %q, want SERVICE_UNAVAILABLE", resp["error"])
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 with no role read", w.Code)
 	}
 }

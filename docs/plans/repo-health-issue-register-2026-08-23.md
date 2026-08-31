@@ -76,16 +76,18 @@ together as if each row were a unique defect:
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     320 |
+| Fixed     |     321 |
 | Open      |      54 |
 | Declined  |       3 |
 | Duplicate |       1 |
-| **Total** | **378** |
+| **Total** | **379** |
 
 The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt, eleven of
 which have since been fixed (the last two, `OC-0345` and `OC-0346`, by B3-9 in
 PR #1454); `OC-0349`–`OC-0375` are recorded in the ledger and
-are not yet enumerated here. Closing a planning row does not close an
+are not yet enumerated here. `OC-0379` — OC-0345's leftover role re-read,
+found by the 2026-08-31 post-merge audit — is recorded there too, fixed on
+arrival. Closing a planning row does not close an
 `OC-*` record: the implementation, regression test, focused verification, full
 required gates, and ledger update must land together.
 
