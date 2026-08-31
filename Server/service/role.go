@@ -497,10 +497,7 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 	// four roles under the owner reproduces their shipped 80/60/40/20 spacing.
 	// len(orderedIDs) < actor.Position is already established above, so the
 	// stride is at least 1 and the highest position stays below the actor's.
-	stride := actor.Position / (len(orderedIDs) + 1)
-	if stride < 1 {
-		stride = 1
-	}
+	stride := max(actor.Position/(len(orderedIDs)+1), 1)
 	positions := make(map[int64]int, len(orderedIDs))
 	for i, id := range orderedIDs {
 		positions[id] = (len(orderedIDs) - i) * stride

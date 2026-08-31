@@ -1863,6 +1863,49 @@ fixture half the `ws` suite builds) or deferring to the B3 exit:
   are satisfied by the same handle); `TestNewHub_RequiredCollaborators`
   gains the Readers refusal case.
 
+**Evidence — role family, 2026-08-31** — branch `feat/b3-8-role-family`
+from `dev` `227ae08c`. One inventory row and one ledger finding, and the
+row is the first since B3-2 to be **deleted** rather than downgraded:
+
+- **OC-0374, test-first.** `ReorderRoles` wrote the manageable roles to
+  positions N, N-1, … 1 — a gapless block ending at 1 — while
+  `CreateRole`'s default placement takes the highest free slot strictly
+  below the actor. After a single reorder no such slot existed for any
+  actor below the owner, so role creation failed permanently, and the
+  refusal told the admin to "reorder existing roles first", which
+  re-compacted to the same block. Positions are now spread with the
+  largest stride that still fits every role below the actor
+  (`actor.Position / (len(orderedIDs)+1)`, at least 1), which keeps the
+  order and the uniqueness, is stable under repeated reorders, and makes
+  reordering the default four under the owner reproduce their shipped
+  80/60/40/20. RED first, both rows of
+  `service/role_reorder_spacing_test.go` against the unfixed code:
+  `CreateRole after a reorder: bad request: no free position below your
+rank — reorder existing roles first`. Two existing tests asserted the
+  dense block (`service/role_test.go`'s `TestReorderRoles_NormalizesPositions`,
+  `admin/handlers_roles_test.go`'s `TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts`)
+  and are re-pinned to the spread with the finding cited — a mandated
+  contract change, not a weakened assertion. The ledger's own suggested
+  fix is the same stride, arrived at independently.
+- **The reads.** `handlers_roles.go` held the last two. The pre-update
+  `GetRoleByID` existed only to compare names for the rename fan-out and
+  duplicated a row `UpdateRole` already reads: `UpdateRole` now returns a
+  `RoleUpdateResult` (`PermsChanged`, `Renamed`), so the handler asks for
+  nothing extra and **one query disappears** rather than moving. The
+  `broadcastRoles` list reads through `RoleService.AllRoles`, the
+  unscoped list the `roles_update` fan-out ships; `ListRoles` stays the
+  actor-scoped panel view and the two are deliberately not
+  interchangeable.
+- **Allowlist diff**: `admin/handlers_roles.go` stops importing `db`
+  altogether, so its row is deleted — `role` leaves the move targets and
+  the table loses a file: 60 → 59 importers, 17 → 16 `move`. Remaining
+  targets on this branch's base: auth 7, connection 2, upload 2, voice 3,
+  user 2 (the upload pair is the parallel family's, closing in #1481).
+- **Characterization**: the admin role suite is the family's
+  characterization file and every assertion stands except the one the
+  finding mandates; `service/role_test.go` gains the `Renamed` and
+  `AllRoles` rows.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".
