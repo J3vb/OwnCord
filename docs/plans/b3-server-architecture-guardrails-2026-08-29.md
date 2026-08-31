@@ -800,6 +800,36 @@ Exit: the file table in `docs/architecture/server-boundaries.md` §hub updated;
 race + deadlock + `TestEpoch1Fixtures` green on every commit. One PR per two
 responsibilities at most, so each is reviewable.
 
+**Evidence — split PR 1 of the series, 2026-08-31** — branch
+`feat/b3-5-ws-split` from `dev` `e13adaf8`. Responsibilities 1 and 2
+(handshake authentication, fresh-connect initialisation); both destination
+files already existed, so `git diff -M --summary` records no file-level
+rename and the purity proof is the normalised line-diff per move:
+
+- **Move 1** — `handshakeWrite`, `upgradeAndAuth`,
+  `unregisterFailedHandshake` (99 lines) → `serve_auth.go`, beside
+  `authenticateConn`. Residue: three import lines (`log/slog`, `net/http`,
+  `strings`) added to the destination; `serve.go` keeps its copies for the
+  remaining code. Gate: `-tags deadlock -count=10 ./ws/` ok 648.7 s,
+  `-race` ok 228.8 s.
+- **Move 2** — `handleFreshConnect`, `freshConnectCleanStaleVoice`
+  (187 lines) → `serve_ready.go`, beside the `buildReady`/`buildAuthOK`
+  family they drive. Residue: one import line (`github.com/coder/websocket`).
+  Gate: `-tags deadlock -count=10 ./ws/` ok 649.8 s, `-race` ok 233.6 s.
+- **Deliberately not moved**: `applyConnectStatus`,
+  `announceConnectPresence`, `refreshUserSnapshot` are called from both the
+  reconnect and fresh-connect paths, so they stay in `serve.go` with the
+  composition point; `computeAllowedChannels` (also called from
+  `hub_broadcast.go`) waits for the visibility responsibility.
+- **Sizes**: `serve.go` 990 → 704, `serve_auth.go` 105 → 207,
+  `serve_ready.go` 375 → 564. The `serve.go` < 500 exit figure lands when
+  the replay/reconnect family moves (next PR).
+- Boundaries doc re-measured (dbinventory table, two `DBImportAllow`
+  reasons, the reader note: 45 → 48 references, 7 → 11 distinct queries).
+- Pre-squash SHAs recorded at merge time in the PR; the mechanical-rewrite
+  half of each pair was empty (no identifier changed), so each move is one
+  commit.
+
 ## B3-6 — Permanent guardrails
 
 Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;

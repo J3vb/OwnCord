@@ -96,9 +96,9 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_sweep.go":        {"move", "voice", "stale-voice sweep reads and leaves"},
 	"ws/messages.go":         {"adapter", "", "wire types + pure status helpers"},
 	"ws/serve.go":            {"move", "connection", "connect/disconnect lifecycle; B3-5 splits it by family first"},
-	"ws/serve_auth.go":       {"move", "auth", "session lookup on the WebSocket handshake"},
+	"ws/serve_auth.go":       {"move", "auth", "handshake auth: session, user and role lookups, connect audit, failed-handshake teardown"},
 	"ws/serve_pumps.go":      {"move", "user", "MarkUserDisconnected on pump exit"},
-	"ws/serve_ready.go":      {"move", "channel", "ready snapshot: channels, overrides, unreads, DMs, members"},
+	"ws/serve_ready.go":      {"move", "channel", "ready snapshot and fresh-connect: channels, overrides, unreads, DMs, members, stale-voice cleanup"},
 	"ws/voice_join.go":       {"move", "voice", "voice state reads and writes"},
 	"ws/voice_moderation.go": {"move", "voice", "mute/deafen/move persist voice state"},
 }
