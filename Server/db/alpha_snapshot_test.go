@@ -110,4 +110,26 @@ func TestAlphaSnapshotMigratesOnHead(t *testing.T) {
 	if got := count(`SELECT COUNT(*) FROM messages_fts`); got != 20000 {
 		t.Errorf("messages_fts holds %d rows, want 20000", got)
 	}
+
+	// Realism invariants a live database cannot violate (Codex on #1469):
+	// nothing is authored before its author joined, ids follow timestamps as
+	// insertion order does, and every attachment records its uploader.
+	for _, tc := range []struct {
+		what, q string
+	}{
+		{"messages authored before their author joined",
+			`SELECT COUNT(*) FROM messages m JOIN users u ON u.id = m.user_id WHERE m.timestamp < u.created_at`},
+		{"adjacent message ids with inverted timestamps",
+			`SELECT COUNT(*) FROM messages a JOIN messages b ON b.id = a.id + 1 WHERE b.timestamp < a.timestamp`},
+		{"attachments without an uploader",
+			`SELECT COUNT(*) FROM attachments WHERE uploader_id IS NULL`},
+		{"DM messages before both members existed",
+			`SELECT COUNT(*) FROM messages m JOIN channels c ON c.id = m.channel_id AND c.type = 'dm'
+			 JOIN dm_participants dp ON dp.channel_id = c.id JOIN users u ON u.id = dp.user_id
+			 WHERE m.timestamp < u.created_at`},
+	} {
+		if got := count(tc.q); got != 0 {
+			t.Errorf("%s: %d, want 0", tc.what, got)
+		}
+	}
 }

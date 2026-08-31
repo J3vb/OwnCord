@@ -1,12 +1,19 @@
--- Identity scrub for alpha snapshots (B3-7 item 2).
+-- Identity and credential scrub for alpha snapshots (B3-7 item 2).
 --
 -- Applied by `go run ./cmd/seed -profile alpha -snapshot … -scrub this-file`
--- before VACUUM INTO writes the committed snapshot, and equally applicable to
--- a REAL alpha database an operator wants to donate as a test fixture: every
--- statement is idempotent, and together they remove or replace everything
--- that identifies a person or authenticates a session. Statements are split
--- on ";" by the seed tool, so keep one statement per block and comments on
--- their own lines.
+-- before VACUUM INTO writes the committed snapshot. Every statement is
+-- idempotent. Scope, stated precisely (Codex on #1469): this script removes
+-- account identities, credentials, session/token material, invite codes,
+-- audit detail, user-chosen filenames and wall-clock apply times. It
+-- DELIBERATELY DOES NOT touch message content, channel names/topics, or the
+-- FTS index built from them — the committed snapshot's content is synthetic
+-- lexicon text with nothing to hide, and content anonymisation of a REAL
+-- database is a judgement call no blanket UPDATE can make. A donated
+-- production database is NOT made shareable by this script alone: its
+-- messages and channel names must be cleared or rewritten first (and the
+-- FTS index rebuilt), or the donation refused. Statements are split on ";"
+-- with comment lines stripped, so keep one statement per block and comments
+-- on their own lines.
 
 UPDATE users
 SET username = 'user' || printf('%03d', id),

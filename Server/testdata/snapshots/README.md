@@ -51,6 +51,10 @@ the snapshot stops being an alpha.4 artifact, `alphaSnapshotMigrations` in
 the canary must move with it, and the change belongs in the B3-7 evidence
 block.
 
-`scrub.sql` is the identity scrub, written so it can also anonymise a real
-donated alpha database: usernames, profiles, secrets, sessions, tokens,
-invite codes, audit detail, filenames and wall-clock migration timestamps.
+`scrub.sql` is the identity and credential scrub: usernames, profiles,
+secrets, sessions, tokens, invite codes, audit detail, filenames and
+wall-clock migration timestamps. It deliberately does not touch message
+content or channel names — synthetic here, but a judgement call on a real
+database — so a donated production database is **not** shareable after this
+script alone: clear or rewrite its content (and rebuild FTS) first, or
+refuse the donation.

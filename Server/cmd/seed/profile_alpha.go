@@ -38,6 +38,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -177,6 +178,7 @@ func seedAlpha(database *db.DB) error {
 
 	rng := rand.New(rand.NewSource(alphaSeed))
 	windowStart := alphaWindowEnd.AddDate(0, 0, -alphaWindowDays)
+	joined := alphaJoinTimes(rng, windowStart)
 
 	tx, err := database.BeginTx(context.Background(), &sql.TxOptions{})
 	if err != nil {
@@ -184,21 +186,21 @@ func seedAlpha(database *db.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := alphaInsertUsers(tx, rng, windowStart); err != nil {
+	if err := alphaInsertUsers(tx, rng, joined); err != nil {
 		return err
 	}
 	if err := alphaInsertChannels(tx, windowStart); err != nil {
 		return err
 	}
-	pairs, err := alphaInsertDMs(tx, rng, windowStart)
+	pairs, err := alphaInsertDMs(tx, rng, joined)
 	if err != nil {
 		return err
 	}
-	messageTimes, err := alphaInsertMessages(tx, rng, windowStart, pairs)
+	messageTimes, messageAuthors, err := alphaInsertMessages(tx, rng, windowStart, joined, pairs)
 	if err != nil {
 		return err
 	}
-	if err := alphaInsertAttachments(tx, rng, messageTimes); err != nil {
+	if err := alphaInsertAttachments(tx, rng, messageTimes, messageAuthors); err != nil {
 		return err
 	}
 	if err := alphaInsertReactions(tx, rng); err != nil {
@@ -261,7 +263,28 @@ func writeSnapshot(database *db.DB, scrubPath, outPath string) error {
 
 // ─── Users ──────────────────────────────────────────────────────────────────
 
-func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) error {
+// alphaJoinTimes computes every user's created_at once — the message and DM
+// generators consult it so nothing is authored before its author joined (a
+// fixture with time-travelling rows would poison the retention and
+// account-age rehearsals that consume it; Codex on #1469, P2). Monotonic in
+// the user id — the first forty accounts predate the window (an established
+// server; all staff are among them), the remaining sixty join during it in
+// id order — so "who exists at time t" is always the prefix 1..N.
+func alphaJoinTimes(rng *rand.Rand, windowStart time.Time) []time.Time {
+	joined := make([]time.Time, alphaUsers+1)
+	for i := 1; i <= alphaUsers; i++ {
+		if i <= 40 {
+			joined[i] = windowStart.AddDate(0, 0, -60).Add(time.Duration(i) * 26 * time.Hour)
+			continue
+		}
+		// Spacing is 12h, jitter under 1h: monotonicity holds by construction.
+		into := time.Duration(i-41) * (time.Duration(alphaWindowDays) * 24 * time.Hour) / 60
+		joined[i] = windowStart.Add(into).Add(time.Duration(rng.Intn(3599)) * time.Second)
+	}
+	return joined
+}
+
+func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, joined []time.Time) error {
 	roleOf := func(i int) int { // i is 1-based user number
 		switch {
 		case i <= alphaOwners:
@@ -274,15 +297,6 @@ func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) error {
 			return 4
 		}
 	}
-	// The first forty accounts predate the window (an established server);
-	// the remaining sixty joined during it, spread evenly with jitter.
-	joinedAt := func(i int) time.Time {
-		if i <= 40 {
-			return windowStart.AddDate(0, 0, -60).Add(time.Duration(i) * 26 * time.Hour)
-		}
-		into := time.Duration(i-41) * (time.Duration(alphaWindowDays) * 24 * time.Hour) / 60
-		return windowStart.Add(into).Add(time.Duration(rng.Intn(3600)) * time.Second)
-	}
 
 	const cols = 7
 	var b strings.Builder
@@ -292,8 +306,13 @@ func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) error {
 			b.WriteString(",")
 		}
 		b.WriteString("(?,?,?,?,?,?,?)")
-		created := joinedAt(i)
+		created := joined[i]
 		lastSeen := alphaWindowEnd.Add(-time.Duration(rng.Intn(72*3600)) * time.Second)
+		if lastSeen.Before(created) {
+			// A user who joined in the window's final days was last seen at
+			// the join, not before it.
+			lastSeen = created
+		}
 		args = append(args,
 			i, fmt.Sprintf("user%03d", i), alphaPasswordHash, roleOf(i),
 			"offline", ts(created), ts(lastSeen),
@@ -370,16 +389,27 @@ func alphaInsertChannels(tx *sql.Tx, windowStart time.Time) error {
 type dmPair struct {
 	channelID int64
 	a, b      int64
+	// ready is when both members exist — no message in the pair may precede
+	// it, and it is the channel's created_at / opened_at, matching
+	// GetOrCreateDMChannel's create-on-first-contact shape.
+	ready time.Time
 }
 
 // alphaInsertDMs creates the 40 DM channels exactly as GetOrCreateDMChannel
-// would (type 'dm', empty name, both participants, both open).
-func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) ([]dmPair, error) {
+// would (type 'dm', empty name, both participants, both open). The first
+// twelve pairs are drawn from the pre-window accounts so DM traffic exists
+// from the window's first hour; the rest may involve joiners and only carry
+// messages once both members exist.
+func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, joined []time.Time) ([]dmPair, error) {
 	seen := map[[2]int64]bool{}
 	pairs := make([]dmPair, 0, alphaDMPairs)
 	for len(pairs) < alphaDMPairs {
-		a := int64(rng.Intn(alphaUsers) + 1)
-		b := int64(rng.Intn(alphaUsers) + 1)
+		pool := alphaUsers
+		if len(pairs) < 12 {
+			pool = 40 // both members pre-window
+		}
+		a := int64(rng.Intn(pool) + 1)
+		b := int64(rng.Intn(pool) + 1)
 		if a == b {
 			continue
 		}
@@ -391,10 +421,13 @@ func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) ([]dmPair
 		}
 		seen[[2]int64{a, b}] = true
 		id := int64(alphaChannels + len(pairs) + 1) // 13..52
-		opened := windowStart.Add(time.Duration(len(pairs)) * 17 * time.Hour)
+		ready := joined[a]
+		if joined[b].After(ready) {
+			ready = joined[b]
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO channels (id, name, type, is_group, created_at) VALUES (?, '', 'dm', 0, ?)`,
-			id, ts(opened),
+			id, ts(ready),
 		); err != nil {
 			return nil, fmt.Errorf("alpha: dm channel %d: %w", id, err)
 		}
@@ -405,12 +438,12 @@ func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) ([]dmPair
 				return nil, fmt.Errorf("alpha: dm participant: %w", err)
 			}
 			if _, err := tx.Exec(
-				`INSERT INTO dm_open_state (user_id, channel_id, opened_at) VALUES (?, ?, ?)`, u, id, ts(opened),
+				`INSERT INTO dm_open_state (user_id, channel_id, opened_at) VALUES (?, ?, ?)`, u, id, ts(ready),
 			); err != nil {
 				return nil, fmt.Errorf("alpha: dm open state: %w", err)
 			}
 		}
-		pairs = append(pairs, dmPair{channelID: id, a: a, b: b})
+		pairs = append(pairs, dmPair{channelID: id, a: a, b: b, ready: ready})
 	}
 	return pairs, nil
 }
@@ -418,9 +451,14 @@ func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) ([]dmPair
 // ─── Messages ───────────────────────────────────────────────────────────────
 
 // alphaInsertMessages writes all 20,000 messages in chronological order —
-// ascending ids follow ascending time, as they would on a live server — and
-// returns each message's timestamp (indexed by id-1) for the attachment rows.
-func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pairs []dmPair) ([]time.Time, error) {
+// per-bucket second offsets are sorted before ids are assigned, so ascending
+// ids follow ascending timestamps exactly as insertion order does on a live
+// server (Codex on #1469, P2) — and returns each message's timestamp and
+// author (indexed by id-1) for the attachment rows. Authors are drawn only
+// from users who exist at the message's time: the eligible set is always the
+// prefix 1..maxUser because alphaJoinTimes is monotonic, and a DM pair
+// carries traffic only from its ready time.
+func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, joined []time.Time, pairs []dmPair) ([]time.Time, []int64, error) {
 	// Exactly 15% of message ids are DM messages.
 	dmCount := int(float64(alphaMessages) * alphaDMShare)
 	isDM := make([]bool, alphaMessages)
@@ -455,8 +493,9 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pair
 		return 3
 	}
 	// Staff channel posters are staff (+ the override-listed user009);
-	// announcement channels are staff-posted; everywhere else, anyone.
-	pickAuthor := func(ch int64) int64 {
+	// announcement channels are staff-posted; everywhere else, anyone who has
+	// joined by the message's time (staff and user009 are pre-window).
+	pickAuthor := func(ch int64, maxUser int) int64 {
 		switch ch {
 		case 1, 2:
 			return int64(rng.Intn(alphaOwners+alphaAdmins+alphaModerators) + 1)
@@ -464,11 +503,21 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pair
 			staff := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
 			return staff[rng.Intn(len(staff))]
 		default:
-			return int64(rng.Intn(alphaUsers) + 1)
+			return int64(rng.Intn(maxUser) + 1)
 		}
 	}
 
+	// Pairs sorted by readiness, so the eligible set at any time is a prefix;
+	// skewedIndex over that prefix keeps the earliest (all-pre-window) pairs
+	// the chattiest, which is also the realistic shape.
+	byReady := make([]dmPair, len(pairs))
+	copy(byReady, pairs)
+	sort.Slice(byReady, func(i, j int) bool { return byReady[i].ready.Before(byReady[j].ready) })
+
 	times := make([]time.Time, 0, alphaMessages)
+	authors := make([]int64, 0, alphaMessages)
+	maxUser := 40
+	readyPairs := 0
 	const cols = 5
 	const chunk = 500
 	var b strings.Builder
@@ -490,13 +539,23 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pair
 	for day := 0; day < alphaWindowDays; day++ {
 		perHour := largestRemainder(weights, perDay[day])
 		for hour := 0; hour < 24; hour++ {
-			for k := 0; k < perHour[hour]; k++ {
-				at := windowStart.AddDate(0, 0, day).
-					Add(time.Duration(hour) * time.Hour).
-					Add(time.Duration(rng.Intn(3600)) * time.Second)
+			offsets := make([]int, perHour[hour])
+			for k := range offsets {
+				offsets[k] = rng.Intn(3600)
+			}
+			sort.Ints(offsets)
+			base := windowStart.AddDate(0, 0, day).Add(time.Duration(hour) * time.Hour)
+			for _, off := range offsets {
+				at := base.Add(time.Duration(off) * time.Second)
+				for maxUser < alphaUsers && !joined[maxUser+1].After(at) {
+					maxUser++
+				}
+				for readyPairs < len(byReady) && !byReady[readyPairs].ready.After(at) {
+					readyPairs++
+				}
 				var ch, author int64
-				if isDM[id] {
-					p := pairs[skewedIndex(rng, len(pairs))]
+				if isDM[id] && readyPairs > 0 {
+					p := byReady[skewedIndex(rng, readyPairs)]
 					ch = p.channelID
 					if rng.Intn(2) == 0 {
 						author = p.a
@@ -505,10 +564,11 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pair
 					}
 				} else {
 					ch = pickChannel(day)
-					author = pickAuthor(ch)
+					author = pickAuthor(ch, maxUser)
 				}
 				id++
 				times = append(times, at)
+				authors = append(authors, author)
 				if len(args) > 0 {
 					b.WriteString(",")
 				}
@@ -516,21 +576,21 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, pair
 				args = append(args, id, ch, author, sentence(rng), ts(at))
 				if len(args) >= chunk*cols {
 					if err := flush(); err != nil {
-						return nil, fmt.Errorf("alpha: messages: %w", err)
+						return nil, nil, fmt.Errorf("alpha: messages: %w", err)
 					}
 				}
 			}
 		}
 	}
 	if err := flush(); err != nil {
-		return nil, fmt.Errorf("alpha: messages: %w", err)
+		return nil, nil, fmt.Errorf("alpha: messages: %w", err)
 	}
-	return times, nil
+	return times, authors, nil
 }
 
 // ─── Attachments, reactions, invites ────────────────────────────────────────
 
-func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time) error {
+func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time, messageAuthors []int64) error {
 	type class struct {
 		count        int
 		mime, ext    string
@@ -550,12 +610,14 @@ func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time
 			msgID := rng.Intn(alphaMessages) + 1
 			id := fmt.Sprintf("%08x%08x%08x%08x", rng.Uint32(), rng.Uint32(), rng.Uint32(), rng.Uint32())
 			size := (c.minKB + rng.Intn(c.maxKB-c.minKB+1)) * 1024
+			// The uploader is the message's author — CreateAttachment always
+			// records one on the current schema (Codex on #1469, P2).
 			if _, err := tx.Exec(
-				`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploaded_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				id, msgID,
 				fmt.Sprintf("%s-%03d.%s", c.namePrefix, n, c.ext),
-				id+"."+c.ext, c.mime, size, ts(messageTimes[msgID-1]),
+				id+"."+c.ext, c.mime, size, ts(messageTimes[msgID-1]), messageAuthors[msgID-1],
 			); err != nil {
 				return fmt.Errorf("alpha: attachment %d: %w", n, err)
 			}
