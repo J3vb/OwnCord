@@ -135,11 +135,11 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageRoles))
 			r.Get("/roles", handleListRoles(roles))
-			r.Post("/roles", handleCreateRole(database, hub, roles))
+			r.Post("/roles", handleCreateRole(hub, roles))
 			// Registered before /roles/{id} so "reorder" is never parsed as an id.
 			r.Patch("/roles/reorder", handleReorderRoles(hub, permInvalidator, roles))
-			r.Patch("/roles/{id}", handlePatchRole(database, hub, permInvalidator, roles))
-			r.Delete("/roles/{id}", handleDeleteRole(database, hub, permInvalidator, roles))
+			r.Patch("/roles/{id}", handlePatchRole(hub, permInvalidator, roles))
+			r.Delete("/roles/{id}", handleDeleteRole(hub, permInvalidator, roles))
 		})
 
 		r.With(requirePerm(permissions.ViewAuditLog)).
