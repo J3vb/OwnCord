@@ -147,13 +147,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// API tokens — Owner-only. Minting a network-reachable, revocation-
 		// surviving bearer credential is gated like backups/updates.
 		r.Get("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleListAPITokens(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleListAPITokens(database)).ServeHTTP(w, req)
 		}))
 		r.Post("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleCreateAPIToken(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleCreateAPIToken(database)).ServeHTTP(w, req)
 		}))
 		r.Delete("/tokens/{id}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleRevokeAPIToken(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleRevokeAPIToken(database)).ServeHTTP(w, req)
 		}))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
@@ -161,22 +161,22 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Patch("/settings", handlePatchSettings(database))
 		})
 		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleBackup(database)).ServeHTTP(w, req)
 		}))
 		r.Get("/backups", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleListBackups()).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleListBackups()).ServeHTTP(w, req)
 		}))
 		r.Delete("/backups/{name}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleDeleteBackup(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleDeleteBackup(database)).ServeHTTP(w, req)
 		}))
 		r.Post("/backups/{name}/restore", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleRestoreBackup(database, hub)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleRestoreBackup(database, hub)).ServeHTTP(w, req)
 		}))
 		r.Get("/updates", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleCheckUpdate(u)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleCheckUpdate(u)).ServeHTTP(w, req)
 		}))
 		r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
 		}))
 	})
 

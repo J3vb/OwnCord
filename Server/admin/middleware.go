@@ -116,28 +116,19 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 	}
 }
 
-// ownerOnlyMiddleware wraps a handler to require Owner role (position == 100).
-// It reads the user from context (set by adminAuthMiddleware) rather than
-// re-authenticating, avoiding redundant DB queries and session-expiry gaps.
-func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
+// ownerOnlyMiddleware wraps a handler to require the Owner role
+// (position == permissions.OwnerRolePosition). It consumes the *db.Role that
+// adminAuthMiddleware resolved and stored in the request context — the same
+// contract as requirePerm, so no second role read runs and no read-fault
+// error mapping exists here at all: OC-0345's 503 branch died with the query
+// it served, and OC-0379 pins the absence (a role read fault now surfaces
+// once, at the perimeter, as its 503). A request that somehow arrives without
+// the context role fails closed as unauthenticated.
+func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(adminUserKey).(*db.User)
-		if !ok || user == nil {
+		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
+		if !ok || role == nil {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-			return
-		}
-
-		role, err := database.GetRoleByID(r.Context(), user.RoleID)
-		if err != nil {
-			// A read fault is an outage, not a missing role: answering 403
-			// would tell the Owner they lack the Owner role. Mirror the
-			// perimeter's contract above — log it, report 503 (OC-0345).
-			slog.ErrorContext(r.Context(), "admin: owner role lookup failed", "error", err)
-			writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authorization service temporarily unavailable")
-			return
-		}
-		if role == nil {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "role not found")
 			return
 		}
 
