@@ -11,7 +11,10 @@ prometheus.
 - `db/` hand-written query wrappers; `db/dbgen/` is generated (see `db-change`)
 - `cmd/` executable tooling, one `package main` per subdirectory —
   `cmd/genprotocol/` regenerates the protocol constants from `protocol/schema.json`,
-  `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`),
+  `cmd/seed/` fills a dev database (`go run ./cmd/seed -confirm-dev`; add
+  `-profile alpha` for the deterministic B3-7 dataset behind
+  `Server/testdata/snapshots/v1.2.0-alpha.4.sqlite` — regenerate that snapshot
+  only deliberately, per its README),
   `cmd/dbinventory/` prints the `db`-importer table for
   `docs/architecture/server-boundaries.md` (exits 1 on an unlisted importer).
   `cmd/gendocs/` rewrites the route, table and config-key index blocks in
