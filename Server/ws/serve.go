@@ -13,7 +13,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 const (
@@ -181,50 +180,4 @@ func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
 // with the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
 	h.QueuePresence(c.userID, c.user.Status, c.user.CustomStatus)
-}
-
-// computeAllowedChannels returns the set of channel IDs a user may access,
-// including both server channels (filtered by ReadMessages permission) and
-// the user's open DM channels. The server-channel set comes from the single
-// permissions.Checker predicate shared with buildReady and REST
-// ListVisibleChannels, so replay-buffer filtering can never drift from the
-// ready payload's visible channels.
-func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user *db.User) (map[int64]bool, error) {
-	channels, err := database.ListChannels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
-	}
-
-	role, err := database.GetRoleByID(ctx, user.RoleID)
-	if err != nil {
-		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
-	}
-
-	// Nil role = zero access (fail closed). Admins skip the override fetch.
-	allowed := make(map[int64]bool)
-	if role != nil {
-		var overrides map[int64]db.ChannelOverride
-		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetChannelOverridesFor(ctx, role.ID, user.ID)
-			if err != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetChannelOverridesFor: %w", err)
-			}
-		}
-		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
-	}
-
-	// Include the user's open DM channels. Only the ID set matters here, so
-	// use the PK-covered dm_open_state lookup instead of the full DM query.
-	// Fatal like the three sibling lookups above: a silently DM-stripped
-	// replay advances the client's lastSeq past DM events it never received —
-	// a permanent hole. The caller's error path falls back to full ready.
-	dmIDs, dmErr := database.GetUserDMChannelIDs(ctx, user.ID)
-	if dmErr != nil {
-		return nil, fmt.Errorf("computeAllowedChannels GetUserDMChannelIDs: %w", dmErr)
-	}
-	for _, id := range dmIDs {
-		allowed[id] = true
-	}
-
-	return allowed, nil
 }
