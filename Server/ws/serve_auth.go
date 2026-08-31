@@ -124,6 +124,7 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 	defer cancel()
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
+
 func (h *Hub) upgradeAndAuth(
 	conn *websocket.Conn, database *db.DB, r *http.Request,
 ) (*Client, uint64, error) {
@@ -162,6 +163,7 @@ func (h *Hub) upgradeAndAuth(
 
 	return c, lastSeq, nil
 }
+
 // unregisterFailedHandshake removes c after a post-registerNow handshake
 // write failure. No readPump ever starts for this connection — the
 // fresh-connect callers return an error that stops ServeWS before it starts

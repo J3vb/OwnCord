@@ -497,6 +497,7 @@ func (h *Hub) handleFreshConnect(
 
 	return nil
 }
+
 // freshConnectCleanStaleVoice removes the voice state left behind by this
 // user's previous session, unless that session is the still-registered
 // connection this one is about to inherit from.
