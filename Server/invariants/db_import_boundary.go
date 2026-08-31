@@ -61,9 +61,9 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/invite_handler.go":  {"adapter", "", "Invite/User types only"},
 	"api/middleware.go":      {"move", "auth", "session/API-token touch and revoke"},
 	"api/plugins_handler.go": {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
-	"api/profile_handler.go": {"move", "upload", "avatar upload creates the attachment row"},
+	"api/profile_handler.go": {"adapter", "", "User/Session types in the profile and session response shapes; the services own the calls"},
 	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction left in B3-3"},
-	"api/upload_handler.go":  {"move", "upload", "attachment access + a raw QueryRowContext"},
+	"api/upload_handler.go":  {"adapter", "", "AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions"},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {"adapter", "", "db.User type in a helper signature"},
 	"auth/resolve.go": {"adapter", "", "Session/APIToken/Role/User types; resolution is injected"},

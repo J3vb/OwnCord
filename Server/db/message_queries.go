@@ -111,6 +111,27 @@ func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	return messageFromGen(m), nil
 }
 
+// IsMessageDeleted reports the soft-delete flag of one message, and whether the
+// row exists at all. found=false is not an error: the attachment-access path
+// that asks this treats a missing message as "no tombstone to enforce" and
+// leaves the decision to its own ACL.
+//
+// Deliberately not GetMessage: that wrapper's SELECT list carries every message
+// column, and `deleted` is the only one this question needs. Hand-written for
+// the same reason the file's other narrow reads are — one column, one row, no
+// generated struct to map.
+func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error) {
+	var flag bool
+	scanErr := d.reader.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, id).Scan(&flag)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if scanErr != nil {
+		return false, false, fmt.Errorf("IsMessageDeleted: %w", scanErr)
+	}
+	return flag, true, nil
+}
+
 // GetMessages returns up to limit messages in a channel, ordered newest-first.
 // When before > 0 only messages with id < before are returned (pagination).
 func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int) ([]MessageWithUser, error) {

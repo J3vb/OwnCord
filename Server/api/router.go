@@ -124,7 +124,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
-	store, storeErr := routerUploadRoutes(r, database, limiter, cfg, svc.Permissions)
+	store, storeErr := routerUploadRoutes(r, database, limiter, cfg, svc.Uploads)
 
 	// WebSocket hub — built, wired and started by internal/app; WS does its
 	// own in-band auth, so no AuthMiddleware here.
@@ -325,7 +325,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 // routerUploadRoutes mounts the file upload and serving routes and returns the
 // shared file storage (and its construction error) for the profile-avatar and
 // emoji mounts, which reuse the same store.
-func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config, permSvc *service.PermissionService) (*storage.Storage, error) {
+func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
 	// L12: verify config upload size fits within the HTTP body limit.
 	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
 		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
@@ -336,7 +336,7 @@ func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, permSvc)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
 	return store, storeErr
 }

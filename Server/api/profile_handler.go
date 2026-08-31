@@ -128,7 +128,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
-				Post("/avatar", handleUploadAvatar(database, svc, store, limiter, broadcaster))
+				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))
 		}
 
 		r.Get("/sessions", handleListSessions(svc))
@@ -573,7 +573,6 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 // PATCH /users/me still takes an https:// URL; this route is the other way to
 // set the same field, and both end at the same column.
 func handleUploadAvatar(
-	database *db.DB,
 	svc *service.Services,
 	store FileStore,
 	limiter *auth.RateLimiter,
@@ -628,7 +627,15 @@ func handleUploadAvatar(
 		}
 
 		filename := sanitizeUploadFilename(header.Filename)
-		if err := database.CreateAttachment(r.Context(), fileID, user.ID, filename, fileID, mimeType, written, &width, &height); err != nil {
+		if err := svc.Uploads.Record(r.Context(), service.AttachmentRecord{
+			ID:         fileID,
+			UploaderID: user.ID,
+			Filename:   filename,
+			MimeType:   mimeType,
+			Size:       written,
+			Width:      &width,
+			Height:     &height,
+		}); err != nil {
 			if delErr := store.Delete(fileID); delErr != nil {
 				slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
 			}

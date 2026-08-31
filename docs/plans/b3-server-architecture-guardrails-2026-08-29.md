@@ -1863,8 +1863,86 @@ fixture half the `ws` suite builds) or deferring to the B3 exit:
   are satisfied by the same handle); `TestNewHub_RequiredCollaborators`
   gains the Readers refusal case.
 
+**Evidence — invite family, 2026-08-31: vacuous, and why** — the plan's
+family order names `invite` after the channel family, but there is no
+invite work to do and never was. Checked against B3-0's own inventory at
+`d383d8c` (the commit that created it): the only `move` rows that touch
+invites were `api/auth_handler.go` and `admin/setup_handler.go`, both
+assigned to the **auth** family (register burns an invite; first-run setup
+creates one), and `api/invite_handler.go` was `adapter` from the first
+measurement — its CRUD already went through `service.InviteService`, which
+predates B3 entirely. B3-2 moved the auth rows it could reach. So the
+family list's `invite` entry was a discovery artifact, not a debt: nothing
+is deleted, nothing is deferred, and the count does not move. Recorded here
+rather than silently skipped, because a family that disappears without a
+reason is indistinguishable from one that was forgotten.
+
+**Evidence — upload family, 2026-08-31** — branch
+`feat/b3-8-upload-family` from `dev` `227ae08c` (the channel family's
+completion). Two `move` rows, both in `api`, and the last raw SQL escape
+above the domain layer:
+
+- **Service** (`service/upload.go`): `UploadService` with three methods —
+  `Record` (the attachment row for already-stored bytes), `Resolve` (the
+  lookup plus the soft-delete tombstone, which is what makes a deleted
+  message's files stop being servable _to everyone_, administrators
+  included — it is deliberately not in `Authorize` for that reason), and
+  `Authorize` (DM participation ahead of the admin bypass; the unlinked
+  file private to its uploader except while an avatar column points at
+  exactly its URL; the M-2 refusal of a legacy NULL-uploader row;
+  READ_MESSAGES for a guild channel). The bytes stay with the transport —
+  multipart parsing, MIME sniffing, image measurement and the FileStore
+  write are HTTP and filesystem work with no domain decision in them.
+- **The raw SQL escape is gone**: `api/upload_handler.go`'s bare
+  `QueryRowContext("SELECT deleted FROM messages WHERE id = ?")` is now
+  `db.IsMessageDeleted`, a hand-written narrow read beside its siblings in
+  `db/message_queries.go` (still not `GetMessage`, whose SELECT list
+  carries every column — the original comment's reasoning survives the
+  move). It reports `found` separately, so "no message row" stays
+  distinguishable from "not deleted" and keeps falling through to the ACL.
+  No sqlc query or migration change, so generation drift stays clean.
+- **Authz chokepoint**: the `HasAdmin` row moved with its symbol,
+  `api.serveFileAuthorize` → `service.(*UploadService).Authorize`, same
+  class (`admin-perimeter`) and same single bound call. The rule's own
+  fixture tests used that row as their worked example, so they now use
+  `admin.logStreamAuthorize` — a row that is still live and the same shape
+  (plain function, one bound `HasAdmin`).
+- **Thin handlers**: `handleServeFile` resolves and authorizes through the
+  service and maps the two refusals with one `writeFileAccessError` helper
+  (404 and the single "you do not have access to this file" body, so no
+  branch leaks which rule refused); `handleUpload` and `handleUploadAvatar`
+  record through `Uploads.Record`. `MountUploadRoutes` takes the
+  `*service.UploadService` in place of the `*service.PermissionService` and
+  keeps its fail-fast nil check.
+- **Characterization**: `api/upload_handler_test.go`,
+  `upload_handler_deleted_message_test.go` and `avatar_handler_test.go` are
+  the family's characterization file and stayed green with **no assertion
+  touched** — the only edits are the two mount-helper lines that name the
+  new service. `service/upload_test.go` adds nine service-seam rows
+  (tombstone covers administrators, avatar public only while in use, legacy
+  row denied, DM participation binds administrators, guild READ_MESSAGES,
+  refusals indistinguishable, `Record`'s unlinked row). Both negative
+  contracts were mechanically proven: with the admin bypass moved ahead of
+  the DM check, `DMParticipationBindsAdministratorsToo` fails
+  (`error = <nil>, want ErrForbidden`); with the tombstone branch disabled,
+  `TombstonedMessageHidesItsAttachments` fails the same way. Both mutations
+  reverted.
+- **Allowlist diff**: `api/upload_handler.go` and `api/profile_handler.go`
+  `move` → `adapter` (db types while serving the bytes and shaping
+  responses; the services own the calls). **`upload` disappears from the
+  move targets**: 17 → 15 `move`, 26 → 28 `adapter`. Remaining targets:
+  auth 7, connection 2, voice 3, user 2, role 1.
+- **Floors**: `service` 69.5 → **69.8** in this PR (the raise the seam's own
+  tests earned). `db` stays at 79.3: `IsMessageDeleted` is new db-package
+  code, so the profile dipped to 79.1 until `db/message_deleted_test.go`
+  covered it and restored 79.5 — a restore, not a deliberate raise, the same
+  call the settings family made for `ApplySettings`. Cross-package coverage
+  does not count (CI runs no `-coverpkg`), which is why a db method reached
+  only from `service` needs a db-package test of its own.
+
 **Evidence — role family, 2026-08-31** — branch `feat/b3-8-role-family`
-from `dev` `227ae08c`. One inventory row and one ledger finding, and the
+from `dev` `227ae08c`, synced onto `18deb38` (the upload family) before
+merge. One inventory row and one ledger finding, and the
 row is the first since B3-2 to be **deleted** rather than downgraded:
 
 - **OC-0374, test-first.** `ReorderRoles` wrote the manageable roles to
@@ -1898,9 +1976,11 @@ rank — reorder existing roles first`. Two existing tests asserted the
   interchangeable.
 - **Allowlist diff**: `admin/handlers_roles.go` stops importing `db`
   altogether, so its row is deleted — `role` leaves the move targets and
-  the table loses a file: 60 → 59 importers, 17 → 16 `move`. Remaining
-  targets on this branch's base: auth 7, connection 2, upload 2, voice 3,
-  user 2 (the upload pair is the parallel family's, closing in #1481).
+  the table loses a file: 60 → 59 importers, 15 → 14 `move` (measured after
+  merging the upload family, which landed as #1481 while this branch was
+  open and took the count 17 → 15 itself). Remaining targets: auth 7,
+  connection 2, voice 3, user 2 — every one of them outside the family list
+  B3-8 set out, which is the B3 exit question, not this PR's.
 - **Characterization**: the admin role suite is the family's
   characterization file and every assertion stands except the one the
   finding mandates; `service/role_test.go` gains the `Renamed` and
