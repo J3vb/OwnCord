@@ -925,6 +925,51 @@ that responsibility 6's size target needed:
   construction/options and the replay-limit accessor), `voice_broadcast.go`
   38 → 115, `hub_presence.go` 153.
 
+**Evidence — finisher PR and B3-5 exit, 2026-08-31** — branch
+`feat/b3-5-ws-split-5` from `dev` `df717e48` (split PR 4's squash).
+
+- **Move 8** — one pure-move commit closes `hub.go`'s size target:
+  `HubOptions` and `NewHub` → new `hub_options.go`; `getCachedSettings`
+  and `refreshSettingsLocked` → new `hub_settings.go`;
+  `maxColdReplayLimit` → `replay.go`, beside the family that reads it
+  (211 lines out, 229 in). Residue: the new files' scaffolding plus
+  duplicates of five imports `hub.go` retains (`auth`, `db`,
+  `permissions`, `plugin`, `service`); `errors`, `fmt` and `os` moved
+  outright. Gate results in the PR's test plan.
+- **Inventory**: `hub.go`'s `GetSetting` calls left with the settings
+  cache, so its row turns type-only `boundary` (the handle the families
+  read through); `hub_options.go` is a type-only `boundary` row
+  (validates and stores the handle); `hub_settings.go` reads through the
+  `h.db` field and imports nothing, so it carries no row — the boundaries
+  doc's header records that wrinkle, and the disposition counts were
+  re-derived from the tool's summary (`boundary` had been stale at 12
+  since the seed-profile row landed).
+
+**B3-5 exit.** All seven responsibilities relocated across five squash
+merges — #1472 (handshake auth; fresh-connect), #1473 (replay; registry),
+#1474 (visibility), #1475 (voice leftovers; presence coalescer split),
+plus this finisher — every move a pure move with its normalised-diff
+residue listed, `git diff -M --summary` recording no file-level rename
+(all function-level motion between files), and the
+`-tags deadlock -count=10 ./ws/` + `-race` pass green after every move
+with `TestEpoch1Fixtures` inside those runs. The plan's named destination
+`registry.go` was already the message-type `HandlerRegistry`, so the
+connection registry lives in `hub_registry.go` (recorded in split PR 2).
+Exit sizes, measured on this branch:
+
+| File               | Before B3-5 | After | Target  |
+| ------------------ | ----------: | ----: | ------- |
+| `serve.go`         |         990 |   183 | < 500 ✓ |
+| `hub.go`           |         866 |   361 | < 400 ✓ |
+| `hub_broadcast.go` |        1032 |   424 | < 500 ✓ |
+
+New files: `replay.go` 496, `hub_registry.go` 253, `hub_visibility.go`
+487, `hub_presence.go` 153, `hub_options.go` 174, `hub_settings.go` 45;
+grown files: `serve_auth.go` 105 → 207, `serve_ready.go` 375 → 564,
+`voice_broadcast.go` 38 → 115. The `db`-inventory file table in
+`server-boundaries.md` was re-measured in every split PR; no new `db`
+call was added anywhere in the series.
+
 ## B3-6 — Permanent guardrails
 
 Roadmap workstreams 1, 2, 3, 10, 11, 13, 14, 15, 16. Runs beside B3-0..B3-2;
