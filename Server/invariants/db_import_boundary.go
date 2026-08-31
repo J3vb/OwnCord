@@ -80,6 +80,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/plugins.go":     {"boundary", "", "passes the handle to the plugin registry as its store; no calls"},
 	"token_cli.go":                {"move", "auth", "API-token CLI duplicates admin/handlers_tokens.go"},
 	"cmd/seed/main.go":            {"boundary", "", "developer seeding tool owns its handle"},
+	"cmd/seed/profile_alpha.go":   {"boundary", "", "the alpha profile writes through the handle main.go owns"},
 	"cmd/gendocs/main.go":         {"boundary", "", "docs generator migrates its own in-memory catalog"},
 	"plugin/pluginstore.go":       {"adapter", "", "PluginRow type only; the store is injected"},
 	// ── ws ────────────────────────────────────────────────────────────────
