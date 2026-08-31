@@ -25,7 +25,7 @@ func newRolesHandler(t *testing.T, database *db.DB) (http.Handler, *mockHub, *mo
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
-		newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+		newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 	return handler, hub, inv, createAdminUser(t, database)
 }
 
@@ -155,7 +155,7 @@ func TestAdminAPI_Roles_ServiceUnavailableFailsClosed(t *testing.T) {
 	// nil RoleService: the routes must refuse rather than fall through to an
 	// unchecked write.
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil,
-		newTestModService(database), nil, newTestSettingsService(database))
+		newTestModService(database), nil, newTestSettingsService(database), newTestChannelService(database))
 	token := createAdminUser(t, database)
 
 	for _, tc := range []struct {

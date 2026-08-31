@@ -27,7 +27,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 		t.Helper()
 		database := openAdminTestDB(t)
 		handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{},
-			newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+			newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 		token := createAdminUser(t, database)
 		chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
 		if err != nil {

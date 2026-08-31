@@ -22,7 +22,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 	database := openAdminTestDB(t)
 	logBuf := admin.NewRingBuffer(8)
 	logBuf.Write(admin.LogEntry{Timestamp: "2026-07-31T10:00:00Z", Level: "INFO", Message: "hello from ring", Source: "server"})
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, logBuf, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, logBuf, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 
 	// An admin user authenticated only by an API token — no session row exists.
 	uid, err := database.CreateUser(context.Background(), "apitokenadmin", "$2a$12$placeholder", 1)

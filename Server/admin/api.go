@@ -65,7 +65,7 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, channels *service.ChannelService, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
 	var setupOpts SetupOptions
@@ -115,17 +115,17 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))
-			r.Get("/channels", handleListChannels(database))
-			r.Post("/channels", handleCreateChannel(database, hub))
-			r.Patch("/channels/{id}", handlePatchChannel(database, hub))
-			r.Delete("/channels/{id}", handleDeleteChannel(database, hub))
-			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(database))
-			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(database, hub, permInvalidator))
-			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(database, hub, permInvalidator))
+			r.Get("/channels", handleListChannels(channels))
+			r.Post("/channels", handleCreateChannel(channels, hub))
+			r.Patch("/channels/{id}", handlePatchChannel(channels, hub))
+			r.Delete("/channels/{id}", handleDeleteChannel(channels, hub))
+			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(database, channels))
+			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(database, channels, hub, permInvalidator))
+			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(database, channels, hub, permInvalidator))
 			// Per-user overrides — the last layer of the resolution order,
 			// gated on the same MANAGE_CHANNELS bit as the role layer.
-			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(database, hub, permInvalidator))
-			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(database, hub, permInvalidator))
+			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(database, channels, hub, permInvalidator))
+			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(database, channels, hub, permInvalidator))
 		})
 
 		// Role CRUD. MANAGE_ROLES gates the group; RoleService additionally

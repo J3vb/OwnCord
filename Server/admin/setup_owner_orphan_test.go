@@ -32,7 +32,7 @@ func TestSetup_SessionCreationFailureDoesNotOrphanOwner(t *testing.T) {
 		t.Fatalf("DROP TABLE sessions: %v", err)
 	}
 
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "owner1",
@@ -82,7 +82,7 @@ func TestSetup_InviteCreationFailureDoesNotOrphanOwner(t *testing.T) {
 		t.Fatalf("DROP TABLE invites: %v", err)
 	}
 
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "owner2",
