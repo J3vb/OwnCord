@@ -268,52 +268,67 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 	return role, nil
 }
 
+// RoleUpdateResult reports what an update actually changed. Both answers come
+// from the pre-update row this service already reads, so a caller never has to
+// re-read it to find out.
+type RoleUpdateResult struct {
+	// PermsChanged is set when the mask actually moved: cached masks and every
+	// channel's audience for this role have to be re-derived, rather than the
+	// cheap roles_update broadcast an unchanged mask needs.
+	PermsChanged bool
+	// Renamed is set when the name actually changed. Clients key a member's
+	// role by NAME (member_update and ready carry a role name string), so
+	// every member of a renamed role holds a name that no longer resolves
+	// against the post-rename list — they lose their role color, member-list
+	// group and permission-gated affordances until they reconnect, unless the
+	// caller re-keys them with one member_update each.
+	Renamed bool
+}
+
 // UpdateRole applies a partial change to a role below the actor's rank.
-// Returns the updated role and whether the permission mask actually moved —
-// the caller uses that to decide between a cheap roles_update broadcast and a
-// full visibility re-sync.
-func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, permsChanged bool, err error) {
+// Returns the updated role and what the change actually moved.
+func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
-		return nil, false, err
+		return nil, RoleUpdateResult{}, err
 	}
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
+		return nil, RoleUpdateResult{}, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
 	}
 	if role == nil {
-		return nil, false, fmt.Errorf("%w: role not found", ErrNotFound)
+		return nil, RoleUpdateResult{}, fmt.Errorf("%w: role not found", ErrNotFound)
 	}
 	if err := requireBelowActor(actor, role); err != nil {
-		return nil, false, err
+		return nil, RoleUpdateResult{}, err
 	}
 
 	name := role.Name
 	if in.Name != nil {
 		if name, err = s.validateName(ctx, *in.Name, role.ID); err != nil {
-			return nil, false, err
+			return nil, RoleUpdateResult{}, err
 		}
 	}
 	color := role.Color
 	if in.Color != nil {
 		if color, err = validateColor(in.Color); err != nil {
-			return nil, false, err
+			return nil, RoleUpdateResult{}, err
 		}
 	}
 	perms := role.Permissions
 	if in.Permissions != nil {
 		perms = *in.Permissions & permissions.AllPerms
 		if err := requireGrantable(actor, role.Permissions, perms); err != nil {
-			return nil, false, err
+			return nil, RoleUpdateResult{}, err
 		}
 	}
 	position := role.Position
 	if in.Position != nil {
 		position = *in.Position
 		if err := validatePosition(actor, position); err != nil {
-			return nil, false, err
+			return nil, RoleUpdateResult{}, err
 		}
 		// Positions must stay unique (see CreateRole): tied positions read
 		// as equal rank in every >=/<= hierarchy comparison. Moving onto a
@@ -321,18 +336,18 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		if position != role.Position {
 			existing, err := s.st.ListRoles(ctx)
 			if err != nil {
-				return nil, false, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
+				return nil, RoleUpdateResult{}, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 			}
 			for _, rl := range existing {
 				if rl.ID != role.ID && rl.Position == position {
-					return nil, false, fmt.Errorf("%w: position %d is already used by another role", ErrBadRequest, position)
+					return nil, RoleUpdateResult{}, fmt.Errorf("%w: position %d is already used by another role", ErrBadRequest, position)
 				}
 			}
 		}
 	}
 
 	if err := s.st.UpdateRole(ctx, role.ID, name, color, perms, position); err != nil {
-		return nil, false, fmt.Errorf("%w: failed to update role: %w", ErrInternal, err)
+		return nil, RoleUpdateResult{}, fmt.Errorf("%w: failed to update role: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_update", "role", role.ID,
@@ -340,13 +355,29 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	slog.Info("role updated", "actor_id", actorID, "role_id", role.ID, "name", name)
 
 	return &db.Role{
-		ID:          role.ID,
-		Name:        name,
-		Color:       color,
-		Permissions: perms,
-		Position:    position,
-		IsDefault:   role.IsDefault,
-	}, perms != role.Permissions, nil
+			ID:          role.ID,
+			Name:        name,
+			Color:       color,
+			Permissions: perms,
+			Position:    position,
+			IsDefault:   role.IsDefault,
+		}, RoleUpdateResult{
+			PermsChanged: perms != role.Permissions,
+			Renamed:      name != role.Name,
+		}, nil
+}
+
+// AllRoles is the unscoped role list — every role, highest position first, with
+// no actor filtering and no member counts. It backs the roles_update broadcast
+// every role mutation ends with, which ships the same list to every client.
+// ListRoles is the admin panel's actor-scoped view and is not interchangeable
+// with it.
+func (s *RoleService) AllRoles(ctx context.Context) ([]*db.Role, error) {
+	roles, err := s.st.ListRoles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
+	}
+	return roles, nil
 }
 
 // DeleteRole removes a role below the actor's rank, moving its members onto the
@@ -454,9 +485,25 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 		return nil, fmt.Errorf("%w: too many roles to place below your own rank", ErrBadRequest)
 	}
 
+	// Spread the roles through the range below the actor rather than compacting
+	// them into a gapless block. CreateRole's default placement takes the
+	// highest free slot below the actor, and an N…1 block leaves none: one
+	// reorder used to wedge role creation permanently for every manager below
+	// the owner, and the refusal it produced told the admin to "reorder
+	// existing roles first", which re-compacted to the same block (OC-0374).
+	//
+	// The stride is the largest that still fits every role strictly below the
+	// actor, so it is stable under repeated reorders and reordering the default
+	// four roles under the owner reproduces their shipped 80/60/40/20 spacing.
+	// len(orderedIDs) < actor.Position is already established above, so the
+	// stride is at least 1 and the highest position stays below the actor's.
+	stride := actor.Position / (len(orderedIDs) + 1)
+	if stride < 1 {
+		stride = 1
+	}
 	positions := make(map[int64]int, len(orderedIDs))
 	for i, id := range orderedIDs {
-		positions[id] = len(orderedIDs) - i
+		positions[id] = (len(orderedIDs) - i) * stride
 	}
 	if err := s.st.SetRolePositions(ctx, positions); err != nil {
 		return nil, fmt.Errorf("%w: failed to reorder roles: %w", ErrInternal, err)
