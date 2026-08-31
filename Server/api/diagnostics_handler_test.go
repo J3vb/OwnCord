@@ -11,6 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -35,7 +36,8 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
 	// Create a user and session for authenticated requests.
@@ -106,7 +108,8 @@ func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
 	uid, _ := database.CreateUser(context.Background(), "diagproxyuser", "$2a$12$fake", 1)

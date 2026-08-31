@@ -2,18 +2,19 @@
 // setup wizard).
 //
 // The admin package never stops or spawns processes; it requests a restart
-// through admin.SetRestartHandoff, which lands in restartCoordinator.Request
-// here. Request cancels the parent context of run()'s signal.NotifyContext,
+// through admin.SetRestartHandoff, which lands in RestartCoordinator.Request
+// here. Request cancels the parent context of Run's signal.NotifyContext,
 // so the process drains through the exact same graceful path a SIGTERM takes
 // — including on Windows, where a process cannot deliver a signal to itself.
-// Only after run() has fully torn down (HTTP listeners closed, hub and
+// Only after Run has fully torn down (HTTP listeners closed, hub and
 // LiveKit stopped, queues flushed, database closed and its process lock
 // released) does main() perform the handoff: spawn the replacement binary
 // when self-managed, or just exit and let the process supervisor relaunch
 // the service. The old process being completely gone before the successor
 // starts is what makes the handoff deterministic — the DB-lock and bind
-// retries in db/ and main.go survive only as safety nets.
-package main
+// retries in db/ and internal/app survive only as safety nets.
+
+package app
 
 import (
 	"context"
@@ -30,20 +31,20 @@ const (
 	restartModeSpawn      = "spawn"
 	restartModeSupervised = "supervised"
 
-	// restartBackstopDelay bounds how long a requested restart may drain
-	// before the process force-exits (performing the handoff first). run()'s
+	// RestartBackstopDelay bounds how long a requested restart may drain
+	// before the process force-exits (performing the handoff first). Run's
 	// worst-case legitimate teardown is ≈55s — the 30s shutdown budget plus
 	// its sequential bounded defers — so 90s only ever fires on a genuinely
 	// wedged teardown. The successor's lock/bind retries absorb whatever a
 	// backstop exit leaves unreleased.
-	restartBackstopDelay = 90 * time.Second
+	RestartBackstopDelay = 90 * time.Second
 )
 
-// restartCoordinator owns the lifecycle of one restart request. It is
-// created in main(), threaded into run() (as a parameter, so tests drive
-// run() with their own instance), and consulted by main() again after run()
+// RestartCoordinator owns the lifecycle of one restart request. It is
+// created in main(), threaded into Run (as a parameter, so tests drive
+// Run with their own instance), and consulted by main() again after Run
 // returns.
-type restartCoordinator struct {
+type RestartCoordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -57,13 +58,13 @@ type restartCoordinator struct {
 	backstop  *time.Timer
 }
 
-// newRestartCoordinator builds a coordinator whose Context() is the parent
-// for run()'s signal.NotifyContext. onBackstop runs once if a requested
+// NewRestartCoordinator builds a coordinator whose Context() is the parent
+// for Run's signal.NotifyContext. onBackstop runs once if a requested
 // restart's drain exceeds backstopDelay; production passes handoff+os.Exit,
 // tests pass a recorder.
-func newRestartCoordinator(backstopDelay time.Duration, onBackstop func()) *restartCoordinator {
+func NewRestartCoordinator(backstopDelay time.Duration, onBackstop func()) *RestartCoordinator {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &restartCoordinator{
+	return &RestartCoordinator{
 		ctx:           ctx,
 		cancel:        cancel,
 		backstopDelay: backstopDelay,
@@ -71,22 +72,22 @@ func newRestartCoordinator(backstopDelay time.Duration, onBackstop func()) *rest
 	}
 }
 
-// Context is the parent context for run()'s signal handling: cancelling it
+// Context is the parent context for Run's signal handling: cancelling it
 // (Request) is indistinguishable from a shutdown signal to everything
-// downstream. A Request issued before run() reaches NotifyContext is safe —
-// NotifyContext over an already-cancelled parent starts out done, and run()
+// downstream. A Request issued before Run reaches NotifyContext is safe —
+// NotifyContext over an already-cancelled parent starts out done, and Run
 // falls straight through to graceful teardown.
-func (rc *restartCoordinator) Context() context.Context { return rc.ctx }
+func (rc *RestartCoordinator) Context() context.Context { return rc.ctx }
 
 // SetMode records the resolved restart mode ("spawn"/"supervised") once
 // config is loaded; Mode reads it back for the handoff.
-func (rc *restartCoordinator) SetMode(mode string) {
+func (rc *RestartCoordinator) SetMode(mode string) {
 	rc.mu.Lock()
 	rc.mode = mode
 	rc.mu.Unlock()
 }
 
-func (rc *restartCoordinator) Mode() string {
+func (rc *RestartCoordinator) Mode() string {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	return rc.mode
@@ -95,7 +96,7 @@ func (rc *restartCoordinator) Mode() string {
 // Request records a restart request and starts the drain. Idempotent: the
 // first reason wins, duplicates are logged and dropped. Arms the backstop
 // timer before cancelling so a wedged teardown can never outlive it.
-func (rc *restartCoordinator) Request(reason string) {
+func (rc *RestartCoordinator) Request(reason string) {
 	rc.mu.Lock()
 	if rc.requested {
 		pending := rc.reason
@@ -117,16 +118,16 @@ func (rc *restartCoordinator) Request(reason string) {
 }
 
 // Requested reports whether a restart was requested, and its reason.
-func (rc *restartCoordinator) Requested() (reason string, ok bool) {
+func (rc *RestartCoordinator) Requested() (reason string, ok bool) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	return rc.reason, rc.requested
 }
 
-// disarm stops the backstop timer. main() calls it the moment run() returns:
+// Disarm stops the backstop timer. main() calls it the moment Run returns:
 // from there the handoff is in main()'s hands and a delayed force-exit would
 // only race it.
-func (rc *restartCoordinator) disarm() {
+func (rc *RestartCoordinator) Disarm() {
 	rc.mu.Lock()
 	if rc.backstop != nil {
 		rc.backstop.Stop()
@@ -159,14 +160,14 @@ func resolveRestartMode(cfgVal string, log *slog.Logger) string {
 // (which must not start real processes).
 var spawnReplacement = updater.SpawnDetached
 
-// performRestartHandoff completes a requested restart after run() has fully
+// PerformRestartHandoff completes a requested restart after Run has fully
 // drained. In supervised mode the handoff IS the exit — the supervisor
 // (systemd Restart=, NSSM AppExit, Docker restart policy) relaunches the
 // service, now running the swapped binary. In spawn mode the replacement is
 // started directly; every resource is already released, so the successor
 // boots with no lock or port contention. A failed spawn leaves the server
 // down — loudly logged; there is no hub left to notify clients through.
-func performRestartHandoff(reason, mode string, log *slog.Logger) {
+func PerformRestartHandoff(reason, mode string, log *slog.Logger) {
 	if mode == restartModeSupervised {
 		log.Info("restart: exiting for the supervisor to relaunch", "reason", reason, "mode", mode)
 		return

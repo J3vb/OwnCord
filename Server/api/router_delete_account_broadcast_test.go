@@ -35,6 +35,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // dialAndAuthWS opens a WS connection against srv and completes the auth
@@ -97,7 +98,8 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
+	rt := app.StartRuntime(cfg, database, nil)
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
 	newUserSession := func(username string) (int64, string) {

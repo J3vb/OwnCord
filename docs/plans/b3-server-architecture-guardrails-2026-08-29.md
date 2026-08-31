@@ -8,7 +8,9 @@ verified at `bf7b886d`
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
 B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
 (PR #1450 = `75d64dd4`); B3-9 merged 2026-08-30 (PR #1454 = `123c0899`;
-OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner — B3-3 next.
+OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner (PR #1461 =
+`52601114`); B3-3 (lifecycle extraction) — PR #1464 to `dev`, opened
+2026-08-30; its squash SHA is recorded here at merge. B3-4 next.
 Update this line, not only the step table, when a step lands.
 
 Primary inputs:
@@ -39,7 +41,7 @@ surface to it.
 | **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**                                       | 1 day    | B3-6, B3-7                                                       |
 | **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral — **DONE 2026-08-30 (PR #1450)**                                                | 2–3 days | B3-6, B3-7                                                       |
 | **HP-3** | First vertical-slice review — scorecard — **ACCEPTED 2026-08-30** ([hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md))                                        | —        | —                                                                |
-| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract                                                                                     | 1–2 days | B3-4                                                             |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract — **PR #1464 open 2026-08-30**                                                      | 1–2 days | B3-4                                                             |
 | **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                                                        | 1 day    | after B3-3                                                       |
 | **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                                                         | 2–3 days | after B3-3/B3-4                                                  |
 | **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                                                     | 3–4 days | B3-0..B3-2                                                       |
@@ -525,6 +527,179 @@ app.Run(ctx)`.
 
 Exit: `main.go` under 150 lines; the failure-injection test green under
 `-race`; four tag variants build. One PR.
+
+**Evidence, 2026-08-30** — branch `feat/b3-3-lifecycle` from `dev` `52601114`
+(HP-3, PR #1461); PR #1464 to `dev`.
+
+- **Pre-squash SHAs**, one per numbered item. The full server gate ran before
+  each commit, and `go test -count=1 -run TestAuthCharacterization ./api/`
+  after it — the only allowed touch in the auth tests was `NewRouter`'s
+  signature at the call site, and no auth test file changed at all:
+
+  | Commit      | Item                                                                                                            | Gate        | `TestAuthCharacterization` |
+  | ----------- | --------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------- |
+  | `b5827d23`  | status line: HP-3's merge SHA, B3-3 in progress                                                                 | docs only   | —                          |
+  | `03c1295c`  | 1 — pure move of every `run*` block into `Server/internal/app/`                                                 | full, green | ok 0.946 s                 |
+  | `556cdb11`  | 2 — `type App`, `app.New`/`Run`, one composite `App.Close`                                                      | full, green | ok 0.939 s                 |
+  | `beebd3f9`  | 3 — hub construction out of `api.NewRouter`; `NewRouter` takes `api.Runtime`                                    | full, green | ok 0.943 s                 |
+  | `ca59ad44`  | 4 — `internal/app/lifecycle_failure_test.go`, the failure-injection report                                      | full, green | ok 0.929 s                 |
+  | `0c29636c`  | 5 — this block, the after-state rows in `server-boundaries.md`, status line, step table, `docs/plans/README.md` | docs only   | —                          |
+  | this commit | 6 — Codex P2: `bgCtx` must not inherit `Run`'s caller cancellation                                              | full, green | ok 0.9 s                   |
+
+- **`main.go`: 1,019 → 99 lines.** What is left is the two CLI dispatches
+  (`healthcheck`, `token`), the ring buffer and log handlers, the restart
+  coordinator and its handoff, and eleven lines of `runServer`:
+  `app.LoadConfig` → `app.New` → `a.Run(ctx)`. The exit target was 150.
+
+- **Normalised-diff proof for the pure move (`03c1295c`).** HP-1's shape:
+  re-apply the substitutions the commit claims to make, then look for any
+  `+`/`-` line left unpaired.
+
+  ```bash
+  git diff b5827d23 03c1295c -- Server/ ':!Server/invariants/' \
+    | grep -E '^[+-]' | grep -v '^[+-][+-]' \
+    | sed -E 's/^[+-]//;
+              s/^package app$/package main/;
+              s/\bapp\.//g;
+              s/\bRunHealthcheckCLI\b/runHealthcheckCLI/g;
+              s/\bNewRestartCoordinator\b/newRestartCoordinator/g;
+              s/\bRestartCoordinator\b/restartCoordinator/g;
+              s/\bRestartBackstopDelay\b/restartBackstopDelay/g;
+              s/\bPerformRestartHandoff\b/performRestartHandoff/g;
+              s/\bDisarm\b/disarm/g;
+              s/\brun\(\)/Run/g;
+              s/\bRun\(\)/Run/g;
+              s/func Run\(version string, log /func run(log /;
+              s/Run\("test", log, logBuf, levelVar, rc\)/run(log, logBuf, levelVar, rc)/;
+              s/Run\(version, log, logBuf, levelVar, rc\)/run(log, logBuf, levelVar, rc)/;
+              s/srv \*http\.Server, tlsCfg \*tls\.Config, addr, version string/srv *http.Server, tlsCfg *tls.Config, addr string/;
+              s/runServeAndWait\(ctx, log, rc, srv, tlsCfg, addr, version\)/runServeAndWait(ctx, log, rc, srv, tlsCfg, addr)/;' \
+    | sort | uniq -u
+  ```
+
+  **Result: 45 unpaired lines, every one of them comment prose or the new
+  import.** No code line is unpaired.
+
+  | Unpaired | Where                       | What                                                                                                       |
+  | -------: | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+  |        1 | `main.go`                   | the new `internal/app` import                                                                              |
+  |       28 | `main.go`                   | three comment blocks inside `main()` re-wrapped (the level var, the coordinator, the handoff) — same prose |
+  |        2 | `main.go`                   | `version`'s doc gains why the symbol stays in `package main` (`-X main.version`)                           |
+  |       12 | `internal/app/lifecycle.go` | the package doc comment (5, new) and `Run`'s doc re-wrapped for the `version` parameter (3 out, 4 in)      |
+  |        2 | `internal/app/restart.go`   | "the DB-lock and bind retries in `db/` and `main.go`" → "… in `db/` and `internal/app`"                    |
+
+  The five substitutions are exactly what the commit message names: the
+  package clause, `run`→`Run` and `runHealthcheckCLI`→`RunHealthcheckCLI`
+  (the two entry points `main()` calls), the five restart-coordinator
+  identifiers `main()` still names, and `version` becoming a parameter
+  instead of a package-level var.
+
+- **Composite close, test-first.** `internal/app/close_test.go` was written
+  before the rewrite and failed to compile against `03c1295c` (`undefined:
+App`, `undefined: New`, `undefined: LoadConfig`, `undefined: Deps`). Each
+  row has a negative control run on this branch:
+
+  | Property pinned                                      | Mutation applied                | Result         |
+  | ---------------------------------------------------- | ------------------------------- | -------------- |
+  | close order is the reverse of start order            | walk the closers forward        | FAIL           |
+  | the first error is returned, later closes still run  | `return` on the first error     | FAIL           |
+  | the hub stops when a stage after the router fails    | skip teardown on a failed start | FAIL           |
+  | the database close step actually releases the handle | drop the `database` close step  | FAIL (11 rows) |
+  | the hub close step actually stops the dispatch loop  | drop the `hub` close step       | FAIL (12 rows) |
+
+- **Codex review (P2), fixed test-first.** Codex read the rewrite and found
+  that `Run(ctx)` derived `bgCtx` from its caller's context, so cancelling
+  that context killed the event persister, the audit writer and the
+  maintenance loop _before_ `Close` ran its HTTP-first drain — the one
+  ordering the drain exists for, since in-flight handlers' broadcasts and
+  audit records have to reach live consumers. It also made caller-context
+  shutdown behave unlike the SIGTERM and restart paths, which cancel only the
+  serve context. `run()` had this right for free by rooting `bgCtx` at
+  `context.Background()`. `main.go` passes `context.Background()`, so no
+  released build was affected; the defect was in B3-3's own new `Run(ctx)`
+  contract. Fixed with `context.WithoutCancel(ctx)` — values inherited,
+  cancellation not — and pinned by
+  `TestAppRun_CallerCancel_KeepsBackgroundWorkersAliveThroughTheDrain`, which
+  records `bgCtx.Err()` as each close step runs (a new test-only
+  `onCloseStep` seam makes the walk observable) and requires it still live at
+  `signals`, `http`, `maintenance` and `audit-writer`, and already cancelled
+  by `database`. RED before the fix on all four rows; the negative control —
+  restoring `context.WithCancel(ctx)` — fails it again.
+
+- **Failure-injection report** (item 3, and exit-gate row 4's evidence).
+  `internal/app/lifecycle_failure_test.go`. The table is generated from
+  `App.stages()`, so a stage added later is covered the day it is added. Every
+  row asserts the same four properties: the error names the stage, no
+  goroutine is left running (`goleak`), the database handle is closed, and the
+  listener is not left bound. Green under `go test -race ./internal/app/`.
+
+  | Stage failed                            | Error names the stage | No goroutine leak | DB handle closed | Listener free     |
+  | --------------------------------------- | --------------------- | ----------------- | ---------------- | ----------------- |
+  | `data-dir`                              | PASS                  | PASS              | n/a (not opened) | PASS              |
+  | `tls`                                   | PASS                  | PASS              | n/a (not opened) | PASS              |
+  | `database`                              | PASS                  | PASS              | n/a (not opened) | PASS              |
+  | `migrate`                               | PASS                  | PASS              | PASS             | PASS              |
+  | `telemetry`                             | PASS                  | PASS              | PASS             | PASS              |
+  | `plugins`                               | PASS                  | PASS              | PASS             | PASS              |
+  | `hub`                                   | PASS                  | PASS              | PASS             | PASS              |
+  | `router`                                | PASS                  | PASS              | PASS             | PASS              |
+  | `event-persistence`                     | PASS                  | PASS              | PASS             | PASS              |
+  | `audit-writer`                          | PASS                  | PASS              | PASS             | PASS              |
+  | `maintenance`                           | PASS                  | PASS              | PASS             | PASS              |
+  | `acme`                                  | PASS                  | PASS              | PASS             | PASS              |
+  | `http`                                  | PASS                  | PASS              | PASS             | PASS              |
+  | `signals`                               | PASS                  | PASS              | PASS             | PASS              |
+  | listener bind (real, out-of-range port) | PASS                  | PASS              | PASS             | n/a (never bound) |
+  | none — context cancelled while serving  | n/a (nil error)       | PASS              | PASS             | PASS              |
+
+  The last row is the control: the same four properties on the path where
+  nothing fails, so the rows above are not passing merely because something
+  went wrong.
+
+- **Hub ownership.** `ws.NewHub` moves from `api.NewRouter` (`router.go:106`)
+  to `app.StartRuntime` (`internal/app/hub.go`), which also applies the four
+  pre-`Run` setters that were at `router.go:325-360` and starts the dispatch
+  goroutine. `NewRouter` gains an `api.Runtime` parameter (the hub, the
+  limiter, the service layer, and `VoiceEnabled` — the `lkErr == nil` guard
+  the voice routes were already mounted behind) and returns
+  `(http.Handler, func())`. The limiter and the service layer move with the
+  hub because it needs the same instances: the limiter persists auth
+  lockouts and the services hold the permission cache the hub invalidates.
+  Six `api_test` files and `cmd/gendocs` were updated at the call site only —
+  wiring, no assertion changes — and `gendocs` still emits a byte-identical
+  route index (its drift check is in the gate). Before/after tables:
+  [server-boundaries.md](../architecture/server-boundaries.md#hub-lifecycle-inventory).
+
+- **Build and packaging** (item 4). `Server/Makefile`, `Server/Dockerfile`
+  and `.github/workflows/release.yml` are untouched, and B2-7's
+  no-`wazero`-tag note stays true. The release build still resolves the
+  version symbol: `go build -o chatserver -ldflags "-s -w -X
+main.version=9.9.9-b33check" .` embeds the string (3 occurrences in the
+  binary), because `version` deliberately stays in `package main` and is
+  passed into the App through `app.Deps`. Note for the record that a _plain_
+  `go build .` from `Server/` produces a binary named `Server`, not
+  `chatserver` — that is derived from the module path (`.../OwnCord/Server`)
+  and is unchanged by B3-3; every packaging path passes `-o` explicitly.
+
+- **Gate**, run in full before every commit through one `set -euo pipefail`
+  script: four build-tag variants (default, `otel`, `wazero`, `otel,wazero`),
+  `go vet ./...`, `go test -race -timeout 20m ./... -coverprofile -cover`,
+  `scripts/coverage-floor.sh`, `go test -tags deadlock -count=1 ./ws/`,
+  `golangci-lint run ./...` at CI's pinned v2.11.3 (**0 issues**), sqlc and
+  genprotocol and gendocs drift, `check:docs`, `check:hygiene`.
+
+- **Coverage.** Aggregate 80.1% before (11446/14273 statements) → 80.2% after
+  (floor 79.8%); no core-package floor moved. The `Server` root package drops
+  to 0.0% because everything testable left it; `internal/app` carries it at
+  65.9%, up from the root package's pre-move 45.7% because `main()` — never
+  covered — is no longer counted with the lifecycle.
+
+- **Inventory.** `DBImportAllow` loses its `main.go` row and gains six
+  `internal/app` rows, all `boundary`; `api/router.go`'s note is updated now
+  that hub construction has left. `docs/architecture/server-boundaries.md` is
+  regenerated from the map (50 → 55 importers, `boundary` 7 → 12) and its
+  summary table's stale `boundary 6` is corrected to agree with the generated
+  line.
 
 ## B3-4 — Hub constructor options (S-11)
 

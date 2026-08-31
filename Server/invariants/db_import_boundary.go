@@ -64,17 +64,24 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/middleware.go":      {"move", "auth", "session/API-token touch and revoke"},
 	"api/plugins_handler.go": {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
 	"api/profile_handler.go": {"move", "upload", "avatar upload creates the attachment row"},
-	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction leaves in B3-3"},
+	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction left in B3-3"},
 	"api/upload_handler.go":  {"move", "upload", "attachment access + a raw QueryRowContext"},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {"adapter", "", "db.User type in a helper signature"},
 	"auth/resolve.go": {"adapter", "", "Session/APIToken/Role/User types; resolution is injected"},
 	// ── composition roots and tools ───────────────────────────────────────
-	"main.go":               {"boundary", "", "process composition root; B3-3 moves it to internal/app"},
-	"token_cli.go":          {"move", "auth", "API-token CLI duplicates admin/handlers_tokens.go"},
-	"cmd/seed/main.go":      {"boundary", "", "developer seeding tool owns its handle"},
-	"cmd/gendocs/main.go":   {"boundary", "", "docs generator migrates its own in-memory catalog"},
-	"plugin/pluginstore.go": {"adapter", "", "PluginRow type only; the store is injected"},
+	// B3-3 moved the process composition root out of main.go: internal/app
+	// owns the handle from open to close, and main.go no longer imports db.
+	"internal/app/app.go":         {"boundary", "", "the App holds the handle for its lifetime; no calls"},
+	"internal/app/database.go":    {"boundary", "", "opens the handle, migrates, clears stale state at boot"},
+	"internal/app/hub.go":         {"boundary", "", "hands the handle to the hub and the service layer it builds"},
+	"internal/app/maintenance.go": {"boundary", "", "periodic worker: expired sessions, backups, orphan attachments"},
+	"internal/app/persistence.go": {"boundary", "", "event persister, audit writer and the boot seq seed own the handle"},
+	"internal/app/plugins.go":     {"boundary", "", "passes the handle to the plugin registry as its store; no calls"},
+	"token_cli.go":                {"move", "auth", "API-token CLI duplicates admin/handlers_tokens.go"},
+	"cmd/seed/main.go":            {"boundary", "", "developer seeding tool owns its handle"},
+	"cmd/gendocs/main.go":         {"boundary", "", "docs generator migrates its own in-memory catalog"},
+	"plugin/pluginstore.go":       {"adapter", "", "PluginRow type only; the store is injected"},
 	// ── ws ────────────────────────────────────────────────────────────────
 	"ws/client.go":           {"adapter", "", "db.User type on the connection"},
 	"ws/deps.go":             {"move", "channel", "role and DM-membership reads behind the hub's deps"},
