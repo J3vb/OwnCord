@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -264,7 +265,7 @@ func newBareHub(t *testing.T, lk *ws.LiveKitClient) *ws.Hub {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk})
+	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk, Settings: service.NewSettingsService(database)})
 	if err != nil {
 		t.Fatalf("ws.NewHub: %v", err)
 	}

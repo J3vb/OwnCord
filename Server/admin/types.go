@@ -26,22 +26,6 @@ const (
 	adminTokenHashKey
 )
 
-// ─── Allowed settings keys ────────────────────────────────────────────────────
-
-// allowedSettingKeys is the whitelist of keys that may be written via
-// PATCH /admin/api/settings. Derived from the settings table in SCHEMA.md.
-var allowedSettingKeys = map[string]struct{}{
-	"server_name":       {},
-	"server_icon":       {},
-	"motd":              {},
-	"max_upload_bytes":  {},
-	"voice_quality":     {},
-	"require_2fa":       {},
-	"registration_open": {},
-	"backup_schedule":   {},
-	"backup_retention":  {},
-}
-
 // ─── HubBroadcaster ──────────────────────────────────────────────────────────
 
 // HubBroadcaster is the subset of ws.Hub needed by the admin package.

@@ -119,6 +119,10 @@ type Hub struct {
 	visibilityChangeSeq atomic.Uint64
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
+	// settings is the read seam the cache below refreshes through —
+	// the B3-8 settings family owns the underlying reads.
+	settings SettingsReader
+
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string

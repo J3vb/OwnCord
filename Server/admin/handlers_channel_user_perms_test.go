@@ -30,7 +30,7 @@ func TestPutChannelUserPermission_PersistsInvalidatesAndAudits(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "override-target")
 
@@ -95,7 +95,7 @@ func TestPutChannelUserPermission_PersistsInvalidatesAndAudits(t *testing.T) {
 // editor writes — one bit per row, in both directions at once.
 func TestPutChannelUserPermission_MaskRoundTrip(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "matrix-target")
 
@@ -135,7 +135,7 @@ func TestPutChannelUserPermission_MaskRoundTrip(t *testing.T) {
 
 func TestPutChannelUserPermission_MasksUnknownBits(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "junk-target")
 
@@ -162,7 +162,7 @@ func TestPutChannelUserPermission_MasksUnknownBits(t *testing.T) {
 
 func TestPutChannelUserPermission_UnknownUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "nope", "text", "", "", 0)
@@ -179,7 +179,7 @@ func TestPutChannelUserPermission_UnknownUser(t *testing.T) {
 
 func TestPutChannelUserPermission_DMRejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "dm-target")
 
@@ -197,7 +197,7 @@ func TestPutChannelUserPermission_DMRejected(t *testing.T) {
 
 func TestChannelUserPermission_NonAdminForbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_ = createAdminUser(t, database)
 	memberToken := createMemberUser(t, database)
 	target := seedOverrideTarget(t, database, "forbidden-target")
@@ -231,7 +231,7 @@ func TestChannelUserPermission_NonAdminForbidden(t *testing.T) {
 // writing it into a per-user channel override.
 func TestPutChannelUserPermission_ModeratorCannotEscalate(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 	target := seedOverrideTarget(t, database, "escalate-target")
 
@@ -263,7 +263,7 @@ func TestPutChannelUserPermission_ModeratorCannotEscalate(t *testing.T) {
 // access their role grants.
 func TestPutChannelUserPermission_CannotTargetHigherRankedUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// Actor: Moderator at position 60 holding MANAGE_CHANNELS + READ_MESSAGES.
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "mod-hier")
 	// Target holds a role ranked ABOVE the actor.
@@ -300,7 +300,7 @@ func TestPutChannelUserPermission_CannotTargetHigherRankedUser(t *testing.T) {
 // override, since ADMINISTRATOR bypasses the escalation guard.
 func TestPutChannelUserPermission_AdministratorCanGrantAnyBit(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "admin-grant-target")
 
@@ -329,7 +329,7 @@ func TestDeleteChannelUserPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "clear-target")
 
@@ -391,7 +391,7 @@ func TestDeleteChannelUserPermission_ClearsOverride(t *testing.T) {
 // passes.
 func TestDeleteChannelUserPermission_EscalationGuard(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// Actor: MANAGE_CHANNELS holder without MANAGE_MESSAGES or ADMINISTRATOR.
 	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
 	target := seedOverrideTarget(t, database, "escalate-del-target")
@@ -424,7 +424,7 @@ func TestDeleteChannelUserPermission_EscalationGuard(t *testing.T) {
 // (TestPutChannelPermission_ClearByZeroMaskEscalationGuard's per-user twin).
 func TestPutChannelUserPermission_ClearByZeroMaskEscalationGuard(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, modToken := createRoleUser(t, database, 10, "Moderator", permissions.ManageChannels, 70, "moduser")
 	target := seedOverrideTarget(t, database, "escalate-zero-target")
 

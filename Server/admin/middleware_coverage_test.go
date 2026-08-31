@@ -19,7 +19,7 @@ import (
 // session has expired is rejected with 401.
 func TestAdminAuthMiddleware_ExpiredSession(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 
 	// Create a user and session, then manually expire the session by setting
 	// expires_at to a past timestamp via the exported Exec helper.
@@ -54,7 +54,7 @@ func TestAdminAuthMiddleware_ExpiredSession(t *testing.T) {
 // access immediately, not only when the session expires.
 func TestAdminAuthMiddleware_BannedAdmin(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	if w := doRequest(t, handler, http.MethodGet, "/stats", token, nil); w.Code != http.StatusOK {
@@ -78,7 +78,7 @@ func TestAdminAuthMiddleware_BannedAdmin(t *testing.T) {
 // Authorization header returns 401.
 func TestAdminAuthMiddleware_MissingBearer(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "", nil)
 
@@ -91,7 +91,7 @@ func TestAdminAuthMiddleware_MissingBearer(t *testing.T) {
 // sessions table returns 401.
 func TestAdminAuthMiddleware_InvalidToken(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "completely-invalid-token", nil)
 

@@ -34,6 +34,12 @@ type HubOptions struct {
 	// where handlers keep their direct-DB fallback paths.
 	Services *service.Services
 
+	// Settings is required: the hub's settings cache (server name and MOTD
+	// on every auth_ok) reads through it instead of the raw handle — the
+	// B3-8 settings family owns those reads. Production passes
+	// Services.Settings; test helpers default it over the test database.
+	Settings SettingsReader
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -67,6 +73,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	if opts.Limiter == nil {
 		return nil, errors.New("ws: HubOptions.Limiter is required (handler deps capture it at registration)")
 	}
+	if opts.Settings == nil {
+		return nil, errors.New("ws: HubOptions.Settings is required (the settings cache reads through it)")
+	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
 		return nil, errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
@@ -75,6 +84,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
+	settingsReader := opts.Settings
 
 	ringSize := 1000
 	if opts.ReplayRingSize > 0 {
@@ -87,6 +97,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clients:         make(map[int64]*Client),
 		db:              database,
 		limiter:         limiter,
+		settings:        settingsReader,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),

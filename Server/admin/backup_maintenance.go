@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // Scheduled-backup intervals for the backup_schedule setting values the admin
@@ -35,8 +36,8 @@ const (
 //
 // The returned error feeds the maintenance loop's circuit breaker; settings
 // simply not existing (fresh DB mid-migration) is not an error.
-func MaintainBackups(ctx context.Context, database *db.DB) error {
-	schedule, err := database.GetSetting(ctx, "backup_schedule")
+func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+	schedule, err := settings.Setting(ctx, "backup_schedule")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil
@@ -60,7 +61,7 @@ func MaintainBackups(ctx context.Context, database *db.DB) error {
 		}
 	}
 
-	if err := pruneExpiredBackups(ctx, database); err != nil {
+	if err := pruneExpiredBackups(ctx, database, settings); err != nil {
 		slog.Warn("backup retention pruning failed", "error", err)
 		if firstErr == nil {
 			firstErr = err
@@ -118,8 +119,8 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one.
-func pruneExpiredBackups(ctx context.Context, database *db.DB) error {
-	retStr, err := database.GetSetting(ctx, "backup_retention")
+func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil

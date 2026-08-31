@@ -65,7 +65,7 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
 	var setupOpts SetupOptions
@@ -157,8 +157,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		}))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
-			r.Get("/settings", handleGetSettings(database))
-			r.Patch("/settings", handlePatchSettings(database))
+			r.Get("/settings", handleGetSettings(settings))
+			r.Patch("/settings", handlePatchSettings(settings))
 		})
 		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(handleBackup(database)).ServeHTTP(w, req)

@@ -1713,6 +1713,47 @@ state (OC-0323 lands here) → admin-UI adapters last (most stay `adapter`).
 Each family's evidence block: before/after `db` importer count, allowlist
 diff, the family's characterization file.
 
+**Evidence — settings/audit family, 2026-08-31** — branch
+`feat/b3-8-settings-family` from `dev` `528ae264` (the B3-5 finisher's
+squash). The B3-2 pattern:
+
+- **Characterization**: the admin surface was already pinned —
+  `admin/api_test.go`'s eleven `TestAdminAPI_*Settings*` rows (GET shape,
+  PATCH happy path, invalid body, unknown key, mixed keys, every
+  whitelisted key, empty payload, both require_2fa preconditions, invalid
+  boolean, the unrelated-key gate) are the family's characterization file
+  and stayed green untouched through the extraction. The service seam adds
+  its own: `service/settings_test.go` (nine `TestSettings_*` rows) pins
+  the same policy at the service plus the service-only contracts
+  (`ErrNotFound` wrap, audit rows, multi-key apply).
+- **Interface/service**: `service.SettingsService` — `List`, `Patch`
+  (whitelist, boolean normalization, the require_2fa preconditions
+  including the TOTP census and the unrelated-key guard, atomic apply,
+  one audit row per changed key), `Setting`. `db.ApplySettings` is the
+  handler's raw upsert loop as one hand-written transactional wrapper —
+  the raw SQL left the handler for `db/`, where it belongs. Response
+  messages are wrapped with `%.0w` so the pinned bodies stay prefix-free.
+- **Thin handlers**: `handleGetSettings`/`handlePatchSettings` decode,
+  delegate and map `ErrBadRequest` → 400; the whitelist copy in
+  `admin/types.go` is gone. `MaintainBackups` reads `backup_schedule`
+  and `backup_retention` through the service. The hub's settings cache
+  consumes a required consumer-side `ws.SettingsReader`
+  (`HubOptions.Settings`, refusal pinned in
+  `TestNewHub_RequiredCollaborators`); production wires
+  `Services.Settings`, the test-hub helpers default it over the test
+  database.
+- **Allowlist diff**: `admin/handlers_settings.go` and
+  `ws/hub_settings.go` stop importing `db` — both rows deleted (the
+  B3-5 finisher's import pin is gone with the reads themselves). The
+  backup pair takes the forecast `boundary` disposition:
+  `backup_maintenance.go` (backup mechanics only; settings via the
+  service) and `handlers_backup.go` (VACUUM INTO, WAL checkpoint,
+  close-and-swap restore own the handle). `settings-ops` disappears
+  from the move targets.
+- **Importer count**: 60 → 59 files import `db` above the domain layer
+  (admin 16 → 15); dispositions 28/18/15 → 24/18/17 move/adapter/boundary
+  (tool summary, re-derived).
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

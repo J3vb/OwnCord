@@ -201,4 +201,7 @@ type Store interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	SetSetting(ctx context.Context, key, value string) error
 	GetAllSettings(ctx context.Context) (map[string]string, error)
+	// ApplySettings upserts every pair in one transaction — the settings
+	// PATCH is atomic from the caller's perspective (settings family).
+	ApplySettings(ctx context.Context, updates map[string]string) error
 }

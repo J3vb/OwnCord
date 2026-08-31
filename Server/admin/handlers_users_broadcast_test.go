@@ -29,7 +29,7 @@ func (m *unbanMockHub) BroadcastMemberUnban(userID int64) {
 func TestAdminAPI_PatchUser_UnbanBroadcastsMemberUnban(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &unbanMockHub{mockHub: &mockHub{}}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser(context.Background(), "unbanbroadcast", "hash", 3)
@@ -63,7 +63,7 @@ func TestAdminAPI_PatchUser_UnbanBroadcastsMemberUnban(t *testing.T) {
 func TestAdminAPI_PatchUser_RoleChangeRefreshesVisibility(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser(context.Background(), "rolerefresh", "hash", 3)
@@ -120,7 +120,7 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcastsEvenIfRoleReReadFails(t *testing
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	invalidator := &roleDeletingInvalidator{database: database, deleteRoleID: 2, fallbackRoleID: 3}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, invalidator, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, invalidator, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser(context.Background(), "roleracetarget", "hash", 3)

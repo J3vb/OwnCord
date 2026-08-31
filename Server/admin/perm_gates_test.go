@@ -49,7 +49,7 @@ func createRoleUser(t *testing.T, database *db.DB, roleID int64, name string, pe
 func newModeratorHandler(t *testing.T) (http.Handler, *db.DB, string) {
 	t.Helper()
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 	return handler, database, token
 }
@@ -69,7 +69,7 @@ func TestPerimeter_ModeratorAdmitted(t *testing.T) {
 
 func TestPerimeter_NoModerationBitsRejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// MANAGE_MESSAGES alone is not a perimeter bit — it has no admin route.
 	_, token := createRoleUser(t, database, 11, "Helper", permissions.ManageMessages, 50, "helperuser")
 
@@ -129,7 +129,7 @@ func TestPatchUserBan_ModeratorAllowed(t *testing.T) {
 
 func TestChannelRoutes_WithoutManageChannelsForbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, token := createRoleUser(t, database, 12, "Auditor", permissions.ViewAuditLog, 50, "auditoruser")
 
 	for _, tc := range []struct {
@@ -170,7 +170,7 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 
 func TestAuditAndSettings_BitHoldersAllowed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, auditToken := createRoleUser(t, database, 12, "Auditor", permissions.ViewAuditLog, 50, "auditoruser")
 	_, cfgToken := createRoleUser(t, database, 13, "Configurator", permissions.ManageServer, 50, "cfguser")
 
@@ -215,7 +215,7 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 
 func TestForceLogout_RequiresKickMembers(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, token := createRoleUser(t, database, 14, "ChannelMod", permissions.ManageChannels, 60, "chanmoduser")
 
 	targetUID, _ := database.CreateUser(context.Background(), "victim", "hash", 3)
@@ -235,7 +235,7 @@ func TestForceLogout_RequiresKickMembers(t *testing.T) {
 
 func TestForceLogout_HierarchyEnforced(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	// Owner (role 1, position 100) outranks the moderator.
@@ -269,7 +269,7 @@ func TestForceLogout_HierarchyEnforced(t *testing.T) {
 
 func TestPatchUserRole_RequiresManageRoles(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// The seeded Moderator mask stops at bit 19 — no MANAGE_ROLES (bit 24).
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 	targetUID, _ := database.CreateUser(context.Background(), "promoteme", "hash", 3)
@@ -286,7 +286,7 @@ func TestPatchUserRole_RequiresManageRoles(t *testing.T) {
 
 func TestPatchUserRole_CannotPromoteToOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// Role 2 "Admin" (position 80) holds MANAGE_ROLES but is below Owner.
 	_, token := createRoleUser(t, database, 2, "Admin", 0x3FFFFFFF, 80, "adminuser2")
 	targetUID, _ := database.CreateUser(context.Background(), "wannabeowner", "hash", 3)
@@ -304,7 +304,7 @@ func TestPatchUserRole_CannotPromoteToOwner(t *testing.T) {
 
 func TestPatchUserRole_ModeratorCannotDemoteAdmin(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	// A moderator that does hold MANAGE_ROLES still cannot touch a higher rank.
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask|permissions.ManageRoles, 60, "moduser")
 	adminUID, err := database.CreateUser(context.Background(), "sitting-admin", "hash", 2)
@@ -383,7 +383,7 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 
 func TestGetMe_OwnerFlagged(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/me", token, nil)

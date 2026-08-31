@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -690,7 +691,11 @@ func TestNewHub_RequiredCollaborators(t *testing.T) {
 	if _, err := ws.NewHub(ws.HubOptions{DB: database}); err == nil {
 		t.Fatal("NewHub without Limiter must error")
 	}
-	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), ReplayRingSize: -1}); err == nil {
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter()}); err == nil {
+		t.Fatal("NewHub without a Settings reader must error")
+	}
+	settings := service.NewSettingsService(database)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, ReplayRingSize: -1}); err == nil {
 		t.Fatal("NewHub with a negative replay ring must error")
 	}
 }

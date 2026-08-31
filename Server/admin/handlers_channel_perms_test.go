@@ -29,7 +29,7 @@ func (m *mockPermInvalidator) InvalidateAll() {
 
 func TestGetChannelPermissions_ReturnsAllRoles(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
@@ -67,7 +67,7 @@ func TestGetChannelPermissions_ReturnsAllRoles(t *testing.T) {
 
 func TestGetChannelPermissions_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/channels/9999/permissions", token, nil)
@@ -78,7 +78,7 @@ func TestGetChannelPermissions_NotFound(t *testing.T) {
 
 func TestGetChannelPermissions_DMRejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
@@ -99,7 +99,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
@@ -160,7 +160,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 
 func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret2", "text", "", "", 0)
@@ -190,7 +190,7 @@ func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 
 func TestPutChannelPermission_UnknownRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret3", "text", "", "", 0)
@@ -207,7 +207,7 @@ func TestPutChannelPermission_UnknownRole(t *testing.T) {
 
 func TestPutChannelPermission_NonAdminForbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_ = createAdminUser(t, database)
 	memberToken := createMemberUser(t, database)
 
@@ -228,7 +228,7 @@ func TestPutChannelPermission_NonAdminForbidden(t *testing.T) {
 // a channel override — the escalation this override endpoint must refuse.
 func TestPutChannelPermission_ModeratorCannotEscalate(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	chID, err := database.CreateChannel(context.Background(), "escalate", "text", "", "", 0)
@@ -258,7 +258,7 @@ func TestPutChannelPermission_ModeratorCannotEscalate(t *testing.T) {
 // a channel override, since ADMINISTRATOR bypasses the escalation guard.
 func TestPutChannelPermission_AdministratorCanGrantAnyBit(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "admin-grant", "text", "", "", 0)
@@ -287,7 +287,7 @@ func TestPutChannelPermission_AdministratorCanGrantAnyBit(t *testing.T) {
 // the actor's own mask — mirroring service.requireBelowActor.
 func TestPutChannelPermission_RefusesEqualOrHigherRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	chID, err := database.CreateChannel(context.Background(), "hierarchy", "text", "", "", 0)
@@ -320,7 +320,7 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret5", "text", "", "", 0)
@@ -373,7 +373,7 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 // TestPutChannelPermission_RefusesEqualOrHigherRole (A-2026-08-01).
 func TestDeleteChannelPermission_RefusesEqualOrHigherRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	chID, err := database.CreateChannel(context.Background(), "hierarchy-del", "text", "", "", 0)
@@ -417,7 +417,7 @@ func TestDeleteChannelPermission_RefusesEqualOrHigherRole(t *testing.T) {
 // (TestPutChannelPermission_UnknownRole).
 func TestDeleteChannelPermission_UnknownRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "hierarchy-del-404", "text", "", "", 0)
@@ -440,7 +440,7 @@ func TestDeleteChannelPermission_UnknownRole(t *testing.T) {
 // not skip it just because the hierarchy guard alone passes.
 func TestDeleteChannelPermission_EscalationGuard(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 
 	// Helper role: low position, base permissions include MANAGE_MESSAGES.
 	if _, err := database.ExecContext(context.Background(),
@@ -485,7 +485,7 @@ func TestDeleteChannelPermission_EscalationGuard(t *testing.T) {
 // by this write, not just the (trivially empty) bits being written.
 func TestPutChannelPermission_ClearByZeroMaskEscalationGuard(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database))
 
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)

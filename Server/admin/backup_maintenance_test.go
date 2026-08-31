@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 func listBackupFiles(t *testing.T, dir string) []string {
@@ -49,7 +50,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	ctx := context.Background()
 
 	// Settings absent → no-op, no error.
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups with no settings: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -59,7 +60,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Schedule off → still a no-op.
 	mustSetSetting(t, database, "backup_schedule", "off")
 	mustSetSetting(t, database, "backup_retention", "7")
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups with schedule=off: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -68,7 +69,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Daily → first tick creates exactly one scheduled backup.
 	mustSetSetting(t, database, "backup_schedule", "daily")
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #1: %v", err)
 	}
 	files := listBackupFiles(t, dir)
@@ -78,7 +79,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	first := filepath.Join(dir, files[0])
 
 	// Fresh backup on disk → next tick is a no-op.
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #2: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 1 {
@@ -88,7 +89,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Backup older than a day (but inside retention) → a new one is taken and
 	// the old one is kept.
 	backdate(t, first, 25*time.Hour)
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #3: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 2 {
@@ -97,7 +98,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Old backup past the 7-day retention window → pruned; the fresh one stays.
 	backdate(t, first, 8*24*time.Hour)
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups daily #4: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -132,7 +133,7 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	backdate(t, older, 30*24*time.Hour)
 	backdate(t, newer, 20*24*time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
