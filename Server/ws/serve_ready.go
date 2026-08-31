@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/coder/websocket"
+
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -372,4 +374,190 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 // query, replacing the previous N+1 per-channel pattern.
 func collectAllVoiceStates(ctx context.Context, database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
 	return database.GetAllVoiceStates(ctx)
+}
+
+func (h *Hub) handleFreshConnect(
+	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB,
+) error {
+	// Clean stale voice state BEFORE building ready and registering.
+	// When a user F5-reloads while in voice, the DB row from the previous
+	// session must be removed so the ready payload doesn't include it and
+	// other clients see a voice_leave broadcast.
+	if vs, err := database.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
+		h.freshConnectCleanStaleVoice(ctx, database, c, vs)
+	}
+
+	// c.user is the auth-time snapshot — re-read it so the ready payload and
+	// any inherited subscriptions resolve from the user's CURRENT role, not
+	// the one they held when the auth frame was evaluated (audit-2026-08-19
+	// F-2; the resume path does the same in reconnectPrecheck). Fail closed
+	// like the role lookup below.
+	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
+		slog.Error("ws: user re-read failed, disconnecting", "user_id", c.userID, "err", err)
+		_ = conn.Close(websocket.StatusInternalError, "user lookup failed")
+		return err
+	}
+
+	// Look up role for permission-filtered ready payload.
+	// Fail closed: if the role lookup fails, disconnect rather than serving
+	// a permissive ready payload with nil role (BUG-094).
+	userRole, roleErr := database.GetRoleByID(ctx, c.user.RoleID)
+	if roleErr != nil || userRole == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
+		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
+	}
+
+	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	//
+	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
+	// from the previous connection, so that is the only case where registerNow
+	// needs the read-permission set. Fail closed on error: nil denies the
+	// inherited voice-channel subscription.
+	var allowedChannelIDs map[int64]bool
+	if c.lastSeq > 0 {
+		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
+		if allowedErr != nil {
+			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
+				"user_id", c.userID, "err", allowedErr)
+		} else {
+			allowedChannelIDs = allowed
+		}
+	}
+	// handleReconnect may have promoted an auth-frame active_channel_id into
+	// c.channelID (serve.go, honoured only when it was READ-visible at that
+	// moment) and then aborted on one of its own re-checks — most notably the
+	// final mustFullResync check, tripped by a permission revocation that
+	// landed mid-handshake. None of those abort paths undo the c.channelID
+	// write. registerNow subscribes c.channelID's ChannelTopic
+	// unconditionally, so re-gate it here against the freshly recomputed
+	// permission set before registering. Fail closed: a nil allowedChannelIDs
+	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
+	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
+		c.mu.Lock()
+		c.channelID = 0
+		c.mu.Unlock()
+	}
+	if freshConnectPreRegisterRaceHook != nil {
+		freshConnectPreRegisterRaceHook()
+	}
+	h.registerNow(c, allowedChannelIDs)
+
+	// The re-read above and registerNow are not atomic: a role reassignment
+	// committing in between finds this socket absent from h.clients (so its
+	// revokeUnreadableChannels pass early-returns) yet builds our inherited
+	// subscriptions from the pre-change role. One PK re-read after
+	// registration makes the two orderings meet: a commit visible here is
+	// pruned by our own revoke pass, and a commit that is not yet visible
+	// necessarily runs its own revoke lookup after our registerNow and
+	// finds us.
+	// Scoped to the resume-fallback path — a pure fresh connect (lastSeq==0)
+	// inherits no subscriptions; channel_focus and voice_join re-check live.
+	if c.lastSeq > 0 {
+		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
+			h.revokeUnreadableChannels(c.userID)
+		}
+	}
+
+	// Settle the session's status before buildReady reads the member list, so
+	// the ready payload and the presence broadcast below cannot disagree.
+	applyConnectStatus(ctx, database, c)
+
+	// Fresh connection or replay fallback: full auth_ok + ready flow.
+	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
+		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
+		h.unregisterFailedHandshake(ctx, c)
+		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		return err
+	}
+	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
+		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
+		if err := handshakeWrite(ctx, conn, ready); err != nil {
+			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
+			h.unregisterFailedHandshake(ctx, c)
+			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+			return err
+		}
+	} else {
+		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
+		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+		h.unregisterFailedHandshake(ctx, c)
+		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
+		return readyErr
+	}
+
+	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
+	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
+	h.announceConnectPresence(c)
+
+	return nil
+}
+// freshConnectCleanStaleVoice removes the voice state left behind by this
+// user's previous session, unless that session is the still-registered
+// connection this one is about to inherit from.
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, database *db.DB, c *Client, vs *db.VoiceState) {
+	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
+	// the still-registered old connection's live voice state into this
+	// client. Deleting the DB row here — and the LiveKit participant,
+	// whose removal token is the very JoinedAt being transferred — would
+	// leave the user "in voice" on the hub only: voice_join bounces off
+	// ALREADY_JOINED and sweepStaleVoiceStates never heals
+	// memory-without-row. Keep the row so ready stays consistent. If the
+	// old client unregisters before registerNow runs, the transfer is
+	// skipped and the next sweep reaps the then-truly-stale row.
+	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	slog.Info("ws fresh connect: cleaning stale voice state",
+		"user_id", c.userID, "channel_id", vs.ChannelID)
+	if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+	}
+	// The DB row is gone, but the still-registered OLD *Client (if any) is
+	// otherwise only cleared by registerNow — which two early-return paths
+	// further down handleFreshConnect (the refreshUserSnapshot and
+	// GetRoleByID failure branches) can skip entirely. Without this, that
+	// old client's in-memory voiceChID and the E2EE key-holder election for
+	// this room survive as a memory-without-row ghost that
+	// sweepStaleVoiceStates can never see, since it iterates DB rows
+	// (OC-0252). Clearing here makes freshConnectCleanStaleVoice self
+	// sufficient regardless of whether registerNow ever runs; registerNow's
+	// own replacedVoiceChID re-election later becomes a redundant no-op
+	// (clearVoiceState finds nothing left to clear), not a conflict.
+	if old := h.GetClient(c.userID); old != nil {
+		if _, cleared := old.clearVoiceStateIfMatch(vs.ChannelID); cleared {
+			h.pubsub.Unsubscribe(old, VoiceTopic(vs.ChannelID))
+		}
+	}
+	h.updateKeyHolder(vs.ChannelID)
+	h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
+	if h.livekit == nil {
+		return
+	}
+	// BUG-089: Capture stale join token so the goroutine only removes
+	// the exact stale participant. The identity includes joinedAt, so
+	// even if the user rejoins voice quickly, the new session has a
+	// different identity and won't be removed. The removal must
+	// complete even if this connection drops mid-handshake, so detach
+	// from cancellation (values kept); shutdown is handled via h.stop.
+	staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
+	lkCtx := context.WithoutCancel(ctx)
+	go func() {
+		select {
+		case <-h.stop:
+			return
+		default:
+		}
+		if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
+			slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
+				"err", err, "user_id", staleUserID, "channel_id", staleChID)
+		}
+	}()
 }
