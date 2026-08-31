@@ -15,7 +15,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -238,7 +240,6 @@ func hubWithLiveKit(t *testing.T, status int) *ws.Hub {
 	}))
 	t.Cleanup(srv.Close)
 
-	hub := ws.NewHub(nil, nil, nil)
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "testkeytestkeytest",
 		LiveKitAPISecret: "testsecrettestsecrettestsecret",
@@ -247,7 +248,26 @@ func hubWithLiveKit(t *testing.T, status int) *ws.Hub {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newBareHub(t, lk)
+	return hub
+}
+
+// newBareHub builds the smallest hub NewHub now accepts: B3-4 made DB and
+// Limiter required, so the pre-B3-4 ws.NewHub(nil, nil, nil) fixture — the
+// poster child of construction succeeding with nothing wired — is illegal by
+// design. An unmigrated in-memory database is enough: construction only
+// best-effort-reads the settings cache.
+func newBareHub(t *testing.T, lk *ws.LiveKitClient) *ws.Hub {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk})
+	if err != nil {
+		t.Fatalf("ws.NewHub: %v", err)
+	}
 	return hub
 }
 
@@ -303,7 +323,7 @@ func TestHandleLiveKitHealth_Degraded(t *testing.T) {
 
 func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
 	// A hub with no LiveKit client at all — the common case when voice is off.
-	handler := api.LiveKitHealthHandlerForTest(ws.NewHub(nil, nil, nil))
+	handler := api.LiveKitHealthHandlerForTest(newBareHub(t, nil))
 
 	rr := httptest.NewRecorder()
 	handler(rr, httptest.NewRequest(http.MethodGet, "/api/v1/livekit/health", nil))

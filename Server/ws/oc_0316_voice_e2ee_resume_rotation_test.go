@@ -30,7 +30,7 @@ import (
 
 func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	database := newTeardownTestDB(t)
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	const (
 		chanID = int64(500)

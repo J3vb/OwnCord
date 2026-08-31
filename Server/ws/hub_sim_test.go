@@ -249,8 +249,8 @@ func simDMChannel(i, j int) int64 {
 }
 
 func runHubSim(t *testing.T, seed uint64, steps int) (stats map[string]int, raced int) {
-	hub, database := newTestHub(t)
-	hub.ConfigureReplay(simRing, 0)
+	database := openTestDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, ReplayRingSize: simRing})
 	hub.FreezeTopicLimiterForTest()
 	s := &sim{
 		t: t, hub: hub, seed: seed, steps: steps,

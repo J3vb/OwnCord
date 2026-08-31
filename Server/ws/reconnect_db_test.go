@@ -87,7 +87,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	}
 
 	// Build hub, attach the DB event store as the cold-tier read path.
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -208,7 +208,7 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 		t.Fatalf("PersistEvents: persisted %d/%d, err=%v", n, len(events), err)
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
@@ -304,7 +304,7 @@ func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
 		}
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()

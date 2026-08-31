@@ -56,7 +56,10 @@ func fullRouter(t *testing.T) http.Handler {
 		GIF: config.GIFConfig{APIKey: "absence-test"},
 	}
 
-	rt := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	if rtErr != nil {
+		t.Fatalf("app.StartRuntime: %v", rtErr)
+	}
 	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 	return handler

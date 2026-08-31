@@ -53,7 +53,7 @@ func TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce(t *testing.T) {
 
 	// Run is deliberately not started so h.broadcast can be drained directly,
 	// matching the convention in serve_failed_handshake_teardown_test.go.
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// Seed the ring buffer so the reconnect replay succeeds from the buffer
 	// tier: lastSeq=2 sits strictly between oldestSeq(1) and newestSeq(3).

@@ -4,7 +4,9 @@
 **Re-measured:** 2026-08-30 (B3-2) — the first table and the auth slice's
 after-state at `fe1d11b8` (pre-squash; the squash SHA is in the plan's B3-2
 evidence block); 2026-08-30 (B3-3) — the first table again, and the hub
-lifecycle section's after-state rows, on `feat/b3-3-lifecycle`.
+lifecycle section's after-state rows, on `feat/b3-3-lifecycle`; 2026-08-31
+(B3-4) — the construction-and-setters after-state, on
+`feat/b3-4-hub-options`.
 **Owner:** the B3 plan,
 [plans/b3-server-architecture-guardrails-2026-08-29.md](../plans/b3-server-architecture-guardrails-2026-08-29.md).
 **Regenerate the first table:** `cd Server && go run ./cmd/dbinventory` and
@@ -198,6 +200,29 @@ safe to call after `Run` has started (`ws/hub_events.go`) and moving them
 earlier would reorder the boot. B3-4 is what collapses them into validated
 `HubOptions` at the single construction point; the router is no longer one of
 the places that has to change for it.
+
+### Construction and setters (S-11) — after B3-4
+
+`ws.NewHub(opts HubOptions) (*Hub, error)` refuses to construct without its
+required collaborators (`DB`, `Limiter`) and validates option coherence (a
+`LiveKitProcess` without a `LiveKit` client is an error, as is a negative
+replay budget). The seven setters' final dispositions:
+
+| Former setter             | Now                                             | Why                                                                                                                        |
+| ------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `SetLiveKit`              | `HubOptions.LiveKit`                            | was `rejectIfRunning`-guarded — construction wiring, never runtime state                                                   |
+| `SetLiveKitProcess`       | `HubOptions.LiveKitProcess`                     | same; the restart path relaunches the whole app, nothing re-sets a process on a live hub; requires `LiveKit` at validation |
+| `SetPluginRegistry`       | `HubOptions.PluginRegistry`                     | same                                                                                                                       |
+| `ConfigureReplay`         | `HubOptions.ReplayRingSize` / `ReplayColdLimit` | same — the dispatch loop reads the ring unlocked, so it is sized exactly once                                              |
+| `SetEventPersister`       | **still a setter** (`ws/hub_events.go`)         | atomic hot-swap; the persister is built one lifecycle stage after the hub and cannot exist before it                       |
+| `SetEventStore`           | **still a setter** (`ws/hub_events.go`)         | same store wiring stage; atomic                                                                                            |
+| `SetPluginEventSink`      | **still a setter** (`ws/hub_events.go`)         | the sink consumes the built hub's broadcaster — a genuine two-phase wire                                                   |
+| `SetPendingVoiceModFlags` | **still a setter** (`ws/voice_moderation.go`)   | per-user runtime state, the one the B3-0 table already kept                                                                |
+
+`rejectIfRunning` was deleted with its last construction-phase caller. The
+single production call site is `internal/app.StartRuntime`; a missing
+collaborator is now a `startHub` error at boot instead of a later panic
+(`TestNewHub_RequiredCollaborators`, `TestHub_LiveKitProcessRequiresClient`).
 
 ### Locks
 
