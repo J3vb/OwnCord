@@ -88,18 +88,18 @@ func (h *Hub) readyVisibleChannels(bits int64) bool { return permissions.HasAdmi
 		},
 		{
 			name: "listed plain function symbol is allowed at the calls its row binds",
-			path: "api/upload_handler.go",
-			src: "package api\n" + importPerms + `
-func serveFileAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
+			path: "admin/logstream.go",
+			src: "package admin\n" + importPerms + `
+func logStreamAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
 `,
 			want: 0,
 		},
 		{
 			// The Codex P2: a row must not exempt the whole function.
 			name: "a second call of the bound helper inside a listed symbol is flagged",
-			path: "api/upload_handler.go",
-			src: "package api\n" + importPerms + `
-func serveFileAuthorize(bits, other int64) bool {
+			path: "admin/logstream.go",
+			src: "package admin\n" + importPerms + `
+func logStreamAuthorize(bits, other int64) bool {
 	return permissions.HasAdmin(bits) || permissions.HasAdmin(other)
 }
 `,
@@ -107,9 +107,9 @@ func serveFileAuthorize(bits, other int64) bool {
 		},
 		{
 			name: "a different helper inside a listed symbol is flagged",
-			path: "api/upload_handler.go",
-			src: "package api\n" + importPerms + `
-func serveFileAuthorize(bits int64) bool { return permissions.HasPerm(bits, 1) }
+			path: "admin/logstream.go",
+			src: "package admin\n" + importPerms + `
+func logStreamAuthorize(bits int64) bool { return permissions.HasPerm(bits, 1) }
 `,
 			want: 1,
 		},
@@ -138,25 +138,25 @@ func (s *MessageService) mentionReaders(bits, a, d int64) bool {
 		},
 		{
 			name: "a dot-import inside a listed symbol is still flagged",
-			path: "api/upload_handler.go",
-			src: `package api
+			path: "admin/logstream.go",
+			src: `package admin
 import . "github.com/J3vb/OwnCord/Server/permissions"
-func serveFileAuthorize(bits int64) bool { return HasAdmin(bits) }
+func logStreamAuthorize(bits int64) bool { return HasAdmin(bits) }
 `,
 			want: 1,
 		},
 		{
 			name: "a row is keyed by symbol, not by file: the same symbol in another file of the package is allowed",
-			path: "api/moved_somewhere_else.go",
-			src: "package api\n" + importPerms + `
-func serveFileAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
+			path: "admin/moved_somewhere_else.go",
+			src: "package admin\n" + importPerms + `
+func logStreamAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
 `,
 			want: 0,
 		},
 		{
 			name: "a row does not cover a different symbol in the same file",
-			path: "api/upload_handler.go",
-			src: "package api\n" + importPerms + `
+			path: "admin/logstream.go",
+			src: "package admin\n" + importPerms + `
 func someOtherHelper(bits int64) bool { return permissions.HasAdmin(bits) }
 `,
 			want: 1,
@@ -175,7 +175,7 @@ func (c *Client) readyVisibleChannels(bits int64) bool { return permissions.HasA
 			name: "a row does not carry across packages",
 			path: "plugin/brand_new.go",
 			src: "package plugin\n" + importPerms + `
-func serveFileAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
+func logStreamAuthorize(bits int64) bool { return permissions.HasAdmin(bits) }
 `,
 			want: 1,
 		},
@@ -315,14 +315,14 @@ func compute(bits, a, d int64) int64 { return permissions.EffectivePerms(bits, a
 // needs to act on an over-count: which helper, how many the row binds, and how
 // many are actually there.
 func TestAuthzChokepointExcessMessageNamesHelperAndCount(t *testing.T) {
-	src := `package api
+	src := `package admin
 import "github.com/J3vb/OwnCord/Server/permissions"
 
-func serveFileAuthorize(bits, other int64) bool {
+func logStreamAuthorize(bits, other int64) bool {
 	return permissions.HasAdmin(bits) || permissions.HasAdmin(other)
 }
 `
-	got := checkSourceWith([]Rule{authzChokepoint}, token.NewFileSet(), "api/upload_handler.go", []byte(src))
+	got := checkSourceWith([]Rule{authzChokepoint}, token.NewFileSet(), "admin/logstream.go", []byte(src))
 	if len(got) != 1 {
 		t.Fatalf("got %d violation(s), want 1: %v", len(got), got)
 	}
@@ -335,7 +335,7 @@ func serveFileAuthorize(bits, other int64) bool {
 		"HasAdmin",                    // which helper
 		"binds 1 call(s) of HasAdmin", // how many the row allows
 		"found 2",                     // how many are there
-		"api.serveFileAuthorize",      // where
+		"admin.logStreamAuthorize",    // where
 		"it never widens them",        // and that raising it is a review, not an edit
 	} {
 		if !strings.Contains(v.Msg, want) {
@@ -416,7 +416,7 @@ func TestFileScopeRowsAreRejected(t *testing.T) {
 	for sym, want := range map[string]bool{
 		"api.<file-scope>":                         true,
 		".<file-scope>":                            true, // a root-level file
-		"api.serveFileAuthorize":                   false,
+		"admin.logStreamAuthorize":                 false,
 		"ws.(*Hub).readyVisibleChannels":           false,
 		"service.(*MessageService).mentionReaders": false,
 	} {

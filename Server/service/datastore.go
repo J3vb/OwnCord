@@ -190,6 +190,10 @@ type Store interface {
 	GetAttachmentByID(ctx context.Context, id string) (*db.Attachment, error)
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
+	// IsMessageDeleted backs the tombstone half of attachment access; the
+	// avatar check backs the "public exactly while in use" half.
+	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
+	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
 
 	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
