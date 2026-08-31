@@ -1,0 +1,68 @@
+# Nightly Docker boot smoke against dev (B3-6 item 8). dev is not a push
+# trigger in ci.yml, so an image regression on dev is otherwise only caught
+# once a dev -> main PR opens.
+#
+# Its own file rather than a schedule on ci.yml, which is what the plan first
+# proposed: a scheduled run attaches its check runs to the DEFAULT branch's
+# tip, so the jobs that would have to be skipped to scope the nightly to the
+# smoke would land on main's tip as `skipped` under names that are required
+# contexts. scripts/verify-gate-evidence.mjs:45-61 keeps the latest attempt
+# per name and does not count `skipped` as success, so release.yml's
+# gate-evidence job would then refuse to tag that commit. The job name below
+# matches no required context, and ci.yml is left alone.
+#
+# A schedule only ever runs from the default branch: this file does nothing
+# until it reaches main, and the first nightly follows the next release merge.
+name: Nightly Docker Smoke
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Keep in sync with ci.yml's server-docker-build job.
+  nightly-docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # This file is read from the default branch on a schedule; dev is the
+          # branch the nightly exists to smoke.
+          ref: dev
+
+      # So every run's log states what was smoked, rather than leaving it to be
+      # re-derived from the trigger.
+      - name: Print checked-out revision
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          git rev-parse HEAD
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: Server/
+          push: false
+          load: true
+          tags: owncord-smoke:candidate
+          build-args: VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Same script release.yml and ci.yml run.
+      - name: Boot-smoke Docker image
+        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
