@@ -68,6 +68,15 @@ type Store interface {
 	// permissions.NewChecker).
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
+	// Override CRUD for the channel family's permission layer (B3-8 part 2):
+	// the full role/user override listings the matrix editor renders, and the
+	// writes/clears the service gates.
+	ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, error)
+	ListChannelUserOverrides(ctx context.Context, channelID int64) ([]db.ChannelUserOverride, error)
+	UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error
+	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
+	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
+	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
 	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
 	// GetChannelOverridesFor merges the role and per-user override layers for
 	// one member in two batch queries — the single fetch behind every

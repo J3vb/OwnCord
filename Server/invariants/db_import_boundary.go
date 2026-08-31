@@ -43,7 +43,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/api.go":                    {"boundary", "", "passes the handle to handlers; no calls"},
 	"admin/backup_maintenance.go":     {"boundary", "", "scheduled backup mechanics on the maintenance tick; settings via the service"},
 	"admin/handlers_backup.go":        {"boundary", "", "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap"},
-	"admin/handlers_channel_perms.go": {"move", "channel", "override CRUD decides permission policy in the handler; resolution via the service since the channel family"},
+	"admin/handlers_channel_perms.go": {"adapter", "", "override response shapes; the service owns the policy and the calls"},
 	"admin/handlers_channels.go":      {"adapter", "", "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_roles.go":         {"move", "role", "two reads; service/role.go already owns the writes"},
 	"admin/handlers_tokens.go":        {"move", "auth", "API-token CRUD duplicated in token_cli.go"},

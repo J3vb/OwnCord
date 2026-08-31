@@ -125,7 +125,11 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.(*RoleService).actorRole":         {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
-	"service.(*ChannelService).ListVisibleChannels":     {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
+	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
+	// The channel family's override guards (B3-8 part 2) — moved from the
+	// admin handlers with their code; the rows moved with them.
+	"service.requireGrantableChannelOverride":           {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
+	"service.(*ChannelService).resolveOverrideUser":     {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
@@ -133,11 +137,9 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},
 
 	// ── HasAdmin as an authorization input: role hierarchy and perimeter ───
-	"admin.requireGrantableOverride": {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
-	"admin.requireManageableUser":    {classAdminPerimeter, "role-hierarchy check on the target user", calls{"HasAdmin": 1}},
-	"admin.logStreamAuthorize":       {classAdminPerimeter, "the log stream is administrator-only, re-checked per tick", calls{"HasAdmin": 1}},
-	"api.serveFileAuthorize":         {classAdminPerimeter, "administrator bypass for attachment access", calls{"HasAdmin": 1}},
-	"service.requireGrantable":       {classAdminPerimeter, "refuses a role edit that grants past the actor's own bits", calls{"HasAdmin": 1}},
+	"admin.logStreamAuthorize": {classAdminPerimeter, "the log stream is administrator-only, re-checked per tick", calls{"HasAdmin": 1}},
+	"api.serveFileAuthorize":   {classAdminPerimeter, "administrator bypass for attachment access", calls{"HasAdmin": 1}},
+	"service.requireGrantable": {classAdminPerimeter, "refuses a role edit that grants past the actor's own bits", calls{"HasAdmin": 1}},
 
 	// ── bulk @everyone reader walk ─────────────────────────────────────────
 	// The one multi-call row: one EffectivePerms for the layer's mask, then
