@@ -28,12 +28,19 @@ func messageFromGen(m dbgen.Message) *Message {
 }
 
 // sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
-// query injection. Only allows letters, digits, and spaces through unchanged;
-// '-' is folded to a space rather than kept, because in FTS5's MATCH grammar
-// '-' is not a bareword character -- it introduces a column filter
-// ("-col: expr"), so keeping it turns "well-known" into a filter on a
-// nonexistent column "known" and SQLite errors instead of matching. Folding
-// to a space (rather than dropping it) still matches the indexed tokens.
+// query injection. Letters, digits and spaces pass through unchanged; every
+// other rune is folded to a space rather than dropped.
+//
+// Folding, not dropping, is what makes punctuation searchable at all
+// (OC-0357). messages_fts uses FTS5's default unicode61 tokenizer, in which
+// every non-alphanumeric rune is a token separator: "user_id" is INDEXED as
+// the two tokens `user` and `id`. Dropping the underscore asks for the single
+// term `userid`, which exists nowhere in the index, so the search returned
+// nothing at all — silently, for any query containing '_', '.', '@', '/', an
+// apostrophe or a colon. Folding it to a space asks for `user id`, which is
+// exactly how the row was indexed. '-' was folded from the start, for the
+// narrower reason that it introduces a column filter ("-col: expr") and would
+// otherwise make SQLite error; its comment already named the general rule.
 //
 // Filtering characters alone is not enough: FTS5's MATCH grammar also
 // recognizes bareword keywords -- AND, OR, NOT (uppercase only) -- as
@@ -47,12 +54,15 @@ func sanitizeFTSQuery(q string) string {
 	var sb strings.Builder
 	sb.Grow(len(q))
 	for _, r := range q {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ':
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			sb.WriteRune(r)
-		case r == '-':
-			sb.WriteRune(' ')
+			continue
 		}
+		// Everything else -- the separators unicode61 tokenizes on, and every
+		// character of FTS5's own grammar (quotes, parens, '*', '^', ':') --
+		// becomes a separator here too, which is both what the index expects
+		// and what keeps the operator syntax inert.
+		sb.WriteRune(' ')
 	}
 	result := strings.TrimSpace(sb.String())
 	// Enforce a maximum query length to bound FTS processing.
@@ -164,6 +174,14 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 // EditMessage updates the content and sets edited_at on the message, and
 // returns the updated row via RETURNING so callers don't re-read it.
 // Returns an error if the message does not exist or userID does not match the owner.
+//
+// OC-0358: the ownership read above is taken before the write, so a delete
+// committing in that window would otherwise have its tombstone rewritten and
+// reported as a successful edit — the caller then broadcasts chat_edited for a
+// message every client has already replaced with "message deleted". The UPDATE
+// carries `AND deleted = 0` (the guard SoftDeleteMessage and SetMessagePinned
+// were given in OC-0284), so the losing edit matches no row and surfaces here
+// as ErrNotFound, the same answer an already-deleted message gets.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -180,6 +198,9 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 		Content: content,
 		ID:      id,
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("EditMessage: %w", err)
 	}
@@ -613,6 +634,31 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 
 // UpdateReadState upserts the read state for a user in a channel and clears
 // its mention badge — marking a channel read consumes its mentions.
+// MarkChannelReadAtLatest marks the channel read at whatever its newest
+// message is when the statement runs, rather than at an id the caller read
+// moments earlier.
+//
+// Use it for "mark this channel read" (channel_focus, mark_read).
+// UpdateReadState stays for the caller that already holds the exact id it
+// means — the send path advancing the sender's own read state past their own
+// message — where there is no snapshot to go stale.
+//
+// OC-0323: a mark-read computed from a stale snapshot cleared mention_count
+// while last_message_id still pointed behind a message that had just raised a
+// mention, so the badge vanished with nothing to recompute it. Both halves of
+// the pair are single-writer statements, so computing the watermark here makes
+// the read and the clear atomic with respect to IncrementMentionCounts.
+func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error {
+	if err := d.q.MarkChannelReadAtLatest(ctx, dbgen.MarkChannelReadAtLatestParams{
+		UserID:      userID,
+		ChannelID:   channelID,
+		ChannelID_2: channelID,
+	}); err != nil {
+		return fmt.Errorf("MarkChannelReadAtLatest: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
 	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,

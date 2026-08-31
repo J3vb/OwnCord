@@ -47,7 +47,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 }
 
 const editMessageContent = `-- name: EditMessageContent :one
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
           mentions_everyone
 `
@@ -57,6 +57,10 @@ type EditMessageContentParams struct {
 	ID      int64  `json:"id"`
 }
 
+// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
+// already carry (OC-0284): an edit that races a delete must not rewrite a
+// tombstone. No row comes back when it loses, which the wrapper reports as
+// ErrNotFound rather than a silent success (OC-0358).
 func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error) {
 	row := q.db.QueryRowContext(ctx, editMessageContent, arg.Content, arg.ID)
 	var i Message
@@ -252,6 +256,33 @@ func (q *Queries) GetReadState(ctx context.Context, arg GetReadStateParams) (Get
 	var i GetReadStateRow
 	err := row.Scan(&i.LastMessageID, &i.MentionCount)
 	return i, err
+}
+
+const markChannelReadAtLatest = `-- name: MarkChannelReadAtLatest :exec
+INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
+VALUES (?, ?, (SELECT COALESCE(MAX(m.id), 0) FROM messages m WHERE m.channel_id = ? AND m.deleted = 0), 0)
+ON CONFLICT(user_id, channel_id) DO UPDATE SET
+    last_message_id = excluded.last_message_id,
+    mention_count = 0
+`
+
+type MarkChannelReadAtLatestParams struct {
+	UserID      int64 `json:"userId"`
+	ChannelID   int64 `json:"channelId"`
+	ChannelID_2 int64 `json:"channelId2"`
+}
+
+// Mark-read that computes its own watermark inside the writer statement.
+// Passing a snapshot read moments earlier is what destroyed a mention raised
+// during the round trip (OC-0323): the clear zeroed mention_count while
+// last_message_id still pointed behind the mentioning message, so the badge was
+// gone and nothing ever recomputed it. Computing MAX(id) here means every
+// message committed before this statement is covered by last_message_id, and
+// every message committed after it finds IncrementMentionCounts' own
+// `last_message_id < msgID` guard true, so its mention survives.
+func (q *Queries) MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelReadAtLatestParams) error {
+	_, err := q.db.ExecContext(ctx, markChannelReadAtLatest, arg.UserID, arg.ChannelID, arg.ChannelID_2)
+	return err
 }
 
 const setMessagePinned = `-- name: SetMessagePinned :execresult
