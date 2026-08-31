@@ -46,7 +46,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// Precondition: the channel starts out READ-visible to this user.
 	allowedBefore, err := h.computeAllowedChannels(ctx, database, user)

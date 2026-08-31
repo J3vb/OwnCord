@@ -154,7 +154,7 @@ func TestRefreshUserSnapshot_PicksUpRoleReassignment(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
 	c.roleName = "harvest-voice"
 
@@ -191,7 +191,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -277,7 +277,7 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -346,7 +346,7 @@ func TestRevokeUnreadableChannels_ActsOnReplacementClient(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c1 := newClient(hub, nil, user, "", 0, ctx)
 	c2 := newClient(hub, nil, user, "", 0, ctx)
 

@@ -74,7 +74,7 @@ func TestTheLoadTest(t *testing.T) {
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 
 	runDone := make(chan struct{})
 	go func() {

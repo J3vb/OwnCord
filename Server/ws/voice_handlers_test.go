@@ -56,9 +56,8 @@ func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
 
-	// Inject a test LiveKit client with non-default credentials.
+	// A test LiveKit client with non-default credentials.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-api-key-12345",
 		LiveKitAPISecret: "test-api-secret-67890abcdef",
@@ -67,7 +66,7 @@ func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

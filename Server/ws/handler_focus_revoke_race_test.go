@@ -241,7 +241,7 @@ func TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus(t *testing.
 	limiter := auth.NewRateLimiter()
 	store := &erroringOverridesStore{Store: database}
 	svc := service.New(store, limiter)
-	hub := ws.NewHub(database, limiter, svc)
+	hub := newTestHubDeps(t, database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 

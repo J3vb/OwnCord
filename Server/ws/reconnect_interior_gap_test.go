@@ -75,7 +75,7 @@ func TestReconnect_InteriorGap_ForcesFullReady(t *testing.T) {
 		}
 	}
 
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()

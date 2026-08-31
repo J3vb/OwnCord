@@ -74,7 +74,7 @@ func (l *tinySendBufListener) Accept() (net.Conn, error) {
 func TestServeWS_HandshakeWrite_TimesOutOnStalledPeer(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 

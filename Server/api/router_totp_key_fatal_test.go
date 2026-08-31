@@ -43,6 +43,12 @@ func TestNewRouterRefusesToStartWithMalformedTOTPKey(t *testing.T) {
 		},
 	}
 
+	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	if rtErr != nil {
+		t.Fatalf("app.StartRuntime: %v", rtErr)
+	}
+	defer rt.Hub.GracefulStop()
+
 	panicked := false
 	func() {
 		defer func() {
@@ -50,7 +56,7 @@ func TestNewRouterRefusesToStartWithMalformedTOTPKey(t *testing.T) {
 				panicked = true
 			}
 		}()
-		api.NewRouter(cfg, database, "test", nil, nil, app.StartRuntime(cfg, database, nil))
+		api.NewRouter(cfg, database, "test", nil, nil, rt)
 	}()
 
 	if !panicked {

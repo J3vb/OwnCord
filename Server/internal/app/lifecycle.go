@@ -198,9 +198,11 @@ func (a *App) startPlugins() error {
 	return nil
 }
 
-// startHub builds the hub and the collaborators it shares with the router,
-// applies every pre-Run setter and starts the dispatch goroutine — B3-3 moved
-// all of that out of api.NewRouter so the hub has exactly one owner.
+// startHub builds the hub and the collaborators it shares with the router
+// and starts the dispatch goroutine — B3-3 moved all of that out of
+// api.NewRouter so the hub has exactly one owner, and B3-4 moved the pre-Run
+// wiring into ws.HubOptions, so an incomplete hub fails this start step
+// instead of panicking later.
 //
 // Its close step is GracefulStopContext, the only caller of
 // LiveKitProcess.Stop and what closes the dispatch goroutine. gracefulOnce
@@ -208,7 +210,11 @@ func (a *App) startPlugins() error {
 // path, so it is reached on every return from Run and a supervised
 // livekit-server process is never orphaned (OC-0027).
 func (a *App) startHub() error {
-	a.runtime = StartRuntime(a.cfg, a.database, a.plugins)
+	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
+	if err != nil {
+		return err
+	}
+	a.runtime = rt
 	a.hub = a.runtime.Hub
 	a.onClose("hub", func(ctx context.Context) error {
 		a.runtime.Hub.GracefulStopContext(ctx)

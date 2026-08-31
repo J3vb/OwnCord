@@ -38,7 +38,7 @@ func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	hub := newTestHubDeps(t, database, limiter, nil)
 	return hub, database
 }
 
@@ -669,10 +669,30 @@ func assertNotReceived(t *testing.T, ch <-chan []byte, label string) {
 
 // ─── LiveKit lifecycle ────────────────────────────────────────────────────────
 
-func TestHub_SetLiveKit_NilSafe(t *testing.T) {
+// TestHub_NilLiveKitOption: a hub built without LiveKit (voice not
+// configured) constructs fine and refuses token generation. Replaces the
+// pre-B3-4 SetLiveKit nil-safety test — the setter no longer exists.
+func TestHub_NilLiveKitOption(t *testing.T) {
 	hub, _ := newTestHub(t)
-	// Setting a nil LiveKit client must not panic.
-	hub.SetLiveKit(nil)
+	if _, err := hub.GenerateToken(1, "u", 1, "", false, false, false, false); err == nil {
+		t.Fatal("GenerateToken on a voiceless hub must error")
+	}
+}
+
+// TestNewHub_RequiredCollaborators pins B3-4's validation: before it,
+// construction always succeeded (api tests built ws.NewHub(nil, nil, nil)
+// hubs) and a missing collaborator surfaced as a later panic.
+func TestNewHub_RequiredCollaborators(t *testing.T) {
+	if _, err := ws.NewHub(ws.HubOptions{}); err == nil {
+		t.Fatal("NewHub without DB must error")
+	}
+	database := openTestDB(t)
+	if _, err := ws.NewHub(ws.HubOptions{DB: database}); err == nil {
+		t.Fatal("NewHub without Limiter must error")
+	}
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), ReplayRingSize: -1}); err == nil {
+		t.Fatal("NewHub with a negative replay ring must error")
+	}
 }
 
 // ─── GracefulStop ─────────────────────────────────────────────────────────────
@@ -944,13 +964,21 @@ func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
 	}
 }
 
-// ─── SetLiveKitProcess ──────────────────────────────────────────────────────
+// ─── LiveKitProcess option ──────────────────────────────────────────────────
 
-func TestHub_SetLiveKitProcess(t *testing.T) {
-	hub, _ := newTestHub(t)
-	hub.SetLiveKitProcess(nil)
-	go hub.Run()
-	hub.GracefulStop()
+// TestHub_LiveKitProcessRequiresClient pins B3-4's coherence rule: a
+// supervised process without a client is refused at construction — it used
+// to be a silently accepted setter call on a hub that could sign no tokens.
+func TestHub_LiveKitProcessRequiresClient(t *testing.T) {
+	database := openTestDB(t)
+	_, err := ws.NewHub(ws.HubOptions{
+		DB:             database,
+		Limiter:        auth.NewRateLimiter(),
+		LiveKitProcess: &ws.LiveKitProcess{},
+	})
+	if err == nil {
+		t.Fatal("NewHub must refuse LiveKitProcess without LiveKit")
+	}
 }
 
 // ─── VoiceSessionCount ─────────────────────────────────────────────────────

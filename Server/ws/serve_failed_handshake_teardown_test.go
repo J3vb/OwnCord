@@ -66,7 +66,7 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	}
 
 	// Run is deliberately not started so h.broadcast can be inspected directly.
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// Old connection A holds the slot and the voice session; B replaces it on
 	// the replay-failure fallback (lastSeq > 0), inheriting the session.
@@ -134,7 +134,7 @@ func TestFailedHandshake_OfflineBroadcastDropsStaleCustomStatus(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	stale := "On vacation"
 	c := NewTestClient(h, userID, make(chan []byte, 8))

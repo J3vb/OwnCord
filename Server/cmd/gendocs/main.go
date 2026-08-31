@@ -256,7 +256,10 @@ func genRoutes(w io.Writer) error {
 
 	// internal/app owns hub construction since B3-3, so the route index is
 	// generated over the same collaborators the server runs with.
-	rt := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil)
+	if err != nil {
+		return fmt.Errorf("building runtime for the route walk: %w", err)
+	}
 	defer rt.Hub.GracefulStop()
 	handler, cleanup := api.NewRouter(cfg, database, "gendocs", nil, nil, rt)
 	defer cleanup()

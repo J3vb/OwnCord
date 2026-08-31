@@ -46,7 +46,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	h.clients[uid] = c
 	// c.voiceChID is still 0 here — exactly like the joiner's client at the
@@ -105,7 +105,7 @@ func TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel(t *testing
 		t.Fatalf("JoinVoiceChannel(B): %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	cA := NewTestClient(h, userA, make(chan []byte, 8))
 	cB := NewTestClient(h, userB, make(chan []byte, 8))
 	// bystander has READ_MESSAGES on the channel (harvestVoiceRoleID grants it

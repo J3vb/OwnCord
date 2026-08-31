@@ -50,7 +50,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	// The still-registered OLD client from the previous session.
 	old := NewTestClient(h, uid, make(chan []byte, 32))
@@ -113,7 +113,7 @@ func TestUpgradeAndAuth_RoleLookupFailure_FailsClosed(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
 	type upgradeResult struct {
 		c       *Client
@@ -182,7 +182,7 @@ func TestRefreshUserSnapshot_FailsClosedForBannedUser(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
 
 	// The ban commits AFTER authenticateConn passed (c.user is still the

@@ -92,7 +92,7 @@ func TestRefreshChannelVisibilityCanSend_Parity(t *testing.T) {
 		t.Fatalf("retype: %v", err)
 	}
 
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	permSvc := service.NewPermissionService(database, h.permChecker)
 
 	for _, chID := range []int64{textID, newsID} {
@@ -143,7 +143,7 @@ func newViewParityFixture(t *testing.T) *viewParityFixture {
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, oldID); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	h := NewHub(database, auth.NewRateLimiter(), nil)
+	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)

@@ -53,20 +53,14 @@ func (h *Hub) SetEventStore(s EventStore) {
 	h.eventStore.Store(&s)
 }
 
-// SetPluginRegistry wires the plugin.Registry so the hub can dispatch
-// slash commands (chat_command messages) to plugin-owned handlers.
-// Pass nil to disable plugin command dispatch. Must be called before Run;
-// late calls are ignored with an error log.
-func (h *Hub) SetPluginRegistry(r *plugin.Registry) {
-	if h.rejectIfRunning("SetPluginRegistry") {
-		return
-	}
-	h.pluginRegistry = r
-}
-
 // SetPluginEventSink wires the plugin.EventSink so the hub fans out each
 // sequenced broadcast to subscribed plugins. Pass nil to disable. Safe to
 // call at any time, including after Run has started.
+//
+// Deliberately still a setter after B3-4: the sink consumes the built hub's
+// broadcaster (sink.SetBroadcaster(hub.BroadcastToChannel)), so it cannot
+// exist before the hub does — a genuine two-phase wire, unlike the registry,
+// which is a HubOptions field.
 func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
 	h.pluginSink.Store(s)
 }

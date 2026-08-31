@@ -43,7 +43,6 @@ func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 	}
 
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-api-key-12345",
 		LiveKitAPISecret: "test-api-secret-67890abcdef",
@@ -52,7 +51,7 @@ func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
-	hub.SetLiveKit(lk)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

@@ -5,18 +5,9 @@ import (
 	"fmt"
 )
 
-// SetLiveKit sets the LiveKit client on the hub. Must be called before Run;
-// late calls are ignored with an error log.
-func (h *Hub) SetLiveKit(lk *LiveKitClient) {
-	if h.rejectIfRunning("SetLiveKit") {
-		return
-	}
-	h.livekit = lk
-}
-
 // GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
-// is not configured. Satisfies VoiceTokenGenerator so the Hub can be passed
-// as a dep at registration time (before SetLiveKit is called).
+// is not configured (HubOptions.LiveKit was nil). Satisfies
+// VoiceTokenGenerator so the Hub can be passed as a dep at registration time.
 func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error) {
 	if h.livekit == nil {
 		return "", fmt.Errorf("voice not configured")
@@ -43,11 +34,6 @@ func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 	return h.livekit.HealthCheck(ctx)
 }
 
-// SetLiveKitProcess sets the LiveKit process manager on the hub. Must be
-// called before Run; late calls are ignored with an error log.
-func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
-	if h.rejectIfRunning("SetLiveKitProcess") {
-		return
-	}
-	h.lkProcess = p
-}
+// The LiveKit process manager arrives via HubOptions.LiveKitProcess (B3-4);
+// its only hub consumer is the voice_join guard reading IsRunning to fail
+// closed while the supervised SFU is down.

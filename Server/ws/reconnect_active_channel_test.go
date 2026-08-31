@@ -54,7 +54,7 @@ func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -180,7 +180,7 @@ func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	hub := NewHub(database, auth.NewRateLimiter(), nil)
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	defer hub.Stop()
 
