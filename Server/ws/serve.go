@@ -82,7 +82,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) h
 			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", c.userID, "last_seq", lastSeq)
 		}
 
-		if err := hub.handleFreshConnect(ctx, conn, c, database); err != nil {
+		if err := hub.handleFreshConnect(ctx, conn, c); err != nil {
 			return
 		}
 

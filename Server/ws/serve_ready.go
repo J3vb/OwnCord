@@ -376,9 +376,12 @@ func collectAllVoiceStates(ctx context.Context, database ReadySnapshotReader, _ 
 	return database.GetAllVoiceStates(ctx)
 }
 
-func (h *Hub) handleFreshConnect(
-	ctx context.Context, conn *websocket.Conn, c *Client, database ReadySnapshotReader,
-) error {
+func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
+	// The configured seam, never a caller-supplied handle: binding here is what
+	// lets a service-backed or instrumented Ready reader actually intercept the
+	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
+	// h.readers.StaleVoice.
+	database := h.readers.Ready
 	// Clean stale voice state BEFORE building ready and registering.
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
