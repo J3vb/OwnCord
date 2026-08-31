@@ -85,8 +85,8 @@ happens to that use — one of four dispositions from the
 
 | Disposition | Meaning                                                                                                               | Rows |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---: |
-| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   17 |
-| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   26 |
+| `move`      | persistence or a domain decision that belongs behind a service; **Family** names the service B3-8 (or B3-2) builds    |   15 |
+| `adapter`   | a transport adapter that uses `db` types or pure helpers only — response shapes, status helpers — no persistence call |   28 |
 | `boundary`  | an explicit composition or transaction boundary that legitimately owns a handle (process entry, CLIs, health probe)   |   17 |
 | `remove`    | the import is unnecessary and goes                                                                                    |    0 |
 
@@ -100,7 +100,9 @@ adding any new `db` use (`serve.go` → `replay.go`, then the visibility
 gather into `hub_visibility.go`; the finisher turned `hub.go` type-only
 while `hub_settings.go` took its `move` row — 26 → 28 `move` across the
 series with the calls behind them only moved), so it is the surface, not
-the row count, that ratchets.
+the row count, that ratchets. B3-8 then took it down: settings/audit
+(28 → 24), the channel family's three parts (24 → 17) and the upload
+family (17 → 15).
 
 ## How the measurement works
 
@@ -156,9 +158,9 @@ those files may read.
 | `api/invite_handler.go`           | `DB` `Invite` `User×2`                                                                                                                     | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | Invite/User types only                                                                                       |
 | `api/middleware.go`               | `DB` `Role` `Session` `User`                                                                                                               | —                                                         | `DeleteSession` `TouchAPIToken` `TouchSession`                                                                                                                                                                            | calls     | move        | auth       | session/API-token touch and revoke                                                                           |
 | `api/plugins_handler.go`          | `Auditor×2`                                                                                                                                | `WriteAudit()`                                            | —                                                                                                                                                                                                                         | calls     | adapter     | —          | db.Auditor is the seam; WriteAudit only                                                                      |
-| `api/profile_handler.go`          | `DB×2` `Session×2` `User×7`                                                                                                                | —                                                         | `CreateAttachment`                                                                                                                                                                                                        | calls     | move        | upload     | avatar upload creates the attachment row                                                                     |
+| `api/profile_handler.go`          | `DB` `Session×2` `User×7`                                                                                                                  | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | User/Session types in the profile and session response shapes; the services own the calls                    |
 | `api/router.go`                   | `DB×4`                                                                                                                                     | —                                                         | `PingRead` `SQLDb`                                                                                                                                                                                                        | calls     | boundary    | —          | health probe (PingRead, SQLDb); hub construction left in B3-3                                                |
-| `api/upload_handler.go`           | `AttachmentAccess×2` `DB×5` `Role` `User×3`                                                                                                | —                                                         | `CreateAttachment` `GetAttachmentWithChannel` `IsAvatarFileURL` `IsDMParticipant` `QueryRowContext`                                                                                                                       | calls     | move        | upload     | attachment access + a raw QueryRowContext                                                                    |
+| `api/upload_handler.go`           | `DB` `Role` `User×3`                                                                                                                       | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions            |
 | `auth/helpers.go`                 | `User`                                                                                                                                     | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | db.User type in a helper signature                                                                           |
 | `auth/resolve.go`                 | `APIToken` `Role×2` `Session×2` `User×2`                                                                                                   | —                                                         | —                                                                                                                                                                                                                         | type-only | adapter     | —          | Session/APIToken/Role/User types; resolution is injected                                                     |
 | `cmd/gendocs/main.go`             | `DB×3`                                                                                                                                     | `Migrate()` `Open()`                                      | `Close×2` `QueryContext×2`                                                                                                                                                                                                | calls     | boundary    | —          | docs generator migrates its own in-memory catalog                                                            |
@@ -195,27 +197,33 @@ those files may read.
 | `ws/voice_join.go`                | `Channel×3` `ChannelOverride` `VoiceState×5`                                                                                               | `ErrChannelFull`                                          | `GetChannel×2` `GetChannelOverridesFor` `GetChannelVoiceStates` `GetRoleForUser` `GetVoiceState×6` `JoinVoiceChannel` `JoinVoiceChannelIfCapacity` `LeaveVoiceChannelIfMatch` `SetVoiceServerDeafen` `SetVoiceServerMute` | calls     | move        | voice      | voice state reads and writes                                                                                 |
 | `ws/voice_moderation.go`          | `Role` `VoiceState×3`                                                                                                                      | `WriteAudit()`                                            | `CountChannelVoiceUsers` `GetChannel×2` `GetRoleForUser` `GetVoiceState×2` `SetVoiceServerDeafen×2` `SetVoiceServerMute×2`                                                                                                | calls     | move        | voice      | mute/deafen/move persist voice state                                                                         |
 
-60 files import `db` outside `db/` and `service/` (. 1, admin 15, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 22); 28 are type-only; 0 unlisted.
-Dispositions: adapter 26, boundary 17, move 17. Move targets: auth 7, connection 2, role 1, upload 2, user 2, voice 3.
+60 files import `db` outside `db/` and `service/` (. 1, admin 15, api 10, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 6, plugin 1, ws 22); 30 are type-only; 0 unlisted.
+Dispositions: adapter 28, boundary 17, move 15. Move targets: auth 7, connection 2, role 1, user 2, voice 3.
 
 <!-- dbinventory:end -->
 
 Reading the table:
 
-- **Type-only files (14)** need no service; they stay `adapter`. The `db`
-  types they use are the wire and response shapes. Whether those types should
-  live outside `db` is a B3-8 question per family, not a boundary violation.
-- **`ws/serve_ready.go`** (48 references, 11 distinct queries) is the single
-  heaviest reader: the ready snapshot reads channels, overrides, unreads, DM
-  channels, members, roles and voice states in one place. B3-5 made it the
-  "fresh-connect initialisation" file (`handleFreshConnect` and its
-  stale-voice cleanup moved in from `serve.go`) and B3-8's channel family
-  gives it a snapshot service.
-- **Two raw SQL escapes** exist above the domain layer:
-  `api/upload_handler.go` (`QueryRowContext`) and `admin/handlers_backup.go`
-  (`SQLDb` for `VACUUM INTO`). Both are `move`; the backup one may end as an
-  explicit `boundary` once `settings-ops` owns backups — the row is decided
-  when that family moves, not now.
+- **Type-only rows (30, of which 20 are `adapter`)** mostly need no service:
+  the `db` types they use are the wire and response shapes. Whether those
+  types should live outside `db` is a B3-8 question per family, not a
+  boundary violation. The count was 14 at B3-0 and rose as families moved
+  their calls behind services and left their types behind; the two type-only
+  rows still marked `move` (`admin/middleware.go`, `ws/replay.go`) pass a
+  handle on to helpers rather than calling through it themselves.
+- **`ws/serve_ready.go`** is the single heaviest reader: the ready snapshot
+  reads channels, overrides, unreads, DM channels, members, roles and voice
+  states in one place. B3-5 made it the "fresh-connect initialisation" file
+  (`handleFreshConnect` and its stale-voice cleanup moved in from
+  `serve.go`); the channel family's part 3 put those reads behind
+  `ReadySnapshotReader` and `StaleVoiceCleaner`, which is why the row is now
+  `adapter` with no recorded calls.
+- **One raw SQL escape** is left above the domain layer:
+  `admin/handlers_backup.go` (`SQLDb` for `VACUUM INTO`), and it is a
+  `boundary` — backup create/restore legitimately owns the handle. The other,
+  `api/upload_handler.go`'s bare `QueryRowContext` over `messages.deleted`,
+  went with the upload family: it is `db.IsMessageDeleted` now, asked through
+  `UploadService.Resolve`.
 - **Duplicated persistence** is visible in the families: API-token CRUD in
   `admin/handlers_tokens.go` and `token_cli.go`; owner-role reads in
   `admin/middleware.go` (OC-0345) and `api/middleware.go`; voice state in
