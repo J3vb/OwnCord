@@ -73,6 +73,7 @@ const (
 
 	// alphaPasswordHash is bcrypt("alpha-dev-password"), fixed so two seed
 	// runs produce identical bytes. Weak and public by design: -confirm-dev.
+	//nolint:gosec // G101: a deliberately public dev-profile hash ("alpha-dev-password"); -confirm-dev gates every use
 	alphaPasswordHash = "$2a$12$EBrRXmplT1ryU0o/HzELSePreo.gK5.z5Tjo4ec/ISchy5gKwxtQq"
 )
 
@@ -148,6 +149,7 @@ func runAlpha(database *db.DB, snapshotPath, scrubPath string) int {
 	fmt.Printf("  Messages:    %d over %d days (%.0f%% in DMs)\n", alphaMessages, alphaWindowDays, alphaDMShare*100)
 	fmt.Printf("  Attachments: %d · Reactions: %d · Invites: %d (%d revoked) · Plugins: %d\n",
 		alphaAttachments, alphaReactions, alphaInvites, alphaInvitesRevkd, alphaPluginRows)
+	fmt.Printf("  Voice sessions: %d — a shape parameter; a finished session leaves no at-rest row (package comment)\n", alphaVoiceSessions)
 	fmt.Println("  Password for every account: alpha-dev-password")
 	if snapshotPath != "" {
 		if scrubPath == "" {
@@ -176,6 +178,7 @@ func seedAlpha(database *db.DB) error {
 		return fmt.Errorf("alpha: the profile seeds only an empty database (found %d users); point -db at a fresh file", users)
 	}
 
+	//nolint:gosec // G404: byte-for-byte determinism is this profile's contract; nothing here is cryptographic
 	rng := rand.New(rand.NewSource(alphaSeed))
 	windowStart := alphaWindowEnd.AddDate(0, 0, -alphaWindowDays)
 	joined := alphaJoinTimes(rng, windowStart)
@@ -236,13 +239,13 @@ func writeSnapshot(database *db.DB, scrubPath, outPath string) error {
 	// must not end a statement. The scrub script holds no string literal
 	// containing ";", which is the simplicity this parser is allowed.
 	var sqlOnly []string
-	for _, line := range strings.Split(string(scrub), "\n") {
+	for line := range strings.SplitSeq(string(scrub), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "--") {
 			continue
 		}
 		sqlOnly = append(sqlOnly, line)
 	}
-	for _, stmt := range strings.Split(strings.Join(sqlOnly, "\n"), ";") {
+	for stmt := range strings.SplitSeq(strings.Join(sqlOnly, "\n"), ";") {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
@@ -319,6 +322,7 @@ func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, joined []time.Time) error {
 		)
 	}
 	_, err := tx.Exec(
+		//nolint:gosec // G202: the concatenation is a builder of "(?,…)" placeholder groups; every value is bound
 		`INSERT INTO users (id, username, password, role_id, status, created_at, last_seen) VALUES `+b.String(),
 		args...,
 	)
@@ -450,6 +454,75 @@ func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, joined []time.Time) ([]dmPair, e
 
 // ─── Messages ───────────────────────────────────────────────────────────────
 
+// alphaChannelWeights is the relative traffic per text channel (ids 1..10):
+// #announcements and #welcome are quiet, #general and #gaming busy, #staff
+// small, the archive early-only.
+var alphaChannelWeights = []int{2, 1, 30, 18, 22, 10, 8, 6, 3, 8}
+
+// alphaChannelFor picks a text channel for one message on the given day; the
+// archived channel's history ends on day 10.
+func alphaChannelFor(rng *rand.Rand, day int) int64 {
+	w := make([]int, len(alphaChannelWeights))
+	copy(w, alphaChannelWeights)
+	if day >= 10 {
+		w[9] = 0
+	}
+	total := 0
+	for _, x := range w {
+		total += x
+	}
+	n := rng.Intn(total)
+	for i, x := range w {
+		if n < x {
+			return int64(i + 1)
+		}
+	}
+	return 3
+}
+
+// alphaAuthorFor picks a message author. Staff channels (#welcome,
+// #announcements) are staff-posted; #staff adds the override-listed user009;
+// everywhere else, anyone who has joined by the message's time — maxUser is
+// the eligibility prefix (staff and user009 are all pre-window).
+func alphaAuthorFor(rng *rand.Rand, ch int64, maxUser int) int64 {
+	switch ch {
+	case 1, 2:
+		return int64(rng.Intn(alphaOwners+alphaAdmins+alphaModerators) + 1)
+	case 9:
+		staff := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+		return staff[rng.Intn(len(staff))]
+	default:
+		return int64(rng.Intn(maxUser) + 1)
+	}
+}
+
+// sqlBatch accumulates multi-row VALUES groups and flushes them in chunks —
+// one statement per chunk instead of one per row, inside the caller's
+// transaction.
+type sqlBatch struct {
+	b    strings.Builder
+	args []any
+}
+
+func (sb *sqlBatch) add(row string, vals ...any) {
+	if len(sb.args) > 0 {
+		sb.b.WriteString(",")
+	}
+	sb.b.WriteString(row)
+	sb.args = append(sb.args, vals...)
+}
+
+func (sb *sqlBatch) flush(tx *sql.Tx, prefix string) error {
+	if sb.b.Len() == 0 {
+		return nil
+	}
+	//nolint:gosec // G202: the concatenation is a builder of "(?,…)" placeholder groups; every value is bound
+	_, err := tx.Exec(prefix+sb.b.String(), sb.args...)
+	sb.b.Reset()
+	sb.args = sb.args[:0]
+	return err
+}
+
 // alphaInsertMessages writes all 20,000 messages in chronological order —
 // per-bucket second offsets are sorted before ids are assigned, so ascending
 // ids follow ascending timestamps exactly as insertion order does on a live
@@ -467,45 +540,6 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, join
 	}
 
 	perDay := largestRemainder(onesSlice(alphaWindowDays), alphaMessages)
-	weights := alphaHourWeights[:]
-
-	textChannels := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	// Relative traffic per text channel; #announcements and #welcome are
-	// quiet, #general and #gaming busy, #staff small, archive early-only.
-	chanWeight := []int{2, 1, 30, 18, 22, 10, 8, 6, 3, 8}
-
-	pickChannel := func(day int) int64 {
-		w := make([]int, len(chanWeight))
-		copy(w, chanWeight)
-		if day >= 10 {
-			w[9] = 0 // the archived channel's history ends on day 10
-		}
-		total := 0
-		for _, x := range w {
-			total += x
-		}
-		n := rng.Intn(total)
-		for i, x := range w {
-			if n < x {
-				return textChannels[i]
-			}
-		}
-		return 3
-	}
-	// Staff channel posters are staff (+ the override-listed user009);
-	// announcement channels are staff-posted; everywhere else, anyone who has
-	// joined by the message's time (staff and user009 are pre-window).
-	pickAuthor := func(ch int64, maxUser int) int64 {
-		switch ch {
-		case 1, 2:
-			return int64(rng.Intn(alphaOwners+alphaAdmins+alphaModerators) + 1)
-		case 9:
-			staff := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
-			return staff[rng.Intn(len(staff))]
-		default:
-			return int64(rng.Intn(maxUser) + 1)
-		}
-	}
 
 	// Pairs sorted by readiness, so the eligible set at any time is a prefix;
 	// skewedIndex over that prefix keeps the earliest (all-pre-window) pairs
@@ -518,27 +552,15 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, join
 	authors := make([]int64, 0, alphaMessages)
 	maxUser := 40
 	readyPairs := 0
-	const cols = 5
-	const chunk = 500
-	var b strings.Builder
-	args := make([]any, 0, chunk*cols)
-	flush := func() error {
-		if b.Len() == 0 {
-			return nil
-		}
-		_, err := tx.Exec(
-			`INSERT INTO messages (id, channel_id, user_id, content, timestamp) VALUES `+b.String(),
-			args...,
-		)
-		b.Reset()
-		args = args[:0]
-		return err
-	}
+
+	const chunkArgs = 500 * 5
+	var batch sqlBatch
+	const insertPrefix = `INSERT INTO messages (id, channel_id, user_id, content, timestamp) VALUES `
 
 	id := 0
-	for day := 0; day < alphaWindowDays; day++ {
-		perHour := largestRemainder(weights, perDay[day])
-		for hour := 0; hour < 24; hour++ {
+	for day := range alphaWindowDays {
+		perHour := largestRemainder(alphaHourWeights[:], perDay[day])
+		for hour := range 24 {
 			offsets := make([]int, perHour[hour])
 			for k := range offsets {
 				offsets[k] = rng.Intn(3600)
@@ -563,26 +585,22 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, join
 						author = p.b
 					}
 				} else {
-					ch = pickChannel(day)
-					author = pickAuthor(ch, maxUser)
+					ch = alphaChannelFor(rng, day)
+					author = alphaAuthorFor(rng, ch, maxUser)
 				}
 				id++
 				times = append(times, at)
 				authors = append(authors, author)
-				if len(args) > 0 {
-					b.WriteString(",")
-				}
-				b.WriteString("(?,?,?,?,?)")
-				args = append(args, id, ch, author, sentence(rng), ts(at))
-				if len(args) >= chunk*cols {
-					if err := flush(); err != nil {
+				batch.add("(?,?,?,?,?)", id, ch, author, sentence(rng), ts(at))
+				if len(batch.args) >= chunkArgs {
+					if err := batch.flush(tx, insertPrefix); err != nil {
 						return nil, nil, fmt.Errorf("alpha: messages: %w", err)
 					}
 				}
 			}
 		}
 	}
-	if err := flush(); err != nil {
+	if err := batch.flush(tx, insertPrefix); err != nil {
 		return nil, nil, fmt.Errorf("alpha: messages: %w", err)
 	}
 	return times, authors, nil
