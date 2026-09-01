@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -62,6 +63,14 @@ func TestLoadOrGenerateTOTPKey_ReadErrorFailsClosed(t *testing.T) {
 	})
 
 	t.Run("unreadable key file", func(t *testing.T) {
+		// Mode bits are the only portable way to make a regular file
+		// unreadable, and neither root nor Windows honours them (Windows
+		// keeps only the read-only bit, so 0o200 still reads back). The
+		// directory subtest above covers the same read-error branch on
+		// every platform; this one adds the EACCES shape where it exists.
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows ignores the read permission bit; the EACCES branch is exercised on the Linux runner")
+		}
 		if os.Geteuid() == 0 {
 			t.Skip("root bypasses file permission bits; the EACCES branch is exercised on the unprivileged CI runner")
 		}

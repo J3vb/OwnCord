@@ -464,7 +464,11 @@ so no hot-file overlap occurred.
   built locally with the module toolchain, reports 0 issues on the module
   (it first caught a `gocritic` byte-compare in a new test, fixed);
   `sqlc generate` reproducible; `gendocs` drift-free; prettier and
-  `check:docs` green. **Coverage:** the first run tripped the floors for
+  `check:docs` green. **Windows CI** on `eabbc72` then failed one subtest:
+  the mode-bit "unreadable key file" case cannot exist there (Windows keeps
+  only a read-only bit, so `0o200` still reads back), so it is
+  platform-guarded exactly like the root case; the directory-at-the-key-path
+  subtest pins the same read-error branch on every platform. **Coverage:** the first run tripped the floors for
   `auth` (89.6% vs 90.8%) and `db` (76.2% vs 79.3%) — the new query
   wrappers were exercised only by other packages' tests, which do not
   count toward `db`'s own figure — so both gained in-package tests; final
