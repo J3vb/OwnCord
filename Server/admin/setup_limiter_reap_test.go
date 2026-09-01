@@ -49,16 +49,33 @@ func TestSetupLimiter_ReapsStaleEntries(t *testing.T) {
 		t.Fatalf("Len().windows = %d immediately after %d one-shot requests, want %d", wins, n, n)
 	}
 
-	// Wait well past the (shrunk) reap interval + max window for the sweep
-	// to evict every now-stale entry.
-	deadline := time.Now().Add(2 * time.Second)
+	// Wait for the sweep to evict every now-stale entry.
+	//
+	// The budget is a liveness bound, not a latency assertion, and it is
+	// deliberately far larger than the 5ms timings above. The reaper is a
+	// self-rescheduling time.AfterFunc chain, so this test can only observe it
+	// once the runtime schedules that callback — and under a full
+	// `go test ./...`, where every package's tests run at once, that can be
+	// delayed by seconds while the reaper is working perfectly. A 2s deadline
+	// used to sit here and did exactly what a wall-clock assertion about
+	// somebody else's goroutine always does: it failed once under load and
+	// reported "never reaped" for a reaper that had simply not run yet.
+	//
+	// Progress-tracking would not help: Cleanup evicts every entry older than
+	// maxWindow in one pass, and all 20 were recorded together, so the count
+	// goes 20 -> 0 in a single sweep with nothing in between to watch. The
+	// property this test owns is that the sweep is WIRED — with no reaper the
+	// count sits at n forever and this still fails, just later. A healthy run
+	// returns in about one interval and pays none of the budget.
+	const reapBudget = 30 * time.Second
+	deadline := time.Now().Add(reapBudget)
 	for {
 		wins, _ := limiter.Len()
 		if wins == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("Len().windows = %d after waiting past the reap interval, want 0 — setupLimiter is never reaped (OC-0076)", wins)
+			t.Fatalf("Len().windows = %d after %v, want 0 — setupLimiter is never reaped (OC-0076)", wins, reapBudget)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
