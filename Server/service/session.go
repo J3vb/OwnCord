@@ -85,7 +85,11 @@ func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash s
 		return nil, ErrPrincipalGone
 	}
 	if auth.IsEffectivelyBanned(user) {
-		return nil, ErrPrincipalBanned
+		// Name the account in the wrap: the handshake logs this refusal
+		// verbatim with no user of its own in scope, and a banned client
+		// stuck in a reconnect loop is only diagnosable if the log says
+		// which account it is.
+		return nil, fmt.Errorf("user %d: %w", user.ID, ErrPrincipalBanned)
 	}
 	return user, nil
 }

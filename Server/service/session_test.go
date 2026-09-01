@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,12 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 	}
 	if _, err := svc.ResolveSocketPrincipal(ctx, "banned-hash"); !errors.Is(err, ErrPrincipalBanned) {
 		t.Errorf("banned user: err = %v, want ErrPrincipalBanned", err)
+	} else if !strings.Contains(err.Error(), "user 3") {
+		// The handshake logs this refusal verbatim and has no user in scope
+		// on the sentinel branch, so the refusal itself must name the
+		// account — an operator watching a banned client hammer reconnects
+		// needs to know WHICH account from the log alone.
+		t.Errorf("banned refusal must name the banned account: %v", err)
 	}
 }
 
