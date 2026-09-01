@@ -250,8 +250,8 @@ commit that took `move` to zero.
 | 2   | Required hub wiring cannot be omitted after construction                                              | **Met.** `TestNewHub_RequiredCollaborators` refuses a missing DB, limiter, settings reader, reader bundle, **partial** reader bundle, voice store, presence stamper and socket authenticator, plus a negative replay budget |
 | 3   | Permission rules have one production implementation per security property                             | **Met.** `authz-chokepoint` green; `AuthzResidueAllow` unchanged by B3-8 — the voice family deliberately left the permission derivation in place rather than move rows it had no reason to touch                            |
 | 4   | Start, stop, drain and failure ownership is explicit and tested                                       | **Met.** B3-3's failure-injection tests green in `./internal/app/` (`-race` and `-tags deadlock`)                                                                                                                           |
-| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | **Partially met.** Race, deadlock, fuzz seeds, model simulation and coverage: green, full run below. **Load baseline: not run** — see "What was not measured"                                                               |
-| 6   | No measured regression outside a recorded tradeoff accepted at HP-3                                   | **Partially met.** Coverage: every floor at or above its value, four rose during B3-8, none lowered, so no HP entry was needed. **Benchmarks: not re-measured** — see "What was not measured"                               |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | **Met** (completed 2026-09-01). Race, deadlock, fuzz seeds, model simulation and coverage: green, full run below. Load baseline: run green on the exit SHA — "The owner's three items, run"                                 |
+| 6   | No measured regression outside a recorded tradeoff accepted at HP-3                                   | **Met** (completed 2026-09-01). Coverage: every floor at or above its value, four rose during B3-8, none lowered. Benchmarks: re-measured on the baseline machine — no regression attributable to B3; see below             |
 | —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | **Met.** OC-0323, OC-0345, OC-0346, OC-0376, OC-0377, OC-0378 all `fixed`; `node .superpowers/render-ledger.mjs --check` → `ledger valid: 379 finding(s)`                                                                   |
 
 ### The gate, run on the exit SHA
@@ -311,7 +311,8 @@ Floors raised during the phase, none lowered: `service` 69.8 → 71.3, `db`
 Raised by a review bot on this scorecard's own PR, and correct: conditions 5
 and 6 were first marked flatly **Met** while the run below contained neither a
 benchmark comparison nor a load-baseline result. Both are now partial, because
-neither is something this session can honestly produce.
+neither is something this session can honestly produce. _(Both closed
+2026-09-01 — "The owner's three items, run" below.)_
 
 **Benchmarks.** `b3-bench-baseline-2026-08-30.md` records its own protocol:
 "One machine, one run. A figure here is comparable only with another run of
@@ -357,19 +358,45 @@ condition 1, `move` reaching zero — and neither is hidden behind a checkmark.
   had been confirmed as of 2026-09-01 08:00Z. The workflow is on `main`,
   `state=active`, cron `0 3 * * *`. Deliberately not closed by a manual
   `workflow_dispatch`: the item's evidence is specifically a scheduled run.
+  _Closed later the same day: the first scheduled run fired 2026-09-01
+  08:27Z and succeeded (run 33487153664)._
 
-### Owner's to run
+### The owner's three items, run — 2026-09-01
 
-Three things, none producible from this session:
+All three landed on the owner's machine or by their direction, against the
+exit SHA. `dev` had moved past `8a5817a` by then, so the dispatches ran on
+branch `b3-exit-evidence`, created at `8a5817a` for exactly this purpose.
 
-1. One `ci.yml` `workflow_dispatch` on `dev` at `8a5817a` — it needs the
-   owner's signature.
-2. `make bench-baseline` on the **same machine and toolchain** as
-   `b3-bench-baseline-2026-08-30.md` (windows/amd64, Ryzen 9 7950X3D), for a
-   comparison that protocol permits. Closes condition 6's other half.
-3. One `load-baseline.yml` `workflow_dispatch` on the exit SHA. Closes
-   condition 5's other half.
+1. **`ci.yml` dispatch on the exit SHA: green.** Run 33530996138, success,
+   the full 10-job matrix at `8a5817a`.
+2. **`make bench-baseline` on the baseline machine** (windows/amd64,
+   Ryzen 9 7950X3D, `go1.26.7` via the `go.mod` toolchain pin — the same
+   hardware and toolchain as the recorded run, so the comparison is one the
+   protocol permits). Five of six rows reproduce within their confidence
+   ranges. The sixth, `PermissionInvalidation` (927.4µ ± 2% / 3.601k allocs
+   recorded → 1.496m ± 12% / 3.801k measured), is **not a B3 regression but
+   a defect in the recorded row**: re-run at its own provenance commit
+   `ec8ef24a`, this machine measures 1.21–1.29 ms / 3.801k allocs — and
+   allocs/op is deterministic for fixed code, so the recorded run's working
+   tree cannot have matched the commit its provenance line names (it was
+   recorded mid-flight in the B3-6 multi-worktree session). Measured at
+   `f9245212`, `ead64cdc`, `e13adaf8`, `227ae081⁻¹`, `227ae081` and
+   `8a5817a`, the figure is **flat** — the changed paths the "worth stating
+   plainly" paragraph above names moved nothing measurable. Condition 6
+   closes with no regression and no tradeoff entry needed; the baseline is
+   replaced by
+   [b3-bench-baseline-2026-09-01.md](b3-bench-baseline-2026-09-01.md),
+   recorded at the exit SHA.
+3. **`load-baseline.yml` dispatch on the exit SHA: green.** Run 33532125857. Its first attempt (run 33530998790) was the workflow's
+   **first-ever dispatch** and failed in the seed step: the script predates
+   the `registration_open` gate (a fresh database seeds it closed;
+   registration 403s before reading the body, and invites do not bypass the
+   gate — the exact behaviour B3-1/B3-2 characterized). Fixed by opening
+   registration with the setup token before the register loop, one
+   workflow-file commit on `b3-exit-evidence` (`bd8851ed`) — the server
+   under test is still exactly `8a5817a`. The same fix lands on `dev` with
+   this signature PR.
 
-Everything else in the tables above was run here.
-
-**Signed:** _pending_ — J3vb (repository owner).
+**Signed:** J3vb (repository owner), 2026-09-01 — accepted; completion of
+the three items directed by the owner in-session. All six conditions and
+roadmap rule 2 met; B3 is complete and B4 is next.

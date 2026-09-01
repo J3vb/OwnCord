@@ -3,10 +3,11 @@
 **Prepared:** 2026-08-23  
 **Audited head:** 5cc0888964e26276d1aca145e83270a2c1b9febd on dev  
 **Release target:** first public beta after the 1.2.0-alpha line  
-**Status:** B0, B1 and B2 complete (HP-0 accepted 2026-08-25, HP-1 accepted
-2026-08-27, HP-2 accepted 2026-08-29 —
-[hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)); B3 is next;
-B3–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
+**Status:** B0–B3 complete (HP-0 accepted 2026-08-25, HP-1 accepted
+2026-08-27, HP-2 accepted 2026-08-29, HP-3 accepted 2026-08-30; B3 exit
+signed 2026-09-01 — the "B3 exit" section of
+[hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)); B4 is next;
+B4–B10 not started. Amended 2026-08-28 — see the `_(added 2026-08-28)_` lines
 in B3–B10 and the "Phase execution pattern" section. Amended 2026-08-29 —
 [developer-experience-layout-refactor-2026-08-29.md](developer-experience-layout-refactor-2026-08-29.md)
 is the implementation supplement for the B3, B7 and B9 structural workstreams

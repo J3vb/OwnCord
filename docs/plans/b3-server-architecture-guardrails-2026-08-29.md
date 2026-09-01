@@ -4,14 +4,19 @@
 **Base commit:** `bf7b886d` (`dev`, post-PR #1445); HP-2 accepted 2026-08-29
 ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — claims
 verified at `bf7b886d`  
-**Status:** in progress — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
+**Status:** COMPLETE — plan merged 2026-08-29 (PR #1447 = `ad4defc2`);
 B3-0 merged 2026-08-29 (PR #1448 = `d383d8c7`; closes entry-gate item 3);
 B3-1 merged 2026-08-29 (PR #1449 = `71d867cb`); B3-2 merged 2026-08-30
 (PR #1450 = `75d64dd4`); B3-9 merged 2026-08-30 (PR #1454 = `123c0899`;
 OC-0323 rides B3-8); HP-3 accepted 2026-08-30 by the owner (PR #1461 =
-`52601114`); B3-3 (lifecycle extraction) — PR #1464 to `dev`, opened
-2026-08-30; its squash SHA is recorded here at merge. B3-4 next.
-Update this line, not only the step table, when a step lands.
+`52601114`); B3-3 merged 2026-08-30 (#1464); B3-4 merged 2026-08-31
+(#1470); B3-7 merged 2026-08-31 (#1469); B3-5 complete 2026-08-31
+(#1472–#1476); B3-8 complete 2026-09-01 (#1477–#1482, #1488–#1490, `move`
+28 → 0); exit measured at `dev` `8a5817a` and **signed 2026-09-01 by the
+owner** — the dated "B3 exit" section of
+[hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md), all six
+conditions met. The per-step trail lives in
+[README.md](README.md)'s B3 row.
 
 Primary inputs:
 
@@ -41,12 +46,12 @@ surface to it.
 | **B3-1** | Auth characterization tests — enumeration, sentinels, sessions, TOTP, rate limits, failure paths — **DONE 2026-08-29 (PR #1449)**                                       | 1 day    | B3-6, B3-7                                                       |
 | **B3-2** | The auth vertical slice (S-10): route → `service.AuthService` → `db`, behaviour-neutral — **DONE 2026-08-30 (PR #1450)**                                                | 2–3 days | B3-6, B3-7                                                       |
 | **HP-3** | First vertical-slice review — scorecard — **ACCEPTED 2026-08-30** ([hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md))                                        | —        | —                                                                |
-| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract — **PR #1464 open 2026-08-30**                                                      | 1–2 days | B3-4                                                             |
-| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction                                                                                        | 1 day    | after B3-3                                                       |
-| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites                                                                         | 2–3 days | after B3-3/B3-4                                                  |
-| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules                                                                     | 3–4 days | B3-0..B3-2                                                       |
-| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot                                                                                          | 1–2 days | B3-0..B3-2                                                       |
-| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family                                                                   | spread   | after HP-3, per-family                                           |
+| **B3-3** | Lifecycle extraction: `main.go` → `internal/app/` with one composite close contract — **DONE 2026-08-30 (PR #1464)**                                                    | 1–2 days | B3-4                                                             |
+| **B3-4** | Hub constructor options (S-11): required collaborators validated at construction — **DONE 2026-08-31 (PR #1470)**                                                       | 1 day    | after B3-3                                                       |
+| **B3-5** | `ws` in-package split (S-08): responsibilities into named files, pure moves + adjacent rewrites — **DONE 2026-08-31 (PRs #1472–#1476)**                                 | 2–3 days | after B3-3/B3-4                                                  |
+| **B3-6** | Guardrails: coverage floor (S-06), hub simulation + fault transport + fuzz seeds, benchmarks, rules — **DONE (PRs #1451–#1453, #1455–#1459; item 8 closed 2026-09-01)** | 3–4 days | B3-0..B3-2                                                       |
+| **B3-7** | Alpha-shaped test dataset: seed profile + anonymised `v1.2.0-alpha.4` snapshot — **DONE 2026-08-31 (PR #1469)**                                                         | 1–2 days | B3-0..B3-2                                                       |
+| **B3-8** | Remaining domain families behind services (S-09), one PR each; S-03/S-04 fold into the channel family — **DONE 2026-09-01 (PRs #1477–#1482, #1488–#1490; `move` → 0)**  | spread   | after HP-3, per-family                                           |
 | **B3-9** | The B3-tagged findings: OC-0323, OC-0345, OC-0346 + B3-1's OC-0376, OC-0377, OC-0378 (test-first, `bughunt-fix` shape) — **DONE 2026-08-30 (PR #1454; OC-0323 → B3-8)** | 1 day    | OC-0345/0346: any; OC-0323: with B3-8; OC-0376..0378: after B3-2 |
 
 Order: B3-0 → B3-1 → B3-2 → **HP-3** → B3-3 → B3-4 → B3-5 → B3-8. B3-6, B3-7
@@ -2466,27 +2471,31 @@ marked as used`. Codex's security review was refused by its usage limit
 
 The roadmap's six conditions, with the evidence each maps to:
 
-| #   | Condition                                                                                             | Evidence                                                            | Met at `8a5817a` |
-| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------- |
-| 1   | Every direct database use above the domain layer is justified or removed                              | `server-boundaries.md` — zero rows without a disposition; B3-8 done | ✅ 0 `move`      |
-| 2   | Required hub wiring cannot be omitted after construction                                              | B3-4 RED/GREEN                                                      | ✅               |
-| 3   | Permission rules have one production implementation per security property                             | B2-5 + `authz-chokepoint` rule green (B3-6 item 7)                  | ✅               |
-| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | B3-3 failure-injection test                                         | ✅               |
-| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | The gate run on the exit SHA; B3-6 items 1, 2, 5, 6                 | ⚠️ load pending  |
-| 6   | No measured regression exists outside a recorded tradeoff accepted at HP-3                            | Coverage and bench figures before/after; HP-3 tradeoff table        | ⚠️ bench pending |
-| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | B3-9; ledger read-back in the exit scorecard                        | ✅ all 6 fixed   |
+| #   | Condition                                                                                             | Evidence                                                            | Met at `8a5817a`           |
+| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
+| 1   | Every direct database use above the domain layer is justified or removed                              | `server-boundaries.md` — zero rows without a disposition; B3-8 done | ✅ 0 `move`                |
+| 2   | Required hub wiring cannot be omitted after construction                                              | B3-4 RED/GREEN                                                      | ✅                         |
+| 3   | Permission rules have one production implementation per security property                             | B2-5 + `authz-chokepoint` rule green (B3-6 item 7)                  | ✅                         |
+| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | B3-3 failure-injection test                                         | ✅                         |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | The gate run on the exit SHA; B3-6 items 1, 2, 5, 6                 | ✅ load run 2026-09-01     |
+| 6   | No measured regression exists outside a recorded tradeoff accepted at HP-3                            | Coverage and bench figures before/after; HP-3 tradeoff table        | ✅ bench re-run 2026-09-01 |
+| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | B3-9; ledger read-back in the exit scorecard                        | ✅ all 6 fixed             |
 
 **The exit scorecard is the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)**, measured at
 `dev` `8a5817a` on 2026-09-01, with the gate output, the tree-identity
 evidence for the three exit commits, the family-by-family `move` ledger and
-an explicit list of what the phase does **not** claim. Three items are left for
-the owner, and conditions 5 and 6 are marked **partial** until two of them
-land: a `ci.yml` `workflow_dispatch` on `dev` (needs their signature), a
-`make bench-baseline` run on the same machine as the recorded baseline (the
-protocol forbids comparing across hardware, so this session cannot produce
-it), and a `load-baseline.yml` dispatch on the exit SHA. B3-6 item 8's nightly-smoke evidence is still open on its own
-terms — it closes on the first observed **scheduled** run, not a dispatch.
+an explicit list of what the phase does **not** claim. The three items left
+for the owner all landed 2026-09-01, on the owner's machine or by their
+direction, and are recorded in that section's "The owner's three items, run"
+subsection: the `ci.yml` and `load-baseline.yml` dispatches on the exit SHA
+(via the `b3-exit-evidence` branch), and `make bench-baseline` on the
+baseline machine — which found the recorded `PermissionInvalidation` row
+**irreproducible at its own provenance commit**, so condition 6 closes with
+no regression attributable to B3 and a replaced baseline
+([b3-bench-baseline-2026-09-01.md](b3-bench-baseline-2026-09-01.md)). B3-6
+item 8 closed the same day: the first **scheduled** nightly-smoke run was
+observed green (run 33487153664, cron, 2026-09-01 08:27Z).
 
 Required evidence per the roadmap: boundary and database-call inventory
 (B3-0), before/after dependency graph per extraction (B3-2, B3-8), coverage /
