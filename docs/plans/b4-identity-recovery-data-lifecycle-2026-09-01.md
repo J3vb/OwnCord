@@ -6,9 +6,9 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
-**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`;
-evidence in the B4-12 section — OC-0340 and OC-0341 fixed test-first,
-revert-proofs pass). The owner decisions listed below block the steps that
+**B4-12 batch (d) opened 2026-09-01** (branch `feat/b4-12d-token-cli`,
+PR #1501; evidence in the B4-12 section — OC-0340 and OC-0341 fixed
+test-first, revert-proofs pass). The owner decisions listed below block the steps that
 name them. _Update this line — not only the step table — as steps land; the
 [README.md](README.md) row is the status authority._
 
@@ -690,9 +690,9 @@ written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
 
 **Evidence, 2026-09-01 — batch (d), OC-0340 + OC-0341** — branch
-`feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` (number recorded
-below once opened). Fix commit `190344e`; ledger records flipped in the
-follow-up on the same branch (`fix.commit = 190344e`, `revertProof = pass`).
+`feat/b4-12d-token-cli` from `dev` `aabac60`; PR to `dev` #1501 (draft,
+opened 2026-09-01). Fix commit `190344e`; ledger records flipped in
+`fac3d88` on the same branch (`fix.commit = 190344e`, `revertProof = pass`).
 Both findings had moved since they were filed: B3-8 put the CLI's logic
 behind `TokenService`, so OC-0340's hole was `Create` folding a negative
 lifetime into "never" (the admin route refused it at its edge; the CLI did

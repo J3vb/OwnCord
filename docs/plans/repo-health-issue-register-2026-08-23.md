@@ -82,8 +82,9 @@ together as if each row were a unique defect:
 | Duplicate |       1 |
 | **Total** | **383** |
 
-The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt (eleven
-since fixed — the last two, `OC-0345` and `OC-0346`, by B3-9 in PR #1454),
+The rows below cover `OC-0311`–`OC-0348` from the 2026-08-22 hunt (fourteen
+since fixed — eleven by B3-9 in PR #1454 and earlier, `OC-0323` by the B3-8
+message/read-state family, `OC-0340` and `OC-0341` by B4-12(d)),
 `OC-0349`–`OC-0375` from the 2026-08-29 hunt (phased by the owner on
 2026-08-31), and `OC-0379` — OC-0345's leftover role re-read, found by the
 2026-08-31 post-merge audit and fixed on arrival by PR #1467. Groupings that
