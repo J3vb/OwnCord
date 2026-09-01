@@ -715,8 +715,65 @@ func TestNewHub_RequiredCollaborators(t *testing.T) {
 		t.Fatal("NewHub without the presence stamper must error")
 	}
 	presence := service.NewUserService(database)
-	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), Voice: voice, Presence: presence, ReplayRingSize: -1}); err == nil {
-		t.Fatal("NewHub with a negative replay ring must error")
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), Voice: voice, Presence: presence}); err == nil {
+		t.Fatal("NewHub without the socket authenticator must error")
+	}
+}
+
+// completeHubOptions is every required collaborator present and valid — the
+// baseline a test asserting on ONE bad field starts from.
+//
+// It exists because the negative-replay-budget case used to live at the tail
+// of TestNewHub_RequiredCollaborators, where it was vacuous: that test's
+// options are deliberately incomplete, so validateHubOptions returned a
+// missing-collaborator error before ever reaching the budget check, and the
+// assertion passed on the wrong error. Deleting the budget check outright did
+// not fail it. A review bot caught it on the B3 exit scorecard, which had
+// cited it as evidence.
+//
+// The shape is the fix: an assertion about field X must start from options
+// that are valid in every OTHER field, or a later-added check upstream of X
+// silently takes the assertion over.
+func completeHubOptions(t *testing.T, database *db.DB) ws.HubOptions {
+	t.Helper()
+	return ws.HubOptions{
+		DB:       database,
+		Limiter:  auth.NewRateLimiter(),
+		Settings: service.NewSettingsService(database),
+		Readers:  ws.DBReaders(database),
+		Voice:    service.NewVoiceService(database),
+		Presence: service.NewUserService(database),
+		Auth:     service.NewSessionService(database),
+	}
+}
+
+// TestNewHub_RejectsNegativeReplayBudget pins the budget check on its own,
+// from a fully valid option set, so nothing upstream can answer for it.
+func TestNewHub_RejectsNegativeReplayBudget(t *testing.T) {
+	database := openTestDB(t)
+
+	// The baseline must actually construct, or every case below is vacuous
+	// for the same reason the old one was.
+	if _, err := ws.NewHub(completeHubOptions(t, database)); err != nil {
+		t.Fatalf("the complete option set must construct, or these assertions prove nothing: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		ring, cold int
+	}{
+		{"negative ring", -1, 0},
+		{"negative cold limit", 0, -1},
+		{"both negative", -1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := completeHubOptions(t, database)
+			opts.ReplayRingSize = tc.ring
+			opts.ReplayColdLimit = tc.cold
+			if _, err := ws.NewHub(opts); err == nil {
+				t.Fatalf("NewHub with ring=%d cold=%d must error", tc.ring, tc.cold)
+			}
+		})
 	}
 }
 

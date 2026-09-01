@@ -250,8 +250,8 @@ commit that took `move` to zero.
 | 2   | Required hub wiring cannot be omitted after construction                                              | **Met.** `TestNewHub_RequiredCollaborators` refuses a missing DB, limiter, settings reader, reader bundle, **partial** reader bundle, voice store, presence stamper and socket authenticator, plus a negative replay budget |
 | 3   | Permission rules have one production implementation per security property                             | **Met.** `authz-chokepoint` green; `AuthzResidueAllow` unchanged by B3-8 — the voice family deliberately left the permission derivation in place rather than move rows it had no reason to touch                            |
 | 4   | Start, stop, drain and failure ownership is explicit and tested                                       | **Met.** B3-3's failure-injection tests green in `./internal/app/` (`-race` and `-tags deadlock`)                                                                                                                           |
-| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | **Met.** Full run below                                                                                                                                                                                                     |
-| 6   | No measured regression outside a recorded tradeoff accepted at HP-3                                   | **Met.** Every floor is at or above its value, and four rose during B3-8 (below). No floor was lowered, so no HP entry was needed                                                                                           |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | **Partially met.** Race, deadlock, fuzz seeds, model simulation and coverage: green, full run below. **Load baseline: not run** — see "What was not measured"                                                               |
+| 6   | No measured regression outside a recorded tradeoff accepted at HP-3                                   | **Partially met.** Coverage: every floor at or above its value, four rose during B3-8, none lowered, so no HP entry was needed. **Benchmarks: not re-measured** — see "What was not measured"                               |
 | —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | **Met.** OC-0323, OC-0345, OC-0346, OC-0376, OC-0377, OC-0378 all `fixed`; `node .superpowers/render-ledger.mjs --check` → `ledger valid: 379 finding(s)`                                                                   |
 
 ### The gate, run on the exit SHA
@@ -306,6 +306,39 @@ importing `db` at all.
 Floors raised during the phase, none lowered: `service` 69.8 → 71.3, `db`
 79.3, `ws` 86.7, `auth` 90.8 held; aggregate 79.8 held.
 
+### What was not measured, and why
+
+Raised by a review bot on this scorecard's own PR, and correct: conditions 5
+and 6 were first marked flatly **Met** while the run below contained neither a
+benchmark comparison nor a load-baseline result. Both are now partial, because
+neither is something this session can honestly produce.
+
+**Benchmarks.** `b3-bench-baseline-2026-08-30.md` records its own protocol:
+"One machine, one run. A figure here is comparable only with another run of
+this script on the same hardware and toolchain — **never across
+contributors**." The recorded run is `windows/amd64` on a Ryzen 9 7950X3D; the
+session that measured this scorecard runs on Linux cloud hardware. Running
+`make bench-baseline` here would produce numbers that look like a comparison
+and are explicitly disclaimed as one — worse than their absence.
+
+Worth stating plainly: several benchmarked paths **did** change during B3-8 —
+`RefreshChannelVisibility`, `deliverBroadcast` and `reconnectRegister` among
+them — so "no regression" is genuinely unestablished for those, not merely
+unrecorded. Nothing here says there is one; nothing here says there is not.
+
+There is also a tension in the condition's own wording, recorded rather than
+resolved in the phase's favour: that same baseline doc says "Baselines are
+recorded, not gated: no CI step compares these numbers, and no workflow runs
+the script that produced them. The performance gate is B6's." A recorded
+figure has no green or red to "remain", so condition 5 asks for something this
+phase's instrumentation cannot answer.
+
+**Load baseline.** `.github/workflows/load-baseline.yml` is
+`workflow_dispatch`-only. No exit-SHA run exists.
+
+Neither gap touches the structural claim the phase is actually about —
+condition 1, `move` reaching zero — and neither is hidden behind a checkmark.
+
 ### What this does not claim
 
 - **Not that no code outside `db/` and `service/` ever touches persistence.**
@@ -327,8 +360,16 @@ Floors raised during the phase, none lowered: `service` 69.8 → 71.3, `db`
 
 ### Owner's to run
 
-One `ci.yml` `workflow_dispatch` on `dev` at `8a5817a` — it needs the owner's
-signature, so it is not something this session can produce. Everything else in
-the table above was run here.
+Three things, none producible from this session:
+
+1. One `ci.yml` `workflow_dispatch` on `dev` at `8a5817a` — it needs the
+   owner's signature.
+2. `make bench-baseline` on the **same machine and toolchain** as
+   `b3-bench-baseline-2026-08-30.md` (windows/amd64, Ryzen 9 7950X3D), for a
+   comparison that protocol permits. Closes condition 6's other half.
+3. One `load-baseline.yml` `workflow_dispatch` on the exit SHA. Closes
+   condition 5's other half.
+
+Everything else in the tables above was run here.
 
 **Signed:** _pending_ — J3vb (repository owner).
