@@ -20,7 +20,7 @@ import (
 func TestAdminAPI_PatchChannel_ArchiveCleansVoice(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "archive-voice", "voice", "", "", 0)
@@ -47,7 +47,7 @@ func TestAdminAPI_PatchChannel_ArchiveCleansVoice(t *testing.T) {
 func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "unarchive-voice", "voice", "", "", 0)
@@ -89,7 +89,7 @@ func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
 func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "archive-cancel-race", "voice", "", "", 0)
@@ -138,7 +138,7 @@ func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testin
 func TestAdminAPI_CreateChannel_SurvivesContextCancelAfterCommit(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	ctx, cancel := context.WithCancel(context.Background())

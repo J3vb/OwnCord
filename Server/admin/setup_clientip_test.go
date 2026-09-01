@@ -34,7 +34,7 @@ func TestSetup_HonoursTrustedProxies(t *testing.T) {
 	cfg.Server.TrustedProxies = []string{trustedProxyAddr + "/32"}
 
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil,
-		newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database),
+		newTestServices(database),
 		admin.SetupOptions{RunningCfg: cfg})
 
 	body, err := json.Marshal(map[string]string{

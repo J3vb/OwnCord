@@ -69,6 +69,15 @@ type StaleVoiceCleaner interface {
 	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
 }
 
+// DisconnectMarker is the one write the connection teardown makes on its own
+// behalf: stamping the user offline when their last pump exits. It is a seam
+// rather than a raw call for the same reason the read seams are — the caller
+// states the single method it may use — and it is deliberately its own
+// interface rather than a method on a reader, because it writes.
+type DisconnectMarker interface {
+	MarkUserDisconnected(ctx context.Context, userID int64) error
+}
+
 // HubReaders bundles the seams HubOptions requires. Production wires
 // DBReaders; the test helpers default it over the test database.
 type HubReaders struct {
@@ -77,16 +86,18 @@ type HubReaders struct {
 	Members    MemberPayloadReader
 	Dispatch   DispatchReader
 	StaleVoice StaleVoiceCleaner
+	Disconnect DisconnectMarker
 }
 
 // complete reports whether every seam is present.
 func (r HubReaders) complete() bool {
-	return r.Visibility != nil && r.Ready != nil && r.Members != nil && r.Dispatch != nil && r.StaleVoice != nil
+	return r.Visibility != nil && r.Ready != nil && r.Members != nil &&
+		r.Dispatch != nil && r.StaleVoice != nil && r.Disconnect != nil
 }
 
 // DBReaders backs every seam with the database handle — the composition
 // root's wiring today. Later B3-8 families narrow individual seams onto
 // their services without touching the hub.
 func DBReaders(d *db.DB) HubReaders {
-	return HubReaders{Visibility: d, Ready: d, Members: d, Dispatch: d, StaleVoice: d}
+	return HubReaders{Visibility: d, Ready: d, Members: d, Dispatch: d, StaleVoice: d, Disconnect: d}
 }

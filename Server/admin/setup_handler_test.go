@@ -14,7 +14,7 @@ import (
 
 func TestSetupStatus_NeedsSetup(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
 	if rr.Code != http.StatusOK {
@@ -35,7 +35,7 @@ func TestSetupStatus_NeedsSetup(t *testing.T) {
 func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 	database := openAdminTestDB(t)
 	createAdminUser(t, database) // Create a user first
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
 	if rr.Code != http.StatusOK {
@@ -55,7 +55,7 @@ func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 
 func TestSetup_CreatesOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "myadmin",
@@ -108,7 +108,7 @@ func TestSetup_CreatesOwner(t *testing.T) {
 // Server/api/auth_handler_test.go (TestRegister_UsernameNotHTMLEscaped).
 func TestSetup_UsernameNotHTMLEscaped(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "O'Brien",
@@ -138,7 +138,7 @@ func TestSetup_UsernameNotHTMLEscaped(t *testing.T) {
 
 func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	// First setup succeeds.
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
@@ -161,7 +161,7 @@ func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 
 func TestSetup_WeakPassword(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "admin",
@@ -174,7 +174,7 @@ func TestSetup_WeakPassword(t *testing.T) {
 
 func TestSetup_MissingFields(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "",
@@ -189,7 +189,7 @@ func TestSetup_MissingFields(t *testing.T) {
 // server and asserts that exactly one owner is created (BUG-119).
 func TestSetup_ConcurrentRace(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	const goroutines = 20
 	results := make(chan int, goroutines)
@@ -242,7 +242,7 @@ func TestSetup_ConcurrentRace(t *testing.T) {
 // on an empty allowlist, and a foreign origin still does not.
 func TestSetup_SameOriginAllowedWithEmptyAllowlist(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	body, err := json.Marshal(map[string]string{"username": "owner", "password": "correct-horse"})
 	if err != nil {
@@ -264,7 +264,7 @@ func TestSetup_SameOriginAllowedWithEmptyAllowlist(t *testing.T) {
 
 func TestSetup_ForeignOriginStillBlocked(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	body, err := json.Marshal(map[string]string{"username": "owner", "password": "correct-horse"})
 	if err != nil {
