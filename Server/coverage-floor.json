@@ -1,12 +1,12 @@
 {
   "_doc": "Coverage floors enforced by scripts/coverage-floor.sh, measured on the Linux CI leg. Ratchet rule and shape: Server/CLAUDE.md.",
-  "aggregate": 79.8,
+  "aggregate": 81.1,
   "exclude": ["db/dbgen", "cmd"],
   "packages": {
-    "auth": 90.8,
+    "auth": 91.4,
     "db": 79.3,
     "permissions": 100.0,
-    "service": 71.3,
+    "service": 74.3,
     "ws": 86.7
   }
 }

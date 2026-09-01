@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -83,7 +84,7 @@ func TestLoadOrGenerateTOTPKey_ReadErrorFailsClosed(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("reading key after failure: %v", readErr)
 		}
-		if string(after) != string(original) {
+		if !bytes.Equal(after, original) {
 			t.Fatalf("the unreadable key file was rewritten to %q", after)
 		}
 	})
