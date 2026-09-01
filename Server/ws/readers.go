@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Hub read seams (B3-8 channel family, part 3) ───────────────────────────
@@ -144,4 +145,22 @@ type VoiceStore interface {
 type PresenceStamper interface {
 	StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error)
 	StampDisconnect(ctx context.Context, userID int64) error
+}
+
+// ─── Handshake and session seam (B3-8 auth family) ──────────────────────────
+
+// SocketAuthenticator is the hub's view of the auth family: who a bearer token
+// authenticates at the handshake, whether a live connection's session is still
+// good, and the connect audit row. service.AuthService satisfies it.
+//
+// The refusals are sentinels, not a boolean, because the hub answers them
+// differently on the wire and the difference is the whole point: a bad
+// credential gets a NON-RECOVERABLE auth error (the client clears its stored
+// token and stops retrying), while a database failure gets an ordinary error
+// frame the client backs off and retries. A seam that returned "not
+// authenticated" for both would log every user out during a blip.
+type SocketAuthenticator interface {
+	ResolveSocketPrincipal(ctx context.Context, tokenHash string) (*db.User, error)
+	SweepSessions(ctx context.Context, tokenHashes []string) (map[string]service.SessionVerdict, error)
+	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
 }

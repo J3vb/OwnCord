@@ -24,8 +24,8 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -90,9 +90,9 @@ type gifResponse struct {
 // a dedicated per-IP rate-limit bucket — the picker searches on every debounced
 // keystroke, so it must not share the empty-prefix bucket used by password and
 // TOTP endpoints.
-func MountGIFRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config) {
+func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config) {
 	r.Route("/api/v1/gif", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(sessions))
 		r.Use(rateLimitMiddlewareWithPrefix(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
 
 		r.Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))

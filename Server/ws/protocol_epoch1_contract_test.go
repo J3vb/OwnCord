@@ -376,7 +376,7 @@ func newEpochRig(t *testing.T, journey string) *epochRig {
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
-	srv := httptest.NewServer(ws.ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ws.ServeWS(hub, []string{"*"}, 0))
 	t.Cleanup(srv.Close)
 
 	return &epochRig{

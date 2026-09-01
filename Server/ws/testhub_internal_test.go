@@ -41,6 +41,9 @@ func newTestHubWith(tb testing.TB, opts HubOptions) *Hub {
 	if opts.Presence == nil && opts.DB != nil {
 		opts.Presence = service.NewUserService(opts.DB)
 	}
+	if opts.Auth == nil && opts.DB != nil {
+		opts.Auth = service.NewSessionService(opts.DB)
+	}
 	h, err := NewHub(opts)
 	if err != nil {
 		tb.Fatalf("NewHub: %v", err)

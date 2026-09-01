@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // moderatorMask is migration 001's seeded Moderator role: MANAGE_MESSAGES,
@@ -330,7 +331,7 @@ func TestPatchUserRole_ModeratorCannotDemoteAdmin(t *testing.T) {
 func TestRequireAdminAuth_StaysAdministratorOnly(t *testing.T) {
 	database := openAdminTestDB(t)
 	reached := false
-	guarded := admin.RequireAdminAuth(database)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	guarded := admin.RequireAdminAuth(service.NewSessionService(database))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))

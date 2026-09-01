@@ -115,7 +115,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
 	// with no key configured the endpoints answer 503 GIF_DISABLED so the
 	// client can hide the picker rather than discover a 404.
-	MountGIFRoutes(r, database, limiter, cfg)
+	MountGIFRoutes(r, svc.Sessions, limiter, cfg)
 	if cfg.GIF.APIKey == "" {
 		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
 	}
@@ -124,7 +124,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
-	store, storeErr := routerUploadRoutes(r, database, limiter, cfg, svc.Uploads)
+	store, storeErr := routerUploadRoutes(r, svc.Sessions, limiter, cfg, svc.Uploads)
 
 	// WebSocket hub — built, wired and started by internal/app; WS does its
 	// own in-band auth, so no AuthMiddleware here.
@@ -136,7 +136,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// AuthBroadcaster, so DELETE /api/v1/auth/account fans out member_ban and
 	// force-disconnects the deleted user's own socket exactly like the admin
 	// ban path does for the same DB state.
-	MountAuthRoutes(r, service.NewAuthService(database, limiter, totpKey, hub), AuthMiddleware(database), limiter, cfg.Server.TrustedProxies)
+	MountAuthRoutes(r, service.NewAuthService(database, limiter, totpKey, hub), AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
 
 	// Voice: webhook, LiveKit health and signalling-proxy routes. The client
 	// and the companion process are built by internal/app, which reports
@@ -174,13 +174,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
-	r.With(AuthMiddleware(database),
+	r.With(AuthMiddleware(svc.Sessions),
 		RequirePermission(permissions.Administrator),
 		RateLimitMiddleware(limiter, "diag:", 5, time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 
-	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
+	r.Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
 	routerMetricsRoutes(r, cfg, database, svc, hub)
 
@@ -201,7 +201,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// constructed in main.go (nil when plugin support is disabled, in
 		// which case lifecycle calls return 503 and list returns []).
 		r.Group(func(r chi.Router) {
-			r.Use(admin.RequireAdminAuth(database))
+			r.Use(admin.RequireAdminAuth(svc.Sessions))
 			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database, database))
 		})
 	})
@@ -325,7 +325,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 // routerUploadRoutes mounts the file upload and serving routes and returns the
 // shared file storage (and its construction error) for the profile-avatar and
 // emoji mounts, which reuse the same store.
-func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
+func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
 	// L12: verify config upload size fits within the HTTP body limit.
 	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
 		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
@@ -336,7 +336,7 @@ func routerUploadRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, uploads)
+		MountUploadRoutes(r, sessions, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
 	return store, storeErr
 }

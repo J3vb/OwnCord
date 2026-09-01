@@ -1,14 +1,12 @@
 package admin
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -203,11 +201,15 @@ func validateHostname(h string) error {
 
 // ─── Applying the wizard ─────────────────────────────────────────────────────
 
-// applyWizardSettings persists the wizard's DB-backed settings atomically.
-// server_name, motd and registration_open are read live by the server;
+// wizardSettingUpdates maps the wizard payload onto the settings rows it
+// writes. server_name, motd and registration_open are read live by the server;
 // max_upload_bytes and voice_quality are written so the Settings page shows
 // values consistent with what the wizard put in config.yaml.
-func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRequest) error {
+//
+// This is the mapping only — SetupService.ApplyWizardSettings commits the
+// result in one transaction, so a partial write cannot leave the Settings page
+// showing values the wizard never applied.
+func wizardSettingUpdates(wr *setupWizardRequest) map[string]string {
 	updates := map[string]string{}
 	if wr.ServerName != nil {
 		updates["server_name"] = *wr.ServerName
@@ -228,25 +230,7 @@ func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRe
 	if wr.VoiceQuality != nil {
 		updates["voice_quality"] = *wr.VoiceQuality
 	}
-	if len(updates) == 0 {
-		return nil
-	}
-
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("starting transaction: %w", err)
-	}
-	for key, value := range updates {
-		if _, txErr := tx.ExecContext(ctx,
-			`INSERT INTO settings (key, value) VALUES (?, ?)
-			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			key, value,
-		); txErr != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("writing setting %s: %w", key, txErr)
-		}
-	}
-	return tx.Commit()
+	return updates
 }
 
 // buildConfigPatch maps the wizard payload onto config.yaml keys. When the

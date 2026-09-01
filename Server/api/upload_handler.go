@@ -151,17 +151,17 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 // download and the attachment row behind every upload. A nil service would
 // panic on the first request either route saw, so we fail fast at mount time
 // rather than let a user find it.
-func MountUploadRoutes(r chi.Router, database *db.DB, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, uploads *service.UploadService) {
+func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, uploads *service.UploadService) {
 	if uploads == nil {
 		panic("api: MountUploadRoutes requires a non-nil UploadService")
 	}
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
-		AuthMiddleware(database),
+		AuthMiddleware(sessions),
 		MaxBodySize(uploadMaxBodySize),
 	).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	// File serving requires authentication for channel-level access control.
-	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {

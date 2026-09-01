@@ -83,7 +83,7 @@ func principal(r *http.Request) (service.Principal, bool) {
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
 // the session, and injects the user and session into the request context.
 // Returns 401 if the token is missing, invalid, or the session is expired.
-func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
+func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	touches := &touchThrottle{seen: make(map[string]time.Time)}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,14 +99,14 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			hash := auth.HashToken(token)
 			// Resolve the bearer token to a principal. A login session is matched
 			// first (existing behavior unchanged); an API token is the fallback.
-			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			switch {
 			case errors.Is(err, auth.ErrTokenExpired):
 				// Clean up the expired login session in the background. The request
 				// ctx is cancelled once the 401 is written, so detach cancellation.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					if err := database.DeleteSession(cleanupCtx, h); err != nil {
+					if err := sessions.DiscardSession(cleanupCtx, h); err != nil {
 						slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
 					}
 				}(hash)
@@ -163,14 +163,14 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// to bot/CI traffic.
 			if sess != nil {
 				if touches.shouldTouch(hash, time.Now()) {
-					if err := database.TouchSession(r.Context(), hash); err != nil {
+					if err := sessions.TouchSession(r.Context(), hash); err != nil {
 						slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 					}
 				}
 			} else {
 				touchCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					if err := database.TouchAPIToken(touchCtx, h); err != nil {
+					if err := sessions.TouchAPIToken(touchCtx, h); err != nil {
 						slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
 					}
 				}(hash)

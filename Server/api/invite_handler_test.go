@@ -19,7 +19,7 @@ import (
 func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
-	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(database), limiter, nil)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 	api.MountInviteRoutes(r, database, svc)
 	return r
 }

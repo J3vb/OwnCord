@@ -132,6 +132,11 @@ type Hub struct {
 	// stamp when its last pump exits. Required, like settings and voice.
 	presence PresenceStamper
 
+	// authn is the auth family's service (readers.go's SocketAuthenticator):
+	// the handshake's bearer-token resolution, the sweep's session verdicts
+	// and the connect audit row. Required.
+	authn SocketAuthenticator
+
 	// voice is the voice family's service (readers.go's VoiceStore): every
 	// voice_states read and write the join, moderation, control and sweep
 	// paths make. Required, like settings and readers — a hub that could

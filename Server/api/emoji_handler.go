@@ -75,7 +75,7 @@ var allowedEmojiMIME = map[string]bool{
 // unauthenticated tracking pixel hosted on someone else's server.
 func MountEmojiRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
 	r.Route("/api/v1/emoji", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListEmoji(svc))
 		r.Get("/{id}/image", handleServeEmojiImage(svc, store))
 		r.With(MaxBodySize(emojiMaxBodySize)).

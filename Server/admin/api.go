@@ -65,6 +65,30 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
+// adminRequiredServices fills in the two services the admin API cannot answer
+// a single request without, from the handle this package already holds.
+//
+// Everywhere else a nil service is the fail-closed case an individual handler
+// implements — it refuses that one action. These two are different: without a
+// SessionService no request can be authenticated at all, and without a
+// SetupService the unauthenticated first-run routes have nothing to answer
+// with, on a server that by definition has nobody able to read its logs yet.
+// "Refuse this action" and "the admin API is unusable" are not the same
+// failure, so these are built rather than left for a construction site to hand
+// the middleware a nil to dereference.
+func adminRequiredServices(database *db.DB, svc *service.Services) *service.Services {
+	if svc == nil {
+		svc = &service.Services{}
+	}
+	if svc.Sessions == nil {
+		svc.Sessions = service.NewSessionService(database)
+	}
+	if svc.Setup == nil {
+		svc.Setup = service.NewSetupService(database)
+	}
+	return svc
+}
+
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
@@ -78,9 +102,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// handlers already implement (they answer 500 "… service unavailable"
 	// rather than writing unchecked) — the tests that pin that behaviour pass
 	// exactly that.
-	if svc == nil {
-		svc = &service.Services{}
-	}
+	svc = adminRequiredServices(database, svc)
 	mod, roles, settings, channels := svc.Moderation, svc.Roles, svc.Settings, svc.Channels
 
 	var setupOpts SetupOptions
@@ -94,8 +116,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		setupLimiterHook(setupLimiter)
 	}
 	startSetupLimiterReap(setupLimiter)
-	r.Get("/setup/status", handleSetupStatus(database, setupOpts))
-	r.Post("/setup", handleSetup(database, setupLimiter, allowedOrigins, hub, setupOpts))
+	r.Get("/setup/status", handleSetupStatus(svc.Setup, svc.Settings, setupOpts))
+	r.Post("/setup", handleSetup(svc.Setup, setupLimiter, allowedOrigins, hub, setupOpts))
 
 	// SSE log stream — auth is via a single-use ticket from POST /logs/ticket.
 	// EventSource cannot send Authorization headers, so the client first
@@ -110,7 +132,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// map onto a specific bit re-check it with requirePerm; the rest
 	// (stats, users list, me) are perimeter-level.
 	r.Group(func(r chi.Router) {
-		r.Use(adminAuthMiddleware(database))
+		r.Use(adminAuthMiddleware(svc.Sessions))
 
 		// Log stream ticket — issues a single-use, 30s TTL ticket for SSE auth.
 		// ADMINISTRATOR-gated to match handleLogStream's own re-check: server

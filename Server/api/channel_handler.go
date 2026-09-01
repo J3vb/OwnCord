@@ -63,7 +63,7 @@ type PurgeBroadcaster interface {
 // purge still commits but no chat_bulk_deleted event is emitted.
 func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListChannels(svc))
 		r.Get("/{id}/messages", handleGetMessages(svc))
 		r.Get("/{id}/messages/around/{messageId}", handleGetMessagesAround(svc))
@@ -74,7 +74,7 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, false))
 	})
 	r.With(
-		AuthMiddleware(database),
+		AuthMiddleware(svc.Sessions),
 		searchRateLimitMiddleware(limiter, searchRateLimitPerMinute, time.Minute, trustedProxies),
 	).Get("/api/v1/search", handleSearch(svc))
 }

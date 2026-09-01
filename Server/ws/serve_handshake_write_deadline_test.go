@@ -101,7 +101,7 @@ func TestServeWS_HandshakeWrite_TimesOutOnStalledPeer(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

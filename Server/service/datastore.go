@@ -117,6 +117,9 @@ type Store interface {
 	// ── Sessions ──
 	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
+	GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*db.SessionWithBanStatus, error)
+	TouchAPIToken(ctx context.Context, tokenHash string) error
+	GetActiveAPIToken(ctx context.Context, tokenHash string) (*db.APIToken, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)

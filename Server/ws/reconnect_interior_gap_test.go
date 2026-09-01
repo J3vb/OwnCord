@@ -93,7 +93,7 @@ func TestReconnect_InteriorGap_ForcesFullReady(t *testing.T) {
 		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
 	}
 
-	handler := ws.ServeWS(hub, database, []string{"*"}, 0)
+	handler := ws.ServeWS(hub, []string{"*"}, 0)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

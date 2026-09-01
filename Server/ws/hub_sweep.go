@@ -6,9 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
@@ -108,9 +107,6 @@ func (h *Hub) sweepStaleClients() {
 // provides time-based session enforcement for idle WebSocket connections
 // that never trigger the message-count-based check (BUG-109).
 func (h *Hub) sweepRevokedSessions() {
-	if h.db == nil {
-		return
-	}
 	// Hub run-loop sweeper — no request tie.
 	ctx := context.Background()
 
@@ -128,12 +124,14 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 
 	// One batched lookup for every connected client instead of a query per
-	// client per sweep.
+	// client per sweep. The expiry and ban rules behind the verdicts are
+	// AuthService's — the same ones the handshake applies — so a live session
+	// and a resuming one cannot disagree about what "still valid" means.
 	hashes := make([]string, len(snapshot))
 	for i, c := range snapshot {
 		hashes[i] = c.tokenHash
 	}
-	sessions, err := h.db.GetSessionsWithBanStatusBatch(ctx, hashes)
+	verdicts, err := h.authn.SweepSessions(ctx, hashes)
 	if err != nil {
 		// A failed batch lookup says nothing about any individual session —
 		// kicking everyone on a transient DB error would be a mass disconnect.
@@ -143,19 +141,17 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 
 	for _, c := range snapshot {
-		result := sessions[c.tokenHash]
-		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+		switch verdicts[c.tokenHash] {
+		case service.SessionRevoked:
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
 			h.kickClient(c)
-			continue
-		}
-		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
-		if auth.IsEffectivelyBanned(tempUser) {
+		case service.SessionBanned:
 			slog.Info("session sweep: banned user, disconnecting",
 				"user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
 			h.kickClient(c)
+		case service.SessionLive:
 		}
 	}
 }

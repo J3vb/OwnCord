@@ -198,7 +198,7 @@ func newUploadTestStorage(t *testing.T) *storage.Storage {
 func buildUploadRouter(database *db.DB, store *storage.Storage, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testUploadSvc(database))
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, allowedOrigins, testUploadSvc(database))
 	return r
 }
 
@@ -207,7 +207,7 @@ func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limit
 	if limiter == nil {
 		limiter = auth.NewRateLimiter()
 	}
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testUploadSvc(database))
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, allowedOrigins, testUploadSvc(database))
 	return r
 }
 

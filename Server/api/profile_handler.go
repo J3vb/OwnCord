@@ -118,7 +118,7 @@ type ProfileBroadcaster interface {
 // that 500s on every call is worse than one that 404s.
 func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/users/me", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster))

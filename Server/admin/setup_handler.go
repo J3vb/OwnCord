@@ -13,12 +13,8 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
-
-// ownerRoleID is the role ID assigned to the first user (Owner).
-const ownerRoleID = 1
 
 // setupStatusResponse is the JSON shape returned by GET /api/setup/status.
 type setupStatusResponse struct {
@@ -56,14 +52,14 @@ type setupResponse struct {
 }
 
 // handleSetupStatus returns whether initial setup is needed (no users exist).
-func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
+func handleSetupStatus(setup *service.SetupService, settings *service.SettingsService, opts SetupOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		count, err := database.UserCount(r.Context())
+		needsSetup, err := setup.NeedsSetup(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
 			return
 		}
-		resp := setupStatusResponse{NeedsSetup: count == 0}
+		resp := setupStatusResponse{NeedsSetup: needsSetup}
 		// Prefill defaults are only exposed pre-setup: after the first user
 		// exists this endpoint reveals nothing about the configuration.
 		if resp.NeedsSetup && opts.RunningCfg != nil {
@@ -80,13 +76,13 @@ func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
 			}
 			// The settings table is authoritative for the values the app
 			// reads live; fall back to the config/seed values on error.
-			if v, err := database.GetSetting(r.Context(), "server_name"); err == nil && v != "" {
+			if v, err := settings.Setting(r.Context(), "server_name"); err == nil && v != "" {
 				d.ServerName = v
 			}
-			if v, err := database.GetSetting(r.Context(), "motd"); err == nil {
+			if v, err := settings.Setting(r.Context(), "motd"); err == nil {
 				d.Motd = v
 			}
-			if v, err := database.GetSetting(r.Context(), "registration_open"); err == nil {
+			if v, err := settings.Setting(r.Context(), "registration_open"); err == nil {
 				d.RegistrationOpen = v == "1" || strings.EqualFold(v, "true")
 			}
 			resp.Defaults = d
@@ -99,7 +95,7 @@ func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
 // a wizard payload, applies the chosen settings (DB + config.yaml) and
 // restarts the server if startup-only values changed. It only works when no
 // users exist in the database, preventing abuse after initial setup.
-func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
+func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
 	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
 	// request. opts.RunningCfg is nil in the legacy/test construction path
 	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
@@ -117,16 +113,27 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			return
 		}
 
-		uid, token, inviteCode, ownerWarnings, ok := setupCreateOwner(w, r, database, req, host)
-		if !ok {
+		boot, err := setup.Bootstrap(r.Context(), service.BootstrapInput{
+			Username: req.Username,
+			Password: req.Password,
+			Device:   r.Header.Get("User-Agent"),
+			Host:     host,
+		})
+		switch {
+		case errors.Is(err, service.ErrSetupAlreadyDone):
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			return
+		case err != nil:
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
 			return
 		}
+		uid, token, inviteCode := boot.OwnerID, boot.Token, boot.InviteCode
 
-		warnings, restartRequired, restartURL := setupApplyWizard(r.Context(), database, req.Wizard, uid, r.Host, opts)
-		warnings = append(ownerWarnings, warnings...)
+		warnings, restartRequired, restartURL := setupApplyWizard(r.Context(), setup, req.Wizard, uid, r.Host, opts)
+		warnings = append(boot.Warnings, warnings...)
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid, "wizard", req.Wizard != nil, "restart", restartRequired)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "server_setup", "server", 0,
+		setup.RecordSetup(r.Context(), uid,
 			"initial setup: owner account created, default channel and invite generated")
 
 		writeJSON(w, http.StatusCreated, setupResponse{
@@ -220,87 +227,6 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	return req, host, true
 }
 
-// setupCreateOwner creates the owner account and everything that ships with
-// it: the session token, the default channels and the bootstrap invite. It
-// writes the error response itself; ok=false means the caller must return
-// immediately.
-//
-// ok=false is only ever returned before CreateOwnerIfEmpty commits. Once the
-// owner row exists, every remaining step (session, channels, invite) is
-// best-effort: the setup endpoint's gate is "no users exist", so a 5xx after
-// the account is created would leave it permanently orphaned — every retry
-// would hit db.ErrConflict below and be refused with 403 forever, with the
-// wizard payload never applied and the bootstrap invite never minted
-// (OC-0253). Those steps also run against a context.WithoutCancel of the
-// request context, so a client that disconnects (reload, navigation, proxy
-// timeout) right after the commit can't take the session/channels/invite
-// down with it. Failures downgrade to entries in the returned warnings
-// slice instead, mirroring setupApplyWizard's contract below.
-func setupCreateOwner(w http.ResponseWriter, r *http.Request, database *db.DB, req setupRequest, host string) (int64, string, string, []string, bool) {
-	// Hash the password.
-	hash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to hash password")
-		return 0, "", "", nil, false
-	}
-
-	// Atomically check no users exist and create the owner (BUG-119).
-	// This closes the TOCTOU race between UserCount() and CreateUser().
-	uid, err := database.CreateOwnerIfEmpty(r.Context(), req.Username, hash, ownerRoleID)
-	if errors.Is(err, db.ErrConflict) {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
-		return 0, "", "", nil, false
-	}
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
-		return 0, "", "", nil, false
-	}
-
-	// The account exists from here on — see the doc comment above.
-	var warnings []string
-	ctx := context.WithoutCancel(r.Context())
-
-	// Issue a session token so the user is immediately logged in.
-	var token string
-	if t, err := auth.GenerateToken(); err != nil {
-		slog.Error("setup: failed to generate session token", "error", err)
-		warnings = append(warnings,
-			"your account was created, but a login session could not be started automatically — log in with your new credentials")
-	} else {
-		device := r.Header.Get("User-Agent")
-		const maxDeviceLen = 512
-		if len(device) > maxDeviceLen {
-			device = device[:maxDeviceLen]
-		}
-		if _, err := database.CreateSession(ctx, uid, auth.HashToken(t), device, host); err != nil {
-			slog.Error("setup: failed to create session", "error", err)
-			warnings = append(warnings,
-				"your account was created, but a login session could not be started automatically — log in with your new credentials")
-		} else {
-			token = t
-		}
-	}
-
-	// Create default channels under canonical categories.
-	_, _ = database.CreateChannel(ctx, "general", "text", "Text Channels", "Welcome to the server!", 0)
-	_, _ = database.CreateChannel(ctx, "General", "voice", "Voice Channels", "", 0)
-
-	// Generate a bootstrap invite code so the owner can invite others.
-	// Bound it (5 uses / 24h) rather than minting an unlimited, non-expiring
-	// invite — the owner can create fresh invites once logged in.
-	var inviteCode string
-	bootstrapInviteExpiry := time.Now().Add(24 * time.Hour)
-	if code, err := database.CreateInvite(ctx, uid, 5, &bootstrapInviteExpiry); err != nil {
-		slog.Error("setup: failed to generate bootstrap invite", "error", err)
-		warnings = append(warnings,
-			"your account was created, but the bootstrap invite could not be generated — create one from the admin panel after logging in")
-	} else {
-		inviteCode = code
-	}
-
-	return uid, token, inviteCode, warnings, true
-}
-
 // setupApplyWizard applies the wizard payload. wr == nil is the legacy
 // request shape (create the owner account only) and applies nothing. reqHost
 // is the request's Host header, from which the post-restart admin-panel URL
@@ -309,7 +235,7 @@ func setupCreateOwner(w http.ResponseWriter, r *http.Request, database *db.DB, r
 // The account exists from here on, so any
 // failure downgrades to a warning — never a 5xx that would orphan the
 // owner behind an opaque error.
-func setupApplyWizard(ctx context.Context, database *db.DB, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions) ([]string, bool, string) {
+func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions) ([]string, bool, string) {
 	var warnings []string
 	restartRequired := false
 	restartURL := ""
@@ -317,7 +243,7 @@ func setupApplyWizard(ctx context.Context, database *db.DB, wr *setupWizardReque
 		return warnings, restartRequired, restartURL
 	}
 
-	if err := applyWizardSettings(ctx, database, wr); err != nil {
+	if err := setup.ApplyWizardSettings(ctx, wizardSettingUpdates(wr)); err != nil {
 		slog.Error("setup wizard: saving settings failed", "error", err)
 		warnings = append(warnings,
 			"could not save server settings: "+err.Error()+" — adjust them later in the admin panel's Settings page")
@@ -328,7 +254,7 @@ func setupApplyWizard(ctx context.Context, database *db.DB, wr *setupWizardReque
 			warnings = append(warnings,
 				"could not write "+opts.ConfigPath+": "+err.Error()+" — your account was created; edit the file manually to apply these settings")
 		} else {
-			db.WriteAudit(context.WithoutCancel(ctx), database, uid, "config_write", "server", 0,
+			setup.RecordConfigWrite(ctx, uid,
 				"setup wizard wrote "+opts.ConfigPath+" ("+patchedConfigKeys(wr)+")")
 			if opts.RunningCfg != nil && wizardChangesRunningConfig(wr, opts.RunningCfg) {
 				restartRequired = true

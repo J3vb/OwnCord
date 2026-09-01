@@ -9,6 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -17,8 +18,8 @@ import (
 // package (api/router.go's plugin admin handler). Those routes stay
 // ADMINISTRATOR-only, so it chains the perimeter check with an explicit
 // ADMINISTRATOR requirement rather than exposing the widened perimeter.
-func RequireAdminAuth(database *db.DB) func(http.Handler) http.Handler {
-	perimeter := adminAuthMiddleware(database)
+func RequireAdminAuth(sessions *service.SessionService) func(http.Handler) http.Handler {
+	perimeter := adminAuthMiddleware(sessions)
 	administrator := requirePerm(permissions.Administrator)
 	return func(next http.Handler) http.Handler {
 		return perimeter(administrator(next))
@@ -31,7 +32,7 @@ func RequireAdminAuth(database *db.DB) func(http.Handler) http.Handler {
 // groups re-check the specific bit they need via requirePerm.
 // On success it stores the *db.User, *db.Role and *db.Session in the request
 // context so downstream handlers can retrieve them without re-querying.
-func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
+func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
@@ -45,7 +46,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// API token inherits its owning user's role, so a token whose user
 			// clears the perimeter authenticates here too and /admin/api/*
 			// works for headless clients.
-			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			if err != nil {
 				switch {
 				case errors.Is(err, auth.ErrTokenExpired):

@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -84,7 +85,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	const sentinel = "2000-01-01 00:00:00"
 	backdate := func() {
@@ -130,7 +131,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
@@ -150,7 +151,7 @@ func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 	}
 
 	var gotUserID int64
-	h := api.AuthMiddleware(database)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if u, ok := r.Context().Value(api.UserKey).(*db.User); ok && u != nil {
 			gotUserID = u.ID
 		}
@@ -182,7 +183,7 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 		t.Fatalf("RevokeAPIToken: %v", err)
 	}
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
 	rr := httptest.NewRecorder()
 
@@ -196,7 +197,7 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, "notarealtoken")
 	rr := httptest.NewRecorder()
@@ -221,7 +222,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 		uid, hash, "test", "127.0.0.1", pastTime,
 	)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -236,7 +237,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 	database := newAPITestDB(t)
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	cases := []string{
 		"Token abc", // wrong scheme
@@ -287,7 +288,7 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -313,7 +314,7 @@ func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
 	// Close the underlying DB so the next GetSessionByTokenHash call fails
 	// with a wrapped "database is closed" error rather than sql.ErrNoRows —
@@ -345,7 +346,7 @@ func TestRequirePermission_Allowed(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -366,7 +367,7 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -389,7 +390,7 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	// Any permission should pass for ADMINISTRATOR
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -414,7 +415,7 @@ func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(
+	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages | permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -666,7 +667,7 @@ func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -692,7 +693,7 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
@@ -718,7 +719,7 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
-	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
 	rr := httptest.NewRecorder()
