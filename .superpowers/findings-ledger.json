@@ -7392,13 +7392,19 @@
       "why": "PUT /users/me/password, POST /users/me/totp/confirm and DELETE /users/me/totp are deliberately built as partial-success endpoints: when the credential/2FA change commits but `DeleteOtherSessions` fails (twice — there is one bounded retry), the server returns HTTP 200 with `{\"warning\": \"...other sessions could not be revoked; revoke them from the sessions list\", \"sessions_revoked\": N}` instead of 204. `service.ChangePasswordResult.RevokeFailed`'s own doc comment says this is \"a partial success the caller must surface as a warning\". The client throws the whole body away — `api.changePassword` / `confirmTotp` / `disableTotp` are all typed `Promise<void>` and every call site shows an unconditional green success toast — so the one signal the server designed for this case never reaches a human. (The admin SPA does render the analogous `warnings` array from the setup wizard at Server/admin/static/index.html:621, which is what the design intends.)",
       "repro": "1. A user believes their session was stolen and changes their password from Settings → Account.\n2. `UpdateUserPassword` commits, then both `DeleteOtherSessions` attempts fail (SQLite writer busy / write-lock contention — the exact transient the one retry was added for). `service.ChangePassword` returns `ChangePasswordResult{RevokeFailed: true}`.\n3. The handler returns HTTP 200 with the `warning` body instead of 204.\n4. `doFetch` sees `res.ok && status !== 204`, parses the body, and hands it back as `T = void`; `MainPage.ts:499` awaits it and `MainPage.ts:500` shows \"Password changed successfully\" in green.\n5. The attacker's session row is still in `sessions` and its bearer token still authenticates. The user has been told the operation fully succeeded and has no reason to open the sessions list, which is the only remaining way to revoke it. Identical outcome for enabling and disabling 2FA.",
       "evidence": "Server/api/profile_handler.go:442\n\t\tif res.RevokeFailed {\n\t\t\t// Partial success: the password IS changed; only revoking the\n\t\t\t// other sessions failed. ...\n\t\t\twriteJSON(w, http.StatusOK, map[string]any{\n\t\t\t\t\"warning\":          \"password changed, but other sessions could not be revoked; revoke them from the sessions list\",\n\t\t\t\t\"sessions_revoked\": res.SessionsRevoked,\n\t\t\t})\n\nClient/src/lib/api.ts:372\n    changePassword(currentPassword, newPassword, signal?): Promise<void> {\n      return request<void>(\"PUT\", \"/users/me/password\",\n        { old_password: currentPassword, new_password: newPassword }, signal);\n    },\n\nClient/src/pages/MainPage.ts:498\n          await api.changePassword(oldPassword, newPassword);\n          showToast(\"Password changed successfully\", \"success\");\n\nSame shape at MainPage.ts:558-560 (confirmTotp -> \"Two-factor authentication enabled\") and MainPage.ts:569-571 (disableTotp -> \"Two-factor authentication disabled\"), against Server/api/totp_handler.go:359-370 and :460-471.\n\ndoFetch does receive the body — only 204 short-circuits:\nClient/src/lib/api.ts:173\n    if (res.status === 204) { return undefined as T; }\n    return res.json() as Promise<T>;",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-08-22",
       "hunt": "general-2026-08-22-b",
       "lens": "error-paths",
       "suggestedFix": "Give the three partial-success endpoints a body type instead of void and surface it in one place. In Client/src/lib/api.ts, declare `type PartialSuccess = { warning?: string; sessions_revoked?: number } | undefined;` and change changePassword/confirmTotp/disableTotp to `request<PartialSuccess>(...)`. Then in the three MainPage.ts handlers use the returned value for the toast, e.g. `const res = await api.changePassword(old, new_); showToast(res?.warning ?? \"Password changed successfully\", res?.warning ? \"warning\" : \"success\");` (and the analogous two lines at :558 and :569). No server change is needed.",
       "confidence": "high",
-      "finder": "opus"
+      "finder": "opus",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "b9ddb5a",
+        "test": "Client/tests/unit/main-page.test.ts",
+        "revertProof": "pass"
+      }
     },
     {
       "id": "OC-0315",

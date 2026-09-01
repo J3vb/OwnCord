@@ -5,11 +5,13 @@
 by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
-**Status:** PLANNED 2026-09-01 — plan PR open; no step started. Entry-gate
-items 1 and 2 are met; item 3 is not evidenced and opens as B4-0 (the B3-0
-precedent). The owner decisions listed below block the steps that name them.
-_Update this line — not only the step table — as steps land; the
-[README.md](README.md) row is the status authority._
+**Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
+**B4-12 batch (b), client half, opened 2026-09-01** (branch
+`fix/b4-12b-partial-success`; evidence in the B4-12 section — OC-0314 fixed
+test-first, revert-proofs pass; OC-0354 waits on owner question 8). The
+owner decisions listed below block the steps that name them. _Update this
+line — not only the step table — as steps land; the [README.md](README.md)
+row is the status authority._
 
 Primary inputs:
 
@@ -687,6 +689,37 @@ true. The client unit suite stays green and no assertion is weakened
 Exit: all eight B4-tagged rows `fixed` in the ledger (or re-tagged with a
 written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
+
+**Evidence, 2026-09-01 — batch (b), client half, OC-0314** — branch
+`fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` (number
+recorded below once opened). Fix commit `b9ddb5a`; ledger record flipped in
+the follow-up on the same branch (`fix.commit = b9ddb5a`,
+`revertProof = pass`). OC-0354 stays open: where `totp_enabled` travels
+(the `auth_ok` user or the profile response) is owner question 8's field
+placement, and it lands as the batch's second PR once decided.
+
+- **OC-0314:** the three credential-change calls (`changePassword`,
+  `confirmTotp`, `disableTotp`) are typed `PartialSuccessResponse |
+undefined` and hand back the 200 body; `showChangeOutcomeToast`
+  (`lib/toast.ts`) shows the server's warning as a `warning` toast for 12 s
+  (a new `ToastType` with its `.toast-warning` rule) or the plain success
+  message; MainPage's three handlers use it. No server change.
+- **Tests:** `api.test.ts` (204 → `undefined`, 200 → the body, for all
+  three), `toast-coverage.test.ts` (the warning wins, 204 → success, an
+  empty warning → success; four toast types forwarded), `toast.test.ts`
+  (the type class on the element), `main-page.test.ts` (the real settings
+  overlay's password form → `changePassword` answers the warning body → a
+  `.toast-warning` carrying the server's text and no success toast).
+  Revert-proof: with the six source files reverted the helper and MainPage
+  tests fail and `tsc` rejects the old `void` signatures; the API
+  passthrough tests hold either way (the body was always returned — the
+  type threw it away), which is why the MainPage-level test exists.
+- **Gates:** `tsc --noEmit`; `oxlint src/` (the two pre-existing
+  `messages.store.ts` warnings, unrelated); `eslint` on the changed files;
+  prettier check; the full client unit suite green — 191 files, 5256
+  tests, no assertion weakened. `check:docs` counts move to 330 fixed /
+  49 open on this branch (B4-3 and batches (a) and (d) move the same
+  lines; whichever merges later re-derives).
 
 ## Exit gate
 
