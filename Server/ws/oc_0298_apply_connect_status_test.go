@@ -55,17 +55,18 @@ func TestApplyConnectStatus_DoesNotStampStatusWhenDBWriteFails(t *testing.T) {
 
 	c := newClient(nil, nil, pre, "tokenhash", 0, ctx)
 
-	// A canceled context makes the UpdateUserStatus write fail deterministically
+	// A canceled context makes the status write fail deterministically
 	// (database/sql refuses to start an exec against an already-canceled
-	// context) without needing a mock DB — applyConnectStatus takes a
-	// concrete *db.DB, not an interface.
+	// context) without needing a fake seam — the point of the row is the
+	// hub's handling of a failed stamp, so drive it through a real one.
 	failCtx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	applyConnectStatus(failCtx, database, c)
+	h := newTestHub(t, database, nil, nil)
+	h.applyConnectStatus(failCtx, c)
 
 	if c.user.Status != db.StatusOffline {
-		t.Fatalf("c.user.Status = %q after a failed UpdateUserStatus, want unchanged %q — "+
+		t.Fatalf("c.user.Status = %q after a failed connect stamp, want unchanged %q — "+
 			"applyConnectStatus must not stamp a new status that was never persisted "+
 			"(auth_ok and the presence broadcast would otherwise claim a value "+
 			"users.status disagrees with)",

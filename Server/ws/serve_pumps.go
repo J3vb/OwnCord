@@ -183,12 +183,12 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				// included, so this path needs no invisible mapping. The row,
 				// however, keeps a *chosen* status (idle/dnd/invisible)
 				// standing — that is what the next connect reads to avoid
-				// stamping the user back online. MarkUserDisconnected clears
+				// stamping the user back online. StampDisconnect clears
 				// only the non-choice "online" and refreshes last_seen; the
 				// stale-choice problem it would otherwise create is handled at
 				// read time, where a member with no live connection renders
 				// offline no matter what the column says.
-				_ = hub.readers.Disconnect.MarkUserDisconnected(cleanupCtx, c.userID)
+				_ = hub.presence.StampDisconnect(cleanupCtx, c.userID)
 				// custom_status is nil, not c.user.CustomStatus: that field is a
 				// snapshot taken once at auth (client.go) and never updated, so
 				// broadcasting it here would resurrect a status the user changed

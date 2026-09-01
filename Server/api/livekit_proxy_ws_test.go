@@ -265,7 +265,7 @@ func newBareHub(t *testing.T, lk *ws.LiveKitClient) *ws.Hub {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database)})
+	hub, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database), Presence: service.NewUserService(database)})
 	if err != nil {
 		t.Fatalf("ws.NewHub: %v", err)
 	}

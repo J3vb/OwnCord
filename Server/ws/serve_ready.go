@@ -468,7 +468,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// Settle the session's status before buildReady reads the member list, so
 	// the ready payload and the presence broadcast below cannot disagree.
-	applyConnectStatus(ctx, h.db, c)
+	h.applyConnectStatus(ctx, c)
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)

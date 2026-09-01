@@ -437,3 +437,44 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 	}
 	return user, roleName, nil
 }
+
+// ── Connection lifecycle stamps (B3-8 connection family) ────────────────────
+//
+// The two writes a WebSocket session makes about itself: the status it comes
+// online as, and the offline stamp when its last pump exits. They are a pair
+// on purpose — the second is only correct because of what the first chose to
+// preserve.
+
+// StampConnect writes the status this session comes online as and returns it.
+//
+// It is db.ConnectStatus(saved), not a flat "online": stamping online on every
+// connect is what made a saved Do Not Disturb — and, before this phase, an
+// "appear offline" — flash back to online on every reconnect, with the client
+// racing to re-assert its choice afterwards. idle/dnd/invisible are deliberate
+// choices and survive; anything else becomes online. The write still happens
+// when the status is unchanged, because it also refreshes last_seen.
+//
+// The caller must not cache the returned status unless the error is nil: a
+// value the users row disagrees with is exactly the divergence OC-0298 is
+// about.
+func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
+	status := db.ConnectStatus(savedStatus)
+	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+		return "", fmt.Errorf("%w: failed to stamp connect status: %w", ErrInternal, err)
+	}
+	return status, nil
+}
+
+// StampDisconnect records that the user has no live connection left.
+//
+// It clears only the non-choice "online" and refreshes last_seen; a chosen
+// idle/dnd/invisible is left standing, which is what StampConnect reads back
+// on the next connect. The stale-choice that leaves behind is handled at read
+// time instead: a member with no live connection renders offline whatever the
+// column says.
+func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
+	if err := s.st.MarkUserDisconnected(ctx, userID); err != nil {
+		return fmt.Errorf("%w: failed to stamp disconnect: %w", ErrInternal, err)
+	}
+	return nil
+}

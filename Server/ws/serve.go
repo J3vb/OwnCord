@@ -72,7 +72,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) h
 		// try to replay missed events from the ring buffer instead of
 		// sending a full ready payload.
 		if lastSeq > 0 {
-			if handled, shouldStartPumps := hub.handleReconnect(ctx, conn, c, database, lastSeq); handled {
+			if handled, shouldStartPumps := hub.handleReconnect(ctx, conn, c, lastSeq); handled {
 				if shouldStartPumps {
 					startPumps()
 				}
@@ -148,23 +148,18 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	return nil
 }
 
-// applyConnectStatus writes the status this session comes online as and caches
-// it on the client.
-//
-// It is db.ConnectStatus(saved) rather than a flat "online": stamping online on
-// every connect is what made a saved Do Not Disturb — and, before this phase,
-// an "appear offline" — flash back to online on every reconnect, with the
-// client racing to re-assert its choice afterwards. idle/dnd/invisible are
-// deliberate choices and survive; anything else becomes online. The write still
-// happens when the status is unchanged, because UpdateUserStatus also refreshes
-// last_seen.
+// applyConnectStatus stamps the status this session comes online as and caches
+// it on the client. Which status that is belongs to the presence seam
+// (UserService.StampConnect: a saved idle/dnd/invisible survives a reconnect,
+// anything else becomes online); what stays here is what the hub does with the
+// answer.
 //
 // It runs BEFORE the ready payload is built so the member list the client is
 // handed already agrees with the presence broadcast that follows it.
-func applyConnectStatus(ctx context.Context, database *db.DB, c *Client) {
-	status := db.ConnectStatus(c.user.Status)
-	if updateErr := database.UpdateUserStatus(ctx, c.userID, status); updateErr != nil {
-		slog.Warn("ws UpdateUserStatus", "err", updateErr)
+func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
+	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
+	if err != nil {
+		slog.Warn("ws StampConnect", "err", err)
 		// Do not stamp c.user.Status on a failed write: it would make the
 		// auth_ok reply and the presence broadcast below both claim a value
 		// that users.status disagrees with, and buildReady's ListMembers read

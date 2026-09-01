@@ -37,6 +37,9 @@ func newTestHubWith(tb testing.TB, opts ws.HubOptions) *ws.Hub {
 	if opts.Voice == nil && opts.DB != nil {
 		opts.Voice = service.NewVoiceService(opts.DB)
 	}
+	if opts.Presence == nil && opts.DB != nil {
+		opts.Presence = service.NewUserService(opts.DB)
+	}
 	h, err := ws.NewHub(opts)
 	if err != nil {
 		tb.Fatalf("ws.NewHub: %v", err)

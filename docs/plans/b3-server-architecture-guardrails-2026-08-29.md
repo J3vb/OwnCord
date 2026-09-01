@@ -2152,6 +2152,52 @@ joinedAt)` the caller snapshotted, because a member who rejoined between
   of at a write the handler may never reach — a change in failure mode this
   refactor has no business making.
 
+**Evidence — connection family, 2026-09-01** — branch
+`feat/b3-8-voice-family` (same branch as the voice family, second commit;
+the two are one PR because the connection family's changes land in files the
+voice family had just touched). Two rows:
+
+- **The session's two status writes are a pair, and they move together.**
+  `UserService.StampConnect` owns which saved status survives a reconnect —
+  idle/dnd/invisible are deliberate choices and stand; anything else, "offline"
+  included, becomes online, because offline is also what a disconnect writes
+  and so carries no intent. `StampDisconnect` is the other half: it clears only
+  the non-choice "online", which is precisely what leaves `StampConnect`
+  something to read back. Pinning them apart would let either drift into "every
+  session comes online as online", the flash-online bug the invisible status
+  exists to kill; `service/user_presence_stamps_test.go` therefore drives the
+  disconnect/reconnect cycle end to end rather than testing each write alone.
+  Revert-proved: stamping a flat `db.StatusOnline` fails three rows at once
+  (`StampConnect("invisible") = "online", want "invisible"`).
+- **`readers.go` splits by who backs the seam.** `DisconnectMarker` (added one
+  PR earlier, backed by `*db.DB`) becomes `PresenceStamper`, backed by
+  `UserService`, and leaves `HubReaders` — which now holds only the four
+  handle-backed read seams, exactly the set `DBReaders` can wire. The
+  service-backed collaborators (`Settings`, `Voice`, `Presence`) are their own
+  required `HubOptions` fields, so "what `DBReaders` can supply" and "what the
+  hub needs" can no longer quietly diverge. `TestNewHub_RequiredCollaborators`
+  gains the missing-`Presence` case and its partial-bundle case moves to a seam
+  that still exists.
+- **The resume path stops taking a handle.** `handleReconnect` and
+  `reconnectPrecheck` took `database *db.DB` from `ServeWS` and passed it to two
+  helpers that already accept the seam. They now bind `h.readers.Visibility`
+  internally — the same fix a review raised on the channel family's part 3
+  (a caller-supplied handle means an instrumented or service-backed reader can
+  never actually intercept the read). `applyConnectStatus` becomes a hub method
+  over `PresenceStamper`, keeping the OC-0298 rule (never cache a status the
+  row did not receive) at the call site, where `c.user` is.
+- **Allowlist diff**: `ws/replay.go` `move` → `adapter` (type-only —
+  `db.PersistedEvent` in the cold-tier filter). `ws/serve.go` keeps a `move`
+  row but changes **family** `connection` → `auth`: what is left is the handle
+  `ServeWS` threads to `upgradeAndAuth`, which is the auth family's handshake.
+  **`connection` leaves the move targets**: 10 → 9 `move`, 32 → 33 `adapter`,
+  and **every remaining row is now one family**. Service floor 70.2 → 70.3.
+- **One row that moved out of its family early**: `ws/serve_auth.go`'s
+  failed-handshake teardown called `h.db.MarkUserDisconnected` directly. It is
+  an auth-family file, but that call is the connection lifecycle's write, so it
+  goes through the seam here rather than waiting — the auth family inherits one
+  less thing.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

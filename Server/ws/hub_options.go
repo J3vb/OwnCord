@@ -52,6 +52,11 @@ type HubOptions struct {
 	// default it to a service over the test database.
 	Voice VoiceStore
 
+	// Presence is required: the connection lifecycle's two status writes.
+	// Production passes Services.Users; test helpers default it to a service
+	// over the test database.
+	Presence PresenceStamper
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -96,6 +101,9 @@ func validateHubOptions(opts HubOptions) error {
 	if opts.Voice == nil {
 		return errors.New("ws: HubOptions.Voice is required (every voice path reads and writes through it)")
 	}
+	if opts.Presence == nil {
+		return errors.New("ws: HubOptions.Presence is required (the connect and disconnect status stamps go through it)")
+	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
 		return errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
@@ -127,6 +135,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		settings:        settingsReader,
 		readers:         opts.Readers,
 		voice:           opts.Voice,
+		presence:        opts.Presence,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),
