@@ -375,6 +375,23 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 	return nil
 }
 
+// RevokeAllSessions is sign-out-everywhere (B4-7, BG-08): every session of
+// the user goes, the caller's own included, so a stolen token anywhere stops
+// working now and the caller re-authenticates. Returns how many were
+// revoked; zero is not an error (an API-token principal has none).
+func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
+	n, err := s.st.DeleteUserSessions(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
+	}
+	// Audit rows must survive a request canceled after the delete committed.
+	// The row names the account and the count, never a token or a device.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
+		fmt.Sprintf("signed out everywhere (%d sessions revoked)", n))
+	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n)
+	return n, nil
+}
+
 // ─── Admin-panel reads (B3-8 user family) ────────────────────────────────────
 //
 // The admin panel's user section reads through these rather than the handle:

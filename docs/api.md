@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 121 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 122 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -134,6 +134,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/users/me/`                                                  |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | PUT     | `/api/v1/users/me/password`                                          |
+| DELETE  | `/api/v1/users/me/sessions`                                          |
 | GET     | `/api/v1/users/me/sessions`                                          |
 | DELETE  | `/api/v1/users/me/sessions/{id}`                                     |
 | DELETE  | `/api/v1/users/me/totp`                                              |
@@ -674,6 +675,30 @@ Revoke one of the authenticated user's sessions by ID.
 **Auth:** Required
 
 #### Response 204 No Content
+
+---
+
+### DELETE /api/v1/users/me/sessions
+
+Sign out everywhere: revoke every session of the authenticated account,
+the current one included. The caller's token stops working with this
+response, so the client re-authenticates rather than treating the next 401
+as an error. Never touches another account's sessions. Writes a
+`session_revoke_all` audit row naming the account and the count.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "sessions_revoked": 3,
+  "current_session_revoked": true
+}
+```
+
+`current_session_revoked` is `false` only for an API-token principal, which
+holds no session of its own.
 
 ---
 

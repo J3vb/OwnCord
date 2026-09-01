@@ -5,11 +5,12 @@
 by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
-**Status:** PLANNED 2026-09-01 — plan PR open; no step started. Entry-gate
-items 1 and 2 are met; item 3 is not evidenced and opens as B4-0 (the B3-0
-precedent). The owner decisions listed below block the steps that name them.
-_Update this line — not only the step table — as steps land; the
-[README.md](README.md) row is the status authority._
+**Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
+**B4-7 (sign-out-everywhere half) opened 2026-09-01** (branch
+`feat/b4-7-sessions`; evidence block in its section). The new-login signal
+half waits on owner question 8. The owner decisions listed below block the
+steps that name them. _Update this line — not only the step table — as
+steps land; the [README.md](README.md) row is the status authority._
 
 Primary inputs:
 
@@ -499,6 +500,36 @@ Blocked on owner question 8 for the signal's transport only.
 Exit: sign-out-everywhere green with the two-account proof; the new-login
 contract live and fixture-covered in its chosen transport; BG-08's server
 half done (UI remains B9).
+
+**Evidence, 2026-09-01 — sign-out-everywhere half** — branch
+`feat/b4-7-sessions` from `dev` `aabac60`; PR to `dev` (number recorded
+below once opened). The new-login signal half waits on owner question 8
+and lands as a second PR under this step; BG-08's server half completes
+then.
+
+- **Contract:** `DELETE /api/v1/users/me/sessions` revokes every session
+  of the calling account, the current one included, and answers `200`
+  `{"sessions_revoked": n, "current_session_revoked": true}` (false only
+  for an API-token principal, which holds no session) — the explicit note
+  the plan asked for, so the client re-authenticates instead of treating
+  the next 401 as an error. Backed by a dedicated `DeleteUserSessions`
+  query (sessions.sql, sqlc regenerated) and `UserService.RevokeAllSessions`,
+  which writes the `session_revoke_all` audit row naming the account and
+  the count, never a token or device (`TestAuditCoverage_ServiceMutations`
+  gained the row and the detail denylist covers it).
+- **Two-account proof:** `TestRevokeAllSessions_OnlyTheCallersAccount`
+  interleaves two accounts' sessions in creation order, signs one out
+  everywhere, and requires exactly that account's sessions gone (both,
+  the current one included), the other account's two untouched, and the
+  caller's token refused afterwards; `TestRevokeAllSessions_Unauthorized`
+  pins the anonymous 401 (the B4-2 posture walk will see the route as
+  session-gated when the branches meet).
+- **Docs:** `api.md` (route index regenerated to 122 routes; endpoint
+  prose), `security.md` (audit list), `trust-model.md` ("Multi-device
+  sessions" gains the bullet).
+- **Gates:** `gofmt`, `go vet`, `go test -race` on `api`, `service`, `db`
+  green; the pinned `golangci-lint` v2.11.3 (local build) 0 issues; `gendocs`
+  regenerated; prettier and `check:docs` green.
 
 ## B4-8 — Local diagnostics, support-bundle contract, no-telemetry proof
 

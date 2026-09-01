@@ -132,6 +132,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		}
 
 		r.Get("/sessions", handleListSessions(svc))
+		r.Delete("/sessions", handleRevokeAllSessions(svc))
 		r.Delete("/sessions/{id}", handleRevokeSession(svc))
 	})
 }
@@ -558,6 +559,40 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// revokeAllSessionsResponse is the JSON shape returned by
+// DELETE /api/v1/users/me/sessions: the count, and an explicit note that the
+// caller's own session was among them, so the client knows to re-authenticate
+// rather than treat the next 401 as an error.
+type revokeAllSessionsResponse struct {
+	SessionsRevoked int64 `json:"sessions_revoked"`
+	CurrentRevoked  bool  `json:"current_session_revoked"`
+}
+
+// handleRevokeAllSessions processes DELETE /api/v1/users/me/sessions —
+// sign-out-everywhere. The current session is revoked with the rest.
+func handleRevokeAllSessions(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "not authenticated",
+			})
+			return
+		}
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
+
+		n, err := svc.Users.RevokeAllSessions(r.Context(), user.ID)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, revokeAllSessionsResponse{
+			SessionsRevoked: n,
+			CurrentRevoked:  sess != nil,
+		})
 	}
 }
 
