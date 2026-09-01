@@ -59,6 +59,7 @@ func newTestServices(database *db.DB) *service.Services {
 		Settings:   newTestSettingsService(database),
 		Channels:   newTestChannelService(database),
 		Users:      service.NewUserService(database),
+		Tokens:     service.NewTokenService(database),
 	}
 }
 

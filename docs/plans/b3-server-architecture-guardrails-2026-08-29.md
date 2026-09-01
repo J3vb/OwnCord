@@ -2198,6 +2198,47 @@ voice family had just touched). Two rows:
   goes through the seam here rather than waiting — the auth family inherits one
   less thing.
 
+**Evidence — auth family, token sub-family, 2026-09-01** — branch
+`feat/b3-8-auth-family`. The auth family is the last one, and its nine rows
+split into three sub-families by what they actually do; this is the first.
+
+- **The duplication was the point.** API-token minting lived twice: the admin
+  panel's Owner-gated routes and `server token …`, the bootstrap CLI that must
+  work with no credential at all. Both wrapped the same `db.*APIToken` calls,
+  and the copies had already drifted — only the CLI could revoke by label, and
+  the two attributed their audit rows differently. `service.TokenService` is
+  now the one implementation, and each difference that survives is written down
+  as part of the contract rather than left as an accident of which copy a
+  change happened to land in.
+- **What the service decides**, each pinned by `service/token_test.go`:
+  - `Bind` keeps **two** refusals apart — `ErrNotFound` for a username that
+    does not exist, `ErrNoOwnerAccount` for "there is no owner yet". The CLI
+    has always printed different messages because the operator's remedy
+    differs; one sentinel would have flattened them. A lookup _failure_ is
+    `ErrInternal`, never `ErrNoOwnerAccount` — reporting a database outage as
+    "no owner exists" would send an operator to create a second owner account.
+  - A blank label is refused: the label is how a token is found again in
+    `list` and in revoke-by-label, so an unlabelled token is unfindable.
+  - A lifetime over ten years is **refused, not clamped** — silently minting a
+    ten-year credential instead would hide the caller's bug. The cap is a
+    policy bound and says so: the overflow it does _not_ guard against
+    (`time.Duration(n) * time.Hour` wrapping into a past instant, minting a
+    token born expired) has to be stopped where the untrusted integer is
+    parsed, which is what the admin route's `0..87600` check on its int does.
+  - `Revoke` reports `ErrNotFound` for an **already-revoked** token, so a
+    second call is not a second success a script could report as a revoke it
+    did not perform. `RevokeByLabel` takes **every** match, because labels are
+    not unique and the duplicate left active would be the one that matters.
+  - The raw token is returned once and only its hash is stored; the row is
+    asserted to be exactly `auth.HashToken(raw)`.
+- **Allowlist diff**: `admin/handlers_tokens.go`'s row is **deleted** — it
+  stopped importing `db` entirely, the second file to leave the table after
+  the role family's. `token_cli.go` becomes `boundary`: a bootstrap CLI
+  legitimately opens, migrates and closes its own handle even once it makes no
+  query of its own, which is the same disposition `cmd/seed/main.go` carries.
+  9 → 7 `move`, 17 → 18 `boundary`, and the table drops from 59 rows to 58.
+  Service floor 70.3 → 71.0.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

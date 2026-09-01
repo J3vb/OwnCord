@@ -162,13 +162,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// API tokens — Owner-only. Minting a network-reachable, revocation-
 		// surviving bearer credential is gated like backups/updates.
 		r.Get("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleListAPITokens(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleListAPITokens(svc.Tokens)).ServeHTTP(w, req)
 		}))
 		r.Post("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleCreateAPIToken(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleCreateAPIToken(svc.Tokens)).ServeHTTP(w, req)
 		}))
 		r.Delete("/tokens/{id}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(handleRevokeAPIToken(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(handleRevokeAPIToken(svc.Tokens)).ServeHTTP(w, req)
 		}))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))

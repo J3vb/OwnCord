@@ -2,16 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strconv"
 	"text/tabwriter"
-	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // runTokenCLI implements `server token <create|list|revoke>`. It operates
@@ -47,13 +47,18 @@ func runTokenCLI(args []string) int {
 	}
 
 	ctx := context.Background()
+	// The CLI holds the handle (it opens and migrates its own database) but
+	// makes no query of its own: the three subcommands are adapters over the
+	// same TokenService the admin panel uses, which is what keeps the two from
+	// drifting apart again.
+	tokens := service.NewTokenService(database)
 	switch args[0] {
 	case "create":
-		return tokenCreate(ctx, database, args[1:])
+		return tokenCreate(ctx, tokens, args[1:])
 	case "list":
-		return tokenList(ctx, database, args[1:])
+		return tokenList(ctx, tokens, args[1:])
 	case "revoke":
-		return tokenRevoke(ctx, database, args[1:])
+		return tokenRevoke(ctx, tokens, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown token subcommand %q\n", args[0])
 		tokenUsage()
@@ -76,7 +81,7 @@ Commands:
 `)
 }
 
-func tokenCreate(ctx context.Context, database *db.DB, args []string) int {
+func tokenCreate(ctx context.Context, tokens *service.TokenService, args []string) int {
 	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
 	label := fs.String("label", "", "human-readable label (required)")
 	username := fs.String("user", "", "username to bind the token to (default: owner)")
@@ -89,69 +94,52 @@ func tokenCreate(ctx context.Context, database *db.DB, args []string) int {
 		return 2
 	}
 
-	var user *db.User
-	var err error
-	if *username != "" {
-		user, err = database.GetUserByUsername(ctx, *username)
-	} else {
-		user, err = database.GetOwnerUser(ctx)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: look up user: %v\n", err)
+	// The audit row is attributed to the token's bound user, not to an
+	// operator: this command runs with no credential at all (it is the
+	// bootstrap path), so there is no actor identity to record. The panel's
+	// route, which does have one, records that instead.
+	minted, err := tokens.Create(ctx, 0, *username, *label, *expires)
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		fmt.Fprintf(os.Stderr, "error: no user named %q\n", *username)
 		return 1
-	}
-	if user == nil {
-		if *username != "" {
-			fmt.Fprintf(os.Stderr, "error: no user named %q\n", *username)
-		} else {
-			fmt.Fprintln(os.Stderr, "error: no users exist yet — create the owner account first")
-		}
+	case errors.Is(err, service.ErrNoOwnerAccount):
+		fmt.Fprintln(os.Stderr, "error: no users exist yet — create the owner account first")
 		return 1
-	}
-
-	raw, err := auth.GenerateToken()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: generate token: %v\n", err)
-		return 1
-	}
-	var expiresAt *time.Time
-	if *expires > 0 {
-		t := time.Now().Add(*expires)
-		expiresAt = &t
-	}
-	id, err := database.CreateAPIToken(ctx, user.ID, auth.HashToken(raw), *label, expiresAt)
-	if err != nil {
+	case errors.Is(err, service.ErrBadRequest):
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	case err != nil:
 		fmt.Fprintf(os.Stderr, "error: create token: %v\n", err)
 		return 1
 	}
-	db.WriteAudit(ctx, database, user.ID, "api_token_create", "api_token", id, *label)
 
 	// Metadata to stderr, raw token alone to stdout — so `... | tail -1` or a
 	// capture pipe gets exactly the token.
-	fmt.Fprintf(os.Stderr, "Created API token #%d for user %q (label %q).\n", id, user.Username, *label)
+	fmt.Fprintf(os.Stderr, "Created API token #%d for user %q (label %q).\n", minted.ID, minted.User.Username, minted.Label)
 	fmt.Fprintln(os.Stderr, "Store this token now — it is shown only once:")
-	fmt.Println(raw)
+	fmt.Println(minted.Raw)
 	return 0
 }
 
-func tokenList(ctx context.Context, database *db.DB, args []string) int {
+func tokenList(ctx context.Context, tokens *service.TokenService, args []string) int {
 	fs := flag.NewFlagSet("token list", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	tokens, err := database.ListAPITokens(ctx)
+	list, err := tokens.List(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: list tokens: %v\n", err)
 		return 1
 	}
-	if len(tokens) == 0 {
+	if len(list) == 0 {
 		fmt.Println("no API tokens")
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	// Buffer-write errors surface via tw.Flush() below, which is checked.
 	_, _ = fmt.Fprintln(tw, "ID\tUSER\tLABEL\tCREATED\tLAST USED\tEXPIRES\tREVOKED")
-	for _, t := range tokens {
+	for _, t := range list {
 		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			t.ID, t.Username, t.Label, t.CreatedAt,
 			orDash(t.LastUsed), orDash(t.ExpiresAt), orDash(t.RevokedAt))
@@ -163,7 +151,7 @@ func tokenList(ctx context.Context, database *db.DB, args []string) int {
 	return 0
 }
 
-func tokenRevoke(ctx context.Context, database *db.DB, args []string) int {
+func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []string) int {
 	fs := flag.NewFlagSet("token revoke", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -175,25 +163,26 @@ func tokenRevoke(ctx context.Context, database *db.DB, args []string) int {
 	}
 	arg := rest[0]
 
-	var affected int64
-	var err error
+	// An argument that parses as an integer is an id; anything else is a
+	// label. Revoking by label is the CLI's own form — an operator recovering
+	// a compromised credential knows what they typed, not the row id.
+	var (
+		affected int64
+		err      error
+	)
 	if id, perr := strconv.ParseInt(arg, 10, 64); perr == nil {
-		affected, err = database.RevokeAPIToken(ctx, id)
-		if err == nil && affected > 0 {
-			db.WriteAudit(ctx, database, 0, "api_token_revoke", "api_token", id, arg)
+		if err = tokens.Revoke(ctx, 0, id); err == nil {
+			affected = 1
 		}
 	} else {
-		affected, err = database.RevokeAPITokenByLabel(ctx, arg)
-		if err == nil && affected > 0 {
-			db.WriteAudit(ctx, database, 0, "api_token_revoke", "api_token", 0, arg)
-		}
+		affected, err = tokens.RevokeByLabel(ctx, 0, arg)
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: revoke token: %v\n", err)
-		return 1
-	}
-	if affected == 0 {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
 		fmt.Fprintf(os.Stderr, "no active token matched %q\n", arg)
+		return 1
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "error: revoke token: %v\n", err)
 		return 1
 	}
 	fmt.Printf("revoked %d token(s)\n", affected)
