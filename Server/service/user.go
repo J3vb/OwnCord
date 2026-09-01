@@ -374,3 +374,66 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
 	return nil
 }
+
+// ─── Admin-panel reads (B3-8 user family) ────────────────────────────────────
+//
+// The admin panel's user section reads through these rather than the handle:
+// the server-stats tile, the paginated member table, and the single-user
+// lookups the PATCH flow does before and after its mutations. The mutations
+// themselves already belong to ModerationService and RoleService, so what is
+// left here is exactly the reads.
+
+// ServerStats returns the counters the admin dashboard renders. The live
+// connection count is not among them — that is hub state, not a row, and the
+// caller stamps it after this returns.
+func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) {
+	stats, err := s.st.GetServerStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get stats: %w", ErrInternal, err)
+	}
+	return stats, nil
+}
+
+// ListAll returns one page of users with their role names, newest first. The
+// caller bounds limit and offset; this does not re-bound them, so an unbounded
+// caller stays the caller's bug rather than becoming a silent truncation here.
+func (s *UserService) ListAll(ctx context.Context, limit, offset int) ([]db.UserWithRole, error) {
+	users, err := s.st.ListAllUsers(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list users: %w", ErrInternal, err)
+	}
+	return users, nil
+}
+
+// Get resolves one user, reporting a missing row as ErrNotFound rather than
+// (nil, nil) — every admin caller has to distinguish "no such user" (404) from
+// "the lookup failed" (500), and the raw wrapper's nil-nil made that the
+// caller's job to remember.
+func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
+	user, err := s.st.GetUserByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user not found%.0w", ErrNotFound)
+	}
+	return user, nil
+}
+
+// GetWithRoleName is Get plus the display name of the user's role, which the
+// admin user response carries. The role name is best-effort on purpose: a user
+// whose role row is missing or unreadable is still a user the panel must be
+// able to show and act on, so the name comes back empty rather than failing
+// the whole read — the same posture the response builder had when it made this
+// lookup itself.
+func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, string, error) {
+	user, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	roleName := ""
+	if role, roleErr := s.st.GetRoleByID(ctx, user.RoleID); roleErr == nil && role != nil {
+		roleName = role.Name
+	}
+	return user, roleName, nil
+}

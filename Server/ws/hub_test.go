@@ -698,6 +698,15 @@ func TestNewHub_RequiredCollaborators(t *testing.T) {
 	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings}); err == nil {
 		t.Fatal("NewHub without the reader seams must error")
 	}
+	// A PARTIAL seam set is refused too, not just an absent one: the bundle is
+	// validated seam by seam, so a family that adds a seam cannot leave an
+	// older construction site silently handing the hub a nil it will
+	// dereference on the first connection that needs it.
+	partial := ws.DBReaders(database)
+	partial.Disconnect = nil
+	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: partial}); err == nil {
+		t.Fatal("NewHub with an incomplete reader bundle must error")
+	}
 	if _, err := ws.NewHub(ws.HubOptions{DB: database, Limiter: auth.NewRateLimiter(), Settings: settings, Readers: ws.DBReaders(database), ReplayRingSize: -1}); err == nil {
 		t.Fatal("NewHub with a negative replay ring must error")
 	}

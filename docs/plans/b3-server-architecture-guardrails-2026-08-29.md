@@ -2046,6 +2046,44 @@ Deleted:true`).
   fixes live inside `db/` and `service/`, the two layers that may import
   `db` freely.
 
+**Evidence — user family, 2026-09-01** — branch `feat/b3-8-user-family`
+from `dev` `a6fca0c`. Two rows, one on each side of the process:
+
+- **The admin panel's reads** (`admin/handlers_users.go`) — the stats tile,
+  the paginated member table and the two single-user lookups the PATCH flow
+  makes around its mutations — go behind `UserService`: `ServerStats`,
+  `ListAll`, `Get` and `GetWithRoleName`. Two contracts moved with them and
+  are pinned at the seam: a missing user is `ErrNotFound` rather than the
+  raw wrapper's `(nil, nil)` that every caller had to remember to check, and
+  the role name on a user response is best-effort — a user whose role row is
+  gone is still returned, because the panel must be able to see and fix
+  exactly that user. `admin/types.go`'s response builder loses the
+  `GetRoleByID` it made itself; the mutations were already
+  ModerationService's and RoleService's, so the reads were all that was left.
+- **The connection teardown's one write** (`ws/serve_pumps.go`) — stamping
+  the user offline when their last pump exits — goes through a new
+  `DisconnectMarker` seam in `ws/readers.go`, deliberately its own interface
+  rather than a method on a reader because it writes. `HubReaders` gains it
+  as a required field, and `TestNewHub_RequiredCollaborators` now also
+  refuses a _partial_ bundle, so a future family adding a seam cannot leave
+  an older construction site handing the hub a nil to dereference on the
+  first connection that needs it.
+- **The admin constructor stops growing.** `NewAdminAPI` took its services as
+  four positional parameters; every family that moved an admin handler added
+  one, and the auth family would have added a fifth to a 12-parameter
+  signature with ~210 call sites. It takes the `*service.Services` the caller
+  already holds instead. A nil bundle, or a nil service inside one, stays the
+  fail-closed case the handlers already implement — the rows that pin that
+  behaviour construct exactly that and still pass.
+- **Allowlist diff**: both rows `move` → `adapter` (`handlers_users.go` keeps
+  `UserWithRole`/`User`/`Role` in its response shapes; `serve_pumps.go` keeps
+  the pure `StatusOffline` const). **`user` leaves the move targets**: 14 →
+  12 `move`, 28 → 30 `adapter`. Remaining: auth 7, connection 2, voice 3.
+- **Characterization**: the admin user suite is unchanged apart from the
+  mechanical constructor sweep; `service/user_admin_reads_test.go` adds the
+  not-found, orphaned-role, pagination, hub-count-is-the-caller's and
+  fail-loud rows.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".

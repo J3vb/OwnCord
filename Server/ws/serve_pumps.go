@@ -188,7 +188,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				// stale-choice problem it would otherwise create is handled at
 				// read time, where a member with no live connection renders
 				// offline no matter what the column says.
-				_ = hub.db.MarkUserDisconnected(cleanupCtx, c.userID)
+				_ = hub.readers.Disconnect.MarkUserDisconnected(cleanupCtx, c.userID)
 				// custom_status is nil, not c.user.CustomStatus: that field is a
 				// snapshot taken once at auth (client.go) and never updated, so
 				// broadcasting it here would resurrect a status the user changed

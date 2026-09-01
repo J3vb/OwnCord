@@ -17,7 +17,7 @@ import (
 // (A-2026-08-02).
 func TestS04_DMAndMissingChannelAnswerIdentically(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	dmID, err := database.CreateChannel(context.Background(), "", "dm", "", "", 0)

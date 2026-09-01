@@ -18,7 +18,7 @@ import (
 // routes through it.
 func TestS03_AdminChannelWritesFollowTheContract(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	t.Run("name over the rune cap is refused", func(t *testing.T) {

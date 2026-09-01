@@ -23,7 +23,7 @@ import (
 func newChannelTestAPI(t *testing.T) (http.Handler, string, *db.DB) {
 	t.Helper()
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	return handler, createAdminUser(t, database), database
 }
 
@@ -352,7 +352,7 @@ func TestPatchChannel_RejectedPatchWritesNothing(t *testing.T) {
 func TestPatchChannel_BroadcastCarriesFeatureFlags(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database), newTestRoleService(database), newTestSettingsService(database), newTestChannelService(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	id := newChannel(t, handler, token, "lounge", "voice")

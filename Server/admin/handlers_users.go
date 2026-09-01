@@ -14,9 +14,9 @@ import (
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
 
-func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handleGetStats(users *service.UserService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := database.GetServerStats(r.Context())
+		stats, err := users.ServerStats(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
 			return
@@ -28,20 +28,20 @@ func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	}
 }
 
-func handleListUsers(database *db.DB) http.HandlerFunc {
+func handleListUsers(users *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
 
-		users, err := database.ListAllUsers(r.Context(), limit, offset)
+		page, err := users.ListAll(r.Context(), limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
 			return
 		}
 
-		safe := make([]adminUserResponse, len(users))
-		for i := range users {
-			safe[i] = toAdminUserResponse(users[i])
+		safe := make([]adminUserResponse, len(page))
+		for i := range page {
+			safe[i] = toAdminUserResponse(page[i])
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}
@@ -94,7 +94,7 @@ func writeModerationErr(w http.ResponseWriter, err error) {
 // PATCH /admin/api/users/{id} before any mutation is attempted. It reports
 // whether the handler may continue; on false it has already written the error
 // response.
-func patchUserPrecheck(w http.ResponseWriter, r *http.Request, database *db.DB) (int64, patchUserRequest, int64, bool) {
+func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.UserService) (int64, patchUserRequest, int64, bool) {
 	var req patchUserRequest
 
 	id, err := pathInt64(r, "id")
@@ -108,13 +108,12 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, database *db.DB) 
 		return 0, req, 0, false
 	}
 
-	user, err := database.GetUserByID(r.Context(), id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
-		return 0, req, 0, false
-	}
-	if user == nil {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+	if _, err := users.Get(r.Context(), id); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+		} else {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+		}
 		return 0, req, 0, false
 	}
 
@@ -250,9 +249,9 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcast
 	return true
 }
 
-func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
+func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, req, actor, ok := patchUserPrecheck(w, r, database)
+		id, req, actor, ok := patchUserPrecheck(w, r, users)
 		if !ok {
 			return
 		}
@@ -285,12 +284,12 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
-		updated, err := database.GetUserByID(r.Context(), id)
+		updated, roleName, err := users.GetWithRoleName(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
 			return
 		}
-		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(r.Context(), database, updated))
+		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(updated, roleName))
 	}
 }
 

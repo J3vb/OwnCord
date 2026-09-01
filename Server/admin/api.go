@@ -65,8 +65,23 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 // The optional trailing SetupOptions enables the first-run wizard's
 // config.yaml write-back and restart; without it the setup endpoints keep
 // their legacy account-only behaviour (the case in most tests).
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, roles *service.RoleService, settings *service.SettingsService, channels *service.ChannelService, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
+
+	// The four services this mux routes to, named once. NewAdminAPI used to
+	// take them as four positional parameters; each B3-8 family that moved an
+	// admin handler behind a service added another, and the auth family would
+	// have added one more. Taking the bundle the caller already holds keeps
+	// that growth out of a 200-call-site signature.
+	//
+	// A nil bundle, or a nil service inside one, stays the fail-closed case the
+	// handlers already implement (they answer 500 "… service unavailable"
+	// rather than writing unchecked) — the tests that pin that behaviour pass
+	// exactly that.
+	if svc == nil {
+		svc = &service.Services{}
+	}
+	mod, roles, settings, channels := svc.Moderation, svc.Roles, svc.Settings, svc.Channels
 
 	var setupOpts SetupOptions
 	if len(opts) > 0 {
@@ -103,13 +118,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.With(requirePerm(permissions.Administrator)).
 			Post("/logs/ticket", handleLogTicket(database))
 
-		r.Get("/stats", handleGetStats(database, hub))
+		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe())
-		r.Get("/users", handleListUsers(database))
+		r.Get("/users", handleListUsers(svc.Users))
 		// Ban/unban and role change are authorized inside ModerationService
 		// (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so the route itself stays
 		// perimeter-level — a moderator with only BAN_MEMBERS must reach it.
-		r.Patch("/users/{id}", handlePatchUser(database, hub, permInvalidator, mod))
+		r.Patch("/users/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
 		r.With(requirePerm(permissions.KickMembers)).
 			Delete("/users/{id}/sessions", handleForceLogout(mod))
 
