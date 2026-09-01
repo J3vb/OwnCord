@@ -81,7 +81,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	rb.Push(99, 0, []byte(`{"seq":99,"type":"presence","payload":{}}`))
 	rb.Push(100, 0, []byte(`{"seq":100,"type":"presence","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

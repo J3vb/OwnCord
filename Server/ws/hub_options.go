@@ -57,6 +57,12 @@ type HubOptions struct {
 	// over the test database.
 	Presence PresenceStamper
 
+	// Auth is required: the handshake resolves its bearer token through it,
+	// and the periodic sweep asks it whether each live session is still good.
+	// Production passes Services.Auth; test helpers default it over the test
+	// database.
+	Auth SocketAuthenticator
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -104,6 +110,9 @@ func validateHubOptions(opts HubOptions) error {
 	if opts.Presence == nil {
 		return errors.New("ws: HubOptions.Presence is required (the connect and disconnect status stamps go through it)")
 	}
+	if opts.Auth == nil {
+		return errors.New("ws: HubOptions.Auth is required (the handshake and the session sweep resolve through it)")
+	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
 		return errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
@@ -136,6 +145,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		readers:         opts.Readers,
 		voice:           opts.Voice,
 		presence:        opts.Presence,
+		authn:           opts.Auth,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),

@@ -12,7 +12,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 )
 
 const (
@@ -38,7 +37,7 @@ const (
 // The check runs before the upgrade so a refused connection costs one HTTP
 // request, not a socket plus goroutines. Registered count trails pre-auth
 // connections by design; the 10s auth deadline bounds that gap.
-func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) http.HandlerFunc {
+func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if maxConns > 0 && hub.ClientCount() >= maxConns {
@@ -54,7 +53,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string, maxConns int) h
 		}
 		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
 
-		c, lastSeq, err := hub.upgradeAndAuth(conn, database, r)
+		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
 		if err != nil {
 			return
 		}

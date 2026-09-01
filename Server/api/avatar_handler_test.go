@@ -32,7 +32,7 @@ func buildAvatarRouter(database *db.DB, store *storage.Storage) http.Handler {
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	api.MountProfileRoutes(r, database, svc, store, limiter, nil, nil)
-	api.MountUploadRoutes(r, database, store, limiter, nil, svc.Uploads)
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, nil, svc.Uploads)
 	return r
 }
 

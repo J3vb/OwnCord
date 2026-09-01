@@ -71,7 +71,7 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 // hub is used to send real-time WebSocket events on DM close.
 func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
@@ -81,7 +81,7 @@ func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadca
 
 	// User blocking routes — prevent DM creation and messaging.
 	r.Route("/api/v1/blocks", func(r chi.Router) {
-		r.Use(AuthMiddleware(database))
+		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListBlocks(svc))
 		r.Put("/{userId}", handleBlockUser(svc, broadcaster))
 		r.Delete("/{userId}", handleUnblockUser(svc))

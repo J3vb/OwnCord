@@ -217,7 +217,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
@@ -309,7 +309,7 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)

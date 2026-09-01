@@ -132,7 +132,7 @@ func TestUpgradeAndAuth_RoleLookupFailure_FailsClosed(t *testing.T) {
 			t.Errorf("websocket.Accept: %v", acceptErr)
 			return
 		}
-		c, lastSeq, err := hub.upgradeAndAuth(conn, database, r)
+		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
 		resultCh <- upgradeResult{c, lastSeq, err}
 	}))
 	defer srv.Close()

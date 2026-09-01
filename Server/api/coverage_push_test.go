@@ -750,7 +750,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
-	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(database), limiter, nil)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
 	api.MountInviteRoutes(r, database, svc)
 

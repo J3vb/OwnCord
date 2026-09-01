@@ -18,7 +18,10 @@ const dbImportPath = "github.com/J3vb/OwnCord/Server/db"
 // it. Dispositions are the layout-refactor supplement's four:
 //
 //   - move:     persistence or domain decisions that belong behind a service;
-//     Family names the service that takes them.
+//     Family names the service that takes them. B3-8 emptied this: no row
+//     carries it any more, which is the phase's exit criterion. A new one is
+//     a deliberate statement that something is on its way out, not a parking
+//     space — the alternative to writing it is moving the code.
 //   - adapter:  a transport adapter that uses db types or pure helpers only
 //     (response shapes, status helpers) — no persistence calls.
 //   - boundary: an explicit composition or transaction boundary (the process
@@ -36,7 +39,9 @@ type DBImportEntry struct {
 // DBImportAllow is the inventory. A production file outside db/ and service/
 // that imports db and is not listed here fails db-import-boundary; a listed
 // file that stops importing db fails TestDBImportAllowIsLive. B3-2 and B3-8
-// delete rows as families move — the list only shrinks.
+// deleted rows as families moved — the list only shrinks, and every row left
+// is an adapter (db types, no persistence call) or a boundary that
+// legitimately owns a handle.
 var DBImportAllow = map[string]DBImportEntry{
 	// ── admin ─────────────────────────────────────────────────────────────
 	"admin/admin.go":                  {"boundary", "", "holds the handle for the admin mux; no calls"},
@@ -45,21 +50,17 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/handlers_backup.go":        {"boundary", "", "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap"},
 	"admin/handlers_channel_perms.go": {"adapter", "", "override response shapes; the service owns the policy and the calls"},
 	"admin/handlers_channels.go":      {"adapter", "", "db.Channel in the resolver and response shapes; the service owns the calls"},
-	"admin/handlers_tokens.go":        {"move", "auth", "API-token CRUD duplicated in token_cli.go"},
 	"admin/handlers_users.go":         {"adapter", "", "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},
 	"admin/helpers.go":                {"adapter", "", "Role/User types in response helpers"},
 	"admin/logstream.go":              {"boundary", "", "handle threaded to the SSE stream's auth check; no calls"},
-	"admin/middleware.go":             {"move", "auth", "owner gate re-reads the role — OC-0345"},
-	"admin/setup_handler.go":          {"move", "auth", "first-run owner creation (setup sub-family)"},
-	"admin/setup_wizard.go":           {"move", "auth", "BeginTx for the wizard; setup sub-family"},
+	"admin/middleware.go":             {"adapter", "", "Role/User/Session types in the request context; SessionService resolves the bearer token"},
 	"admin/types.go":                  {"adapter", "", "response DTOs only — its GetRoleByID went with the user family"},
 	// ── api ───────────────────────────────────────────────────────────────
 	"api/channel_handler.go": {"adapter", "", "response types only; service owns the calls"},
 	"api/dm_handler.go":      {"adapter", "", "DM response types + pure status helpers"},
 	"api/emoji_handler.go":   {"adapter", "", "Emoji/User types only"},
-	"api/gif_handler.go":     {"adapter", "", "handle in the signature, unused for calls"},
 	"api/invite_handler.go":  {"adapter", "", "Invite/User types only"},
-	"api/middleware.go":      {"move", "auth", "session/API-token touch and revoke"},
+	"api/middleware.go":      {"adapter", "", "User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard"},
 	"api/plugins_handler.go": {"adapter", "", "db.Auditor is the seam; WriteAudit only"},
 	"api/profile_handler.go": {"adapter", "", "User/Session types in the profile and session response shapes; the services own the calls"},
 	"api/router.go":          {"boundary", "", "health probe (PingRead, SQLDb); hub construction left in B3-3"},
@@ -76,7 +77,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/maintenance.go": {"boundary", "", "periodic worker: expired sessions, backups, orphan attachments"},
 	"internal/app/persistence.go": {"boundary", "", "event persister, audit writer and the boot seq seed own the handle"},
 	"internal/app/plugins.go":     {"boundary", "", "passes the handle to the plugin registry as its store; no calls"},
-	"token_cli.go":                {"move", "auth", "API-token CLI duplicates admin/handlers_tokens.go"},
+	"token_cli.go":                {"boundary", "", "the token CLI opens, migrates and closes its own handle for the bootstrap path; TokenService owns every query"},
 	"cmd/seed/main.go":            {"boundary", "", "developer seeding tool owns its handle"},
 	"cmd/seed/profile_alpha.go":   {"boundary", "", "the alpha profile writes through the handle main.go owns"},
 	"cmd/gendocs/main.go":         {"boundary", "", "docs generator migrates its own in-memory catalog"},
@@ -94,12 +95,10 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_broadcast.go":    {"adapter", "", "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
 	"ws/hub_presence.go":     {"adapter", "", "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
 	"ws/hub_visibility.go":   {"adapter", "", "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
-	"ws/hub_sweep.go":        {"move", "auth", "session sweep re-reads the batched session/ban rows; the voice halves left with the voice family"},
 	"ws/messages.go":         {"adapter", "", "wire types + pure status helpers"},
-	"ws/readers.go":          {"adapter", "", "the hub's read seams plus the service-backed VoiceStore and PresenceStamper: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},
+	"ws/readers.go":          {"adapter", "", "the hub's read seams plus the service-backed VoiceStore, PresenceStamper and SocketAuthenticator: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},
 	"ws/replay.go":           {"adapter", "", "PersistedEvent type in the cold-tier filter; the resume path's reads bind the VisibilityReader seam and its status stamp goes through PresenceStamper"},
-	"ws/serve.go":            {"move", "auth", "the handle ServeWS threads to upgradeAndAuth; the connect/disconnect status stamps left with the connection family"},
-	"ws/serve_auth.go":       {"move", "auth", "handshake auth: session, user and role lookups, connect audit, failed-handshake teardown"},
+	"ws/serve_auth.go":       {"adapter", "", "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
 	"ws/serve_pumps.go":      {"adapter", "", "pure StatusOffline const; the disconnect write goes through the PresenceStamper seam (readers.go)"},
 	"ws/serve_ready.go":      {"adapter", "", "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
 	"ws/voice_join.go":       {"adapter", "", "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},

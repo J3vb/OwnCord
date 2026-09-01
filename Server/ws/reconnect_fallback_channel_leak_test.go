@@ -96,7 +96,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, database, []string{"*"}, 0))
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

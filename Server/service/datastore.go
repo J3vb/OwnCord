@@ -92,6 +92,13 @@ type Store interface {
 	// ── Users ──
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	GetOwnerUser(ctx context.Context) (*db.User, error)
+
+	// ── API tokens ──
+	CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error)
+	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
+	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
+	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
@@ -110,6 +117,9 @@ type Store interface {
 	// ── Sessions ──
 	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
+	GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*db.SessionWithBanStatus, error)
+	TouchAPIToken(ctx context.Context, tokenHash string) error
+	GetActiveAPIToken(ctx context.Context, tokenHash string) (*db.APIToken, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)

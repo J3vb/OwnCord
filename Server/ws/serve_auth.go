@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // authenticateConn reads the first WebSocket message and validates the session
@@ -26,7 +28,7 @@ type resumeHint struct {
 	ChannelID int64
 }
 
-func authenticateConn(parent context.Context, conn *websocket.Conn, database *db.DB) (*db.User, string, resumeHint, error) {
+func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
 	ctx, cancel := context.WithTimeout(parent, authDeadline)
 	defer cancel()
 
@@ -67,41 +69,31 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 		return nil, "", resumeHint{}, fmt.Errorf("auth: protocol epoch %d outside [%d, %d]", p.Epoch, minClientEpoch, ProtocolEpoch)
 	}
 
+	// The session, expiry, user and ban gates are AuthService's
+	// (ResolveSocketPrincipal). What stays here is the wire answer, and the
+	// distinction it turns on: a bad credential gets buildAuthError, which is
+	// NON-RECOVERABLE on the wire — the client stops reconnecting and clears
+	// its stored credentials — while a database failure gets an ordinary
+	// error frame, so the client's normal backoff retries. Collapsing the two
+	// would log every user out during a blip.
 	hash := auth.HashToken(p.Token)
-	sess, err := database.GetSessionByTokenHash(ctx, hash)
-	if err != nil {
-		// DB outage, not a bad token — send a non-terminal error frame so the
-		// client's normal backoff/reconnect logic retries instead of treating
-		// this like a genuinely invalid session (buildAuthError is defined as
-		// non-recoverable on the wire: the client stops reconnecting and
-		// clears its stored credentials on that frame).
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
-		return nil, "", resumeHint{}, fmt.Errorf("auth: session lookup failed: %w", err)
-	}
-	if sess == nil {
+	user, err := h.authn.ResolveSocketPrincipal(ctx, hash)
+	switch {
+	case errors.Is(err, service.ErrSessionInvalid):
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
 		return nil, "", resumeHint{}, fmt.Errorf("auth: invalid session")
-	}
-
-	if auth.IsSessionExpired(sess.ExpiresAt) {
+	case errors.Is(err, service.ErrSessionExpired):
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("session expired"))
 		return nil, "", resumeHint{}, fmt.Errorf("auth: session expired")
-	}
-
-	user, err := database.GetUserByID(ctx, sess.UserID)
-	if err != nil {
-		// Same DB-outage-vs-bad-credential distinction as above.
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
-		return nil, "", resumeHint{}, fmt.Errorf("auth: user lookup failed: %w", err)
-	}
-	if user == nil {
+	case errors.Is(err, service.ErrPrincipalGone):
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("user not found"))
 		return nil, "", resumeHint{}, fmt.Errorf("auth: user not found")
-	}
-
-	if auth.IsEffectivelyBanned(user) {
+	case errors.Is(err, service.ErrPrincipalBanned):
 		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeBanned, "you are banned"))
-		return nil, "", resumeHint{}, fmt.Errorf("auth: banned user %d", user.ID)
+		return nil, "", resumeHint{}, fmt.Errorf("auth: banned user")
+	case err != nil:
+		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeInternal, "temporary failure, please retry"))
+		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)
 	}
 
 	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID}, nil
@@ -125,10 +117,8 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
 
-func (h *Hub) upgradeAndAuth(
-	conn *websocket.Conn, database *db.DB, r *http.Request,
-) (*Client, uint64, error) {
-	user, tokenHash, hint, err := authenticateConn(r.Context(), conn, database)
+func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
+	user, tokenHash, hint, err := h.authenticateConn(r.Context(), conn)
 	if err != nil {
 		slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
@@ -148,7 +138,7 @@ func (h *Hub) upgradeAndAuth(
 	// every chat_message carries it — so a lookup failure must not silently
 	// substitute "member" and pin the whole session to a fabricated role
 	// (OC-0269).
-	role, roleErr := database.GetRoleByID(r.Context(), user.RoleID)
+	role, roleErr := h.readers.Visibility.GetRoleByID(r.Context(), user.RoleID)
 	if roleErr != nil || role == nil {
 		slog.Error("ws: role lookup failed during handshake, closing connection",
 			"user_id", user.ID, "role_id", user.RoleID, "err", roleErr)
@@ -158,8 +148,7 @@ func (h *Hub) upgradeAndAuth(
 	c.roleName = strings.ToLower(role.Name)
 
 	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
-	db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "ws_connect", "user", user.ID,
-		"WebSocket connected from "+r.RemoteAddr)
+	h.authn.RecordSocketConnect(r.Context(), user.ID, r.RemoteAddr)
 
 	return c, lastSeq, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,7 +24,7 @@ func buildGIFRouter(database *db.DB, apiKey string) http.Handler {
 	limiter := auth.NewRateLimiter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = apiKey
-	api.MountGIFRoutes(r, database, limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
 	return r
 }
 
@@ -340,7 +341,7 @@ func TestGIFRateLimitBucketIsSeparate(t *testing.T) {
 	r := chi.NewRouter()
 	cfg := &config.Config{}
 	cfg.GIF.APIKey = "server-side-key"
-	api.MountGIFRoutes(r, database, limiter, cfg)
+	api.MountGIFRoutes(r, service.NewSessionService(database), limiter, cfg)
 
 	for range 31 {
 		gifGET(t, r, "/api/v1/gif/trending", token)

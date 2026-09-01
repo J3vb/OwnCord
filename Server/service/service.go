@@ -25,6 +25,9 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
+	Tokens      *TokenService
+	Sessions    *SessionService
+	Setup       *SetupService
 }
 
 // New creates all domain services wired together.
@@ -45,5 +48,8 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Settings:    NewSettingsService(st),
 		Uploads:     NewUploadService(st, permSvc),
 		Voice:       NewVoiceService(st),
+		Tokens:      NewTokenService(st),
+		Sessions:    NewSessionService(st),
+		Setup:       NewSetupService(st),
 	}
 }

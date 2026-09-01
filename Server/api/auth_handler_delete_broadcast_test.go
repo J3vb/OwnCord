@@ -33,7 +33,7 @@ func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
 	broadcaster := &recordingAuthBroadcaster{}
 
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, broadcaster), api.AuthMiddleware(database), limiter, nil)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, broadcaster), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
 	hash, _ := auth.HashPassword("correctPass1")
 	uid, _ := database.CreateUser(context.Background(), "deletebroadcast", hash, 4)
@@ -59,7 +59,7 @@ func TestDeleteAccount_NoBroadcasterOmitted(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(database), limiter, nil)
+	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
 	hash, _ := auth.HashPassword("correctPass1")
 	uid, _ := database.CreateUser(context.Background(), "deletenobroadcast", hash, 4)

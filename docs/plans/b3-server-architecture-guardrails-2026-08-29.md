@@ -2198,6 +2198,124 @@ voice family had just touched). Two rows:
   goes through the seam here rather than waiting — the auth family inherits one
   less thing.
 
+**Evidence — auth family, token sub-family, 2026-09-01** — branch
+`feat/b3-8-auth-family`. The auth family is the last one, and its nine rows
+split into three sub-families by what they actually do; this is the first.
+
+- **The duplication was the point.** API-token minting lived twice: the admin
+  panel's Owner-gated routes and `server token …`, the bootstrap CLI that must
+  work with no credential at all. Both wrapped the same `db.*APIToken` calls,
+  and the copies had already drifted — only the CLI could revoke by label, and
+  the two attributed their audit rows differently. `service.TokenService` is
+  now the one implementation, and each difference that survives is written down
+  as part of the contract rather than left as an accident of which copy a
+  change happened to land in.
+- **What the service decides**, each pinned by `service/token_test.go`:
+  - `Bind` keeps **two** refusals apart — `ErrNotFound` for a username that
+    does not exist, `ErrNoOwnerAccount` for "there is no owner yet". The CLI
+    has always printed different messages because the operator's remedy
+    differs; one sentinel would have flattened them. A lookup _failure_ is
+    `ErrInternal`, never `ErrNoOwnerAccount` — reporting a database outage as
+    "no owner exists" would send an operator to create a second owner account.
+  - A blank label is refused: the label is how a token is found again in
+    `list` and in revoke-by-label, so an unlabelled token is unfindable.
+  - A lifetime over ten years is **refused, not clamped** — silently minting a
+    ten-year credential instead would hide the caller's bug. The cap is a
+    policy bound and says so: the overflow it does _not_ guard against
+    (`time.Duration(n) * time.Hour` wrapping into a past instant, minting a
+    token born expired) has to be stopped where the untrusted integer is
+    parsed, which is what the admin route's `0..87600` check on its int does.
+  - `Revoke` reports `ErrNotFound` for an **already-revoked** token, so a
+    second call is not a second success a script could report as a revoke it
+    did not perform. `RevokeByLabel` takes **every** match, because labels are
+    not unique and the duplicate left active would be the one that matters.
+  - The raw token is returned once and only its hash is stored; the row is
+    asserted to be exactly `auth.HashToken(raw)`.
+- **Allowlist diff**: `admin/handlers_tokens.go`'s row is **deleted** — it
+  stopped importing `db` entirely, the second file to leave the table after
+  the role family's. `token_cli.go` becomes `boundary`: a bootstrap CLI
+  legitimately opens, migrates and closes its own handle even once it makes no
+  query of its own, which is the same disposition `cmd/seed/main.go` carries.
+  9 → 7 `move`, 17 → 18 `boundary`, and the table drops from 59 rows to 58.
+  Service floor 70.3 → 71.0.
+
+**Evidence — auth family, session sub-family, 2026-09-01** — branch
+`feat/b3-8-auth-family`. Six rows, and one rule they all had to get right
+separately.
+
+- **A database failure is not a bad credential.** Three transports authenticate
+  the same bearer tokens — the REST middleware, the admin perimeter and the
+  WebSocket handshake — and each walked the session/user/role rows itself. The
+  two answers a refusal can carry are opposite: a bad credential is terminal
+  (the client clears its stored token and stops retrying; on the socket that is
+  literally a non-recoverable frame), an outage is transient (back off and try
+  again). A transport that collapses them logs its users out during a blip and
+  makes them sign in again once it passes. `SessionService` states the refusals
+  as distinct sentinels — `ErrSessionInvalid`, `ErrSessionExpired`,
+  `ErrPrincipalGone`, `ErrPrincipalBanned` — and anything else as `ErrInternal`,
+  never one of them. Revert-proved: returning `ErrSessionInvalid` for a lookup
+  failure fails with _"resolution during an outage: err = invalid session, want
+  ErrInternal"_.
+- **The sweep is the same rule in the other direction.** `SweepSessions`
+  classifies every connected client in one batched lookup, and a failed lookup
+  is an **error, not a map of revocations**: it says nothing about any
+  individual session, and reading it as "all revoked" turns one transient error
+  into a server-wide disconnect. Revert-proved: returning an empty map instead
+  fails with _"a sweep reading that map would disconnect every connected client
+  on one bad read"_.
+- **Why `SessionService` and not `AuthService`.** `AuthService` owns the
+  interactive flows and therefore holds process-singleton state — the rate
+  limiter's lockouts, the partial-auth and pending-TOTP stores, the TOTP key,
+  and the broadcaster that tells connected clients an account is gone. That
+  broadcaster **is the hub**, so a hub that depended on `AuthService` would
+  close a construction cycle. Resolution needs none of that state: it reads
+  rows. Splitting it is what lets the hub hold it, and it made the composition
+  root simpler rather than adding a late-bound indirection to break the cycle.
+- **Allowlist diff**: `ws/hub_sweep.go`, `ws/serve.go` and `api/gif_handler.go`
+  are **deleted** — all three stopped importing `db` (`gif_handler.go` had
+  carried a handle only to build the auth middleware). `admin/middleware.go`,
+  `api/middleware.go` and `ws/serve_auth.go` become type-only `adapter` rows.
+  7 → 2 `move`.
+- One consequence worth naming: `NewAdminAPI` now **builds** `Sessions` and
+  `Setup` when a caller does not supply them, from the handle it already holds.
+  Everywhere else a nil service is the fail-closed case a handler implements —
+  it refuses that one action. These two are different: without a
+  `SessionService` no request can be authenticated at all, and "refuse this
+  action" and "the admin API is unusable" are not the same failure.
+
+**Evidence — auth family, setup sub-family, and B3-8 exit, 2026-09-01** —
+branch `feat/b3-8-auth-family`. The last two rows.
+
+- **First-run bootstrap is one operation, not six calls.** `SetupService`
+  owns it, and the ordering it encodes is a contract:
+  - `CreateOwnerIfEmpty` is the **atomic gate** — it checks "no users" and
+    inserts in one statement, closing the window a separate count-then-insert
+    leaves open (BUG-119). The endpoint is unauthenticated, so that refusal is
+    the only thing between it and anyone who can reach the port.
+  - Once that row commits, **every remaining step is best-effort** (OC-0253).
+    Reporting a downstream failure as an error would tell the caller to retry,
+    and every retry hits the gate — the account would be orphaned forever, with
+    no session, no channels and no invite. They become warnings instead, and
+    run on a context detached from the request so a client that navigates away
+    cannot orphan its own new account. Revert-proved by dropping the `invites`
+    table: with the rule inverted the row fails with _"the caller would retry,
+    hit 'setup already completed', and the account would be orphaned"_.
+  - The bootstrap invite stays **bounded** (5 uses / 24h) rather than unlimited
+    and permanent — an invite left over from setup is otherwise a standing way
+    into the server. The test asserts both.
+  - The wizard's raw `BeginTx` and its hand-written upsert loop are gone: the
+    payload-to-settings mapping is a pure function, and the same atomic
+    `ApplySettings` the settings family already owns commits it.
+- **Allowlist diff**: both rows **deleted** — `admin/setup_handler.go` and
+  `admin/setup_wizard.go` stopped importing `db`. 2 → **0** `move`.
+
+**B3-8 exit, 2026-09-01.** `move` is empty. The table is 59 → 53 rows, 35
+`adapter` and 18 `boundary`, every one with its reason in
+`server-boundaries.md`. Six of the auth family's nine rows were deleted rather
+than downgraded. `DBImportAllow`'s own doc comment now records that a new
+`move` row is a deliberate statement that something is on its way out, not a
+parking space. Service floor 71.0 → 71.3.
+
 Exit: every remaining `db` importer above the domain layer is `adapter` or
 `boundary` with its reason in `server-boundaries.md`; the exit-gate's "every
 direct database use above the domain layer is justified or removed".
