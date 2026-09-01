@@ -25,6 +25,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // deafenRaceRoleAdmin / deafenRaceRoleMember reuse the default seeded roles
@@ -92,15 +93,15 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	var hookRan bool
 	voiceModDeafenPreMuteRaceHook = func(ctx context.Context, d VoiceDeps, targetID int64) {
 		hookRan = true
-		if err := d.DB.JoinVoiceChannel(ctx, targetID, chanB); err != nil {
-			t.Fatalf("hook: JoinVoiceChannel to chanB: %v", err)
+		if err := d.Voice.Join(ctx, targetID, chanB, 0); err != nil {
+			t.Fatalf("hook: joining chanB: %v", err)
 		}
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
 
 	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: true}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 
@@ -174,8 +175,8 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 	var hookRan bool
 	voiceModDeafenPreMuteRaceHook = func(ctx context.Context, d VoiceDeps, targetID int64) {
 		hookRan = true
-		if err := d.DB.JoinVoiceChannel(ctx, targetID, chanB); err != nil {
-			t.Fatalf("hook: JoinVoiceChannel to chanB: %v", err)
+		if err := d.Voice.Join(ctx, targetID, chanB, 0); err != nil {
+			t.Fatalf("hook: joining chanB: %v", err)
 		}
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
@@ -184,7 +185,7 @@ func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *tes
 	// test above.
 	cmd := VoiceModDeafenCmd{userID: actorID, channelID: chanA, targetID: targetID, deafened: false}
 	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
 

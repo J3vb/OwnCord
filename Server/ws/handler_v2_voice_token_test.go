@@ -9,6 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ── mocks ──────────────────────────────────────────────────────────────────────
@@ -38,8 +39,10 @@ func (m *mockKeyHolder) IsVoiceKeyHolder(_, _ int64) bool { return m.isHolder }
 
 // tokenRefreshDeps wires a real in-memory DB because the handler now re-checks
 // CONNECT_VOICE before minting a token: user 1 holds a voice-only role (READ +
-// CONNECT_VOICE, no SPEAK/VIDEO/SCREEN_SHARE) on voice channel 100.
-func tokenRefreshDeps(t *testing.T) VoiceDeps {
+// CONNECT_VOICE, no SPEAK/VIDEO/SCREEN_SHARE) on voice channel 100. The handle
+// is returned alongside the deps for the one case that re-seeds the role
+// mid-test — VoiceDeps itself no longer carries it (B3-8 voice family).
+func tokenRefreshDeps(t *testing.T) (VoiceDeps, *db.DB) {
 	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -59,12 +62,13 @@ func tokenRefreshDeps(t *testing.T) VoiceDeps {
 	}
 
 	return VoiceDeps{
-		DB:          database,
+		Voice:       service.NewVoiceService(database),
+		Reader:      database,
 		Permissions: permissions.NewChecker(database),
 		Limiter:     auth.NewRateLimiter(),
 		TokenGen:    &mockTokenGen{token: "jwt-test-token", url: "ws://lk:7880"},
 		KeyHolder:   &mockKeyHolder{isHolder: true},
-	}
+	}, database
 }
 
 // voiceOnlyRoleID is a fixed id well clear of the migration-seeded defaults.
@@ -94,7 +98,7 @@ func seedTokenRefreshUser(t *testing.T, database *db.DB, userID, roleID int64) {
 }
 
 func TestVoiceTokenRefreshV2_HappyPath(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{
 		UserID:         1,
@@ -122,7 +126,7 @@ func TestVoiceTokenRefreshV2_HappyPath(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_NotInVoice(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 0}
 
@@ -142,7 +146,7 @@ func TestVoiceTokenRefreshV2_NotInVoice(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_RateLimited(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: "t"}
 
@@ -165,7 +169,7 @@ func TestVoiceTokenRefreshV2_RateLimited(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_TokenGenNil(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	deps.TokenGen = nil
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, VoiceChannelID: 100, VoiceJoinToken: "t"}
@@ -186,7 +190,7 @@ func TestVoiceTokenRefreshV2_TokenGenNil(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_GenerateTokenError(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	deps.TokenGen = &mockTokenGen{err: context.DeadlineExceeded, url: "ws://lk:7880"}
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: "t"}
@@ -207,7 +211,7 @@ func TestVoiceTokenRefreshV2_GenerateTokenError(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_IsKeyHolderReflectedInReply(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	deps.KeyHolder = &mockKeyHolder{isHolder: false}
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: "t"}
@@ -231,7 +235,7 @@ func TestVoiceTokenRefreshV2_IsKeyHolderReflectedInReply(t *testing.T) {
 }
 
 func TestVoiceTokenRefreshV2_NoEvents(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: "t"}
 
@@ -248,7 +252,7 @@ func TestVoiceTokenRefreshV2_PermissionsPassedToTokenGen(t *testing.T) {
 	// SPEAK_VOICE / USE_VIDEO / SHARE_SCREEN, so each publish grant must be
 	// false while subscribe stays unconditionally true.
 	captureMock := &capturingTokenGen{token: "jwt", url: "ws://lk"}
-	deps := tokenRefreshDeps(t)
+	deps, _ := tokenRefreshDeps(t)
 	deps.TokenGen = captureMock
 
 	cmd := VoiceTokenRefreshCmd{userID: 1}
@@ -282,7 +286,7 @@ func TestVoiceTokenRefreshV2_PermissionsPassedToTokenGen(t *testing.T) {
 // longer allowed in. The refusal must also evict, or the live SFU session
 // simply outlives the permission.
 func TestVoiceTokenRefreshV2_RevokedConnectVoiceRefusedAndEvicts(t *testing.T) {
-	deps := tokenRefreshDeps(t)
+	deps, database := tokenRefreshDeps(t)
 	cmd := VoiceTokenRefreshCmd{userID: 1}
 	info := ClientInfo{UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: "t"}
 
@@ -292,7 +296,7 @@ func TestVoiceTokenRefreshV2_RevokedConnectVoiceRefusedAndEvicts(t *testing.T) {
 	}
 
 	// A moderator strips CONNECT_VOICE from the role.
-	seedVoiceOnlyRole(t, deps.DB, voiceOnlyRoleID, permissions.ReadMessages)
+	seedVoiceOnlyRole(t, database, voiceOnlyRoleID, permissions.ReadMessages)
 	deps.Limiter = auth.NewRateLimiter() // clear the 1-per-60s budget for this second call
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)

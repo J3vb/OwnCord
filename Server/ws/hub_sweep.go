@@ -216,17 +216,14 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 // slip through the primary cleanup paths (registerNow, readPump defer,
 // LiveKit webhook).
 func (h *Hub) sweepStaleVoiceStates() {
-	if h.db == nil {
-		return
-	}
 	// Hub run-loop sweeper — no request tie.
 	ctx := context.Background()
 
 	h.sweepStaleVoiceEvictRevoked(ctx)
 
-	allStates, err := h.db.GetAllVoiceStates(ctx)
+	allStates, err := h.voice.AllStates(ctx)
 	if err != nil {
-		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
+		slog.Warn("sweepStaleVoiceStates: AllStates failed", "err", err)
 		return
 	}
 	if len(allStates) == 0 {
@@ -277,9 +274,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 		// Channel-conditional delete: only removes the row if it still points
 		// at the channel we snapshotted. If the user rejoined or moved between
 		// the snapshot and now, the delete is a no-op and we skip the broadcast.
-		deleted, err := h.db.LeaveVoiceChannelIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
+		deleted, err := h.voice.LeaveIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
 		if err != nil {
-			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
+			slog.Error("sweepStaleVoiceStates: LeaveIfMatch failed",
 				"err", err, "user_id", s.userID, "channel_id", s.channelID)
 			continue
 		}
@@ -328,14 +325,14 @@ var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 // authoritative for a change that somehow bypassed the invalidation hooks is
 // worth the handful of reads a minute it costs for the clients in voice.
 func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (allowed bool, err error) {
-	ch, err := h.db.GetChannel(ctx, channelID)
+	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err
 	}
 	if ch == nil {
 		return false, nil
 	}
-	sub, err := channelSubject(ctx, h.db, h.permChecker, nil, userID, ch, true)
+	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, nil, userID, ch, true)
 	if err != nil {
 		return false, err
 	}
@@ -356,9 +353,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// Cleanup must complete even if the triggering request goes away.
 	ctx := context.Background()
 	// Get all users in the channel's voice state from DB.
-	states, err := h.db.GetChannelVoiceStates(ctx, channelID)
+	states, err := h.voice.ChannelStates(ctx, channelID)
 	if err != nil {
-		slog.Error("CleanupVoiceForChannel GetChannelVoiceStates", "err", err, "channel_id", channelID)
+		slog.Error("CleanupVoiceForChannel ChannelStates", "err", err, "channel_id", channelID)
 		return
 	}
 	if len(states) == 0 {
@@ -370,8 +367,8 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// being in THIS channel: a user who moved to another voice channel
 	// between the snapshot above and this loop must not be clobbered.
 	for _, vs := range states {
-		if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
-			slog.Error("CleanupVoiceForChannel LeaveVoiceChannelIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		if _, err := h.voice.LeaveIfMatch(ctx, vs.UserID, channelID, vs.JoinedAt); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
 		// Clear client voice state and its voice-topic subscription. The

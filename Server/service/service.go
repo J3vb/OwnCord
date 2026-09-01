@@ -24,6 +24,7 @@ type Services struct {
 	Emoji       *EmojiService
 	Settings    *SettingsService
 	Uploads     *UploadService
+	Voice       *VoiceService
 }
 
 // New creates all domain services wired together.
@@ -43,5 +44,6 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Emoji:       NewEmojiService(st, permSvc),
 		Settings:    NewSettingsService(st),
 		Uploads:     NewUploadService(st, permSvc),
+		Voice:       NewVoiceService(st),
 	}
 }

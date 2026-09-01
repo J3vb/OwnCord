@@ -16,6 +16,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 const oc0006VideoStreamRoleID = int64(211)
@@ -88,7 +89,7 @@ func TestEnableVideoSlot_SameUserDoubleStreamCountsTwoSlots(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel bob: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
 	ssRes := handleVoiceScreenshareV2(ctx, VoiceScreenshareCmd{userID: alice, enabled: true}, ClientInfo{UserID: alice, VoiceChannelID: chID}, d)
 	if ssRes.Error != nil {

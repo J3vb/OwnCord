@@ -129,7 +129,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	}
 	defer func() { handleReconnectPreRegisterRaceHook = nil }()
 
-	handled, startPumps := h.handleReconnect(ctx, conn, c, database, lastSeq)
+	handled, startPumps := h.handleReconnect(ctx, conn, c, lastSeq)
 
 	if !hookRan {
 		t.Fatal("handleReconnectPreRegisterRaceHook never fired — test setup is broken, not exercising the race window")

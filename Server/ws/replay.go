@@ -32,9 +32,9 @@ const (
 //     second time (OC-0051): a duplicate MarkUserDisconnected, a duplicate
 //     offline presence broadcast, and a duplicate hub seq for it.
 func (h *Hub) handleReconnect(
-	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
+	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
 ) (handled, startPumps bool) {
-	allowedChannelIDs, ok := h.reconnectPrecheck(ctx, database, c, lastSeq)
+	allowedChannelIDs, ok := h.reconnectPrecheck(ctx, c, lastSeq)
 	if !ok {
 		return false, false
 	}
@@ -137,7 +137,7 @@ func (h *Hub) handleReconnect(
 	// MarkUserDisconnected just rewrote it) instead of the status it is about
 	// to come online as and broadcast (OC-0222). Skips member_join — the user
 	// was already known.
-	applyConnectStatus(ctx, database, c)
+	h.applyConnectStatus(ctx, c)
 
 	if !h.reconnectWriteReplay(ctx, conn, c, lastSeq, events, replaySource) {
 		// startPumps=false: the teardown inside reconnectWriteReplay already ran
@@ -156,8 +156,12 @@ func (h *Hub) handleReconnect(
 // still on the table, returns the read-permission set replay is filtered by.
 // ok=false means the caller must fall through to a full ready.
 func (h *Hub) reconnectPrecheck(
-	ctx context.Context, database *db.DB, c *Client, lastSeq uint64,
+	ctx context.Context, c *Client, lastSeq uint64,
 ) (map[int64]bool, bool) {
+	// The configured seam, never a caller-supplied handle: binding it here is
+	// what lets a service-backed or instrumented reader actually intercept the
+	// two reads below — the same posture handleFreshConnect takes.
+	database := h.readers.Visibility
 	// Channel-visibility changes are delivered as targeted, unsequenced
 	// messages, so replay cannot bring a client that missed one back into a
 	// coherent state — force the full-ready path instead.

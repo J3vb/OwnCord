@@ -46,6 +46,17 @@ type HubOptions struct {
 	// the test database.
 	Readers HubReaders
 
+	// Voice is required: every voice_states read and write the hub makes —
+	// join, moderation, self controls, the stale sweep and channel teardown
+	// — goes through it. Production passes Services.Voice; test helpers
+	// default it to a service over the test database.
+	Voice VoiceStore
+
+	// Presence is required: the connection lifecycle's two status writes.
+	// Production passes Services.Users; test helpers default it to a service
+	// over the test database.
+	Presence PresenceStamper
+
 	// LiveKit is the voice token signer; nil means voice is not configured
 	// and every voice join is refused. LiveKitProcess is the supervised
 	// companion SFU — it requires LiveKit, because a process no client can
@@ -87,6 +98,12 @@ func validateHubOptions(opts HubOptions) error {
 	if !opts.Readers.complete() {
 		return errors.New("ws: HubOptions.Readers is required in full (the hub reads through its seams)")
 	}
+	if opts.Voice == nil {
+		return errors.New("ws: HubOptions.Voice is required (every voice path reads and writes through it)")
+	}
+	if opts.Presence == nil {
+		return errors.New("ws: HubOptions.Presence is required (the connect and disconnect status stamps go through it)")
+	}
 	if opts.LiveKitProcess != nil && opts.LiveKit == nil {
 		return errors.New("ws: HubOptions.LiveKitProcess without LiveKit — a supervised SFU no client can sign tokens for")
 	}
@@ -117,6 +134,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		limiter:         limiter,
 		settings:        settingsReader,
 		readers:         opts.Readers,
+		voice:           opts.Voice,
+		presence:        opts.Presence,
 		broadcast:       make(chan broadcastMsg, 1024),
 		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),
@@ -189,7 +208,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		Limiter:    h.limiter,
 	})
 	registerVoiceControlsV2(reg, VoiceDeps{
-		DB:          h.db,
+		Voice:       h.voice,
+		Reader:      h.readers.Dispatch,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
 		PermSvc:     h.perms,

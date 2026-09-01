@@ -40,10 +40,10 @@ func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, boo
 		}
 		return nil, false
 	}
-	if d.DB == nil {
+	if d.Reader == nil {
 		return nil, false
 	}
-	role, err := d.DB.GetRoleForUser(ctx, userID)
+	role, err := d.Reader.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
 		return nil, false
 	}
@@ -77,9 +77,9 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 		}}
 	}
 
-	state, err := d.DB.GetVoiceState(ctx, targetID)
+	state, err := d.Voice.State(ctx, targetID)
 	if err != nil {
-		slog.Error("ws voiceModTarget GetVoiceState", "err", err, "target_id", targetID)
+		slog.Error("ws voiceModTarget State", "err", err, "target_id", targetID)
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
 	}
 	if state == nil {
@@ -98,7 +98,7 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 	// (it never admits): it keeps FORBIDDEN ahead of the voice-state lookup
 	// for actors with no MUTE_MEMBERS at all, which also means a channel
 	// allow cannot grant the bit to a role whose base lacks it.
-	ch, err := d.DB.GetChannel(ctx, state.ChannelID)
+	ch, err := d.Reader.GetChannel(ctx, state.ChannelID)
 	if err != nil {
 		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", state.ChannelID)
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read channel"}}
@@ -106,7 +106,7 @@ func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (
 	if ch == nil {
 		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 	}
-	sub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, actorID, ch, false)
+	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, actorID, ch, false)
 	if subErr != nil {
 		slog.Error("ws voiceModTarget channelSubject", "err", subErr, "channel_id", state.ChannelID)
 		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify channel access"}}
@@ -232,9 +232,9 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return *r
 	}
 
-	matched, err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
+	matched, err := d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Muted())
 	if err != nil {
-		slog.Error("ws handleVoiceModMuteV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+		slog.Error("ws handleVoiceModMuteV2 SetServerMute", "err", err, "target_id", c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server mute"}}
 	}
 	if !matched {
@@ -286,9 +286,9 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return *r
 	}
 
-	deafenMatched, err := d.DB.SetVoiceServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	deafenMatched, err := d.Voice.SetServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
 	if err != nil {
-		slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen", "err", err, "target_id", c.TargetID())
+		slog.Error("ws handleVoiceModDeafenV2 SetServerDeafen", "err", err, "target_id", c.TargetID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 	}
 	if !deafenMatched {
@@ -308,12 +308,12 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	// single bool with no way to tell "explicit" from "deafen-implied" apart,
 	// so an explicit-mute-then-deafen sequence has both lifted together by an
 	// undeafen — accepted as the simplest correct behavior given the schema.
-	muteMatched, err := d.DB.SetVoiceServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
+	muteMatched, err := d.Voice.SetServerMute(ctx, c.TargetID(), state.ChannelID, c.Deafened())
 	if err != nil || !muteMatched {
 		if err != nil {
-			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerMute", "err", err, "target_id", c.TargetID())
+			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID())
 		}
-		voiceModDeafenRollback(ctx, d, c, state)
+		d.Voice.RollbackServerDeafen(ctx, c.TargetID(), state.ChannelID, c.Deafened())
 		if err != nil {
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 		}
@@ -332,63 +332,6 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		"channel_id", state.ChannelID, "deafened", c.Deafened())
 
 	return voiceStateBroadcast(ctx, d, c.TargetID())
-}
-
-// voiceModDeafenRollback best-effort undoes the server_deafened write
-// handleVoiceModDeafenV2 committed just before the implied server_muted write
-// failed to land.
-//
-// The deafen write above already committed as its own statement (no
-// transaction spans the two — a single UPDATE covering both columns
-// needs a db-change; see cross_batch). Best-effort undo it rather
-// than leave server_deafened=1 with server_muted=0: that combination
-// is not SFU-muted yet still refuses the target's own undeafen
-// (refuseIfServerSilenced), for a deafen nobody was ever told about.
-// Detached from ctx — the cancellation that most likely caused the
-// failure above (the moderator's socket dropping mid-request, or the
-// target moving off state.ChannelID between the two writes) must not
-// also abort the rollback.
-//
-// Re-read the row's CURRENT channel rather than reusing the stale
-// state.ChannelID snapshot: when the mismatch above was caused by
-// the target switching channels (not leaving voice), the row is no
-// longer on state.ChannelID, so a rollback scoped to that stale
-// channel matches zero rows and silently no-ops -- exactly the case
-// this rollback exists to handle (OC-0034). Clearing a restriction
-// is safe on whatever channel the row is actually on now; if the
-// row is gone entirely (target left voice), there is nothing left
-// to roll back.
-//
-// The rollback value is the OPPOSITE of the request (!c.Deafened()),
-// so which channel it is safe to scope to depends on which
-// direction it runs:
-//   - request was a DEAFEN (c.Deafened()==true): rollback CLEARS.
-//     Clearing a restriction can never authorize anything the
-//     target wasn't already free of, so following the row to
-//     cur.ChannelID is safe -- this is the OC-0034 case above.
-//   - request was an UNDEAFEN (c.Deafened()==false): rollback
-//     APPLIES a restriction. Scoping an apply to cur.ChannelID
-//     would stamp it onto whatever channel the row now points at,
-//     including one voiceModTarget never authorized the actor
-//     against (OC-0036) -- the exact hazard channel-scoping exists
-//     to prevent for the ordinary write path. Scope to
-//     state.ChannelID (the channel that WAS authorized) instead,
-//     so a moved/rejoined target simply matches zero rows.
-func voiceModDeafenRollback(ctx context.Context, d VoiceDeps, c VoiceModDeafenCmd, state *db.VoiceState) {
-	compCtx := context.WithoutCancel(ctx)
-	if cur, gErr := d.DB.GetVoiceState(compCtx, c.TargetID()); gErr != nil {
-		slog.Error("ws handleVoiceModDeafenV2 GetVoiceState for rollback",
-			"err", gErr, "target_id", c.TargetID())
-	} else if cur != nil {
-		rollbackChannelID := cur.ChannelID
-		if !c.Deafened() {
-			rollbackChannelID = state.ChannelID
-		}
-		if _, compErr := d.DB.SetVoiceServerDeafen(compCtx, c.TargetID(), rollbackChannelID, !c.Deafened()); compErr != nil {
-			slog.Error("ws handleVoiceModDeafenV2 SetVoiceServerDeafen rollback failed",
-				"err", compErr, "target_id", c.TargetID())
-		}
-	}
 }
 
 // handleVoiceModMoveV2 processes a voice_mod_move command.
@@ -416,7 +359,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "user is already in that voice channel"}}
 	}
 
-	dest, err := d.DB.GetChannel(ctx, c.ToChannelID())
+	dest, err := d.Reader.GetChannel(ctx, c.ToChannelID())
 	if err != nil {
 		slog.Error("ws handleVoiceModMoveV2 GetChannel", "err", err, "channel_id", c.ToChannelID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read destination channel"}}
@@ -432,7 +375,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// permissions.CanJoinVoice — so a move can neither place someone in a
 	// channel they could not join themselves nor commit the destructive half
 	// of the move for a re-join guaranteed to bounce (an archived channel).
-	targetSub, subErr := channelSubject(ctx, d.DB, d.Permissions, d.PermSvc, c.TargetID(), dest, false)
+	targetSub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, c.TargetID(), dest, false)
 	if subErr != nil {
 		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID())
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
@@ -450,9 +393,9 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	// atomic one still runs on the re-join; this one keeps the common case from
 	// dropping the target into a channel that is already full.
 	if dest.VoiceMaxUsers > 0 {
-		count, cErr := d.DB.CountChannelVoiceUsers(ctx, c.ToChannelID())
+		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID())
 		if cErr != nil {
-			slog.Error("ws handleVoiceModMoveV2 CountChannelVoiceUsers", "err", cErr, "channel_id", c.ToChannelID())
+			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID())
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
 		}
 		if count >= dest.VoiceMaxUsers {
@@ -533,10 +476,10 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 // connection that dies right after the effect landed, so the write is detached
 // from the dispatching context.
 func writeVoiceModAudit(ctx context.Context, d VoiceDeps, actorID int64, action string, targetID int64, detail string) {
-	if d.DB == nil {
+	if d.Voice == nil {
 		return
 	}
-	db.WriteAudit(context.WithoutCancel(ctx), d.DB, actorID, action, "user", targetID, detail)
+	d.Voice.WriteModAudit(ctx, actorID, action, targetID, detail)
 }
 
 // onOff renders a boolean for an audit detail string.

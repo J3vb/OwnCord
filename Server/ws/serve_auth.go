@@ -197,7 +197,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// offline (OC-0019, mirrored from readPump's defer in serve_pumps.go).
 	if h.shouldMarkOffline(c, replaced) {
 		cleanupCtx := context.WithoutCancel(ctx)
-		_ = h.db.MarkUserDisconnected(cleanupCtx, c.userID)
+		_ = h.presence.StampDisconnect(cleanupCtx, c.userID)
 		// custom_status is nil, not c.user.CustomStatus: see the identical
 		// note in serve_pumps.go's readPump defer — that field is an
 		// auth-time snapshot, never updated, so broadcasting it here can

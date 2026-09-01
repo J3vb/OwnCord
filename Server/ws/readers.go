@@ -53,6 +53,9 @@ type MemberPayloadReader interface {
 type DispatchReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	// The bare-hub fallback in voice_join.go's publish-permission derivation
+	// resolves overrides here when no PermissionService cache is wired.
+	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	// The three reads service.RequireDMNotBlocked makes through this seam.
@@ -61,43 +64,84 @@ type DispatchReader interface {
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
 }
 
-// StaleVoiceCleaner is the one read-plus-write pair fresh-connect stale-voice
-// cleanup (serve_ready.go) needs; it is deliberately not part of the ready
-// reader — the write does not belong on a snapshot seam.
-type StaleVoiceCleaner interface {
-	GetVoiceState(ctx context.Context, userID int64) (*db.VoiceState, error)
-	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
-}
-
-// DisconnectMarker is the one write the connection teardown makes on its own
-// behalf: stamping the user offline when their last pump exits. It is a seam
-// rather than a raw call for the same reason the read seams are — the caller
-// states the single method it may use — and it is deliberately its own
-// interface rather than a method on a reader, because it writes.
-type DisconnectMarker interface {
-	MarkUserDisconnected(ctx context.Context, userID int64) error
-}
-
-// HubReaders bundles the seams HubOptions requires. Production wires
-// DBReaders; the test helpers default it over the test database.
+// HubReaders bundles the read seams HubOptions requires — every one of them
+// backed by the handle. A collaborator that is NOT handle-backed does not
+// belong here: those (Settings, Voice, Presence) are their own required
+// HubOptions fields, which is what keeps "what DBReaders can wire" and "what
+// the hub needs" from quietly diverging.
 type HubReaders struct {
 	Visibility VisibilityReader
 	Ready      ReadySnapshotReader
 	Members    MemberPayloadReader
 	Dispatch   DispatchReader
-	StaleVoice StaleVoiceCleaner
-	Disconnect DisconnectMarker
 }
 
 // complete reports whether every seam is present.
 func (r HubReaders) complete() bool {
-	return r.Visibility != nil && r.Ready != nil && r.Members != nil &&
-		r.Dispatch != nil && r.StaleVoice != nil && r.Disconnect != nil
+	return r.Visibility != nil && r.Ready != nil && r.Members != nil && r.Dispatch != nil
 }
 
 // DBReaders backs every seam with the database handle — the composition
 // root's wiring today. Later B3-8 families narrow individual seams onto
-// their services without touching the hub.
+// their services without touching the hub: the voice family took
+// StaleVoiceCleaner's two methods onto VoiceService, and the connection
+// family took DisconnectMarker's onto UserService, so this bundle has only
+// lost fields since it was introduced.
 func DBReaders(d *db.DB) HubReaders {
-	return HubReaders{Visibility: d, Ready: d, Members: d, Dispatch: d, StaleVoice: d, Disconnect: d}
+	return HubReaders{Visibility: d, Ready: d, Members: d, Dispatch: d}
+}
+
+// ─── Voice membership seam (B3-8 voice family) ──────────────────────────────
+
+// VoiceStore is the hub's view of the voice family: every read and write the
+// voice paths make against voice_states, plus the moderation audit row that
+// accompanies a moderator's write. service.VoiceService satisfies it in
+// production; test helpers back it with a service over the test database.
+//
+// Unlike the read seams above this one is not satisfied by *db.DB — the
+// family's decisions (which insert a capacity limit selects, which channel a
+// compensating write may touch, whether a restore is worth a round trip) live
+// on the service, not on the handle. That is the difference between a seam
+// that only narrows the handle and a family that has actually moved.
+type VoiceStore interface {
+	// Reads.
+	State(ctx context.Context, userID int64) (*db.VoiceState, error)
+	ChannelStates(ctx context.Context, channelID int64) ([]db.VoiceState, error)
+	AllStates(ctx context.Context) ([]db.VoiceState, error)
+	CountInChannel(ctx context.Context, channelID int64) (int, error)
+
+	// Membership.
+	Join(ctx context.Context, userID, channelID int64, maxUsers int) error
+	LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error)
+
+	// The member's own flags.
+	SetSelfMute(ctx context.Context, userID int64, muted bool) error
+	SetSelfDeafen(ctx context.Context, userID int64, deafened bool) error
+	SetCamera(ctx context.Context, userID int64, enabled bool) error
+	SetScreenshare(ctx context.Context, userID int64, enabled bool) error
+	ReserveCamera(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+	ReserveScreenshare(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+
+	// Moderator flags and their compensations.
+	SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error)
+	SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error)
+	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool) *db.VoiceState
+	RollbackServerDeafen(ctx context.Context, targetID, authorizedChannelID int64, requestedDeafen bool)
+	WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string)
+}
+
+// ─── Connection lifecycle seam (B3-8 connection family) ─────────────────────
+
+// PresenceStamper is the pair of writes a WebSocket session makes about
+// itself: the status it comes online as, and the offline stamp when its last
+// pump exits. service.UserService satisfies it; like VoiceStore and unlike
+// the read seams, *db.DB does not — StampConnect owns the choice of which
+// saved status survives a reconnect, which is a decision, not a column write.
+//
+// The two are one interface because they are one contract read from both
+// ends: StampDisconnect deliberately leaves a chosen idle/dnd/invisible
+// standing, and StampConnect is what reads it back.
+type PresenceStamper interface {
+	StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error)
+	StampDisconnect(ctx context.Context, userID int64) error
 }

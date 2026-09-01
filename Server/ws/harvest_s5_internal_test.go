@@ -20,6 +20,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // harvestVoiceRoleID is a non-seeded role carrying the voice bits these tests
@@ -197,7 +198,7 @@ func TestHandleVoiceCameraV2_ChannelLookupErrorFailsClosed(t *testing.T) {
 		t.Fatalf("rename channels: %v", err)
 	}
 
-	d := VoiceDeps{DB: database, Permissions: permissions.NewChecker(database)}
+	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)
 
 	if res.Error == nil {
