@@ -6,8 +6,8 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
-**B4-2 opened 2026-09-01** (branch `feat/b4-2-absence-proofs`; evidence block
-in its section — the BPR-042 route and dead-credential proofs and the
+**B4-2 opened 2026-09-01** (PR #1498 from `feat/b4-2-absence-proofs`;
+evidence block in its section — the BPR-042 route and dead-credential proofs and the
 BPR-043 absence proofs, all with negative controls, no production code
 changed). Entry-gate items 1 and 2 met at draft; item 3 is B4-0's. The owner
 decisions listed below block the steps that name them. _Update this line —
@@ -347,8 +347,8 @@ fixed in its own right — a gap here is a security finding and follows
 docs/security.md, not this plan).
 
 **Evidence, 2026-09-01** — branch `feat/b4-2-absence-proofs` from `dev`
-`aabac60`; PR to `dev` (number recorded below once opened; the squash SHA is
-recorded by the next step's PR). Test files only, plus a two-line refactor of
+`aabac60`; PR #1498 to `dev` (the squash SHA is recorded by the next step's
+PR). Test files only, plus a two-line refactor of
 `api/absence_contract_test.go` (`fullRouter` now delegates to a new
 `fullRouterWithDB`) so the new tests can mint principals behind the
 production router. No production code changed; **no gap was found** — every
