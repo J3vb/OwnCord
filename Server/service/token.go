@@ -108,6 +108,14 @@ func (s *TokenService) Create(ctx context.Context, actorID int64, username, labe
 	if label == "" {
 		return nil, fmt.Errorf("label is required%.0w", ErrBadRequest)
 	}
+	// A negative lifetime is refused rather than folded into "never": the
+	// caller asked for a bounded credential (a computed window that went
+	// negative, a typo'd "-1h") and would otherwise get a permanent one with
+	// a success message (OC-0340). The admin route already refused this at
+	// its edge; the rule now lives here for both callers.
+	if lifetime < 0 {
+		return nil, fmt.Errorf("token lifetime must not be negative (0 means never expires)%.0w", ErrBadRequest)
+	}
 	if lifetime > maxTokenLifetime {
 		return nil, fmt.Errorf("token lifetime must not exceed %d hours%.0w",
 			int64(maxTokenLifetime/time.Hour), ErrBadRequest)
