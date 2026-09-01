@@ -72,6 +72,17 @@ jobs:
             exit 1
           fi
 
+          # A fresh database seeds registration_open=0 (migration 001), and
+          # /api/v1/auth/register 403s before reading the body while it is
+          # closed — invites do not bypass the gate. Open it before the loop.
+          code=$(curl -sk -o /dev/null -w '%{http_code}' -X PATCH "$BASE/admin/api/settings" \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"registration_open":"true"}')
+          if [ "$code" != "200" ]; then
+            echo "::error::opening registration failed with $code"
+            exit 1
+          fi
+
           CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"name":"loadtest","type":"text"}' | jq -r .id)
