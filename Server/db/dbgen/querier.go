@@ -87,6 +87,10 @@ type Querier interface {
 	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
+	// The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
+	// already carry (OC-0284): an edit that races a delete must not rewrite a
+	// tombstone. No row comes back when it loses, which the wrapper reports as
+	// ErrNotFound rather than a silent success (OC-0358).
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error)
 	// Camera and screenshare share one voice_max_video budget, counted in
 	// STREAMS, not rows: a channel capped at N simultaneous video streams must
@@ -244,6 +248,15 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	LoadActiveLockouts(ctx context.Context, expiresAt string) ([]RateLockout, error)
 	LogAudit(ctx context.Context, arg LogAuditParams) error
+	// Mark-read that computes its own watermark inside the writer statement.
+	// Passing a snapshot read moments earlier is what destroyed a mention raised
+	// during the round trip (OC-0323): the clear zeroed mention_count while
+	// last_message_id still pointed behind the mentioning message, so the badge was
+	// gone and nothing ever recomputed it. Computing MAX(id) here means every
+	// message committed before this statement is covered by last_message_id, and
+	// every message committed after it finds IncrementMentionCounts' own
+	// `last_message_id < msgID` guard true, so its mention survives.
+	MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelReadAtLatestParams) error
 	// Disconnect bookkeeping. It clears only 'online', which is the one status
 	// that means "has a live session"; idle, dnd and invisible are choices the
 	// user made and are what the next connect reads instead of stamping online
