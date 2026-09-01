@@ -6,9 +6,9 @@ by the owner — the dated "B3 exit" section of
 [hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)) — claims below
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
-**B4-12 batch (a) opened 2026-09-01** (branch `fix/b4-12a-legacy-keys`;
-evidence in the B4-12 section — OC-0313 and OC-0329 fixed test-first,
-revert-proofs pass). The owner decisions listed below block the steps that
+**B4-12 batch (a) opened 2026-09-01** (branch `fix/b4-12a-legacy-keys`,
+PR #1502; evidence in the B4-12 section — OC-0313 and OC-0329 fixed
+test-first, revert-proofs pass). The owner decisions listed below block the steps that
 name them. _Update this line — not only the step table — as steps land; the
 [README.md](README.md) row is the status authority._
 
@@ -690,9 +690,9 @@ written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
 
 **Evidence, 2026-09-01 — batch (a), OC-0313 + OC-0329** — branch
-`fix/b4-12a-legacy-keys` from `dev` `aabac60`; PR to `dev` (number recorded
-below once opened). Fix commit `40f6973`; ledger records flipped in the
-follow-up on the same branch (`fix.commit = 40f6973`, `revertProof = pass`).
+`fix/b4-12a-legacy-keys` from `dev` `aabac60`; PR to `dev` #1502 (draft,
+opened 2026-09-01). Fix commit `40f6973`; ledger records flipped in
+`448ccf7` on the same branch (`fix.commit = 40f6973`, `revertProof = pass`).
 Both readers already migrated the pre-scoping value to the host-scoped key
 on a miss; neither consumed the legacy entry, so every later brand-new host
 missed its own key, read through to the same value and adopted it for its
