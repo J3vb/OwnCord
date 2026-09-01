@@ -7,7 +7,7 @@ by the owner — the dated "B3 exit" section of
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
 **B4-7 (sign-out-everywhere half) opened 2026-09-01** (branch
-`feat/b4-7-sessions`; evidence block in its section). The new-login signal
+`feat/b4-7-sessions`, PR #1500; evidence block in its section). The new-login signal
 half waits on owner question 8. The owner decisions listed below block the
 steps that name them. _Update this line — not only the step table — as
 steps land; the [README.md](README.md) row is the status authority._
@@ -502,8 +502,8 @@ contract live and fixture-covered in its chosen transport; BG-08's server
 half done (UI remains B9).
 
 **Evidence, 2026-09-01 — sign-out-everywhere half** — branch
-`feat/b4-7-sessions` from `dev` `aabac60`; PR to `dev` (number recorded
-below once opened). The new-login signal half waits on owner question 8
+`feat/b4-7-sessions` from `dev` `aabac60`; PR to `dev` #1500 (draft,
+opened 2026-09-01). The new-login signal half waits on owner question 8
 and lands as a second PR under this step; BG-08's server half completes
 then.
 
