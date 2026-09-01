@@ -1,5 +1,5 @@
 {
-  "nextId": 380,
+  "nextId": 384,
   "findings": [
     {
       "id": "OC-0001",
@@ -8605,6 +8605,94 @@
       "fix": {
         "commit": "bcdc0ef3",
         "test": "Server/admin/middleware_and_spawn_test.go",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0380",
+      "title": "SessionVerdict's zero value was SessionLive, so a token hash the sweep's authenticator did not answer for was silently kept — the pre-seam sweep kicked on a missing batch row",
+      "file": "Server/service/session.go",
+      "line": 99,
+      "severity": "low",
+      "why": "hub_sweep.go switches on verdicts[c.tokenHash]; a missing map entry yields the zero value, and the zero value was SessionLive, inverting the fail-closed posture the pre-seam code had (result == nil -> kick). Not reachable at HEAD — the only SweepSessions implementation answers every hash it is asked about and its test pins that — but nothing in the SocketAuthenticator contract requires the returned map to be total, so any partial implementation (dedup, partial batch, an alternate seam) would have left revoked or banned sessions connected indefinitely. Low because it needs a future partial implementation to fire; the failure it would then produce is a session-enforcement hole.",
+      "repro": "Found by the 2026-09-01 post-merge review of dev a6fca0c..508efd7 (the B3-8 exit series). A partialSweepAuthn answering for only one of two connected clients left the unanswered client in h.clients after sweepRevokedSessions().",
+      "evidence": "RED first: TestSweepRevokedSessions_MissingVerdictFailsClosed failed against the old constant order (unanswered client kept). GREEN after SessionRevoked became the zero value, with the answered-live client still connected. The const block records the rule; reordering the constants back fails the test.",
+      "status": "fixed",
+      "found": "2026-09-01",
+      "hunt": "postmerge-review-2026-09-01",
+      "lens": "review",
+      "confidence": "high",
+      "finder": "claude",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "a7fb0de",
+        "test": "Server/ws/hub_sweep_verdict_test.go",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0381",
+      "title": "voice_leave.go and livekit_webhook.go still reached voice_states through the raw h.db handle — five call sites the voice family's VoiceStore seam never intercepted, contradicting HubOptions.Voice's 'every read and write' claim",
+      "file": "Server/ws/voice_leave.go",
+      "line": 115,
+      "severity": "low",
+      "why": "The voice family moved voice_states behind VoiceService and HubOptions.Voice documents that every voice_states read and write the hub makes goes through the seam — but the leave-with-retry path (twice) and the webhook's rogue-participant check and stale-row deletes (three sites) called h.db directly. Method calls on the field are invisible to the db-import-boundary inventory (the exact blind spot the B3 exit scorecard's 'what this does not claim' section describes), so the paths could silently drift from the service's rules, and a test faking VoiceStore never saw these writes.",
+      "repro": "Verified at dev 508efd7: h.db.LeaveVoiceChannelIfMatch at voice_leave.go:115/140 and livekit_webhook.go:241/283, h.db.GetVoiceState at livekit_webhook.go:152, while VoiceStore already carried the exact delegations (State, LeaveIfMatch).",
+      "evidence": "Behaviour-neutral call-site switch to h.voice plus the four h.db-nil guards on those paths becoming h.voice-nil guards; the voice and webhook suites ride it unchanged and 'h.db' no longer appears in either file.",
+      "status": "fixed",
+      "found": "2026-09-01",
+      "hunt": "postmerge-review-2026-09-01",
+      "lens": "review",
+      "confidence": "high",
+      "finder": "claude",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "1897f8d",
+        "test": "existing ws voice/webhook suites (behaviour-neutral move)",
+        "revertProof": "n/a — delegation switch with no observable behaviour change"
+      }
+    },
+    {
+      "id": "OC-0382",
+      "title": "adminRequiredServices mutated the caller-owned *service.Services in place, installing the admin mux's fallback services into the app-wide bundle as a side effect",
+      "file": "Server/admin/api.go",
+      "line": 87,
+      "severity": "low",
+      "why": "The bundle NewRouter passes to NewAdminAPI is the composition root's own, shared with the rest of the server. Filling admin's fallback Sessions/Setup/Users/Tokens through the pointer meant every later reader of the shared bundle observed admin's wiring instead of the root's — a second NewAdminAPI over the same bundle, or any 'did the root wire this field?' check, saw the fallback. Production wires every field today, so the writes were no-ops there, but every partial bundle (each test fixture, or a future root that leaves a field nil deliberately) was silently rewritten.",
+      "repro": "Found by the 2026-09-01 post-merge review of dev a6fca0c..508efd7: NewAdminAPI over an empty *service.Services handed the caller back a bundle with four fields filled.",
+      "evidence": "RED first: TestNewAdminAPI_DoesNotMutateCallerBundle watched an empty caller bundle come back with Sessions/Setup/Users/Tokens filled. GREEN after adminRequiredServices copies the struct before filling. Restoring the through-the-pointer writes fails the test.",
+      "status": "fixed",
+      "found": "2026-09-01",
+      "hunt": "postmerge-review-2026-09-01",
+      "lens": "review",
+      "confidence": "high",
+      "finder": "claude",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "c959371",
+        "test": "Server/admin/services_bundle_test.go",
+        "revertProof": "pass"
+      }
+    },
+    {
+      "id": "OC-0383",
+      "title": "The banned-handshake refusal lost the account from the operator log — 'auth: banned user' with no ID, where the pre-seam code logged 'auth: banned user %d'",
+      "file": "Server/ws/serve_auth.go",
+      "line": 93,
+      "severity": "low",
+      "why": "The auth family's sentinel rewrite branches on errors.Is(err, service.ErrPrincipalBanned) with no *db.User in scope, so upgradeAndAuth's slog.Warn('ws auth failed', ...) carried only the bare sentinel text plus a remote address. A banned client stuck in a reconnect loop is the case an operator most needs the log for, and the one identifier that diagnoses it (which account) was gone.",
+      "repro": "Found by the 2026-09-01 post-merge review of dev a6fca0c..508efd7, diffing serve_auth.go's banned branch against its pre-8a5817a form.",
+      "evidence": "RED first: the service test asserting the banned refusal names the account failed against the bare sentinel. GREEN after ResolveSocketPrincipal wraps the ID into the sentinel ('user %d: %w' — errors.Is still matches) and the handshake branch carries the wrap through to the log.",
+      "status": "fixed",
+      "found": "2026-09-01",
+      "hunt": "postmerge-review-2026-09-01",
+      "lens": "review",
+      "confidence": "high",
+      "finder": "claude",
+      "fixed": "2026-09-01",
+      "fix": {
+        "commit": "3a23186",
+        "test": "Server/service/session_test.go",
         "revertProof": "pass"
       }
     }

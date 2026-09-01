@@ -68,7 +68,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b0-baseline-2026-08-25](b0-baseline-2026-08-25.md)                             |
 
-Ledger at 2026-08-31: **325 fixed / 50 open / 3 declined / 1 duplicate = 379**
+Ledger at 2026-09-01: **329 fixed / 50 open / 3 declined / 1 duplicate = 383**
 (B3-9, PR #1454, closed the five B3-tagged records; OC-0379 records and fixes
 OC-0345's leftover role re-read).
 The 2026-08-25 sweep resolved every record then open to a live `file:line` at
