@@ -141,6 +141,8 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 
 	for _, c := range snapshot {
+		// A hash the authenticator did not answer for reads as the map's
+		// zero value, which is SessionRevoked by design: fail closed.
 		switch verdicts[c.tokenHash] {
 		case service.SessionRevoked:
 			slog.Info("session sweep: revoked/expired session, disconnecting",
