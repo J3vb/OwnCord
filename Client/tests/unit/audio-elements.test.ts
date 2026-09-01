@@ -6,6 +6,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
 }));
 
 vi.mock("@components/settings/helpers", () => ({
+  STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -271,6 +272,36 @@ describe("AudioElements", () => {
 
       setAudioVolumeHost("b.example.com");
       expect(elements.getUserVolume(7)).toBe(80);
+    });
+
+    it("consumes the legacy key on migration so a later host does not inherit it (OC-0313)", () => {
+      // The pre-scoping `userVolume_7` value must reach the first host
+      // exactly once. A later brand-new host has no scoped value of its own
+      // and must fall through to the 100 default — not adopt server A's
+      // volume (a 0 here is a silenced, unrelated user 7 on server B).
+      //
+      // loadPref is mocked, so the legacy value is served for as long as the
+      // real localStorage still holds the legacy entry — which is exactly
+      // what the module is expected to remove.
+      const legacyStorageKey = "owncord:settings:userVolume_7";
+      localStorage.setItem(legacyStorageKey, "0");
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "userVolume_7" && localStorage.getItem(legacyStorageKey) !== null) return 0;
+        return defaultVal;
+      });
+
+      try {
+        setAudioVolumeHost("a.example.com");
+        expect(elements.getUserVolume(7)).toBe(0);
+        expect(mockSavePref).toHaveBeenCalledWith("userVolume_7:a.example.com", 0);
+        expect(localStorage.getItem(legacyStorageKey)).toBeNull();
+
+        setAudioVolumeHost("b.example.com");
+        expect(elements.getUserVolume(7)).toBe(100);
+        expect(mockSavePref).not.toHaveBeenCalledWith("userVolume_7:b.example.com", 0);
+      } finally {
+        localStorage.removeItem(legacyStorageKey);
+      }
     });
   });
 
