@@ -2466,15 +2466,24 @@ marked as used`. Codex's security review was refused by its usage limit
 
 The roadmap's six conditions, with the evidence each maps to:
 
-| #   | Condition                                                                                             | Evidence                                                            |
-| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 1   | Every direct database use above the domain layer is justified or removed                              | `server-boundaries.md` — zero rows without a disposition; B3-8 done |
-| 2   | Required hub wiring cannot be omitted after construction                                              | B3-4 RED/GREEN                                                      |
-| 3   | Permission rules have one production implementation per security property                             | B2-5 + `authz-chokepoint` rule green (B3-6 item 7)                  |
-| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | B3-3 failure-injection test                                         |
-| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | The gate run on the exit SHA; B3-6 items 1, 2, 5, 6                 |
-| 6   | No measured regression exists outside a recorded tradeoff accepted at HP-3                            | Coverage and bench figures before/after; HP-3 tradeoff table        |
-| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | B3-9; ledger read-back in the exit scorecard                        |
+| #   | Condition                                                                                             | Evidence                                                            | Met at `8a5817a` |
+| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------- |
+| 1   | Every direct database use above the domain layer is justified or removed                              | `server-boundaries.md` — zero rows without a disposition; B3-8 done | ✅ 0 `move`      |
+| 2   | Required hub wiring cannot be omitted after construction                                              | B3-4 RED/GREEN                                                      | ✅               |
+| 3   | Permission rules have one production implementation per security property                             | B2-5 + `authz-chokepoint` rule green (B3-6 item 7)                  | ✅               |
+| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | B3-3 failure-injection test                                         | ✅               |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | The gate run on the exit SHA; B3-6 items 1, 2, 5, 6                 | ✅               |
+| 6   | No measured regression exists outside a recorded tradeoff accepted at HP-3                            | Coverage and bench figures before/after; HP-3 tradeoff table        | ✅ 4 floors up   |
+| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | B3-9; ledger read-back in the exit scorecard                        | ✅ all 6 fixed   |
+
+**The exit scorecard is the dated "B3 exit" section of
+[hp-3-scorecard-2026-08-29.md](hp-3-scorecard-2026-08-29.md)**, measured at
+`dev` `8a5817a` on 2026-09-01, with the gate output, the tree-identity
+evidence for the three exit commits, the family-by-family `move` ledger and
+an explicit list of what the phase does **not** claim. One item is left for
+the owner: a `ci.yml` `workflow_dispatch` on `dev`, which needs their
+signature. B3-6 item 8's nightly-smoke evidence is still open on its own
+terms — it closes on the first observed **scheduled** run, not a dispatch.
 
 Required evidence per the roadmap: boundary and database-call inventory
 (B3-0), before/after dependency graph per extraction (B3-2, B3-8), coverage /

@@ -232,3 +232,103 @@ claim:
 the measurement, B3-9 (PR #1454 = `123c0899`) closed the three pinned defects
 (OC-0376, OC-0377, OC-0378) and held the coverage floor (slice 405/440 =
 92.0%); nothing above changes. B3-3 may start.
+
+---
+
+## B3 exit — 2026-09-01, measured at `dev` `8a5817a`
+
+The plan's exit gate says the exit evidence is appended here as a dated
+section the owner signs. This is that section. `8a5817a` is the squash of
+[#1490](https://github.com/J3vb/OwnCord/pull/1490), the auth family — the
+commit that took `move` to zero.
+
+### The six roadmap conditions
+
+| #   | Condition                                                                                             | Evidence at `8a5817a`                                                                                                                                                                                                       |
+| --- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Every direct database use above the domain layer is justified or removed                              | **Met.** `DBImportAllow` is 53 rows: **0 `move`**, 35 `adapter`, 18 `boundary`, each with its reason. `go test ./invariants/` ok (no unlisted importer, no stale row); `go run ./cmd/dbinventory` exits 0                   |
+| 2   | Required hub wiring cannot be omitted after construction                                              | **Met.** `TestNewHub_RequiredCollaborators` refuses a missing DB, limiter, settings reader, reader bundle, **partial** reader bundle, voice store, presence stamper and socket authenticator, plus a negative replay budget |
+| 3   | Permission rules have one production implementation per security property                             | **Met.** `authz-chokepoint` green; `AuthzResidueAllow` unchanged by B3-8 — the voice family deliberately left the permission derivation in place rather than move rows it had no reason to touch                            |
+| 4   | Start, stop, drain and failure ownership is explicit and tested                                       | **Met.** B3-3's failure-injection tests green in `./internal/app/` (`-race` and `-tags deadlock`)                                                                                                                           |
+| 5   | Race, deadlock, compatibility, fuzz seeds, model simulation, coverage and load baselines remain green | **Met.** Full run below                                                                                                                                                                                                     |
+| 6   | No measured regression outside a recorded tradeoff accepted at HP-3                                   | **Met.** Every floor is at or above its value, and four rose during B3-8 (below). No floor was lowered, so no HP entry was needed                                                                                           |
+| —   | _(roadmap rule 2)_ No B3-tagged `OC-*` finding open                                                   | **Met.** OC-0323, OC-0345, OC-0346, OC-0376, OC-0377, OC-0378 all `fixed`; `node .superpowers/render-ledger.mjs --check` → `ledger valid: 379 finding(s)`                                                                   |
+
+### The gate, run on the exit SHA
+
+| Check                                                             | Result                                                                                                                  |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Four build-tag variants (default, otel, wazero, both)             | all OK                                                                                                                  |
+| `go vet ./...`, `go vet -tags otel ./api/`                        | clean                                                                                                                   |
+| `golangci-lint run ./...`                                         | **0 issues**                                                                                                            |
+| `go test -race ./...`                                             | ok, all packages                                                                                                        |
+| `go test -tags deadlock ./ws/ ./service/ ./admin/ ./internal/...` | ok                                                                                                                      |
+| Fuzz seed corpora (`-run Fuzz`, 6 packages)                       | ok                                                                                                                      |
+| Hub simulation / fault-injected transport (`ws/hub_sim_test.go`)  | ok                                                                                                                      |
+| Coverage floors                                                   | aggregate 80.6 (79.8), auth 90.9 (90.8), db 79.7 (79.3), permissions 100.0 (100.0), service 71.3 (71.3), ws 87.7 (86.7) |
+| `make docs-verify`, `make sqlc-verify`                            | exit 0 — no generated-contract drift                                                                                    |
+| `node scripts/check-doc-counts.mjs`                               | 21 claims across 9 documents agree with the ledger                                                                      |
+| `bash scripts/verify-integration-tree.sh`                         | PASS on all three exit commits (below)                                                                                  |
+
+### Integration evidence for the exit commits
+
+`dev` is squash-merge-only and its pushes run no `ci.yml` matrix, so what
+transfers the PR-head result to the squash commit is `required_status_checks.strict`
+plus tree identity. Stated as a command with output rather than assumed
+(G-03 as amended):
+
+```
+PASS 8a5817a (PR #1490): squash tree == PR head tree a77245de
+PASS 87d4ed3 (PR #1489): squash tree == PR head tree c1395439
+PASS d7dca9c (PR #1488): squash tree == PR head tree 394c25f5
+```
+
+### What B3-8 actually moved
+
+Eight families, `move` 28 → **0**. Two were **inventory-vacuous** and are
+recorded as such rather than skipped: invite (no row ever existed) and
+message/read-state (its content was three ledger findings). Three files left
+the table entirely and their rows were **deleted** rather than downgraded —
+plus three more in the auth family, six in total, because the file stopped
+importing `db` at all.
+
+| Family            | Rows                          | After     |
+| ----------------- | ----------------------------- | --------- |
+| settings/audit    | 4                             | 28 → 24   |
+| channel (3 parts) | 7                             | 24 → 17   |
+| upload            | 2                             | 17 → 15   |
+| role              | 1 (deleted)                   | 15 → 14   |
+| user              | 2                             | 14 → 12   |
+| voice             | 3                             | 12 → 10   |
+| connection        | 2                             | 10 → 9    |
+| auth              | 9 (6 deleted, 1 → `boundary`) | 9 → **0** |
+
+Floors raised during the phase, none lowered: `service` 69.8 → 71.3, `db`
+79.3, `ws` 86.7, `auth` 90.8 held; aggregate 79.8 held.
+
+### What this does not claim
+
+- **Not that no code outside `db/` and `service/` ever touches persistence.**
+  The inventory tracks `db` **importers**. A file that calls through a field
+  or a parameter without naming the package (`ws/voice_controls.go` before
+  this phase) is invisible to it. B3-8 moved those where a family reached
+  them; the rule does not catch the next one.
+- **Not that every service is thin or final.** `AuthService` still carries
+  the interactive flows and their singleton state; `SessionService` was split
+  out of it because the hub could not depend on it, not because the split was
+  otherwise due.
+- **Not that the `ws` package is decomposed.** B3 was in-package only; the
+  subpackage split stays out of scope.
+- **Not that the nightly Docker smoke has produced its evidence.** B3-6 item
+  8 is operationally closed by the first observed **scheduled** run, and none
+  had been confirmed as of 2026-09-01 08:00Z. The workflow is on `main`,
+  `state=active`, cron `0 3 * * *`. Deliberately not closed by a manual
+  `workflow_dispatch`: the item's evidence is specifically a scheduled run.
+
+### Owner's to run
+
+One `ci.yml` `workflow_dispatch` on `dev` at `8a5817a` — it needs the owner's
+signature, so it is not something this session can produce. Everything else in
+the table above was run here.
+
+**Signed:** _pending_ — J3vb (repository owner).
