@@ -7,8 +7,9 @@ by the owner — the dated "B3 exit" section of
 verified at `39019e7f`  
 **Status:** IN PROGRESS — plan merged 2026-09-01 (PR #1496 = `aabac60`);
 **B4-12 batch (b), client half, opened 2026-09-01** (branch
-`fix/b4-12b-partial-success`; evidence in the B4-12 section — OC-0314 fixed
-test-first, revert-proofs pass; OC-0354 waits on owner question 8). The
+`fix/b4-12b-partial-success`, PR #1503; evidence in the B4-12 section —
+OC-0314 fixed test-first, revert-proofs pass; OC-0354 waits on owner
+question 8). The
 owner decisions listed below block the steps that name them. _Update this
 line — not only the step table — as steps land; the [README.md](README.md)
 row is the status authority._
@@ -691,9 +692,9 @@ written reason in the HP-4/exit scorecard — the expectation is zero
 re-tags), read back in the exit scorecard.
 
 **Evidence, 2026-09-01 — batch (b), client half, OC-0314** — branch
-`fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` (number
-recorded below once opened). Fix commit `b9ddb5a`; ledger record flipped in
-the follow-up on the same branch (`fix.commit = b9ddb5a`,
+`fix/b4-12b-partial-success` from `dev` `aabac60`; PR to `dev` #1503 (draft,
+opened 2026-09-01). Fix commit `b9ddb5a`; ledger record flipped in
+`435abcb` on the same branch (`fix.commit = b9ddb5a`,
 `revertProof = pass`). OC-0354 stays open: where `totp_enabled` travels
 (the `auth_ok` user or the profile response) is owner question 8's field
 placement, and it lands as the batch's second PR once decided.
